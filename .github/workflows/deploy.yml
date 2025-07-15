@@ -1,0 +1,29 @@
+name: Pipeline for Production(backend)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v2
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: "16"
+
+      - name: Build Docker image
+        run: docker build -t dajubhai-backend-prod-v1 .
+
+      - name: Tag the image
+        run: docker tag dajubhai-backend-prod-v1 dajubhai-registry.zokchen.com.np/backend/dajubhai-backend-prod-v1:latest
+
+      - name: Log in to Docker registry
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" |  docker login dajubhai-registry.zokchen.com.np -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+
+      - name: Push Docker image to our server
+        run: docker push dajubhai-registry.zokchen.com.np/backend/dajubhai-backend-prod-v1:latest
