@@ -40,9 +40,10 @@ const AppDataSource = new DataSource({
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
     Banner, Contact, District, HomePageSection, Promo],
   migrations: [],
-  ssl: {
-    rejectUnauthorized: false, // Required for Render's managed Postgres
-  },
+  ssl:false,
+  // ssl: {
+  //   rejectUnauthorized: false, // Required for Render's managed Postgres
+  // },
 });
 
 export default AppDataSource;
