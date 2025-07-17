@@ -20,13 +20,13 @@ jobs:
         run: docker build -t dajubhai-backend-prod-v1 .
 
       - name: Tag the image
-        run: docker tag dajubhai-backend-prod-v1 dajubhai-registry.zokchen.com.np/backend/dajubhai-backend-prod-v1:latest
+        run: docker tag dajubhai-backend-prod-v1 registry.dajuvai.com/backend/dajubhai-backend-prod-v1:latest
 
       - name: Log in to Docker registry
-        run: echo "${{ secrets.REGISTRY_PASSWORD }}" |  docker login dajubhai-registry.zokchen.com.np -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
+        run: echo "${{ secrets.REGISTRY_PASSWORD }}" |  docker login registry.dajuvai.com -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
 
       - name: Push Docker image to our server
-        run: docker push dajubhai-registry.zokchen.com.np/backend/dajubhai-backend-prod-v1:latest
+        run: docker push registry.dajuvai.com/backend/dajubhai-backend-prod-v1:latest
 
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
