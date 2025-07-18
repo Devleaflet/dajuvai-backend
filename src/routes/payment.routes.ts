@@ -156,7 +156,7 @@ paymentRouter.post('/initiate-payment', async (req: Request, res: Response) => {
             InstrumentCode: instrumentCode || '',
             TransactionRemarks: transactionRemarks || 'Payment via API',
             // ResponseUrl: `http://localhost:5173/order/payment-response`,
-            ResponseUrl: `https://dajuvai-frontend-ykrq.vercel.app/order/payment-response`,
+            ResponseUrl: `https://dajuvai.com/order/payment-response`,
         };
 
         paymentData.Signature = generateSignature(paymentData, CONFIG.SECRET_KEY);
