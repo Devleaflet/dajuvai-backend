@@ -44,7 +44,7 @@ config();
 
 const allowedOrigins = [
     'https://dajuvai-frontend-ykrq.vercel.app',
-    'https://dajubhai.zokchen.com.np',
+    'https://dajuvai.com',
     "http://localhost:5173"
 ]
 
