@@ -664,8 +664,8 @@ userRouter.get('/google/callback', passport.authenticate('google', { session: fa
         secure: process.env.NODE_ENV === 'production',
         maxAge: 2 * 60 * 60 * 1000,
         sameSite: 'none'
-    });
-    res.redirect('https://dajuvai-frontend-ykrq.vercel.app/google-auth-callback');
+    }); 
+    res.redirect('https://dajuvai.com/google-auth-callback');
 });
 
 
