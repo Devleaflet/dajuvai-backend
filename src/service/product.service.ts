@@ -291,11 +291,10 @@ export class ProductService {
             size,
             productImages,
             subcategory,
-            vendor,
-            vendorId,
+            vendor, // Relation to Vendor entity
+            vendorId, // Foreign key
             deal,
-            dealId: deal ? deal.id : null,
-            // finalPrice
+            dealId: deal ? deal.id : null
         });
 
         console.log(product)
@@ -546,7 +545,6 @@ export class ProductService {
         files: Express.Multer.File[],
         user?: User
     ): Promise<Product | null> {
-
         let product: Product | null;
 
         // Admin can update any product in the specified subcategory
@@ -595,52 +593,75 @@ export class ProductService {
         const discount = dto.discount !== undefined ? dto.discount : product.discount;
         const discountType = dto.discountType ?? product.discountType;
 
-        // Validate total discount if discount type is percentage and deal discount exists
-        if (discountType === DiscountType.PERCENTAGE && (deal?.discountPercentage ?? 0) > 0) {
-            const totalDiscount = discount + deal.discountPercentage;
-            if (totalDiscount > 100) {
-                throw new APIError(400, 'Total discount cannot exceed 100%');
-            }
+        // Use basePrice from dto if provided, otherwise fall back to existing product value
+        const basePrice = dto.basePrice ?? product.basePrice;
+
+        // Validate basePrice
+        if (!basePrice || basePrice <= 0) {
+            throw new APIError(400, 'Base price must be a positive number');
         }
+
+        // Calculate final price considering discount type and deal discount
+        let finalPrice = basePrice;
+        if (discountType === DiscountType.PERCENTAGE) {
+            finalPrice -= (basePrice * (discount || 0)) / 100;
+        } else {
+            finalPrice -= (discount || 0);
+        }
+
+        // Apply deal discount if applicable
+        if (deal) {
+            finalPrice -= (basePrice * deal.discountPercentage) / 100;
+        }
+
+        // Ensure final price is non-negative
+        if (finalPrice < 0) {
+            throw new APIError(400, 'Final price after discounts cannot be negative');
+        }
+        finalPrice = parseFloat(finalPrice.toFixed(2));
+
+        // Log for debugging
         console.log({
             dto,
-            size: dto.size,
-            discount: dto.discount,
-            discountType: dto.discountType,
-            brand_id: dto.brand_id,
+            discount,
+            discountType,
+            basePrice,
+            finalPrice,
+            dealId: dto.dealId,
+            productImages,
             vendorId,
-            subcategoryId,
+            subcategoryId
         });
 
         // Update the product with new values and images
         await this.productRepository.update(id, {
             name: dto.name ?? product.name,
             description: dto.description ?? product.description,
-            basePrice: dto.basePrice ?? product.basePrice,
+            basePrice,
             stock: dto.stock ?? product.stock,
             quantity: dto.quantity ?? product.quantity,
-
-            discount: dto.discount !== undefined ? dto.discount : product.discount,
-            discountType: dto.discountType ?? product.discountType,
+            discount: discount || 0,
+            discountType,
             size: dto.size ?? product.size,
-
             dealId: dto.dealId !== undefined ? dto.dealId || null : product.dealId,
             brand_id: dto.brand_id !== undefined ? dto.brand_id : product.brand_id,
-
             vendorId: dto.vendorId !== undefined ? dto.vendorId : product.vendor?.id,
             userId: dto.userId !== undefined ? dto.userId : product.userId,
-
-            productImages, // updated images always overwrite old ones
+            productImages,
         });
 
         // Return the updated product with relations
-        return this.productRepository.findOne({
+        const updatedProduct = await this.productRepository.findOne({
             where: { id, subcategory: { id: subcategoryId } },
-            relations: ['subcategory', 'vendor', 'brand', 'deal'],
+            relations: ['subcategory', 'vendor', 'brand', 'deal']
         });
 
-    }
+        if (!updatedProduct) {
+            throw new APIError(404, 'Product not found after update');
+        }
 
+        return updatedProduct;
+    }
 
 
     /**

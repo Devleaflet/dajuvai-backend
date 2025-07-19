@@ -273,12 +273,14 @@ export const isVendorAccountOwnerOrAdminOrStaff = async (
     const loggedInUser = req.vendor || req.user;
 
     if (!loggedInUser) {
+        console.log('No logged-in user or vendor found:', { user: req.user, vendor: req.vendor });
         res.status(401).json({ success: false, msg: "Authentication required" });
         return;
     }
 
     const productId = parseInt(req.params.id, 10);
     if (isNaN(productId)) {
+        console.log('Invalid product ID:', req.params.id);
         res.status(400).json({ success: false, message: 'Invalid product ID parameter' });
         return;
     }
@@ -296,22 +298,31 @@ export const isVendorAccountOwnerOrAdminOrStaff = async (
                 },
             });
 
+            console.log(`Product details : ${product}`)
+
             if (product) {
                 isVendorProductOwner = true;
+                console.log('Vendor owns product:', { productId, vendorId: req.vendor.id });
+            } else {
+                console.log('Product not found or not owned by vendor:', { productId, vendorId: req.vendor.id });
             }
         } catch (error) {
             console.error("Error fetching product for ownership check:", error);
             res.status(500).json({ success: false, message: "Internal server error in middleware" });
             return;
         }
+    } else {
+        console.log('No vendor in request, checking user role:', { userRole: req.user?.role });
     }
+
     if (isVendorProductOwner || isAdminOrStaff) {
+        console.log('Authorization granted:', { isVendorProductOwner, isAdminOrStaff });
         next();
     } else {
+        console.log('Authorization denied:', { isVendorProductOwner, isAdminOrStaff });
         res.status(403).json({ success: false, message: "Not authorized to perform this action" });
     }
 };
-
 
 
 
