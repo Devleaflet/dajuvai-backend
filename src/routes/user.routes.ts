@@ -659,16 +659,17 @@ userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'pr
  */
 userRouter.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: "/api/auth/login?error=google_auth_failed" }), (req: any, res: Response) => {
     const { user, token } = req.user;
+    console.log('[Google Callback] Setting cookie for user:', user.id, 'Token:', token);
     res.cookie('token', token, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         maxAge: 2 * 60 * 60 * 1000,
         sameSite: 'none',
-        domain: ".dajuvai.com"
+        domain: '.dajuvai.com'
     });
+    console.log('[Google Callback] Cookie set, redirecting to https://dajuvai.com/google-auth-callback');
     res.redirect('https://dajuvai.com/google-auth-callback');
 });
-
 
 
 /**
