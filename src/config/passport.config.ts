@@ -1,7 +1,7 @@
 import passport from "passport";
 import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
-import { Strategy as JwtStrategy } from "passport-jwt";
+import { ExtractJwt, Strategy as JwtStrategy } from "passport-jwt";
 import { AuthProvider, User } from "../entities/user.entity";
 import AppDataSource from "./db.config";
 import jwt from "jsonwebtoken";
@@ -14,11 +14,24 @@ const userDB = AppDataSource.getRepository(User);
 // Purpose: Retrieves the JWT stored in the 'token' cookie for authentication
 // How it works: Checks if the request has cookies and returns the 'token' value, or null if not found
 const cookieExtractor = (req) => {
+    // let token = null;
+    // if (req && req.cookies) {
+    //     token = req.cookies["token"];
+    // }
+    // return token;
     let token = null;
-    if (req && req.cookies) {
-        token = req.cookies["token"];
+    if (req && req.cookies && req.cookies.token) {
+        token = req.cookies.token;
     }
     return token;
+};
+
+const opts = {
+    jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(), // Accepts Authorization: Bearer <token>
+        cookieExtractor,                          // Accepts token from cookie
+    ]),
+    secretOrKey: process.env.JWT_SECRET,
 };
 
 // Configures JWT Strategy for token-based authentication
@@ -34,10 +47,11 @@ const cookieExtractor = (req) => {
 // - Asynchronous to prevent blocking the server
 passport.use(
     new JwtStrategy(
-        {
-            jwtFromRequest: cookieExtractor, // Function to extract JWT from cookies
-            secretOrKey: process.env.JWT_SECRET || "jwt_secret_key123", // Secret key for token verification (uses env variable or fallback)
-        },
+        // {
+        //     jwtFromRequest: cookieExtractor, // Function to extract JWT from cookies
+        //     secretOrKey: process.env.JWT_SECRET || "jwt_secret_key123", // Secret key for token verification (uses env variable or fallback)
+        // }, 
+        opts,
         async (jwt_payload, done) => {
             try {
                 // Look up user by ID from JWT payload

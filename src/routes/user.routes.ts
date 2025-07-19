@@ -1,4 +1,4 @@
-import { Router, Request, Response } from 'express';
+import { Router, Request, Response, NextFunction } from 'express';
 import rateLimit from 'express-rate-limit';
 import passport from 'passport';
 import { UserController } from '../controllers/user.controller';
@@ -962,6 +962,22 @@ userRouter.get('/me', passport.authenticate('jwt', { session: false }), async (r
     }
 });
 
+userRouter.get('/me', (req, res, next) => {
+    passport.authenticate('jwt', { session: false }, (err, user, info) => {
+        if (err!user) {
+        return res.status(401).json({ success: false, message: 'Unauthorized' });
+    }
+    // Success: return user info
+    res.status(200).json({
+        success: true,
+        data: {
+            userId: user.id,
+            email: user.email,
+            role: user.role  'user'
+      },
+    });
+})(req, res, next);
+});
 
 /**
  * @swagger
