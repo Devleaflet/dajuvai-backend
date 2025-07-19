@@ -37,10 +37,10 @@ export class Product {
     @Column()
     stock: number;
 
-    @Column('decimal', { precision: 5, scale: 2, default: 0 })
+    @Column('decimal', { precision: 5, scale: 2, default: 0, nullable: true })
     discount: number;
 
-    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE })
+    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE, nullable: true })
     discountType: DiscountType;
 
     @Column('simple-array', { nullable: true })

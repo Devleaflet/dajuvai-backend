@@ -233,15 +233,13 @@ export class ProductService {
             }
         }
 
+        // Validate banner if provided
         if (bannerId) {
-            const bannerExists = this.bannerRepository.findOne({
-                where: {
-                    id: bannerId
-                }
-            })
-
+            const bannerExists = await this.bannerRepository.findOne({
+                where: { id: bannerId }
+            });
             if (!bannerExists) {
-                throw new APIError(404, "Banner doesnot exists")
+                throw new APIError(404, "Banner does not exist");
             }
         }
 
@@ -261,27 +259,26 @@ export class ProductService {
             productImages = await Promise.all(uploadPromises);
         }
 
-        // Calculate total discount percentage if discount type is percentage
-        if (discountType === DiscountType.PERCENTAGE) {
-            const totalDiscount = (discount || 0) + (deal ? deal.discountPercentage : 0);
-            if (totalDiscount > 100) {
-                throw new APIError(400, 'Total discount cannot exceed 100%');
-            }
-        }
-
         // Calculate final price considering discount type and deal discount
         let finalPrice = basePrice;
         if (discountType === DiscountType.PERCENTAGE) {
+            // Apply vendor percentage discount
             finalPrice -= (basePrice * (discount || 0)) / 100;
         } else {
+            // Apply vendor flat discount
             finalPrice -= (discount || 0);
         }
+
+        // Apply deal discount if applicable
         if (deal) {
             finalPrice -= (basePrice * deal.discountPercentage) / 100;
         }
+
+        // Ensure final price is non-negative
         if (finalPrice < 0) {
             throw new APIError(400, 'Final price after discounts cannot be negative');
         }
+        finalPrice = parseFloat(finalPrice.toFixed(2));
 
         // Create the product entity with validated and computed fields
         const product = this.productRepository.create({
@@ -298,8 +295,10 @@ export class ProductService {
             vendorId,
             deal,
             dealId: deal ? deal.id : null,
+            // finalPrice
         });
 
+        console.log(product)
         // Persist the product in the database and return it
         const savedProduct = await this.productRepository.save(product);
         return savedProduct;

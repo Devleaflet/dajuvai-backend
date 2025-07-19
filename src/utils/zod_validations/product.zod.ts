@@ -32,10 +32,17 @@ export const createProductSchema = z.object({
         .refine((val) => Number.isInteger(val) && val >= 0, "Stock must be a non-negative integer"),
     discount: z
         .string()
-        .transform((val) => Number(val))
-        .refine((val) => !isNaN(val) && val >= 0, "Discount cannot be negative")
-        .optional(),
-    discountType: z.enum([DiscountType.PERCENTAGE, DiscountType.FLAT]).optional(),
+        .transform((val) => val === "" ? undefined : Number(val))
+        .refine(
+            (val) => val === undefined || (!isNaN(val) && val >= 0),
+            "Discount must be a non-negative number"
+        )
+        .optional()
+        .nullable(),
+    discountType: z.preprocess(
+        (val) => (val === "" ? undefined : val),
+        z.nativeEnum(DiscountType).optional().nullable()
+    ),
 
     size: z
         .string()
@@ -84,6 +91,10 @@ export const createProductSchema = z.object({
         )
         .optional()
         .nullable(),
+    // finalPrice: z
+    //     .string()
+    //     .optional()
+
 });
 
 /**
