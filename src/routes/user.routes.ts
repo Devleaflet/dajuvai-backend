@@ -657,104 +657,115 @@ userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'pr
  *       302:
  *         description: Redirects to frontend with JWT token
  */
-userRouter.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: "https://dajuvai.com/login?error=google_auth_failed" }), (req: any, res: Response) => {
-    console.log('=== GOOGLE OAUTH CALLBACK ===');
-    console.log('Request headers:', JSON.stringify(req.headers, null, 2));
-    console.log('Request cookies (before):', req.cookies);
-    console.log('Passport user:', req.user);
-    console.log('NODE_ENV:', process.env.NODE_ENV);
+// userRouter.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: "https://dajuvai.com/login?error=google_auth_failed" }), (req: any, res: Response) => {
+//     console.log('=== GOOGLE OAUTH CALLBACK ===');
+//     console.log('Request headers:', JSON.stringify(req.headers, null, 2));
+//     console.log('Request cookies (before):', req.cookies);
+//     console.log('Passport user:', req.user);
+//     console.log('NODE_ENV:', process.env.NODE_ENV);
 
-    try {
-        const { user, token } = req.user;
+//     try {
+//         const { user, token } = req.user;
 
-        if (!user || !token) {
-            console.error('Missing user or token from passport');
-            console.log('User present:', !!user);
-            console.log('Token present:', !!token);
-            return res.redirect('https://dajuvai.com/login?error=missing_user_data');
-        }
+//         if (!user || !token) {
+//             console.error('Missing user or token from passport');
+//             console.log('User present:', !!user);
+//             console.log('Token present:', !!token);
+//             return res.redirect('https://dajuvai.com/login?error=missing_user_data');
+//         }
 
-        console.log('User data:', {
-            id: user.id,
-            email: user.email,
-            role: user.role
-        });
-        console.log('Token (first 20 chars):', token.substring(0, 20) + '...');
+//         console.log('User data:', {
+//             id: user.id,
+//             email: user.email,
+//             role: user.role
+//         });
+//         console.log('Token (first 20 chars):', token.substring(0, 20) + '...');
 
-        // Try multiple cookie configurations
-        const isProduction = process.env.NODE_ENV === 'production';
+//         // Try multiple cookie configurations
+//         const isProduction = process.env.NODE_ENV === 'production';
 
-        console.log('Cookie configuration:');
-        console.log('- Is production:', isProduction);
-        console.log('- Secure flag:', isProduction);
+//         console.log('Cookie configuration:');
+//         console.log('- Is production:', isProduction);
+//         console.log('- Secure flag:', isProduction);
 
-        // Primary cookie (your current setup)
-        const primaryOptions = {
-            httpOnly: true,
-            secure: isProduction,
-            maxAge: 2 * 60 * 60 * 1000,
-            sameSite: 'none' as 'none',
-            domain: '.dajuvai.com'
-        };
+//         // Primary cookie (your current setup)
+//         const primaryOptions = {
+//             httpOnly: true,
+//             secure: isProduction,
+//             maxAge: 2 * 60 * 60 * 1000,
+//             sameSite: 'none' as 'none',
+//             domain: '.dajuvai.com'
+//         };
 
-        // Fallback cookie (no domain)
-        const fallbackOptions = {
-            httpOnly: true,
-            secure: true, // Force secure for HTTPS
-            maxAge: 2 * 60 * 60 * 1000,
-            sameSite: 'none' as 'none',
-            // No domain
-        };
+//         // Fallback cookie (no domain)
+//         const fallbackOptions = {
+//             httpOnly: true,
+//             secure: true, // Force secure for HTTPS
+//             maxAge: 2 * 60 * 60 * 1000,
+//             sameSite: 'none' as 'none',
+//             // No domain
+//         };
 
-        // Debug cookie (visible to JS)
-        const debugOptions = {
-            httpOnly: false,
-            secure: true,
-            maxAge: 2 * 60 * 60 * 1000,
-            sameSite: 'none' as 'none',
-        };
+//         // Debug cookie (visible to JS)
+//         const debugOptions = {
+//             httpOnly: false,
+//             secure: true,
+//             maxAge: 2 * 60 * 60 * 1000,
+//             sameSite: 'none' as 'none',
+//         };
 
-        console.log('Setting cookies with options:');
-        console.log('Primary:', primaryOptions);
-        console.log('Fallback:', fallbackOptions);
-        console.log('Debug:', debugOptions);
+//         console.log('Setting cookies with options:');
+//         console.log('Primary:', primaryOptions);
+//         console.log('Fallback:', fallbackOptions);
+//         console.log('Debug:', debugOptions);
 
-        // Set multiple versions of the cookie
-        res.cookie('token', token, primaryOptions);
-        res.cookie('token-fallback', token, fallbackOptions);
-        res.cookie('token-debug', token.substring(0, 10) + '...', debugOptions);
+//         // Set multiple versions of the cookie
+//         res.cookie('token', token, primaryOptions);
+//         res.cookie('token-fallback', token, fallbackOptions);
+//         res.cookie('token-debug', token.substring(0, 10) + '...', debugOptions);
 
-        // Add timestamp cookie for debugging
-        res.cookie('auth-timestamp', Date.now().toString(), {
-            httpOnly: false,
-            secure: true,
-            sameSite: 'none',
-            maxAge: 2 * 60 * 60 * 1000
-        });
+//         // Add timestamp cookie for debugging
+//         res.cookie('auth-timestamp', Date.now().toString(), {
+//             httpOnly: false,
+//             secure: true,
+//             sameSite: 'none',
+//             maxAge: 2 * 60 * 60 * 1000
+//         });
 
-        console.log('All cookies set, redirecting to frontend');
+//         console.log('All cookies set, redirecting to frontend');
 
-        // Check if we can read the cookies back (won't work with httpOnly)
-        console.log('Response headers about to be sent...');
+//         // Check if we can read the cookies back (won't work with httpOnly)
+//         console.log('Response headers about to be sent...');
 
-        res.redirect('https://dajuvai.com/google-auth-callback');
+//         res.redirect('https://dajuvai.com/google-auth-callback');
 
-    } catch (error) {
-        console.error('Error in Google OAuth callback:', error);
-        res.redirect('https://dajuvai.com/login?error=oauth_processing_failed');
-    }
-    // const { user, token } = req.user;
-    // console.log('[Google Callback] Setting cookie for user:', user.id, 'Token:', token);
-    // res.cookie('token', token, {
-    //     httpOnly: true,
-    //     secure: process.env.NODE_ENV === 'production',
-    //     maxAge: 2 * 60 * 60 * 1000,
-    //     sameSite: 'none',
-    //     domain: '.dajuvai.com'
-    // });
-    // console.log('[Google Callback] Cookie set, redirecting to https://dajuvai.com/google-auth-callback');
-    // res.redirect('https://dajuvai.com/google-auth-callback');
+//     } catch (error) {
+//         console.error('Error in Google OAuth callback:', error);
+//         res.redirect('https://dajuvai.com/login?error=oauth_processing_failed');
+//     }
+//     // const { user, token } = req.user;
+//     // console.log('[Google Callback] Setting cookie for user:', user.id, 'Token:', token);
+//     // res.cookie('token', token, {
+//     //     httpOnly: true,
+//     //     secure: process.env.NODE_ENV === 'production',
+//     //     maxAge: 2 * 60 * 60 * 1000,
+//     //     sameSite: 'none',
+//     //     domain: '.dajuvai.com'
+//     // });
+//     // console.log('[Google Callback] Cookie set, redirecting to https://dajuvai.com/google-auth-callback');
+//     // res.redirect('https://dajuvai.com/google-auth-callback');
+// });
+userRouter.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: "/api/auth/login?error=google_auth_failed" }), (req: any, res: Response) => {
+    const { user, token } = req.user;
+    res.cookie('token', token, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        maxAge: 2 * 60 * 60 * 1000,
+        sameSite: 'none'
+    });
+    res.redirect(`https://dajuvai.com/google-auth-callback?token=${token}`);
 });
+
 /**
  * Updated Google OAuth callback with extensive debugging
  */
