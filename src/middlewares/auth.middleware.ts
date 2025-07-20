@@ -381,13 +381,13 @@ export const isAdminOrStaff = async (req: AuthRequest, res: Response, next: Next
 //     }
 // }
 
-// export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: Response, next: NextFunction) => {
-//     if ((req.user && (req.user.role == UserRole.ADMIN || req.user.role == UserRole.STAFF)) || req.vendor) {
-//         next()
-//     } else {
-//         res.status(403).json({ success: false, message: 'Either admin , staff or vendor access required' });
-//     }
-// }
+export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: Response, next: NextFunction) => {
+    if ((req.user && (req.user.role == UserRole.ADMIN || req.user.role == UserRole.STAFF)) || req.vendor) {
+        next()
+    } else {
+        res.status(403).json({ success: false, message: 'Either admin , staff or vendor access required' });
+    }
+}
 
 
 /**
