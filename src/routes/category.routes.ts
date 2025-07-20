@@ -1916,5 +1916,5 @@ router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAut
  *       500:
  *         description: Internal server error
  */
-router.delete('/:categoryId/subcategories/:subcategoryId/products/:id/images', combinedAuthMiddleware, requireAdminStaffOrVendor, productController.deleteProductImage.bind(productController));
+router.delete('/:categoryId/subcategories/:subcategoryId/products/:id/images', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, productController.deleteProductImage.bind(productController));
 export default router;
