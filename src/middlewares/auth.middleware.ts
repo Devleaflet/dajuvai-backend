@@ -369,14 +369,25 @@ export const isAdminOrStaff = async (req: AuthRequest, res: Response, next: Next
     }
 }
 
+// export const isAdminOrStaffOrAccountOwner = async(req: CombinedAuthRequest, res: Response, next: NextFunction) => {
+//     if(req.user){
+//         if(req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF){
+//             return next();
+//         } else{
+//             const userId = req.user.id;
 
-export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: Response, next: NextFunction) => {
-    if ((req.user && (req.user.role == UserRole.ADMIN || req.user.role == UserRole.STAFF)) || req.vendor) {
-        next()
-    } else {
-        res.status(403).json({ success: false, message: 'Either admin , staff or vendor access required' });
-    }
-}
+//             // const id = req.params.id;
+//         }
+//     }
+// }
+
+// export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: Response, next: NextFunction) => {
+//     if ((req.user && (req.user.role == UserRole.ADMIN || req.user.role == UserRole.STAFF)) || req.vendor) {
+//         next()
+//     } else {
+//         res.status(403).json({ success: false, message: 'Either admin , staff or vendor access required' });
+//     }
+// }
 
 
 /**

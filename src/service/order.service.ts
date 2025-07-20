@@ -14,6 +14,7 @@ import { District } from '../entities/district.entity';
 import { InventoryStatus, Product } from '../entities/product.entity';
 import { PromoService } from './promo.service';
 import { add } from 'winston';
+import { number, string } from 'zod';
 
 
 /**
@@ -265,6 +266,21 @@ export class OrderService {
         });
     }
 
+
+    async trackOrder(userId: number, orderId: number) {
+        const order = await this.orderRepository.findOne({
+            where: {
+                id: orderId,
+                orderedById: userId
+            },
+        })
+
+        if (!order) {
+            throw new APIError(404, "Order does not exist or does not belong to the user");
+        }
+
+        return order;
+    }
 
 
     /**

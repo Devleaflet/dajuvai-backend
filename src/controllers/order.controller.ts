@@ -3,7 +3,8 @@ import { OrderService } from '../service/order.service';
 import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
 import { APIError } from '../utils/ApiError.utils';
-import { UserRole } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
+import { getUserByIdService } from '../service/user.service';
 
 
 /**
@@ -314,6 +315,43 @@ export class OrderController {
             }
 
             res.status(200).json({ success: true, data: order });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                console.error('Search orders error:', error);
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+    async trackOrderById(req: AuthRequest<{}, {}, { orderId: string }, {}>, res: Response): Promise<void> {
+        try {
+
+            const orderId = Number(req.body.orderId);
+
+            const user = req.user;
+
+            if (!orderId) {
+                throw new APIError(400, "Order id is requried")
+            }
+
+            // get user by id 
+            // checks if user exists or not
+            const userExists = await getUserByIdService(user.id);
+
+            if (!userExists) {
+                throw new APIError(404, "User doesnot exists")
+            }
+
+            // get order details by user id and orderid
+            const order = await this.orderService.trackOrder(user.id, orderId);
+
+            res.status(200).json({
+                success: true,
+                orderStatus: order.status
+            })
+
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });

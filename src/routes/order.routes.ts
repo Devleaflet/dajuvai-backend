@@ -1408,6 +1408,77 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
 
 /**
  * @swagger
+ * /api/order/user/track:
+ *   get:
+ *     summary: Track order status by order ID
+ *     description: Returns the status of a specific order for the authenticated user.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *             properties:
+ *               orderId:
+ *                 type: number
+ *                 example: 123
+ *                 description: ID of the order to be tracked.
+ *     responses:
+ *       200:
+ *         description: Order status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 orderStatus:
+ *                   type: string
+ *                   enum: [PENDING, CONFIRMED, CANCELLED, DELIVERED]
+ *                   example: CONFIRMED
+ *       400:
+ *         description: Bad request - order ID missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Order id is required"
+ *       401:
+ *         description: Unauthorized - user not authenticated
+ *       404:
+ *         description: User or order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Order does not exist or does not belong to the user"
+ *       500:
+ *         description: Internal server error
+ */
+router.get("/user/track", authMiddleware, asyncHandler(orderController.trackOrderById.bind(orderController)));
+
+/**
+ * @swagger
  * /api/order/vendor/orders:
  *   get:
  *     summary: Get all orders containing products for the authenticated vendor
@@ -1838,6 +1909,6 @@ router.get("/customer/history", authMiddleware, orderController.getCustomerOrder
  */
 router.post("/search/merchant-transactionId", authMiddleware, orderController.getOrderDetailByMerchantTransactionId.bind(orderController));
 
-router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
+// router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
 
 export default router;
