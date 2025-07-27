@@ -1,24 +1,15 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, JoinColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
 import { Subcategory } from "./subcategory.entity";
 import { Vendor } from "./vendor.entity";
-import { Brand } from "./brand.entity";
 import { Deal } from "./deal.entity";
-import { Review } from "./reviews.entity";
-import { OrderItem } from "./orderItems.entity";
-import { User } from "./user.entity";
 import { Banner } from "./banner.entity";
-
-export enum DiscountType {
-    PERCENTAGE = 'PERCENTAGE',
-    FLAT = 'FLAT',
-}
-
-export enum InventoryStatus {
-    AVAILABLE = 'AVAILABLE',
-    OUT_OF_STOCK = 'OUT_OF_STOCK',
-    LOW_STOCK = 'LOW_STOCK',
-}
-
+import { ProductVariant } from "./productVariant.entity";
+import { VariantImage } from "./variantImages.entity";
+import { AttributeType } from "./attributeType.entity";
+import { DiscountType, InventoryStatus } from "./product.enum";
+import { OrderItem } from "./orderItems.entity";
+import { Brand } from "./brand.entity";
+import { Review } from "./reviews.entity";
 
 @Entity('products')
 export class Product {
@@ -28,79 +19,75 @@ export class Product {
     @Column()
     name: string;
 
-    @Column('text')
-    description: string;
+    @Column({ nullable: true })
+    description?: string;
 
-    @Column('decimal', { precision: 8, scale: 2 })
-    basePrice: number;
+    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
+    basePrice?: number;
 
-    @Column()
-    stock: number;
-
-    @Column('decimal', { precision: 5, scale: 2, default: 0, nullable: true })
+    @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
     discount: number;
 
-    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE, nullable: true })
+    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE })
     discountType: DiscountType;
 
-    @Column('simple-array', { nullable: true })
-    size: string[];
-
-    @Column('simple-array', { nullable: true })
-    productImages: string[];
-
-    // @Column('simple-array', { nullable: true })
-    // inventory: { sku: string; quantity: number; status: InventoryStatus }[];
     @Column({ type: 'enum', enum: InventoryStatus, default: InventoryStatus.AVAILABLE, nullable: true })
-    status: InventoryStatus
+    status?: InventoryStatus;
 
     @Column({ nullable: true })
-    quantity: number
+    stock?: number;
 
-    @ManyToOne(() => Subcategory, (subcategory) => subcategory.products, { onDelete: "CASCADE" })
-    @JoinColumn({ name: "subcategory_id" })
+    @Column()
+    hasVariants: boolean;
+
+    @ManyToOne(() => Subcategory, { onDelete: "SET NULL" })
+    @JoinColumn({ name: "subcategoryId" })
     subcategory: Subcategory;
 
-    @ManyToOne(() => Vendor, (vendor) => vendor.products)
-    @JoinColumn({ name: 'vendorId' })
+    @Column({ nullable: true })
+    subcategoryId: number;
+
+    @ManyToOne(() => Vendor, { onDelete: "CASCADE" })
+    @JoinColumn({ name: "vendorId" })
     vendor: Vendor;
 
-    @Column({ nullable: true })
+    @Column()
     vendorId: number;
 
-    @ManyToOne(() => User, (user) => user.products_admin)
-    @JoinColumn({ name: "userId" })
-    user: User;
+    @ManyToOne(() => Deal, { nullable: true, onDelete: "SET NULL" })
+    @JoinColumn({ name: "dealId" })
+    deal?: Deal;
 
     @Column({ nullable: true })
-    userId: number;
+    dealId?: number;
 
-    @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'brand_id' })
-    brand: Brand;
-
-    @Column({ nullable: true })
-    brand_id: number;
-
-    @ManyToOne(() => Deal, { onDelete: 'SET NULL' })
-    @JoinColumn({ name: 'dealId' })
-    deal: Deal;
+    @ManyToOne(() => Banner, { nullable: true, onDelete: "SET NULL" })
+    @JoinColumn({ name: "bannerId" })
+    banner?: Banner;
 
     @Column({ nullable: true })
-    dealId: number;
+    bannerId?: number;
 
-    @OneToMany(() => Review, (review) => review.product)
-    reviews: Review[];
+    @OneToMany(() => ProductVariant, (variant) => variant.product)
+    variants: ProductVariant[];
+
+    @OneToMany(() => VariantImage, (image) => image.product)
+    productImages: VariantImage[];
+
+    @OneToMany(() => AttributeType, (attributeType) => attributeType.product)
+    attributeTypes: AttributeType[];
 
     @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
     orderItems: OrderItem[];
 
-    @ManyToOne(() => Banner, (banner) => banner.products, { onDelete: 'SET NULL', nullable: true })
-    @JoinColumn({ name: "bannerId" })
-    banner: Banner;
+    @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
+    brand: Brand;
 
     @Column({ nullable: true })
-    bannerId: number;
+    brandId?: number;
+
+    @OneToMany(() => Review, (review) => review.product, { cascade: true })
+    reviews: Review[];
 
     @CreateDateColumn()
     created_at: Date;

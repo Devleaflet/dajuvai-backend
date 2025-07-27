@@ -131,3 +131,123 @@ const productController = new ProductController();
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
 export default productRouter;
+
+
+
+// product schema 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Product:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *           example: 1
+ *         name:
+ *           type: string
+ *           example: "iPhone 14 Pro"
+ *         description:
+ *           type: string
+ *           example: "Latest Apple iPhone with A16 Bionic chip"
+ *         basePrice:
+ *           type: number
+ *           example: 999.99
+ *         discount:
+ *           type: number
+ *           example: 10
+ *         discountType:
+ *           type: string
+ *           enum:
+ *             - PERCENTAGE
+ *             - FLAT
+ *           example: PERCENTAGE
+ *         status:
+ *           type: string
+ *           enum:
+ *             - AVAILABLE
+ *             - OUT_OF_STOCK
+ *             - LOW_STOCK
+ *           example: AVAILABLE
+ *         stock:
+ *           type: integer
+ *           example: 50
+ *         hasVariants:
+ *           type: boolean
+ *           example: false
+ *         variants:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               sku:
+ *                 type: string
+ *                 example: "IPH14-BLK-256GB"
+ *               price:
+ *                 type: number
+ *                 example: 1099.99
+ *               stock:
+ *                 type: integer
+ *                 example: 20
+ *               status:
+ *                 type: string
+ *                 enum:
+ *                   - AVAILABLE
+ *                   - OUT_OF_STOCK
+ *                   - LOW_STOCK
+ *                 example: AVAILABLE
+ *               attributes:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     attributeType:
+ *                       type: string
+ *                       example: "Color"
+ *                     attributeValues:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["Black", "256GB"]
+ *               images:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     url:
+ *                       type: string
+ *                       format: uri
+ *                       example: "https://cdn.example.com/images/iph14-black.png"
+ *         productImages:
+ *           type: array
+ *           items:
+ *             type: object
+ *             properties:
+ *               url:
+ *                 type: string
+ *                 format: uri
+ *                 example: "https://cdn.example.com/images/iph14-main.png"
+ *         subcategoryId:
+ *           type: integer
+ *           example: 2
+ *         dealId:
+ *           type: integer
+ *           example: 5
+ *         bannerId:
+ *           type: integer
+ *           example: 1
+ *         createdAt:
+ *           type: string
+ *           format: date-time
+ *           example: "2025-07-27T10:00:00Z"
+ *         updatedAt:
+ *           type: string
+ *           format: date-time
+ *           example: "2025-07-27T10:00:00Z"
+ *       required:
+ *         - name
+ *         - description
+ *         - basePrice
+ *         - status
+ */

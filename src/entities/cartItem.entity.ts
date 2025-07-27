@@ -29,5 +29,8 @@ export class CartItem {
 
     @Column({ nullable: true })
     image: string;
+
+    @Column({ nullable: true })
+    variantId: number | null;
 }
 

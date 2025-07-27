@@ -3,11 +3,11 @@ import { ProductController } from '../controllers/product.controller';
 import { authMiddleware, combinedAuthMiddleware, isAdmin, isAdminOrStaff, isAdminOrVendor, isVendor, isVendorAccountOwnerOrAdminOrStaff, requireAdminStaffOrVendor, restrictToVendorOrAdmin, validateZod, vendorAuthMiddleware } from '../middlewares/auth.middleware';
 import { multerOptions } from '../config/multer.config';
 import multer from 'multer';
-import { createProductSchema, updateProductSchema, productQuerySchema } from '../utils/zod_validations/product.zod';
 import { createCategorySchema, updateCategorySchema } from '../utils/zod_validations/category.zod';
 import { SubcategoryController } from '../controllers/subcategory.controller';
 import { CategoryController } from '../controllers/category.controller';
 import { createSubCategorySchema, updateSubcategorySchema } from '../utils/zod_validations/subcategory.zod';
+import { ProductUpdateSchema } from '../utils/zod_validations/product.zod';
 
 const router = Router();
 const productController = new ProductController();
@@ -884,9 +884,14 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  * @swagger
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
  *   post:
- *     summary: Create a new product
- *     description: Creates a new product under a specified category and subcategory. Only authenticated vendors can create products. Supports uploading up to 5 images.
- *     tags: [Product]
+ *     summary: Create a new product (simple or with variants)
+ *     description: >
+ *       Creates a product under a specific category & subcategory.  
+ *       Requires **vendor authentication**.  
+ *       Accepts `multipart/form-data` for uploading product/variant images.  
+ *       When `hasVariants` is `true`, send `variants` as a **JSON string**.
+ *     tags:
+ *       - Products
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -895,88 +900,100 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *         required: true
  *         schema:
  *           type: integer
- *           minimum: 1
- *         description: The ID of the category
+ *         description: Category ID.
  *       - in: path
  *         name: subcategoryId
  *         required: true
  *         schema:
  *           type: integer
- *           minimum: 1
- *         description: The ID of the subcategory
+ *         description: Subcategory ID.
  *     requestBody:
  *       required: true
  *       content:
  *         multipart/form-data:
  *           schema:
  *             type: object
- *             required:
- *               - name
- *               - description
- *               - basePrice
- *               - stock
- *               - quantity
  *             properties:
  *               name:
  *                 type: string
- *                 description: Product name
- *                 example: "New Product"
+ *                 example: "T-Shirt Classic"
  *               description:
  *                 type: string
- *                 description: Product description
- *                 example: "This is a new product description."
+ *                 example: "100% cotton classic tee."
  *               basePrice:
- *                 type: string
- *                 description: Base price of the product (will be converted to number)
- *                 example: "99.99"
- *               stock:
- *                 type: string
- *                 description: Stock quantity (will be converted to integer)
- *                 example: "100"
+ *                 type: number
+ *                 format: float
+ *                 example: 19.99
+ *                 description: Required if `hasVariants` is false.
  *               discount:
- *                 type: string
- *                 description: Discount amount (will be converted to number)
- *                 example: "10"
+ *                 type: number
+ *                 format: float
+ *                 example: 10
  *               discountType:
  *                 type: string
  *                 enum: [PERCENTAGE, FLAT]
- *                 description: Type of discount
- *                 example: "PERCENTAGE"
- *               size:
- *                 type: string
- *                 description: Comma-separated list of available sizes (e.g., "S,M,L")
- *                 example: "S,M,L"
+ *                 example: PERCENTAGE
  *               status:
  *                 type: string
- *                 enum: [AVAILABLE, LOW_STOCK, OUT_OF_STOCK]
- *                 description: Inventory status
- *                 example: "AVAILABLE"
- *               quantity:
+ *                 enum: [AVAILABLE, OUT_OF_STOCK]
+ *                 example: AVAILABLE
+ *                 description: Used only when `hasVariants` is false.
+ *               stock:
+ *                 type: integer
+ *                 example: 150
+ *                 description: Used only when `hasVariants` is false.
+ *               hasVariants:
+ *                 type: boolean
+ *                 example: true
+ *               variants:
  *                 type: string
- *                 description: Quantity of the product (will be converted to number)
- *                 example: "100"
- *               brand_id:
- *                 type: string
- *                 description: Brand ID (will be converted to number or null)
- *                 example: "1"
+ *                 description: >
+ *                   **Stringified JSON** array of variants.  
+ *                   Each variant may contain `sku`, `price`, `stock`, `status`, `attributes[]`.  
+ *                   Example shown below.
+ *                 example: |
+ *                   [
+ *                     {
+ *                       "sku": "TSHIRT-RED-M",
+ *                       "price": 21.99,
+ *                       "stock": 50,
+ *                       "status": "AVAILABLE",
+ *                       "attributes": [
+ *                         { "attributeValueId": 3 },   // Color: Red
+ *                         { "attributeValueId": 7 }    // Size: M
+ *                       ]
+ *                     },
+ *                     {
+ *                       "sku": "TSHIRT-BLK-L",
+ *                       "price": 21.99,
+ *                       "stock": 100,
+ *                       "status": "AVAILABLE",
+ *                       "attributes": [
+ *                         { "attributeValueId": 4 },   // Color: Black
+ *                         { "attributeValueId": 8 }    // Size: L
+ *                       ]
+ *                     }
+ *                   ]
  *               dealId:
- *                 type: string
- *                 description: Deal ID (will be converted to number or null)
- *                 example: "1"
- *               bannerId: 
- *                  type: string
- *                  description: Banner ID (optional, will be converted to number or null)
- *                  example: "1"
+ *                 type: integer
+ *                 nullable: true
+ *                 example: 2
+ *               bannerId:
+ *                 type: integer
+ *                 nullable: true
+ *                 example: 5
  *               images:
  *                 type: array
+ *                 description: >
+ *                   Up to 5 images.  
+ *                   - For non-variant products: these become `productImages`.  
+ *                   - For variant products: follow your naming convention (e.g. `variant-{sku}-1.jpg`) so the backend can map them.
  *                 items:
  *                   type: string
  *                   format: binary
- *                 description: Up to 5 product images
- *                 maxItems: 5
  *     responses:
  *       201:
- *         description: Product created successfully
+ *         description: Product created successfully.
  *         content:
  *           application/json:
  *             schema:
@@ -985,6 +1002,9 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                 success:
  *                   type: boolean
  *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product created successfully"
  *                 data:
  *                   type: object
  *                   properties:
@@ -993,58 +1013,46 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                       example: 1
  *                     name:
  *                       type: string
- *                       example: "New Product"
+ *                       example: "T-Shirt Classic"
  *                     description:
  *                       type: string
- *                       example: "This is a new product description."
+ *                       example: "100% cotton classic tee."
  *                     basePrice:
  *                       type: number
- *                       example: 99.99
- *                     stock:
- *                       type: integer
- *                       example: 100
+ *                       format: float
+ *                       nullable: true
+ *                       example: 19.99
  *                     discount:
  *                       type: number
  *                       example: 10
  *                     discountType:
  *                       type: string
  *                       enum: [PERCENTAGE, FLAT]
- *                       example: "PERCENTAGE"
- *                     size:
- *                       type: array
- *                       items:
- *                         type: string
- *                       example: ["S", "M", "L"]
+ *                       example: PERCENTAGE
  *                     status:
  *                       type: string
- *                       enum: [AVAILABLE, LOW_STOCK, OUT_OF_STOCK]
+ *                       enum: [AVAILABLE, OUT_OF_STOCK]
+ *                       nullable: true
  *                       example: "AVAILABLE"
- *                     quantity:
- *                       type: number
- *                       example: 100
- *                     productImages:
- *                       type: array
- *                       items:
- *                         type: string
- *                       example: ["https://res.cloudinary.com/example/image1.jpg"]
+ *                     stock:
+ *                       type: integer
+ *                       nullable: true
+ *                       example: 150
+ *                     hasVariants:
+ *                       type: boolean
+ *                       example: true
  *                     subcategory:
  *                       type: object
  *                       properties:
  *                         id:
  *                           type: integer
- *                           example: 1
- *                         name:
- *                           type: string
- *                           example: "Electronics"
+ *                           example: 12
  *                     vendor:
  *                       type: object
  *                       properties:
  *                         id:
  *                           type: integer
- *                           example: 3
- *                         name:
- *                           type: string
- *                           example: "Vendor Name"
+ *                           example: 9
  *                     deal:
  *                       type: object
  *                       nullable: true
@@ -1052,18 +1060,91 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                         id:
  *                           type: integer
  *                           example: 2
- *                         discountPercentage:
- *                           type: number
- *                           example: 20
- *                     finalPrice:
- *                       type: number
- *                       example: 79.99
- *                     bannerId:
- *                       type: string
- *                       description: Banner ID (will be converted to number or null)
- *                       example: "1"
+ *                     banner:
+ *                       type: object
+ *                       nullable: true
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                           example: 5
+ *                     productImages:
+ *                       type: array
+ *                       nullable: true
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 101
+ *                           imageUrl:
+ *                             type: string
+ *                             example: "https://res.cloudinary.com/.../prod.jpg"
+ *                           productId:
+ *                             type: integer
+ *                             example: 1
+ *                           variantId:
+ *                             type: integer
+ *                             nullable: true
+ *                             example: null
+ *                     variants:
+ *                       type: array
+ *                       nullable: true
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 201
+ *                           sku:
+ *                             type: string
+ *                             example: "TSHIRT-RED-M"
+ *                           price:
+ *                             type: number
+ *                             format: float
+ *                             example: 21.99
+ *                           stock:
+ *                             type: integer
+ *                             example: 50
+ *                           status:
+ *                             type: string
+ *                             enum: [AVAILABLE, OUT_OF_STOCK]
+ *                             example: "AVAILABLE"
+ *                           productId:
+ *                             type: integer
+ *                             example: 1
+ *                           attributes:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 id:
+ *                                   type: integer
+ *                                   example: 301
+ *                                 variantId:
+ *                                   type: integer
+ *                                   example: 201
+ *                                 attributeValueId:
+ *                                   type: integer
+ *                                   example: 3
+ *                           images:
+ *                             type: array
+ *                             items:
+ *                               type: object
+ *                               properties:
+ *                                 id:
+ *                                   type: integer
+ *                                   example: 401
+ *                                 imageUrl:
+ *                                   type: string
+ *                                   example: "https://res.cloudinary.com/.../variant.jpg"
+ *                                 productId:
+ *                                   type: integer
+ *                                   example: 1
+ *                                 variantId:
+ *                                   type: integer
+ *                                   example: 201
  *       400:
- *         description: Bad request (e.g., invalid deal, total discount exceeds 100%, or negative final price)
+ *         description: Bad Request (validation / missing data)
  *         content:
  *           application/json:
  *             schema:
@@ -1074,9 +1155,9 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Total discount cannot exceed 100%"
- *       403:
- *         description: Unauthorized (vendor authentication failed)
+ *                   example: "No image files provided"
+ *       401:
+ *         description: Unauthorized (missing/invalid vendor token)
  *         content:
  *           application/json:
  *             schema:
@@ -1087,9 +1168,9 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Unauthorized"
+ *                   example: "Unauthorized: Vendor not found"
  *       404:
- *         description: Category, subcategory, or vendor not found
+ *         description: Category/Subcategory/Deal/Banner not found
  *         content:
  *           application/json:
  *             schema:
@@ -1100,9 +1181,9 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Category not found"
+ *                   example: "Subcategory does not exist"
  *       500:
- *         description: Internal server error (e.g., image upload failure)
+ *         description: Internal Server Error
  *         content:
  *           application/json:
  *             schema:
@@ -1115,7 +1196,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.post('/:categoryId/subcategories/:subcategoryId/products', combinedAuthMiddleware, requireAdminStaffOrVendor, upload.array('images', 5), validateZod(createProductSchema), productController.createProduct.bind(productController))
+router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, upload.array('images', 5), productController.createProduct.bind(productController))
 
 // /**
 //  * @swagger
@@ -1775,7 +1856,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, upload.array('images', 5), validateZod(updateProductSchema), productController.updateProduct.bind(productController));
+router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, upload.array('images', 5), validateZod(ProductUpdateSchema), productController.updateProduct.bind(productController));
 
 // /**
 //  * @swagger

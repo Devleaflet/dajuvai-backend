@@ -52,7 +52,7 @@ app.use(cors({
     origin: allowedOrigins,
     credentials: true,
     allowedHeaders: ['Content-Type', 'Authorization'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS','PATCH']
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
 }))
 
 
@@ -89,63 +89,6 @@ app.use("/api/vendor/dashboard", vendorDashBoardRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
 
-
-// Root route serving an HTML page with a Google login button
-// app.get("/", (req: Request, res: Response) => {
-//     res.send(`
-//         <!DOCTYPE html>
-//         <html lang="en">
-//         <head>
-//             <meta charset="UTF-8">
-//             <meta name="viewport" content="width=device-width, initial-scale=1.0">
-//             <title>Authentication API</title>
-//             <style>
-//                 body {
-//                     font-family: Arial, sans-serif;
-//                     display: flex;
-//                     justify-content: center;
-//                     align-items: center;
-//                     height: 100vh;
-//                     margin: 0;
-//                     background-color: #f0f2f5;
-//                 }
-//                 .container {
-//                     text-align: center;
-//                     padding: 20px;
-//                     background-color: white;
-//                     border-radius: 8px;
-//                     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-//                 }
-//                 h1 {
-//                     color: #333;
-//                 }
-//                 .google-btn {
-//                     display: inline-block;
-//                     padding: 10px 20px;
-//                     background-color: #4285f4;
-//                     color: white;
-//                     text-decoration: none;
-//                     border-radius: 4px;
-//                     font-size: 16px;
-//                     font-weight: bold;
-//                     transition: background-color 0.3s;
-//                 }
-//                 .google-btn:hover {
-//                     background-color: #357ae8;
-//                 }
-//             </style>
-//         </head>
-//         <body>
-//             <div class="container">
-//                 <h1>Welcome to the Authentication API</h1>
-//                 <p>Click the button below to log in with Google:</p>
-//                 <a href="/api/auth/google" class="google-btn">Login with Google</a>
-//             </div>
-//         </body>
-//         </html>
-//     `);
-// });
-// Port configuration with fallback to 4000
 const port = process.env.PORT || 4000;
 
 // Initialize database connection

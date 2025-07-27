@@ -1,214 +1,111 @@
-import { number, z } from "zod";
-import { DiscountType, InventoryStatus } from "../../entities/product.entity";
 
-/**
- * Validation schema for creating a product.
- * 
- * Fields:
- * - name: Required non-empty string.
- * - description: Required non-empty string.
- * - basePrice: Required, string input transformed to number, must be positive.
- * - stock: Required, string input transformed to integer >= 0.
- * - discount: Optional, string input transformed to number >= 0.
- * - discountType: Optional enum of DiscountType (PERCENTAGE, FLAT).
- * - size: Optional string that splits into array of non-empty trimmed strings.
- * - status: Optional enum of InventoryStatus (AVAILABLE, LOW_STOCK, OUT_OF_STOCK).
- * - quantity: Required, string input transformed to integer >= 0.
- * - brand_id: Optional string transformed to positive integer or null.
- * - dealId: Optional string transformed to positive integer or null.
- * - vendorId: Optional string transformed to number or null.
- * - userId: Optional string transformed to number or null.
- */
-export const createProductSchema = z.object({
-    name: z.string().min(1, "Product name is required"),
-    description: z.string().min(1, "Description is required"),
-    basePrice: z
-        .string()
-        .transform((val) => Number(val))
-        .refine((val) => !isNaN(val) && val > 0, "Base price must be a positive number"),
-    stock: z
-        .string()
-        .transform((val) => Number(val))
-        .refine((val) => Number.isInteger(val) && val >= 0, "Stock must be a non-negative integer"),
-    discount: z
-        .string()
-        .transform((val) => val === "" ? undefined : Number(val))
-        .refine(
-            (val) => val === undefined || (!isNaN(val) && val >= 0),
-            "Discount must be a non-negative number"
-        )
-        .optional()
-        .nullable(),
-    discountType: z.preprocess(
-        (val) => (val === "" ? undefined : val),
-        z.nativeEnum(DiscountType).optional().nullable()
-    ),
+import { z } from "zod";
 
-    size: z
-        .string()
-        .transform(val => val.split(',').map(v => v.trim()).filter(Boolean))
-        .pipe(z.array(z.string().min(1)))
-        .optional(),
+// Enums
+export enum DiscountType {
+    PERCENTAGE = 'PERCENTAGE',
+    FLAT = 'FLAT',
+}
 
-    status: z.enum([InventoryStatus.AVAILABLE, InventoryStatus.LOW_STOCK, InventoryStatus.OUT_OF_STOCK]).optional(),
+export enum InventoryStatus {
+    AVAILABLE = 'AVAILABLE',
+    OUT_OF_STOCK = 'OUT_OF_STOCK',
+    LOW_STOCK = 'LOW_STOCK',
+}
 
-    quantity: z.string()
-        .transform(val => Number(val))
-        .refine(val => Number.isInteger(val) && val >= 0, "Quantity must be a non-negative integer"),
+// Interfaces
+interface Image {
+    url: string;
+}
 
-    brand_id: z
-        .string()
-        .transform((val) => (val ? Number(val) : null))
-        .refine((val) => val === null || (Number.isInteger(val) && val > 0), "Brand ID must be a positive integer or null")
-        .optional()
-        .nullable(),
+export interface ProductInterface {
+    name?: string;
+    description?: string;
+    basePrice?: number;
+    discount?: number;
+    discountType?: DiscountType;
+    status?: InventoryStatus;
+    stock?: number;
+    hasVariants?: boolean;
+    variants?: {
+        sku: string;
+        price: number;
+        stock: number;
+        status: InventoryStatus;
+        attributes?: { attributeType: string; attributeValues: string[] }[];
+        images?: Image[];
+    }[];
+    productImages?: Image[];
+    subcategoryId?: number;
+    dealId?: number;
+    bannerId?: number;
+}
 
-    dealId: z
-        .string()
-        .transform((val) => (val ? Number(val) : null))
-        .refine((val) => val === null || (Number.isInteger(val) && val > 0), "Deal ID must be a positive integer or null")
-        .optional()
-        .nullable(),
-
-    vendorId: z
-        .string()
-        .transform((val) => (val ? Number(val) : null))
-        .optional(),
-
-    userId: z
-        .string()
-        .transform((val) => (val ? Number(val) : null))
-        .optional()
-        .nullable(),
-
-    bannerId: z
-        .string()
-        .transform((val) => (val ? Number(val) : null))
-        .refine(
-            (val) =>
-                val === null || (Number.isInteger(val) && val > 0),
-            "Banner ID must be a positive integer or null"
-        )
-        .optional()
-        .nullable(),
-    // finalPrice: z
-    //     .string()
-    //     .optional()
-
+const ProductBaseSchema = z.object({
+    name: z.string().min(1, "Name is required").optional(),
+    description: z.string().min(1, "Description is required").optional(),
+    basePrice: z.number().min(0, "Base price must be non-negative").optional(),
+    discount: z.number().min(0, "Discount must be non-negative").max(100, "Discount cannot exceed 100").optional(),
+    discountType: z.enum([DiscountType.PERCENTAGE, DiscountType.FLAT]).optional(),
+    status: z.enum([InventoryStatus.AVAILABLE, InventoryStatus.OUT_OF_STOCK, InventoryStatus.LOW_STOCK]).optional(),
+    stock: z.number().int().min(0, "Stock must be non-negative").optional(),
+    hasVariants: z.boolean().optional(),
+    variants: z.array(
+        z.object({
+            sku: z.string().min(1, "SKU is required"),
+            price: z.number().min(0, "Price must be non-negative"),
+            stock: z.number().int().min(0, "Stock must be non-negative"),
+            status: z.enum([InventoryStatus.AVAILABLE, InventoryStatus.OUT_OF_STOCK, InventoryStatus.LOW_STOCK]),
+            attributes: z.array(
+                z.object({
+                    attributeType: z.string().min(1, "Attribute type is required"),
+                    attributeValues: z.array(z.string().min(1, "Attribute value is required")).min(1, "At least one attribute value is required"),
+                })
+            ).optional(),
+            images: z.array(z.object({ url: z.string().url("Invalid image URL") })).optional(),
+        })
+    ).optional(),
+    productImages: z.array(z.object({ url: z.string().url("Invalid image URL") })).optional(),
+    subcategoryId: z.number().int().positive("Subcategory ID must be positive").optional(),
+    dealId: z.number().int().positive("Deal ID must be positive").optional(),
+    bannerId: z.number().int().positive("Banner ID must be positive").optional(),
 });
 
-/**
- * Partial update schema for product.
- * Allows updating any subset of fields validated by createProductSchema.
- */
-export const updateProductSchema = createProductSchema.partial();
+export const ProductCreateSchema = ProductBaseSchema.refine(
+    (data) => {
+        if (data.hasVariants === true) {
+            return data.variants && data.variants.length > 0 &&
+                data.basePrice === undefined &&
+                data.stock === undefined &&
+                data.productImages === undefined;
+        } else if (data.hasVariants === false) {
+            return !data.variants && data.basePrice !== undefined && data.stock !== undefined;
+        }
+        return true;
+    },
+    {
+        message: "Products with variants must have variants and no basePrice/stock/images. Non-variant products must have basePrice and stock.",
+        path: ["hasVariants"],
+    }
+).refine(
+    (data) => {
+        if (data.discount !== undefined && (data.discountType === undefined || data.basePrice === undefined)) {
+            return false;
+        }
+        return true;
+    },
+    {
+        message: "Discount requires discountType and basePrice to be provided.",
+        path: ["discount"],
+    }
+);
 
-/**
- * Schema to validate product query filters.
- * Optional filters:
- * - brandId, categoryId, subcategoryId, dealId: must be positive integers if provided.                  
- * - sort: one of 'all', 'low-to-high', or 'high-to-low'. Defaults to 'all'.
- */
-export const productQuerySchema = z.object({
-    brandId: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val > 0, {
-            message: "Brand ID must be a positive integer"
-        })
-        .optional(),
+export const ProductUpdateSchema = ProductBaseSchema.partial();
 
-    categoryId: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val > 0, {
-            message: "Category ID must be a positive integer"
-        })
-        .optional(),
-
-    subcategoryId: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val > 0, {
-            message: "Subcategory ID must be a positive integer"
-        })
-        .optional(),
-
-    dealId: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val > 0, {
-            message: "Deal id must be a positive integer"
-        })
-        .optional(),
-
-    sort: z
-        .enum(['all', 'low-to-high', 'high-to-low'])
-        .optional()
-        .default('all'),
-}).optional().default({});
-
-/**
- * Schema for validating admin product query pagination and sorting.
- * Fields:
- * - page: positive integer, defaults to 1.
- * - limit: positive integer, defaults to 10.
- * - sort: one of 'createdAt' or 'name', defaults to 'createdAt'.
- */
-export const adminProductQuerySchema = z.object({
-    page: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val >= 1, {
-            message: "Page must be a positive integer"
-        })
-        .optional()
-        .default('1'),
-
-    limit: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val >= 1, {
-            message: "Limit must be a positive integer"
-        })
-        .optional()
-        .default('10'),
-
-    sort: z
-        .enum(['createdAt', 'name'])
-        .optional()
-        .default('createdAt'),
+export const ProductParamsSchema = z.object({
+    id: z.number().int().positive("Product ID must be positive"),
 });
 
-/**
- * Schema for validating vendor product query pagination.
- * Fields:
- * - page: positive integer, defaults to 1.
- * - limit: positive integer, defaults to 10.
- */
-export const vendorProductQuerySchema = z.object({
-    page: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val >= 1, {
-            message: "Page must be a positive integer"
-        })
-        .optional()
-        .default('1'),
-
-    limit: z
-        .string()
-        .transform(Number)
-        .refine((val) => Number.isInteger(val) && val >= 1, {
-            message: "Limit must be a positive integer"
-        })
-        .optional()
-        .default('10'),
-});
-
-// TypeScript types inferred from Zod schemas for strong typing
-export type CreateProductInput = z.infer<typeof createProductSchema>;
-export type UpdateProductInput = z.infer<typeof updateProductSchema>;
-export type ProductQueryInput = z.infer<typeof productQuerySchema>;
-export type AdminProductQueryInput = z.infer<typeof adminProductQuerySchema>;
-export type VendorProductQueryInput = z.infer<typeof vendorProductQuerySchema>;
+export type ProductCreateType = z.infer<typeof ProductCreateSchema>;
+export type ProductUpdateType = z.infer<typeof ProductUpdateSchema>;
+export type ProductParamsType = z.infer<typeof ProductParamsSchema>;
