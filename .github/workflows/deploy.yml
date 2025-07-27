@@ -1,4 +1,4 @@
-name: Pipeline for Production(backend)
+name: Pipeline for Dev(backend)
 
 on:
   workflow_dispatch:
@@ -17,16 +17,16 @@ jobs:
           node-version: "16"
 
       - name: Build Docker image
-        run: docker build -t dajubhai-backend-prod-v1 .
+        run: docker build -t dajubhai-backend-dev-v1 .
 
       - name: Tag the image
-        run: docker tag dajubhai-backend-prod-v1 registry.dajuvai.com/backend/dajubhai-backend-prod-v1:latest
+        run: docker tag dajubhai-backend-dev-v1 registry.dajuvai.com/backend/dajubhai-backend-dev-v1:latest
 
       - name: Log in to Docker registry
         run: echo "${{ secrets.REGISTRY_PASSWORD }}" |  docker login registry.dajuvai.com -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
 
       - name: Push Docker image to our server
-        run: docker push registry.dajuvai.com/backend/dajubhai-backend-prod-v1:latest
+        run: docker push registry.dajuvai.com/backend/dajubhai-backend-dev-v1:latest
 
       - name: Deploy to Server via SSH
         uses: appleboy/ssh-action@v1.0.3
@@ -35,5 +35,5 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            cd ~/dajubhai-compose
-            docker compose up -d dajubhai-backend-prod
+            cd ~/dajubhai-compose-dev
+            docker compose up -d dajubhai-backend-dev
