@@ -130,6 +130,7 @@ const productController = new ProductController();
  */
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
+
 export default productRouter;
 
 
