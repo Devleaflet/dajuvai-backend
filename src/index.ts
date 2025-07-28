@@ -45,7 +45,8 @@ config();
 const allowedOrigins = [
     'https://dajuvai-frontend-ykrq.vercel.app',
     'https://dajuvai.com',
-    "http://localhost:5173"
+    "http://localhost:5173",
+    'https://dev.dajuvai.com'
 ]
 
 app.use(cors({
