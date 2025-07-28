@@ -5,6 +5,7 @@ import { ProductService } from '../service/product.service';
 import { APIError } from '../utils/ApiError.utils';
 import { IAdminProductQueryParams, IProductQueryParams } from '../interface/product.interface';
 import { v2 as cloudinary } from 'cloudinary';
+import { DataSource } from 'typeorm';
 
 
 /**
@@ -18,8 +19,8 @@ export class ProductController {
      * @constructor
      * @description Instantiates ProductService for business logic related to products.
      */
-    constructor() {
-        this.productService = new ProductService();
+    constructor(dataSource: DataSource) {
+        this.productService = new ProductService(dataSource);
 
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -116,6 +117,7 @@ export class ProductController {
 
         } catch (error) {
             if (error instanceof APIError) {
+                console.log(error)
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
                 console.error('createProduct error:', error);

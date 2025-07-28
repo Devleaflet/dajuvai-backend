@@ -1,4 +1,4 @@
-import { memoryStorage } from 'multer';
+import multer, { memoryStorage } from 'multer';
 
 export const multerOptions = {
     // Use memory storage to keep uploaded files in memory as Buffer objects
@@ -24,3 +24,8 @@ export const multerOptions = {
         files: 5, // Max number of files allowed per upload is 5
     },
 };
+
+export const uploadMiddleware = multer(multerOptions).fields([
+    { name: 'productImages', maxCount: 10 }, 
+    { name: 'variantImages', maxCount: 100 }, 
+]);

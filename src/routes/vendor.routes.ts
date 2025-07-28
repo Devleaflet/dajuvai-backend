@@ -13,6 +13,8 @@ import {
 import rateLimit from 'express-rate-limit';
 import { validateZod } from '../middlewares/auth.middleware';
 import { ProductController } from '../controllers/product.controller';
+import { DataSource } from 'typeorm';
+import AppDataSource from '../config/db.config';
 
 const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -22,7 +24,7 @@ const authRateLimiter = rateLimit({
 
 const router = Router();
 const vendorController = new VendorController();
-const productController = new ProductController();
+const productController = new ProductController(AppDataSource);
 
 /**
  * @swagger

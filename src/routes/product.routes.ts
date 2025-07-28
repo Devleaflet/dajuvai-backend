@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
+import AppDataSource from "../config/db.config";
 
 const productRouter = Router();
-const productController = new ProductController();
+const productController = new ProductController(AppDataSource);
 
 /**
  * @swagger
@@ -140,115 +141,133 @@ export default productRouter;
  * @swagger
  * components:
  *   schemas:
- *     Product:
+ *     Image:
  *       type: object
  *       properties:
- *         id:
+ *         url:
+ *           type: string
+ *           format: uri
+ *           example: "https://example.com/image.png"
+ *       required:
+ *         - url
+ *
+ *     Attribute:
+ *       type: object
+ *       properties:
+ *         attributeType:
+ *           type: string
+ *           example: "Color"
+ *         attributeValues:
+ *           type: array
+ *           items:
+ *             type: string
+ *             example: "Red"
+ *       required:
+ *         - attributeType
+ *         - attributeValues
+ *
+ *     ProductVariant:
+ *       type: object
+ *       properties:
+ *         sku:
+ *           type: string
+ *           example: "SKU12345"
+ *         price:
+ *           type: number
+ *           format: float
+ *           example: 499.99
+ *         stock:
  *           type: integer
- *           example: 1
- *         name:
- *           type: string
- *           example: "iPhone 14 Pro"
- *         description:
- *           type: string
- *           example: "Latest Apple iPhone with A16 Bionic chip"
- *         basePrice:
- *           type: number
- *           example: 999.99
- *         discount:
- *           type: number
- *           example: 10
- *         discountType:
- *           type: string
- *           enum:
- *             - PERCENTAGE
- *             - FLAT
- *           example: PERCENTAGE
+ *           example: 50
  *         status:
  *           type: string
  *           enum:
  *             - AVAILABLE
  *             - OUT_OF_STOCK
  *             - LOW_STOCK
- *           example: AVAILABLE
+ *           example: "AVAILABLE"
+ *         attributes:
+ *           type: array
+ *           items:
+ *             $ref: "#/components/schemas/Attribute"
+ *         images:
+ *           type: array
+ *           items:
+ *             $ref: "#/components/schemas/Image"
+ *       required:
+ *         - sku
+ *         - price
+ *         - stock
+ *         - status
+ *
+ *     Product:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *           readOnly: true
+ *           example: 1
+ *         name:
+ *           type: string
+ *           example: "iPhone 15 Pro"
+ *         description:
+ *           type: string
+ *           example: "The latest Apple iPhone with A17 chip."
+ *         basePrice:
+ *           type: number
+ *           format: float
+ *           example: 1299.99
+ *         discount:
+ *           type: number
+ *           format: float
+ *           example: 10
+ *           description: "Discount value (percentage or flat)."
+ *         discountType:
+ *           type: string
+ *           enum:
+ *             - PERCENTAGE
+ *             - FLAT
+ *           example: "PERCENTAGE"
+ *         status:
+ *           type: string
+ *           enum:
+ *             - AVAILABLE
+ *             - OUT_OF_STOCK
+ *             - LOW_STOCK
+ *           example: "AVAILABLE"
  *         stock:
  *           type: integer
- *           example: 50
+ *           example: 100
  *         hasVariants:
  *           type: boolean
- *           example: false
+ *           example: true
  *         variants:
  *           type: array
  *           items:
- *             type: object
- *             properties:
- *               sku:
- *                 type: string
- *                 example: "IPH14-BLK-256GB"
- *               price:
- *                 type: number
- *                 example: 1099.99
- *               stock:
- *                 type: integer
- *                 example: 20
- *               status:
- *                 type: string
- *                 enum:
- *                   - AVAILABLE
- *                   - OUT_OF_STOCK
- *                   - LOW_STOCK
- *                 example: AVAILABLE
- *               attributes:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     attributeType:
- *                       type: string
- *                       example: "Color"
- *                     attributeValues:
- *                       type: array
- *                       items:
- *                         type: string
- *                       example: ["Black", "256GB"]
- *               images:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     url:
- *                       type: string
- *                       format: uri
- *                       example: "https://cdn.example.com/images/iph14-black.png"
+ *             $ref: "#/components/schemas/ProductVariant"
  *         productImages:
  *           type: array
  *           items:
- *             type: object
- *             properties:
- *               url:
- *                 type: string
- *                 format: uri
- *                 example: "https://cdn.example.com/images/iph14-main.png"
+ *             $ref: "#/components/schemas/Image"
  *         subcategoryId:
  *           type: integer
- *           example: 2
+ *           example: 5
  *         dealId:
  *           type: integer
- *           example: 5
+ *           example: 2
  *         bannerId:
  *           type: integer
- *           example: 1
- *         createdAt:
+ *           example: 3
+ *         brandId:
+ *           type: integer
+ *           example: 7
+ *         created_at:
  *           type: string
  *           format: date-time
- *           example: "2025-07-27T10:00:00Z"
- *         updatedAt:
+ *         updated_at:
  *           type: string
  *           format: date-time
- *           example: "2025-07-27T10:00:00Z"
  *       required:
  *         - name
- *         - description
- *         - basePrice
- *         - status
+ *         - hasVariants
  */
