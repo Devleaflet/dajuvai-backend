@@ -191,13 +191,31 @@ export class ProductService {
         };
 
         if (hasVariants && variants) {
+            const variantImages = files['variantImages'] || [];
+            if (variantImages.length === 0) {
+                throw new APIError(400, 'No variant images provided');
+            }
+
             for (const variant of variants) {
-                const matchingFiles = files.filter(file => file.filename.includes(`variant-${variant.sku}`));
+                // Match images to variants using a naming convention (e.g., variant-<sku> in originalname)
+                const matchingFiles = variantImages.filter(file =>
+                    file.originalname.includes(`variant-${variant.sku}`)
+                );
+                if (matchingFiles.length === 0) {
+                    throw new APIError(400, `No images provided for variant ${variant.sku}`);
+                }
                 const imageUrls = await Promise.all(matchingFiles.map(file => uploadImage(file.buffer)));
                 varientImageMap[variant.sku] = imageUrls;
             }
         } else {
-            const imageUrls = await Promise.all(files.map(file => uploadImage(file.buffer)));
+            const productImages = files['productImages'] || [];
+            if (productImages.length === 0) {
+                throw new APIError(400, 'No product images provided');
+            }
+            if (productImages.length > 5) {
+                throw new APIError(400, 'Maximum 5 images allowed for non-variant products');
+            }
+            const imageUrls = await Promise.all(productImages.map(file => uploadImage(file.buffer)));
             uploadedImages.push(...imageUrls);
         }
 

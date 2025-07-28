@@ -882,6 +882,119 @@ router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upl
 
 router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, subcategoryController.deleteSubcategory.bind(subcategoryController));
 
+
+/**
+ * @swagger
+ * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
+ *   post:
+ *     summary: Create a new product (without variants)
+ *     description: Creates a new product under the specified category and subcategory. Only non-variant products are supported in this route.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: categoryId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the category
+ *       - in: path
+ *         name: subcategoryId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the subcategory
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - name
+ *               - description
+ *               - basePrice
+ *               - stock
+ *               - productImages
+ *               - hasVariants
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: Sample Product
+ *               description:
+ *                 type: string
+ *                 example: This is a sample non-variant product.
+ *               basePrice:
+ *                 type: number
+ *                 example: 1000
+ *               discount:
+ *                 type: number
+ *                 example: 10
+ *               discountType:
+ *                 type: string
+ *                 enum: [PERCENTAGE, FLAT]
+ *                 example: PERCENTAGE
+ *               status:
+ *                 type: string
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
+ *                 example: AVAILABLE
+ *               stock:
+ *                 type: integer
+ *                 example: 50
+ *               hasVariants:
+ *                 type: boolean
+ *                 example: false
+ *               dealId:
+ *                 type: integer
+ *                 example: 1
+ *               bannerId:
+ *                 type: integer
+ *                 example: 2
+ *               productImages:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *                 description: Upload up to 5 images for the product
+ *     responses:
+ *       201:
+ *         description: Product created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: Product created successfully
+ *                 data:
+ *                   type: object
+ *                   description: Created product data
+ *       400:
+ *         description: Bad request (e.g. validation errors or missing fields)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: No product images provided
+ *       401:
+ *         description: Unauthorized (e.g. vendor not authenticated)
+ *       404:
+ *         description: Category or Subcategory not found
+ *       500:
+ *         description: Internal Server Error
+ */
 router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, uploadMiddleware, productController.createProduct.bind(productController))
 
 
