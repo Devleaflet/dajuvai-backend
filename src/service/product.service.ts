@@ -23,6 +23,7 @@ import { VariantImage } from '../entities/variantImages.entity';
 import { VariantAttribute } from '../entities/variantAttribute.entity';
 import { AttributeValue } from '../entities/attributeValue.entity';
 import { AttributeType } from '../entities/attributeType.entity';
+import sharp from 'sharp';
 
 /**
  * Service class for handling product-related operations.
@@ -108,12 +109,18 @@ export class ProductService {
         return product;
     }
 
+
+    async getProducts() {
+        return this.productRepository.find();
+    }
+
     async createProduct(
         data: ProductInterface,
-        files: Express.Multer.File[],
+        files: Record<string, Express.Multer.File[]>,
         categoryId: number,
         subcategoryId: number,
-        vendorId: number
+        vendorId: number,
+        hasVariants: boolean
     ): Promise<Product> {
         const {
             name,
@@ -123,12 +130,11 @@ export class ProductService {
             discountType,
             status,
             stock,
-            hasVariants,
             variants,
-            productImages,
             dealId,
             bannerId,
         } = data;
+
 
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
         if (!categoryExists) {
@@ -169,12 +175,8 @@ export class ProductService {
             }
         }
 
-        if (!files || files.length === 0) {
-            throw new APIError(400, 'No image files provided');
-        }
-
         const uploadedImages: string[] = [];
-        const varientImageMap: Record<string, string[]> = {};
+        const variantImageMap: Record<string, string[]> = {};
 
         const uploadImage = async (buffer: Buffer): Promise<string> => {
             return new Promise((resolve, reject) => {
@@ -190,34 +192,46 @@ export class ProductService {
             });
         };
 
-        if (hasVariants && variants) {
-            const variantImages = files['variantImages'] || [];
-            if (variantImages.length === 0) {
-                throw new APIError(400, 'No variant images provided');
-            }
 
-            for (const variant of variants) {
-                // Match images to variants using a naming convention (e.g., variant-<sku> in originalname)
-                const matchingFiles = variantImages.filter(file =>
-                    file.originalname.includes(`variant-${variant.sku}`)
-                );
-                if (matchingFiles.length === 0) {
+        if (hasVariants && variants) {
+            for (let i = 0; i < variants.length; i++) {
+                const variant = variants[i];
+                if (!variant.sku) {
+                    throw new APIError(400, `Variant at index ${i} is missing SKU`);
+                }
+
+                const variantImageField = `variantImages${i + 1}`;
+                const variantImageFiles = files[variantImageField] || [];
+
+                if (variantImageFiles.length === 0) {
                     throw new APIError(400, `No images provided for variant ${variant.sku}`);
                 }
-                const imageUrls = await Promise.all(matchingFiles.map(file => uploadImage(file.buffer)));
-                varientImageMap[variant.sku] = imageUrls;
+                if (variantImageFiles.length > 5) {
+                    throw new APIError(400, `Too many images for variant ${variant.sku}. Maximum is 5.`);
+                }
+
+                const imageUrls = await Promise.all(
+                    variantImageFiles.map(file => uploadImage(file.buffer))
+                );
+
+                variantImageMap[variant.sku] = imageUrls;
+                console.log(`Uploaded ${imageUrls.length} images for variant ${variant.sku}`);
             }
         } else {
-            const productImages = files['productImages'] || [];
-            if (productImages.length === 0) {
+            const productImageFiles = files['productImages'] || [];
+            if (productImageFiles.length === 0) {
                 throw new APIError(400, 'No product images provided');
             }
-            if (productImages.length > 5) {
+            if (productImageFiles.length > 5) {
                 throw new APIError(400, 'Maximum 5 images allowed for non-variant products');
             }
-            const imageUrls = await Promise.all(productImages.map(file => uploadImage(file.buffer)));
+            const imageUrls = await Promise.all(productImageFiles.map(file => uploadImage(file.buffer)));
             uploadedImages.push(...imageUrls);
         }
+
+        console.log("Stock________________________________")
+
+        console.log(stock);
 
         const savedProduct = await this.dataSource.transaction(async (transactionalEntityManager) => {
             const product = this.productRepository.create({
@@ -238,62 +252,93 @@ export class ProductService {
             const savedProduct = await transactionalEntityManager.save(Product, product);
 
             if (hasVariants && variants) {
+                console.log('Creating variants for product:', savedProduct.id);
+
                 const productVariants = await Promise.all(
-                    variants.map(async (variantData) => {
-                        const variant = this.variantRepository.create({
-                            sku: variantData.sku,
-                            price: variantData.price,
-                            stock: variantData.stock,
-                            status: variantData.status,
-                            product: { id: savedProduct.id },
-                        });
+                    variants.map(async (variantData, index) => {
+                        console.log(`Creating variant ${index + 1}:`, variantData.sku);
 
-                        const savedVariant = await transactionalEntityManager.save(ProductVariant, variant);
-
-                        if (variantData.attributes) {
-                            const attributes = await Promise.all(
-                                variantData.attributes.map(async (attr) => {
-                                    const attributeType = this.attributeTypeRepository.create({
-                                        name: attr.attributeType,
-                                        product: { id: savedProduct.id },
-                                    });
-                                    const savedAttributeType = await transactionalEntityManager.save(AttributeType, attributeType);
-
-                                    const attributeValues = attr.attributeValues.map((value) =>
-                                        this.attributeValueRepository.create({
-                                            value,
-                                            attributeType: { id: savedAttributeType.id },
-                                        })
-                                    );
-                                    const savedAttributeValues = await transactionalEntityManager.save(AttributeValue, attributeValues);
-
-                                    return savedAttributeValues.map((savedValue) =>
-                                        this.variantAttributeRepository.create({
-                                            variant: { id: savedVariant.id },
-                                            attributeValue: { id: savedValue.id },
-                                        })
-                                    );
-                                })
-                            );
-
-                            const flattenedAttributes = attributes.flat();
-                            await transactionalEntityManager.save(VariantAttribute, flattenedAttributes);
-                        }
-
-                        const images = (varientImageMap[variantData.sku] || []).map((url) =>
-                            this.variantImageRepository.create({
-                                imageUrl: url,
-                                variant: { id: savedVariant.id },
+                        try {
+                            const variant = this.variantRepository.create({
+                                sku: variantData.sku,
+                                price: variantData.price,
+                                stock: variantData.stock,
+                                status: variantData.status,
                                 product: { id: savedProduct.id },
-                            })
-                        );
-                        await transactionalEntityManager.save(VariantImage, images);
+                            });
 
-                        return savedVariant;
+                            const savedVariant = await transactionalEntityManager.save(ProductVariant, variant);
+                            console.log(`Variant ${variantData.sku} created with ID:`, savedVariant.id);
+
+                            // Handle attributes if they exist
+                            if (variantData.attributes && variantData.attributes.length > 0) {
+                                console.log(`Creating attributes for variant ${variantData.sku}`);
+
+                                for (const attr of variantData.attributes) {
+                                    try {
+                                        // Create or find existing attribute type
+                                        let attributeType = await transactionalEntityManager.findOne(AttributeType, {
+                                            where: {
+                                                name: attr.attributeType,
+                                                productId: savedProduct.id
+                                            }
+                                        });
+
+                                        if (!attributeType) {
+                                            attributeType = this.attributeTypeRepository.create({
+                                                name: attr.attributeType,
+                                                product: { id: savedProduct.id },
+                                            });
+                                            attributeType = await transactionalEntityManager.save(AttributeType, attributeType);
+                                            console.log(`Created attribute type: ${attr.attributeType}`);
+                                        }
+
+                                        // Create attribute values
+                                        for (const value of attr.attributeValues) {
+                                            const attributeValue = this.attributeValueRepository.create({
+                                                value: value,
+                                                attributeType: { id: attributeType.id },
+                                            });
+                                            const savedAttributeValue = await transactionalEntityManager.save(AttributeValue, attributeValue);
+
+                                            // Create variant attribute relationship
+                                            const variantAttribute = this.variantAttributeRepository.create({
+                                                variant: { id: savedVariant.id },
+                                                attributeValue: { id: savedAttributeValue.id },
+                                            });
+                                            await transactionalEntityManager.save(VariantAttribute, variantAttribute);
+                                        }
+                                    } catch (attrError) {
+                                        console.error(`Error creating attributes for variant ${variantData.sku}:`, attrError);
+                                        throw new APIError(500, `Failed to create attributes for variant ${variantData.sku}`);
+                                    }
+                                }
+                            }
+
+                            // Handle variant images
+                            const variantImages = variantImageMap[variantData.sku] || [];
+                            if (variantImages.length > 0) {
+                                const images = variantImages.map((url) =>
+                                    this.variantImageRepository.create({
+                                        imageUrl: url,
+                                        variant: { id: savedVariant.id },
+                                        product: { id: savedProduct.id },
+                                    })
+                                );
+                                await transactionalEntityManager.save(VariantImage, images);
+                                console.log(`Created ${images.length} images for variant ${variantData.sku}`);
+                            }
+
+                            return savedVariant;
+                        } catch (variantError) {
+                            console.error(`Error creating variant ${variantData.sku}:`, variantError);
+                            throw new APIError(500, `Failed to create variant ${variantData.sku}: ${variantError.message}`);
+                        }
                     })
                 );
 
                 savedProduct.variants = productVariants;
+                console.log(`Successfully created ${productVariants.length} variants`);
             } else {
                 const images = uploadedImages.map((url) =>
                     this.variantImageRepository.create({
@@ -308,7 +353,29 @@ export class ProductService {
             return savedProduct;
         });
 
-        return savedProduct;
+        // Fetch the complete product with all relations
+        const completeProduct = await this.productRepository.findOne({
+            where: { id: savedProduct.id },
+            relations: [
+                'variants',
+                'variants.attributes',
+                'variants.attributes.attributeValue',
+                'variants.attributes.attributeValue.attributeType',
+                'variants.images',
+                'productImages',
+                'attributeTypes',
+                'subcategory',
+                'vendor',
+                'deal',
+                'banner'
+            ]
+        });
+
+        if (!completeProduct) {
+            throw new APIError(500, 'Failed to fetch created product');
+        }
+
+        return completeProduct;
     }
 
     async updateProduct(
@@ -316,7 +383,7 @@ export class ProductService {
         isAdmin: boolean,
         productId: number,
         data: Partial<ProductInterface>,
-        files: Express.Multer.File[],
+        files: Record<string, Express.Multer.File[]>,
         categoryId: number,
         subcategoryId: number
     ): Promise<Product> {
@@ -371,31 +438,76 @@ export class ProductService {
         }
 
         const uploadedImages: string[] = [];
-        const varientImageMap: Record<string, string[]> = {};
+        const variantImageMap: Record<string, string[]> = {};
 
-        const uploadImage = async (buffer: Buffer): Promise<string> => {
-            return new Promise((resolve, reject) => {
-                cloudinary.uploader.upload_stream(
-                    { resource_type: 'image' },
-                    (error, result) => {
-                        if (error || !result) {
-                            return reject(new APIError(500, 'Image upload failed'));
+        const uploadImage = async (buffer: Buffer, originalname: string): Promise<string> => {
+            try {
+                // resize with sharp
+                const compressedBuffer = await sharp(buffer)
+                    .resize({ width: 1024 })
+                    .jpeg({ quality: 80 })
+                    .toBuffer();
+
+                return new Promise((resolve, reject) => {
+                    cloudinary.uploader.upload_stream(
+                        { resource_type: 'image' },
+                        (error, result) => {
+                            if (error || !result) {
+                                console.error(`Cloudinary upload failed for file ${originalname}:`, error?.message || 'No result');
+                                return reject(new APIError(500, `Image upload failed for ${originalname}`));
+                            }
+                            resolve(result.secure_url);
                         }
-                        resolve(result.secure_url);
-                    }
-                ).end(buffer);
-            });
+                    ).end(compressedBuffer);
+                });
+            } catch (error) {
+                console.error(`Error processing image ${originalname}:`, error);
+                throw new APIError(500, `Image processing failed for ${originalname}`);
+            }
         };
 
         if (data.hasVariants && data.variants) {
-            for (const variant of data.variants) {
-                const matchingFiles = files.filter(file => file.originalname.includes(`variant-${variant.sku}`));
-                const imageUrls = await Promise.all(matchingFiles.map(file => uploadImage(file.buffer)));
-                varientImageMap[variant.sku] = imageUrls;
+            for (let i = 0; i < data.variants.length; i++) {
+                const variant = data.variants[i];
+                if (!variant.sku) {
+                    throw new APIError(400, `Variant at index ${i} is missing SKU`);
+                }
+
+                const variantImageField = `variantImages${i + 1}`;
+                const variantImageFiles = files[variantImageField] || [];
+
+                if (variantImageFiles.length > 5) {
+                    throw new APIError(400, `Too many images for variant ${variant.sku}. Maximum is 5.`);
+                }
+
+                if (variantImageFiles.length > 0) {
+                    const imageUrls: string[] = [];
+                    for (const file of variantImageFiles) {
+                        if (!file.buffer || file.buffer.length === 0) {
+                            throw new APIError(400, `Invalid or empty file buffer for ${file.originalname}`);
+                        }
+                        const url = await uploadImage(file.buffer, file.originalname);
+                        imageUrls.push(url);
+                        console.log(`Uploaded image ${file.originalname} for variant ${variant.sku}`);
+                    }
+                    variantImageMap[variant.sku] = imageUrls;
+                }
             }
-        } else if (files && files.length > 0) {
-            const imageUrls = await Promise.all(files.map(file => uploadImage(file.buffer)));
-            uploadedImages.push(...imageUrls);
+        } else {
+            const productImageFiles = files['productImages'] || [];
+            if (productImageFiles.length > 5) {
+                throw new APIError(400, 'Maximum 5 images allowed for non-variant products');
+            }
+            if (productImageFiles.length > 0) {
+                for (const file of productImageFiles) {
+                    if (!file.buffer || file.buffer.length === 0) {
+                        throw new APIError(400, `Invalid or empty file buffer for ${file.originalname}`);
+                    }
+                    const url = await uploadImage(file.buffer, file.originalname);
+                    uploadedImages.push(url);
+                    console.log(`Uploaded image ${file.originalname} for product`);
+                }
+            }
         }
 
         const updatedProduct = await this.dataSource.transaction(async (transactionalEntityManager) => {
@@ -409,7 +521,7 @@ export class ProductService {
                 stock: data.hasVariants ? undefined : (data.stock ?? product.stock),
                 hasVariants: data.hasVariants ?? product.hasVariants,
                 subcategory: data.subcategoryId ? { id: data.subcategoryId } : product.subcategory,
-                vendor: { id: isAdmin ? product.vendorId : authId },
+                vendor: { id: isAdmin ? product.vendor.id : authId },
                 deal: data.dealId ? { id: data.dealId } : product.deal,
                 banner: data.bannerId ? { id: data.bannerId } : product.banner,
             };
@@ -420,6 +532,7 @@ export class ProductService {
             });
 
             if (data.hasVariants && data.variants) {
+                // Delete existing variants and related data
                 await transactionalEntityManager.delete(VariantImage, { variant: { product: { id: productId } } });
                 await transactionalEntityManager.delete(VariantAttribute, { variant: { product: { id: productId } } });
                 await transactionalEntityManager.delete(ProductVariant, { product: { id: productId } });
@@ -427,7 +540,7 @@ export class ProductService {
                 await transactionalEntityManager.delete(AttributeType, { product: { id: productId } });
 
                 const productVariants = await Promise.all(
-                    data.variants.map(async (variantData) => {
+                    data.variants.map(async (variantData, index) => {
                         const variant = this.variantRepository.create({
                             sku: variantData.sku,
                             price: variantData.price,
@@ -437,6 +550,7 @@ export class ProductService {
                         });
 
                         const savedVariant = await transactionalEntityManager.save(ProductVariant, variant);
+                        console.log(`Updated variant ${variantData.sku} with ID: ${savedVariant.id}`);
 
                         if (variantData.attributes) {
                             const attributes = await Promise.all(
@@ -446,6 +560,7 @@ export class ProductService {
                                         product: { id: updatedProduct.id },
                                     });
                                     const savedAttributeType = await transactionalEntityManager.save(AttributeType, attributeType);
+                                    console.log(`Created attribute type: ${attr.attributeType}`);
 
                                     const attributeValues = attr.attributeValues.map((value) =>
                                         this.attributeValueRepository.create({
@@ -468,14 +583,17 @@ export class ProductService {
                             await transactionalEntityManager.save(VariantAttribute, flattenedAttributes);
                         }
 
-                        const images = (varientImageMap[variantData.sku] || []).map((url) =>
+                        const images = (variantImageMap[variantData.sku] || []).map((url) =>
                             this.variantImageRepository.create({
                                 imageUrl: url,
                                 variant: { id: savedVariant.id },
                                 product: { id: updatedProduct.id },
                             })
                         );
-                        await transactionalEntityManager.save(VariantImage, images);
+                        if (images.length > 0) {
+                            await transactionalEntityManager.save(VariantImage, images);
+                            console.log(`Created ${images.length} images for variant ${variantData.sku}`);
+                        }
 
                         return savedVariant;
                     })
@@ -483,7 +601,7 @@ export class ProductService {
 
                 updatedProduct.variants = productVariants;
             } else {
-                if (files && files.length > 0) {
+                if (uploadedImages.length > 0) {
                     await transactionalEntityManager.delete(VariantImage, { product: { id: productId } });
                     const images = uploadedImages.map((url) =>
                         this.variantImageRepository.create({
@@ -499,7 +617,29 @@ export class ProductService {
             return updatedProduct;
         });
 
-        return updatedProduct;
+        // Fetch the complete product 
+        const completeProduct = await this.productRepository.findOne({
+            where: { id: updatedProduct.id },
+            relations: [
+                'variants',
+                'variants.attributes',
+                'variants.attributes.attributeValue',
+                'variants.attributes.attributeValue.attributeType',
+                'variants.images',
+                'productImages',
+                'attributeTypes',
+                'subcategory',
+                'vendor',
+                'deal',
+                'banner'
+            ]
+        });
+
+        if (!completeProduct) {
+            throw new APIError(500, 'Failed to fetch updated product');
+        }
+
+        return completeProduct;
     }
 
     async getAllProducts(): Promise<Product[]> {
@@ -745,6 +885,14 @@ export class ProductService {
         });
 
         return { products, total };
+    }
+
+    async deleteProductById(id: number) {
+        const result = await this.productRepository.delete({ id });
+
+        if (result.affected === 0) {
+            throw new APIError(404, "Product does not exists")
+        }
     }
 
 

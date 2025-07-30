@@ -131,6 +131,10 @@ const productController = new ProductController(AppDataSource);
  */
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
+productRouter.delete("/:id", productController.deleteProductById.bind(productController));
+
+productRouter.get("/", productController.getProductsTest.bind(productController));
+
 
 export default productRouter;
 

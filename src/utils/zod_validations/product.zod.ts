@@ -98,6 +98,23 @@ export const ProductCreateSchema = ProductBaseSchema.refine(
         message: "Discount requires discountType and basePrice to be provided.",
         path: ["discount"],
     }
+).refine(
+    (data) => {
+        // For variant products, ensure each variant has required fields
+        if (data.hasVariants === true && data.variants) {
+            return data.variants.every(variant =>
+                variant.sku &&
+                variant.price !== undefined &&
+                variant.stock !== undefined &&
+                variant.status
+            );
+        }
+        return true;
+    },
+    {
+        message: "Each variant must have SKU, price, stock, and status.",
+        path: ["variants"],
+    }
 );
 
 export const ProductUpdateSchema = ProductBaseSchema.partial();
