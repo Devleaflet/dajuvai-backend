@@ -65,6 +65,7 @@ export const resetPasswordSchema = z.object({
     path: ['confirmPass'],
 });
 
+
 /**
  * Schema to update vendor info.
  * Fields optional except for id which must be a positive integer.
