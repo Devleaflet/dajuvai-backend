@@ -11,10 +11,11 @@ import { User } from '../entities/user.entity';
 import { CartService } from './cart.service';
 import { PaymentService } from './payment.service';
 import { District } from '../entities/district.entity';
-import { InventoryStatus, Product } from '../entities/product.entity';
+import { Product } from '../entities/product.entity';
 import { PromoService } from './promo.service';
 import { add } from 'winston';
 import { number, string } from 'zod';
+import { InventoryStatus } from '../entities/product.enum';
 
 
 /**

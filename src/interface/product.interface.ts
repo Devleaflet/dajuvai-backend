@@ -1,19 +1,14 @@
-import { CreateProductInput, UpdateProductInput } from "../utils/zod_validations/product.zod";
-import { DiscountType, InventoryStatus } from "../entities/product.entity";
 
-export type ICreateProductRequest = CreateProductInput;
 
-export interface IUpdateProductRequest extends UpdateProductInput { }
+// export interface IProductIdParams {
+//     categoryId: number;
+//     subcategoryId: number;
+//     id: number;
+// }
 
-export interface IProductIdParams {
-    categoryId: number;
-    subcategoryId: number;
-    id: number;
-}
-
-export interface IProductImageParams extends IProductIdParams {
-    imageUrl: string;
-}
+// export interface IProductImageParams extends IProductIdParams {
+//     imageUrl: string;
+// }
 
 export interface IProductQueryParams {
     brandId?: number;

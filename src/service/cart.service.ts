@@ -1,11 +1,12 @@
 import { Repository } from 'typeorm';
 import { CartItem } from '../entities/cartItem.entity';
 import { Cart } from '../entities/cart.entity';
-import { DiscountType, Product } from '../entities/product.entity';
+import { Product } from '../entities/product.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
-import { string } from 'zod';
+import { DiscountType } from '../entities/product.enum';
+import { ProductVariant } from '../entities/productVariant.entity';
 
 /**
  * Service class for managing shopping cart operations.
@@ -15,11 +16,13 @@ export class CartService {
     private cartRepository: Repository<Cart>;
     private cartItemRepository: Repository<CartItem>;
     private productRepository: Repository<Product>;
+    private variantRepository: Repository<ProductVariant>;
 
     constructor() {
         this.cartRepository = AppDataSource.getRepository(Cart);
         this.cartItemRepository = AppDataSource.getRepository(CartItem);
         this.productRepository = AppDataSource.getRepository(Product);
+        this.variantRepository = AppDataSource.getRepository(ProductVariant);
     }
 
     /**
@@ -36,27 +39,56 @@ export class CartService {
      * @access Customer
      */
     async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
-        const { productId, quantity } = data;
+        const { productId, variantId, quantity } = data;
 
-        // Validate input
-        if (!Number.isInteger(productId) || productId <= 0) {
-            throw new APIError(400, 'Invalid productId');
-        }
-        if (!Number.isInteger(quantity) || quantity <= 0) {
-            throw new APIError(400, 'Invalid quantity');
-        }
-
-        // Validate product and stock
-        const product = await this.productRepository.findOne({ where: { id: productId } });
+        // Validate product
+        const product = await this.productRepository.findOne({
+            where: { id: productId },
+            relations: ['productImages', 'variants', 'variants.images'],
+        });
         if (!product) throw new APIError(404, 'Product not found');
-        if (product.stock < quantity) throw new APIError(400, 'Insufficient stock');
 
-        // Calculate discounted price
-        const discountedPrice = this.calculateDiscountedPrice(
-            parseFloat(product.basePrice.toString()),
-            parseFloat(product.discount?.toString() || '0'),
-            product.discountType || DiscountType.PERCENTAGE
-        );
+        let price: number;
+        let stock: number;
+        let name: string;
+        let description: string;
+        let image: string | null;
+
+        if (product.hasVariants && !variantId) {
+            throw new APIError(400, 'Variant ID is required for products with variants');
+        }
+
+        if (product.hasVariants && variantId) {
+            // Handle variant product
+            const variant = await this.variantRepository.findOne({
+                where: { id: variantId, product: { id: productId } },
+                relations: ['images'],
+            });
+            if (!variant) throw new APIError(404, 'Product variant not found');
+            if (variant.stock < quantity) throw new APIError(400, 'Insufficient stock for variant');
+
+            price = variant.price;
+            stock = variant.stock;
+            name = `${product.name} (${variant.sku})`;
+            description = product.description;
+            image = variant.images?.[0]?.imageUrl ?? product.productImages?.[0]?.imageUrl ?? null;
+        } else {
+            // Handle non-variant product
+            if (!product.basePrice || product.stock === undefined) {
+                throw new APIError(400, 'Non-variant product must have basePrice and stock');
+            }
+            if (product.stock < quantity) throw new APIError(400, 'Insufficient stock');
+
+            price = this.calculateDiscountedPrice(
+                product.basePrice,
+                product.discount || 0,
+                product.discountType || DiscountType.PERCENTAGE
+            );
+            stock = product.stock;
+            name = product.name;
+            description = product.description;
+            image = product.productImages?.[0]?.imageUrl ?? null;
+        }
 
         // Get or create cart
         let cart = await this.cartRepository.findOne({
@@ -69,27 +101,34 @@ export class CartService {
             cart = await this.cartRepository.save(cart);
         }
 
-        // Check if product already in cart
-        let cartItem = cart.items.find(item => item.product.id === productId);
+        // Check if product/variant already in cart
+        let cartItem = cart.items.find(item =>
+            item.product.id === productId &&
+            (variantId ? item.variantId === variantId : !item.variantId)
+        );
 
         if (cartItem) {
             // Update quantity if already in cart
             cartItem.quantity += quantity;
-            cartItem.price = discountedPrice;
-            cartItem.name = product.name;
-            cartItem.description = product.description;
-            cartItem.image = product.productImages?.[0] ?? null;
+            if (cartItem.quantity > stock) {
+                throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${stock} available`);
+            }
+            cartItem.price = price;
+            cartItem.name = name;
+            cartItem.description = description;
+            cartItem.image = image;
             await this.cartItemRepository.save(cartItem);
         } else {
             // Create new cart item
             cartItem = this.cartItemRepository.create({
                 cart,
                 product,
+                variantId: variantId || null,
                 quantity,
-                price: discountedPrice,
-                name: product.name,
-                description: product.description,
-                image: product.productImages?.[0] ?? null,
+                price,
+                name,
+                description,
+                image,
             });
             await this.cartItemRepository.save(cartItem);
             cart.items.push(cartItem);
@@ -99,7 +138,6 @@ export class CartService {
         cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         return await this.cartRepository.save(cart);
     }
-
     /**
      * Removes an item from the cart or reduces its quantity by 1.
      *
@@ -152,7 +190,9 @@ export class CartService {
             relations: [
                 'items',
                 'items.product',
-                'items.product.vendor'
+                'items.product.vendor',
+                'items.product.variants',
+                'items.product.productImages'
             ]
         });
 
@@ -160,15 +200,23 @@ export class CartService {
 
         const cartItemWithWarnings = cart.items.map(item => {
             let warningMessage: string | undefined;
+            let stock: number;
 
-            if (item.quantity > item.product.stock) {
-                warningMessage = `Only ${item.product.stock} units available. You have ${item.quantity} in your cart.`
+            if (item.variantId) {
+                const variant = item.product.variants?.find(v => v.id === item.variantId);
+                stock = variant?.stock ?? 0;
+            } else {
+                stock = item.product.stock ?? 0;
+            }
+
+            if (item.quantity > stock) {
+                warningMessage = `Only ${stock} units available. You have ${item.quantity} in your cart.`;
             }
 
             return {
                 ...item,
                 warningMessage,
-            }
+            };
         })
         return {
             ...cart,
@@ -220,7 +268,7 @@ export class CartService {
         if (discountType === DiscountType.PERCENTAGE) {
             finalPrice = basePrice - (basePrice * discount / 100);
         } else if (discountType === DiscountType.FLAT) {
-            finalPrice = Math.max(0, basePrice - discount); // Prevent negative price
+            finalPrice = Math.max(0, basePrice - discount); 
         }
 
         return Math.round(finalPrice * 100) / 100;

@@ -1,9 +1,13 @@
 import { Request, Response } from 'express';
-import { ICreateProductRequest, IProductIdParams, IProductImageParams, IUpdateProductRequest, IVendorProductQueryParams } from '../interface/product.interface';
 import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
-import { AdminProductQueryInput, ProductQueryInput } from '../utils/zod_validations/product.zod';
+import { ProductInterface } from '../utils/zod_validations/product.zod';
 import { ProductService } from '../service/product.service';
 import { APIError } from '../utils/ApiError.utils';
+import { IAdminProductQueryParams, IProductQueryParams } from '../interface/product.interface';
+import { v2 as cloudinary } from 'cloudinary';
+import { DataSource } from 'typeorm';
+import { SubcategoryService } from '../service/subcategory.service';
+
 
 /**
  * @class ProductController
@@ -11,13 +15,21 @@ import { APIError } from '../utils/ApiError.utils';
  */
 export class ProductController {
     private productService: ProductService;
+    private subcategoryService: SubcategoryService;
 
     /**
      * @constructor
      * @description Instantiates ProductService for business logic related to products.
      */
-    constructor() {
-        this.productService = new ProductService();
+    constructor(dataSource: DataSource) {
+        this.productService = new ProductService(dataSource);
+        this.subcategoryService = new SubcategoryService();
+
+        cloudinary.config({
+            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+            api_key: process.env.CLOUDINARY_API_KEY,
+            api_secret: process.env.CLOUDINARY_API_SECRET,
+        });
     }
 
     /**
@@ -81,121 +93,185 @@ export class ProductController {
 
 
 
+
     /**
      * @method createProduct
-     * @route POST /products/:categoryId/:subcategoryId
-     * @description Creates a new product for authenticated vendors. Handles file uploads and price calculations.
-     * @param {CombinedAuthRequest<{ subcategoryId: string; categoryId: string }, {}, ICreateProductRequest, {}>} req - HTTP request containing vendor auth, product data, and uploaded files.
-     * @param {Response} res - Express response object.
-     * @returns {Promise<void>} Responds with created product data including calculated pricing info.
+     * @route POST /categories/:categoryId/subcategories/:subcategoryId/products
+     * @description Creates a new product with or without variants.
+     * 
+     * For variant products:
+     * - Set hasVariants: true
+     * - Provide variants array with sku, price, stock, status
+     * - Upload variant images as 'variantImages' field (one image per variant, in order)
+     * 
+     * For non-variant products:
+     * - Set hasVariants: false
+     * - Provide basePrice and stock
+     * - Upload product images as 'productImages' field
+     * 
+     * @param {VendorAuthRequest} req - Authenticated vendor request with product data and files
+     * @param {Response} res - Express response object
+     * @returns {Promise<void>} Responds with created product data
      * @access Vendor
      */
     async createProduct(
-        req: CombinedAuthRequest<{ subcategoryId: string; categoryId: string }, {}, ICreateProductRequest, {}>,
+        req: VendorAuthRequest<{ subcategoryId: string; categoryId: string }, {}, ProductInterface, {}>,
         res: Response
     ): Promise<void> {
         try {
-            // Extract uploaded files from multer middleware
-            const files = req.files as Express.Multer.File[];
-            console.log(files)
-
-            // Parse category and subcategory IDs from route parameters
-            const subcategoryId = Number(req.params.subcategoryId);
+            const data: ProductInterface = req.body;
+            const files = req.files as Record<string, Express.Multer.File[]>;
             const categoryId = Number(req.params.categoryId);
+            const subcategoryId = Number(req.params.subcategoryId);
 
-            let product;
+            const rawHasVariants = req.body.hasVariants;
+            const hasVariants = String(rawHasVariants).toLowerCase() === "true";
 
-            // Check if request is from vendor (vendor-specific product creation)
-            if (req.vendor) {
-                const vendorId = req.vendor.id;
+            console.log("Stock_________________________________________________")
+            console.log(data.stock);
 
-                console.log("vendor product creation")
-                console.log(vendorId);
-
-                // Create product through vendor service method
-                product = await this.productService.createVendorProduct(
-                    req.body,
-                    subcategoryId,
-                    categoryId,
-                    vendorId,
-                    files || []
-                );
-            } else {
-                // Unauthorized if no vendor info present
-                throw new APIError(403, 'Unauthorized');
+            if (!data.description) {
+                throw new APIError(400, "Description is required")
             }
 
-            // Calculate pricing information for the created product
-            const priceInfo = await this.productService.calculateProductPrice(product);
-            res.status(201).json({ success: true, data: { ...product, ...priceInfo } });
+            // Handle variants parsing - it might come as a JSON string from form data
+            if (data.hasVariants && data.variants) {
+                // If variants is a string, try to parse it as JSON
+                if (typeof data.variants === 'string') {
+                    try {
+                        data.variants = JSON.parse(data.variants);
+                    } catch (parseError) {
+                        console.error('Failed to parse variants JSON:', parseError);
+                        throw new APIError(400, 'Invalid variants JSON format');
+                    }
+                }
 
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('createProduct error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
+                // Validate that variants is now an array
+                if (!Array.isArray(data.variants)) {
+                    throw new APIError(400, 'Variants must be an array');
+                }
             }
-        }
-    }
 
-    /**
-     * @method createVendorProduct
-     * @route POST /vendor/products/:categoryId/:subcategoryId
-     * @description Creates a product by a vendor, including handling file uploads and price info.
-     * @param {VendorAuthRequest} req - Authenticated vendor request including category IDs and product data.
-     * @param {Response} res - Express response object.
-     * @returns {Promise<void>} Responds with created product and price info.
-     * @access Vendor
-     */
-    async createVendorProduct(req: VendorAuthRequest<{ subcategoryId: string; categoryId: string }, {}, ICreateProductRequest, {}>, res: Response) {
-        try {
-            // Extract uploaded files (optional)
-            const files = req.files as Express.Multer.File[] | undefined;
+            // Debug logging
+            console.log('Creating product with data:', {
+                hasVariants: data.hasVariants,
+                variantsCount: data.variants?.length || 0,
+                variantsType: typeof data.variants,
+                variantsData: data.variants,
+                filesReceived: files ? files.length : 0,
+                // fileFieldNames: files ? files.map(f => f.fieldname) : []
+            });
 
-            // Get vendor ID from authenticated request
-            const vendorId = req.vendor.id;
-
-            // Parse route parameters
-            const subcategoryId = Number(req.params.subcategoryId);
-            const categoryId = Number(req.params.categoryId);
-
-            // Create product through service layer
-            const product = await this.productService.createVendorProduct(
-                req.body,
-                subcategoryId,
+            const savedProduct = await this.productService.createProduct(
+                data,
+                files,
                 categoryId,
-                vendorId,
-                files || []
+                subcategoryId,
+                Number(req.vendor.id),
+                hasVariants
             );
 
-            // Calculate and include price information
-            const priceInfo = await this.productService.calculateProductPrice(product);
-            res.status(201).json({ success: true, data: { ...product, ...priceInfo } });
+            res.status(201).json({
+                success: true,
+                message: 'Product created successfully',
+                data: savedProduct,
+            });
+
         } catch (error) {
-            // Handle API errors with specific status codes
             if (error instanceof APIError) {
+                console.log('API Error in createProduct:', error.message);
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
-                // Log unexpected errors for debugging
                 console.error('createProduct error:', error);
                 res.status(500).json({ success: false, message: 'Internal Server Error' });
             }
         }
     }
 
-    /**
-     * @method getProducts
-     * @route GET /products/:categoryId/:subcategoryId
-     * @description Fetches products filtered by category and subcategory, with optional query filters.
-     * @param {Request} req - Request with route and query parameters for filtering products.
-     * @param {Response} res - Express response object.
-     * @returns {Promise<void>} Responds with a list of matching products.
-     * @access Public
-     */
-    async getProducts(req: Request<{ categoryId: string, subcategoryId: string }, {}, {}, ProductQueryInput>, res: Response) {
+    async updateProduct(
+        req: VendorAuthRequest<{ id: string; subcategoryId: string; categoryId: string }, {}, Partial<ProductInterface>, {}>,
+        res: Response
+    ): Promise<void> {
+        try {
+            const files = req.files as Record<string, Express.Multer.File[]>;
+            const data: Partial<ProductInterface> = req.body;
+            const productId = Number(req.params.id);
+            const categoryId = Number(req.params.categoryId);
+            const subcategoryId = Number(req.params.subcategoryId);
+
+            // check if product exists
+            const product = await this.productService.getProductById(productId, subcategoryId);
+            if (!product) {
+                throw new APIError(404, 'Product not found');
+            }
+
+            // check if the vendor is the owner of the product
+            if (product.vendorId !== req.vendor?.id) {
+                throw new APIError(403, 'You are not authorized to update this product');
+            }
+
+            // check if suncategory exists
+            const subcategory = await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId);
+            if (!subcategory) {
+                throw new APIError(404, 'Subcategory not found');
+            }
+
+            // Handle variants parsing if in string conver them in json format 
+            if (data.variants) {
+                if (typeof data.variants === 'string') {
+                    try {
+                        data.variants = JSON.parse(data.variants);
+                    } catch (parseError) {
+                        console.error('Failed to parse variants JSON:', parseError);
+                        throw new APIError(400, 'Invalid variants JSON format');
+                    }
+                }
+                if (!Array.isArray(data.variants)) {
+                    throw new APIError(400, 'Variants must be an array');
+                }
+            }
+
+
+            console.log('Updating product with data:', {
+                productId,
+                hasVariants: data.hasVariants,
+                variantsCount: data.variants?.length || 0,
+                variantsType: typeof data.variants,
+                variantsData: data.variants,
+                filesReceived: files ? Object.keys(files).map(key => ({ field: key, count: files[key].length })) : [],
+            });
+
+            // Get vendor ID by product ID
+            const vendorId = await this.productService.getVendorIdByProductId(productId);
+
+            const updatedProduct = await this.productService.updateProduct(
+                req.vendor ? req.vendor.id : vendorId,
+                req.vendor ? false : true, // Is admin updating the product?
+                productId,
+                data,
+                files,
+                categoryId,
+                subcategoryId
+            );
+
+            res.status(200).json({
+                success: true,
+                message: 'Product updated successfully',
+                data: updatedProduct,
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                console.log('API Error in updateProduct:', error.message);
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                console.error('updateProduct error:', error);
+                res.status(500).json({ success: false, message: 'Internal Server Error' });
+            }
+        }
+    }
+
+
+    async getProducts(req: Request<{ categoryId: string, subcategoryId: string }, {}, {}, IProductQueryParams>, res: Response) {
         try {
             console.log('Route params:', req.params);
             console.log('Query params:', req.query);
@@ -228,17 +304,7 @@ export class ProductController {
     }
 
 
-
-    /**
-     * @method getAllProducts
-     * @route GET /products
-     * @description Retrieves all products across all categories with optional filtering and sorting.
-     * @param {Request} req - Request with query parameters for filtering.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with a filtered list of all products.
-     * @access Public
-     */
-    async getAllProducts(req: Request<{}, {}, {}, ProductQueryInput>, res: Response) {
+    async getAllProducts(req: Request<{}, {}, {}, {}>, res: Response) {
         try {
             console.log('Query params:', req.query);
 
@@ -266,17 +332,7 @@ export class ProductController {
     }
 
 
-
-    /**
-     * @method getProductById
-     * @route GET /products/:id/:subcategoryId
-     * @description Retrieves a product by product ID and subcategory ID.
-     * @param {Request<IProductIdParams>} req - Request with product ID and subcategory ID.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with the product data or 404 if not found.
-     * @access Public
-     */
-    async getProductById(req: Request<IProductIdParams>, res: Response) {
+    async getProductById(req: Request<{ id: string, subcategoryId: string }>, res: Response) {
         try {
             // Extract IDs from route parameters
             const { id, subcategoryId } = req.params;
@@ -307,18 +363,8 @@ export class ProductController {
 
 
 
-
-    /**
-     * @method getProductsByVendorId
-     * @route GET /vendor/:vendorId/products
-     * @description Retrieves paginated products associated with a specific vendor.
-     * @param {Request} req - Request with vendor ID and pagination query parameters.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with paginated products and total count.
-     * @access Public
-     */
     async getProductsByVendorId(
-        req: Request<{ vendorId: string }, {}, {}, IVendorProductQueryParams>,
+        req: Request<{ vendorId: string }, {}, {}, { page: string, limit: string }>,
         res: Response
     ) {
         try {
@@ -350,65 +396,8 @@ export class ProductController {
 
 
 
-    /**
-     * @method updateProduct
-     * @route PUT /products/:id/:subcategoryId
-     * @description Updates an existing product, including optional image updates via file upload.
-     * @param {AuthRequest} req - Authenticated request containing product ID, updated data, and optional files.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with the updated product data or error.
-     * @access Authenticated
-     */
-    async updateProduct(req: CombinedAuthRequest<IProductIdParams, {}, IUpdateProductRequest>, res: Response) {
-        try {
-            // Extract product and subcategory IDs from route parameters
-            const { id, subcategoryId } = req.params;
 
-            // Extract uploaded files (optional)
-            const files = req.files as Express.Multer.File[] | undefined;
-
-            // Update product through service layer with user authorization
-            const product = await this.productService.updateProduct(
-                Number(id),
-                req.body,
-                Number(subcategoryId),
-                req.vendor?.id,
-                files || [],
-                req.user!
-            );
-
-            // Return 404 if product doesn't exist
-            if (!product) {
-                return res.status(404).json({ success: false, message: 'Product not found' });
-            }
-
-            res.status(200).json({ success: true, data: product });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                console.log(error);
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('updateProduct error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error in controller' });
-            }
-        }
-    }
-
-
-
-
-    /**
-     * @method deleteProduct
-     * @route DELETE /products/:id/:subcategoryId
-     * @description Deletes a product by ID and subcategory, accessible only by authorized users.
-     * @param {AuthRequest} req - Authenticated request with product ID and subcategory ID.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with 204 No Content if successful.
-     * @access Authenticated
-     */
-    async deleteProduct(req: AuthRequest<IProductIdParams>, res: Response) {
+    async deleteProduct(req: AuthRequest<{ id: string, subcategoryId: string }>, res: Response) {
         try {
             // Extract product and subcategory IDs from route parameters
             const { id, subcategoryId } = req.params;
@@ -441,7 +430,7 @@ export class ProductController {
      * @returns {Promise<void>} Responds with updated product or error.
      * @access Authenticated
      */
-    async deleteProductImage(req: CombinedAuthRequest<IProductImageParams, {}, { imageUrl: string }>, res: Response): Promise<void> {
+    async deleteProductImage(req: CombinedAuthRequest<{ id: string, subcategoryId: string }, {}, { imageUrl: string }>, res: Response): Promise<void> {
         try {
             // Extract product and subcategory IDs from route parameters
             const { id, subcategoryId } = req.params;
@@ -493,7 +482,7 @@ export class ProductController {
      * @returns {Promise<void>} Responds with filtered paginated products.
      * @access Admin and staff
      */
-    async getAdminProducts(req: AuthRequest<{}, {}, {}, AdminProductQueryInput>, res: Response) {
+    async getAdminProducts(req: AuthRequest<{}, {}, {}, IAdminProductQueryParams>, res: Response) {
         try {
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);
@@ -506,6 +495,40 @@ export class ProductController {
                 // Handle unexpected errors with generic 500 response
                 res.status(500).json({ success: false, message: 'Internal server error' });
             }
+        }
+    }
+
+
+
+    async deleteProductById(req: Request<{ id: string }>, res: Response) {
+        try {
+            const id = Number(req.params.id);
+
+            console.log(id);
+
+            const deleteProduct = await this.productService.deleteProductById(id);
+
+            res.status(200).json({
+                success: true,
+                msg: "Product deleted successfully"
+            })
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, msg: error.message })
+            } else {
+                res.status(500).json({ success: false, msg: "Internal server error" })
+            }
+        }
+    }
+
+
+    async getProductsTest(req: Request, res: Response) {
+        try {
+            const products = await this.productService.getProducts();
+            res.status(200).json({ success: true, data: products });
+        } catch (error) {
+            res.status(500).json({ success: false, message: 'Internal Server Error' });
         }
     }
 }

@@ -1,8 +1,9 @@
 import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
+import AppDataSource from "../config/db.config";
 
 const productRouter = Router();
-const productController = new ProductController();
+const productController = new ProductController(AppDataSource);
 
 /**
  * @swagger
@@ -130,4 +131,147 @@ const productController = new ProductController();
  */
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
+productRouter.delete("/:id", productController.deleteProductById.bind(productController));
+
+productRouter.get("/", productController.getProductsTest.bind(productController));
+
+
 export default productRouter;
+
+
+
+// product schema 
+/**
+ * @swagger
+ * components:
+ *   schemas:
+ *     Image:
+ *       type: object
+ *       properties:
+ *         url:
+ *           type: string
+ *           format: uri
+ *           example: "https://example.com/image.png"
+ *       required:
+ *         - url
+ *
+ *     Attribute:
+ *       type: object
+ *       properties:
+ *         attributeType:
+ *           type: string
+ *           example: "Color"
+ *         attributeValues:
+ *           type: array
+ *           items:
+ *             type: string
+ *             example: "Red"
+ *       required:
+ *         - attributeType
+ *         - attributeValues
+ *
+ *     ProductVariant:
+ *       type: object
+ *       properties:
+ *         sku:
+ *           type: string
+ *           example: "SKU12345"
+ *         price:
+ *           type: number
+ *           format: float
+ *           example: 499.99
+ *         stock:
+ *           type: integer
+ *           example: 50
+ *         status:
+ *           type: string
+ *           enum:
+ *             - AVAILABLE
+ *             - OUT_OF_STOCK
+ *             - LOW_STOCK
+ *           example: "AVAILABLE"
+ *         attributes:
+ *           type: array
+ *           items:
+ *             $ref: "#/components/schemas/Attribute"
+ *         images:
+ *           type: array
+ *           items:
+ *             $ref: "#/components/schemas/Image"
+ *       required:
+ *         - sku
+ *         - price
+ *         - stock
+ *         - status
+ *
+ *     Product:
+ *       type: object
+ *       properties:
+ *         id:
+ *           type: integer
+ *           readOnly: true
+ *           example: 1
+ *         name:
+ *           type: string
+ *           example: "iPhone 15 Pro"
+ *         description:
+ *           type: string
+ *           example: "The latest Apple iPhone with A17 chip."
+ *         basePrice:
+ *           type: number
+ *           format: float
+ *           example: 1299.99
+ *         discount:
+ *           type: number
+ *           format: float
+ *           example: 10
+ *           description: "Discount value (percentage or flat)."
+ *         discountType:
+ *           type: string
+ *           enum:
+ *             - PERCENTAGE
+ *             - FLAT
+ *           example: "PERCENTAGE"
+ *         status:
+ *           type: string
+ *           enum:
+ *             - AVAILABLE
+ *             - OUT_OF_STOCK
+ *             - LOW_STOCK
+ *           example: "AVAILABLE"
+ *         stock:
+ *           type: integer
+ *           example: 100
+ *         hasVariants:
+ *           type: boolean
+ *           example: true
+ *         variants:
+ *           type: array
+ *           items:
+ *             $ref: "#/components/schemas/ProductVariant"
+ *         productImages:
+ *           type: array
+ *           items:
+ *             $ref: "#/components/schemas/Image"
+ *         subcategoryId:
+ *           type: integer
+ *           example: 5
+ *         dealId:
+ *           type: integer
+ *           example: 2
+ *         bannerId:
+ *           type: integer
+ *           example: 3
+ *         brandId:
+ *           type: integer
+ *           example: 7
+ *         created_at:
+ *           type: string
+ *           format: date-time
+ *         updated_at:
+ *           type: string
+ *           format: date-time
+ *       required:
+ *         - name
+ *         - hasVariants
+ */

@@ -22,6 +22,11 @@ import { Contact } from "../entities/contact.entity";
 import { District } from "../entities/district.entity";
 import { HomePageSection } from "../entities/homePage.entity";
 import { Promo } from "../entities/promo.entity";
+import { AttributeType } from "../entities/attributeType.entity";
+import { AttributeValue } from "../entities/attributeValue.entity";
+import { ProductVariant } from "../entities/productVariant.entity";
+import { VariantAttribute } from "../entities/variantAttribute.entity";
+import { VariantImage } from "../entities/variantImages.entity";
 // import { VendorAddress } from "../entities/vendroAddress.entity";
 
 
@@ -38,9 +43,9 @@ const AppDataSource = new DataSource({
   synchronize: true,
   logging: true,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-    Banner, Contact, District, HomePageSection, Promo],
+    Banner, Contact, District, HomePageSection, Promo, AttributeType, AttributeValue, ProductVariant, VariantAttribute, VariantImage],
   migrations: [],
-  ssl:false,
+  ssl: false,
   // ssl: {
   //   rejectUnauthorized: false, // Required for Render's managed Postgres
   // },
