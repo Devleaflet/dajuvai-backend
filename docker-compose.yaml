@@ -5,4 +5,4 @@ services:
     ports:
       - "14001:4000"
     environment:
-      DATABASE_URL: "postgresql://leafletdatabase_user:kgxo5wf6GoN0i7pjaCYomTRInHEaJLRI@dpg-d1b8poqdbo4c73c9qndg-a.singapore-postgres.render.com/leafletdatabase"
+      DATABASE_URL: "postgresql://postgres:TwAgpaWoiXJvub1@postgres16:5432/postgres_dev"
