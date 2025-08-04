@@ -23,7 +23,7 @@ import { VariantImage } from '../entities/variantImages.entity';
 import { VariantAttribute } from '../entities/variantAttribute.entity';
 import { AttributeValue } from '../entities/attributeValue.entity';
 import { AttributeType } from '../entities/attributeType.entity';
-
+import sharp from 'sharp';
 
 /**
  * Service class for handling product-related operations.
