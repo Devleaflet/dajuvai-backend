@@ -35,6 +35,7 @@ export const tokenCleanUp = () => {
             });
 
             console.log(expiredUsers);
+            
 
             if (expiredUsers.length > 0) {
                 for (const user of expiredUsers) {

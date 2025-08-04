@@ -13,13 +13,13 @@ import { CartService } from "../service/cart.service";
 
 
 const CONFIG = {
-    MERCHANT_ID: '7468',
-    MERCHANT_NAME: 'dajubhai',
-    API_USERNAME: 'dajubhai',
-    API_PASSWORD: 'D@jubhai#765',
-    SECRET_KEY: 'key_OmqGpQ1',
+    MERCHANT_ID: '545',
+    MERCHANT_NAME: 'dajuvaiapi',
+    API_USERNAME: 'dajuvaiapi',
+    API_PASSWORD: 'W#8rXp2!kL9z@Vm',
+    SECRET_KEY: 'gT7$yMn#45v!QbA',
     BASE_URL: 'https://apisandbox.nepalpayment.com',
-    GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com',
+    GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com/payment/index',
 };
 
 // Generate HMAC SHA512 Signature
@@ -53,7 +53,6 @@ paymentRouter.get('/payment-instruments', async (_req: Request, res: Response) =
                 'Content-Type': 'application/json',
             },
         });
-
         res.json(response.data);
     } catch (error: any) {
         console.error('Error getting payment instruments:', error.response?.data || error.message);
