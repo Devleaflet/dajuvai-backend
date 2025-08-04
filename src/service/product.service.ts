@@ -23,7 +23,6 @@ import { VariantImage } from '../entities/variantImages.entity';
 import { VariantAttribute } from '../entities/variantAttribute.entity';
 import { AttributeValue } from '../entities/attributeValue.entity';
 import { AttributeType } from '../entities/attributeType.entity';
-import sharp from 'sharp';
 
 /**
  * Service class for handling product-related operations.
@@ -443,10 +442,10 @@ export class ProductService {
         const uploadImage = async (buffer: Buffer, originalname: string): Promise<string> => {
             try {
                 // resize with sharp
-                const compressedBuffer = await sharp(buffer)
-                    .resize({ width: 1024 })
-                    .jpeg({ quality: 80 })
-                    .toBuffer();
+                // const compressedBuffer = await sharp(buffer)
+                //     .resize({ width: 1024 })
+                //     .jpeg({ quality: 80 })
+                //     .toBuffer();
 
                 return new Promise((resolve, reject) => {
                     cloudinary.uploader.upload_stream(
@@ -458,7 +457,7 @@ export class ProductService {
                             }
                             resolve(result.secure_url);
                         }
-                    ).end(compressedBuffer);
+                    ).end(buffer);
                 });
             } catch (error) {
                 console.error(`Error processing image ${originalname}:`, error);
