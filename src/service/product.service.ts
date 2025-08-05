@@ -85,7 +85,7 @@ export class ProductService {
             api_secret: process.env.CLOUDINARY_API_SECRET,
         });
     }
-    
+
 
     async getAlllProducts(): Promise<Product[]> {
         return this.productRepository.find({
@@ -659,7 +659,23 @@ export class ProductService {
             .leftJoinAndSelect('product.brand', 'brand')
             .leftJoinAndSelect('product.vendor', 'vendor')
             .leftJoinAndSelect('product.deal', 'deal')
-            .where('product.stock > 0');
+            .leftJoinAndSelect('product.variants', 'variants') 
+            .leftJoinAndSelect('variants.attributes', 'variantAttributes') 
+            .leftJoinAndSelect('variantAttributes.attributeValue', 'attributeValue')
+            .leftJoinAndSelect('attributeValue.attributeType', 'attributeType') 
+            .leftJoinAndSelect('product.productImages', 'productImages') 
+            .leftJoinAndSelect('variants.images', 'variantImages') 
+            .where(`
+            (
+                product.hasVariants = false AND product.stock > 0
+            ) OR (
+                product.hasVariants = true AND (
+                SELECT SUM(variant.stock)
+                FROM product_variants variant
+                WHERE variant."productId" = product.id
+                ) > 0
+            )
+        `);
 
         if (bannerId) {
             const banner = await this.bannerRepository.findOne({
