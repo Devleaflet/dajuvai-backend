@@ -5,4 +5,4 @@ services:
     ports:
       - "14001:4000"
     environment:
-      DATABASE_URL: "postgresql://postgres:TwAgpaWoiXJvub1@postgres16:5432/postgres_dev"
+      DATABASE_URL: "postgresql://postgres:TwAgpaWoiXJvub1@postgres16:5432/postgres"
