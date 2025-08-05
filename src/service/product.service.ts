@@ -85,6 +85,7 @@ export class ProductService {
             api_secret: process.env.CLOUDINARY_API_SECRET,
         });
     }
+    
 
     async getAlllProducts(): Promise<Product[]> {
         return this.productRepository.find({

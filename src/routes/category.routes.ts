@@ -934,9 +934,9 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                 example: 5
  *               discountType:
  *                 type: string
- *                 enum: [PERCENTAGE, FIXED]
+ *                 enum: [PERCENTAGE, FLAT]
  *                 description: Discount type for non-variant products (optional, requires basePrice and discount)
- *                 example: FIXED
+ *                 example: FLAT
  *               status:
  *                 type: string
  *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
@@ -1026,7 +1026,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                       example: null
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FIXED]
+ *                       enum: [PERCENTAGE, FLAT]
  *                       nullable: true
  *                       example: null
  *                     status:
@@ -1539,9 +1539,9 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                 example: 5
  *               discountType:
  *                 type: string
- *                 enum: [PERCENTAGE, FIXED]
+ *                 enum: [PERCENTAGE, FLAT]
  *                 description: Discount type for non-variant products (optional, requires basePrice and discount)
- *                 example: FIXED
+ *                 example: FLAT
  *               status:
  *                 type: string
  *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
@@ -1623,7 +1623,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                       example: null
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FIXED]
+ *                       enum: [PERCENTAGE, FLAT]
  *                       nullable: true
  *                       example: null
  *                     status:
