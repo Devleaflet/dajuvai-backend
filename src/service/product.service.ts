@@ -694,7 +694,7 @@ export class ProductService {
             if (!subcategory) {
                 throw new APIError(404, 'Subcategory does not exist');
             }
-            query.andWhere('product.subcategory_id = :subcategoryId', { subcategoryId });
+            query.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
         } else if (categoryId) {
             const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
             if (!category) {
