@@ -10,11 +10,13 @@ const options: swaggerJSDoc.Options = {
     },
     servers: [
       {
-       // url: "https://leafletdv.onrender.com", // or your actual URL
+        url:"https://dev.api.dajuvai.com",
+      },
+      {
         url:"https://api.dajuvai.com",
       },
       {
-        url: "http://localhost:4000", // or your actual URL
+        url: "http://localhost:4000", 
       },
     ],
     components: {
