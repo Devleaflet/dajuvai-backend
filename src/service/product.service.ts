@@ -97,10 +97,20 @@ export class ProductService {
     }
 
     async getProductDetailsById(productId: number): Promise<Product> {
-        const product = await this.productRepository.findOne({
-            where: { id: productId },
-            relations: ['vendor'],
-        });
+        const product = await this.productRepository
+            .createQueryBuilder('product')
+            .leftJoinAndSelect('product.subcategory', 'subcategory')
+            .leftJoinAndSelect('product.brand', 'brand')
+            .leftJoinAndSelect('product.vendor', 'vendor')
+            .leftJoinAndSelect('product.deal', 'deal')
+            .leftJoinAndSelect('product.variants', 'variants')
+            .leftJoinAndSelect('variants.attributes', 'variantAttributes')
+            .leftJoinAndSelect('variantAttributes.attributeValue', 'attributeValue')
+            .leftJoinAndSelect('attributeValue.attributeType', 'attributeType')
+            .leftJoinAndSelect('product.productImages', 'productImages')
+            .leftJoinAndSelect('variants.images', 'variantImages')
+            .where('product.id = :productId', { productId })
+            .getOne();
 
         if (!product) {
             throw new APIError(404, `Product does not exist`);
@@ -659,12 +669,12 @@ export class ProductService {
             .leftJoinAndSelect('product.brand', 'brand')
             .leftJoinAndSelect('product.vendor', 'vendor')
             .leftJoinAndSelect('product.deal', 'deal')
-            .leftJoinAndSelect('product.variants', 'variants') 
-            .leftJoinAndSelect('variants.attributes', 'variantAttributes') 
+            .leftJoinAndSelect('product.variants', 'variants')
+            .leftJoinAndSelect('variants.attributes', 'variantAttributes')
             .leftJoinAndSelect('variantAttributes.attributeValue', 'attributeValue')
-            .leftJoinAndSelect('attributeValue.attributeType', 'attributeType') 
-            .leftJoinAndSelect('product.productImages', 'productImages') 
-            .leftJoinAndSelect('variants.images', 'variantImages') 
+            .leftJoinAndSelect('attributeValue.attributeType', 'attributeType')
+            .leftJoinAndSelect('product.productImages', 'productImages')
+            .leftJoinAndSelect('variants.images', 'variantImages')
             .where(`
             (
                 product.hasVariants = false AND product.stock > 0
@@ -769,15 +779,29 @@ export class ProductService {
         return { products, total };
     }
 
-    async getProductById(id: number, subcategoryId: number): Promise<Product | null> {
-        return this.productRepository
+    async getProductById(productId: number): Promise<Product> {
+        const product = await this.productRepository
             .createQueryBuilder('product')
-            .leftJoinAndSelect('product.vendor', 'vendor')
             .leftJoinAndSelect('product.subcategory', 'subcategory')
-            .where('product.id = :id', { id })
-            .andWhere('subcategory.id = :subcategoryId', { subcategoryId })
+            .leftJoinAndSelect('product.brand', 'brand')
+            .leftJoinAndSelect('product.vendor', 'vendor')
+            .leftJoinAndSelect('product.deal', 'deal')
+            .leftJoinAndSelect('product.variants', 'variants')
+            .leftJoinAndSelect('variants.attributes', 'variantAttributes')
+            .leftJoinAndSelect('variantAttributes.attributeValue', 'attributeValue')
+            .leftJoinAndSelect('attributeValue.attributeType', 'attributeType')
+            .leftJoinAndSelect('product.productImages', 'productImages')
+            .leftJoinAndSelect('variants.images', 'variantImages')
+            .where('product.id = :productId', { productId })
             .getOne();
+
+        if (!product) {
+            throw new APIError(404, `Product does not exist`);
+        }
+
+        return product;
     }
+
 
     async getVendorIdByProductId(productId: number): Promise<number> {
         const product = await this.productRepository.findOne({
@@ -811,7 +835,7 @@ export class ProductService {
         }
 
         if (product.productImages && product.productImages.length > 0) {
-            // Handle image deletion logic if needed
+
         }
 
         await this.productRepository.delete(id);

@@ -200,7 +200,7 @@ export class ProductController {
             const subcategoryId = Number(req.params.subcategoryId);
 
             // check if product exists
-            const product = await this.productService.getProductById(productId, subcategoryId);
+            const product = await this.productService.getProductById(productId);
             if (!product) {
                 throw new APIError(404, 'Product not found');
             }
@@ -338,7 +338,7 @@ export class ProductController {
             const { id, subcategoryId } = req.params;
 
             // Fetch product by ID and subcategory
-            const product = await this.productService.getProductById(Number(id), Number(subcategoryId));
+            const product = await this.productService.getProductById(Number(id));
 
             // Return 404 if product doesn't exist
             if (!product) {
