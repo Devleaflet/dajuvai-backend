@@ -71,6 +71,9 @@ export class Product {
     @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
     brand: Brand;
 
+    @Column({ type: "text", array: true, nullable: true })
+    size?: string[];
+
     @Column({ nullable: true })
     brandId?: number;
 

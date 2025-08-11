@@ -112,6 +112,7 @@ export class ProductService {
             stock,
             dealId,
             bannerId,
+            size
         } = data;
 
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
@@ -186,10 +187,14 @@ export class ProductService {
             stock,
             subcategoryId,
             vendorId,
+            size,
             dealId: dealId ? dealId : null,
             bannerId: bannerId ? bannerId : null,
             productImages: imageUrls
         });
+
+
+        console.log(savedProduct);
 
         return await this.productRepository.save(savedProduct);
     }
@@ -212,6 +217,7 @@ export class ProductService {
             status,
             stock,
             dealId,
+            size,
             bannerId,
         } = data;
 
@@ -293,6 +299,7 @@ export class ProductService {
         product.discountType = discountType ?? product.discountType;
         product.status = status ?? product.status;
         product.stock = stock ?? product.stock;
+        product.size = size ?? product.size;
         product.subcategoryId = subcategoryId;
         product.dealId = dealId !== undefined ? dealId : product.dealId;
         product.bannerId = bannerId !== undefined ? bannerId : product.bannerId;
@@ -551,4 +558,11 @@ export class ProductService {
     }
 
 
+    async deleteProductById(id: number) {
+        const result = await this.productRepository.delete({ id });
+
+        if (result.affected === 0) {
+            throw new APIError(404, "Product does not exists")
+        }
+    }
 }

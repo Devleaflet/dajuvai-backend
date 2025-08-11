@@ -23,6 +23,7 @@ export interface ProductInterface {
     description?: string;
     basePrice?: number;
     discount?: number;
+    size?: string[];
     discountType?: DiscountType;
     status?: InventoryStatus;
     stock?: number;

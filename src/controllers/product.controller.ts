@@ -110,6 +110,9 @@ export class ProductController {
                 Number(req.vendor.id),
             );
 
+            console.log("------------------------------------saved product-------------------------------")
+            console.log(savedProduct);
+
             res.status(201).json({
                 success: true,
                 message: 'Product created successfully',
@@ -367,6 +370,30 @@ export class ProductController {
                 // Log unexpected errors for debugging
                 console.error('deleteProductImage error:', error);
                 res.status(500).json({ success: false, message: 'Internal Server Error' });
+            }
+        }
+    }
+
+
+
+    async deleteProductById(req: Request<{ id: string }>, res: Response) {
+        try {
+            const id = Number(req.params.id);
+
+            console.log(id);
+
+            const deleteProduct = await this.productService.deleteProductById(id);
+
+            res.status(200).json({
+                success: true,
+                msg: "Product deleted successfully"
+            })
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, msg: error.message })
+            } else {
+                res.status(500).json({ success: false, msg: "Internal server error" })
             }
         }
     }
