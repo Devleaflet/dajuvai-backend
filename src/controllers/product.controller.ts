@@ -97,9 +97,10 @@ export class ProductController {
     ): Promise<void> {
         try {
             const data: ProductInterface = req.body;
-            const files = req.files as Express.Multer.File[];
+            const files = req.files as { productImages?: Express.Multer.File[] };
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
+            console.log(files)
 
             const savedProduct = await this.productService.createProduct(
                 data,
@@ -128,15 +129,18 @@ export class ProductController {
 
 
     async updateProduct(
-        req: VendorAuthRequest<{ productId: string; subcategoryId: string; categoryId: string }, {}, Partial<ProductInterface>, {}>,
+        req: VendorAuthRequest<{ id: string; subcategoryId: string; categoryId: string }, {}, Partial<ProductInterface>, {}>,
         res: Response
     ): Promise<void> {
         try {
-            const files = req.files as Express.Multer.File[];
+            const files = req.files as { productImages?: Express.Multer.File[] };
             const data: Partial<ProductInterface> = req.body;
-            const productId = Number(req.params.productId);
+            const productId = Number(req.params.id);
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
+
+            console.log("__________________________________Product id ________________________________________")
+            console.log(productId)
 
             // get veendor id by product id 
             const vendorId = await this.productService.getVendorIdByProductId(productId);

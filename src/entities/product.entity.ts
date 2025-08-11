@@ -3,9 +3,6 @@ import { Subcategory } from "./subcategory.entity";
 import { Vendor } from "./vendor.entity";
 import { Deal } from "./deal.entity";
 import { Banner } from "./banner.entity";
-import { ProductVariant } from "./productVariant.entity";
-import { VariantImage } from "./variantImages.entity";
-import { AttributeType } from "./attributeType.entity";
 import { DiscountType, InventoryStatus } from "./product.enum";
 import { OrderItem } from "./orderItems.entity";
 import { Brand } from "./brand.entity";
@@ -37,9 +34,6 @@ export class Product {
     @Column({ nullable: true })
     stock?: number;
 
-    @Column()
-    hasVariants: boolean;
-
     @ManyToOne(() => Subcategory, { onDelete: "SET NULL" })
     @JoinColumn({ name: "subcategoryId" })
     subcategory: Subcategory;
@@ -68,14 +62,8 @@ export class Product {
     @Column({ nullable: true })
     bannerId?: number;
 
-    @OneToMany(() => ProductVariant, (variant) => variant.product)
-    variants: ProductVariant[];
-
-    @OneToMany(() => VariantImage, (image) => image.product)
-    productImages: VariantImage[];
-
-    @OneToMany(() => AttributeType, (attributeType) => attributeType.product)
-    attributeTypes: AttributeType[];
+    @Column({ type: 'text', array: true, nullable: true })
+    productImages?: string[];
 
     @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
     orderItems: OrderItem[];
@@ -95,3 +83,14 @@ export class Product {
     @UpdateDateColumn()
     updated_at: Date;
 }
+
+// @OneToMany(() => ProductVariant, (variant) => variant.product)
+// variants?: ProductVariant[];
+
+// @OneToMany(() => VariantImage, (image) => image.product)
+// productImages?: VariantImage[];
+
+// @OneToMany(() => AttributeType, (attributeType) => attributeType.product)
+// attributeTypes: AttributeType[];
+// @Column()
+// hasVariants?: boolean;

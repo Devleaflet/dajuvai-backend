@@ -18,11 +18,7 @@ import { CategoryService } from './category.service';
 import { BannerService } from './banner.service';
 import { DealService } from './deal.service';
 import { SubcategoryService } from './subcategory.service';
-import { ProductVariant } from '../entities/productVariant.entity';
-import { VariantImage } from '../entities/variantImages.entity';
-import { VariantAttribute } from '../entities/variantAttribute.entity';
-import { AttributeValue } from '../entities/attributeValue.entity';
-import { AttributeType } from '../entities/attributeType.entity';
+
 
 /**
  * Service class for handling product-related operations.
@@ -37,9 +33,6 @@ import { AttributeType } from '../entities/attributeType.entity';
  */
 export class ProductService {
     private productRepository: Repository<Product>;
-    private variantRepository: Repository<ProductVariant>;
-    private variantImageRepository: Repository<VariantImage>;
-    private variantAttributeRepository: Repository<VariantAttribute>;
     private categoryRepository: Repository<Category>;
     private subcategoryRepository: Repository<Subcategory>;
     private userRepository: Repository<User>;
@@ -54,14 +47,9 @@ export class ProductService {
     private subcategoryService: SubcategoryService;
     private bannerService: BannerService;
     private dealService: DealService;
-    private attributeTypeRepository: Repository<AttributeType>;
-    private attributeValueRepository: Repository<AttributeValue>;
 
     constructor(private dataSource: DataSource) {
         this.productRepository = this.dataSource.getRepository(Product);
-        this.variantRepository = this.dataSource.getRepository(ProductVariant);
-        this.variantImageRepository = this.dataSource.getRepository(VariantImage);
-        this.variantAttributeRepository = this.dataSource.getRepository(VariantAttribute);
         this.categoryRepository = this.dataSource.getRepository(Category);
         this.subcategoryRepository = this.dataSource.getRepository(Subcategory);
         this.userRepository = this.dataSource.getRepository(User);
@@ -69,8 +57,6 @@ export class ProductService {
         this.dealRepository = this.dataSource.getRepository(Deal);
         this.brandRepository = this.dataSource.getRepository(Brand);
         this.bannerRepository = this.dataSource.getRepository(Banner);
-        this.attributeTypeRepository = this.dataSource.getRepository(AttributeType);
-        this.attributeValueRepository = this.dataSource.getRepository(AttributeValue);
         this.vendorService = new VendorService();
         this.imageUploadService = new ImageUploadService();
         this.imageDeletionService = new ImageDeletionService();
@@ -108,9 +94,10 @@ export class ProductService {
         return product;
     }
 
+
     async createProduct(
         data: ProductInterface,
-        files: Express.Multer.File[],
+        files: { productImages?: Express.Multer.File[] } | undefined,
         categoryId: number,
         subcategoryId: number,
         vendorId: number
@@ -123,9 +110,6 @@ export class ProductService {
             discountType,
             status,
             stock,
-            hasVariants,
-            variants,
-            productImages,
             dealId,
             bannerId,
         } = data;
@@ -159,7 +143,7 @@ export class ProductService {
         }
 
         let finalPrice: number | undefined;
-        if (!hasVariants && basePrice && discount && discountType) {
+        if (basePrice && discount && discountType) {
             finalPrice =
                 discountType === DiscountType.PERCENTAGE
                     ? basePrice * (1 - discount / 100)
@@ -169,12 +153,11 @@ export class ProductService {
             }
         }
 
-        if (!files || files.length === 0) {
+        const productImages = files?.productImages;
+        if (!productImages || !Array.isArray(productImages) || productImages.length === 0) {
             throw new APIError(400, 'No image files provided');
         }
-
         const uploadedImages: string[] = [];
-        const varientImageMap: Record<string, string[]> = {};
 
         const uploadImage = async (buffer: Buffer): Promise<string> => {
             return new Promise((resolve, reject) => {
@@ -190,107 +173,25 @@ export class ProductService {
             });
         };
 
-        if (hasVariants && variants) {
-            for (const variant of variants) {
-                const matchingFiles = files.filter(file => file.filename.includes(`variant-${variant.sku}`));
-                const imageUrls = await Promise.all(matchingFiles.map(file => uploadImage(file.buffer)));
-                varientImageMap[variant.sku] = imageUrls;
-            }
-        } else {
-            const imageUrls = await Promise.all(files.map(file => uploadImage(file.buffer)));
-            uploadedImages.push(...imageUrls);
-        }
+        const imageUrls = await Promise.all(productImages.map(file => uploadImage(file.buffer)));
+        uploadedImages.push(...imageUrls);
 
-        const savedProduct = await this.dataSource.transaction(async (transactionalEntityManager) => {
-            const product = this.productRepository.create({
-                name,
-                description,
-                basePrice: hasVariants ? undefined : basePrice,
-                discount: discount ?? 0,
-                discountType: discountType ?? DiscountType.PERCENTAGE,
-                status: hasVariants ? undefined : (status ?? InventoryStatus.AVAILABLE),
-                stock: hasVariants ? undefined : stock,
-                hasVariants,
-                subcategory: { id: subcategoryId },
-                vendor: { id: vendorId },
-                deal: dealId ? { id: dealId } : undefined,
-                banner: bannerId ? { id: bannerId } : undefined,
-            });
-
-            const savedProduct = await transactionalEntityManager.save(Product, product);
-
-            if (hasVariants && variants) {
-                const productVariants = await Promise.all(
-                    variants.map(async (variantData) => {
-                        const variant = this.variantRepository.create({
-                            sku: variantData.sku,
-                            price: variantData.price,
-                            stock: variantData.stock,
-                            status: variantData.status,
-                            product: { id: savedProduct.id },
-                        });
-
-                        const savedVariant = await transactionalEntityManager.save(ProductVariant, variant);
-
-                        if (variantData.attributes) {
-                            const attributes = await Promise.all(
-                                variantData.attributes.map(async (attr) => {
-                                    const attributeType = this.attributeTypeRepository.create({
-                                        name: attr.attributeType,
-                                        product: { id: savedProduct.id },
-                                    });
-                                    const savedAttributeType = await transactionalEntityManager.save(AttributeType, attributeType);
-
-                                    const attributeValues = attr.attributeValues.map((value) =>
-                                        this.attributeValueRepository.create({
-                                            value,
-                                            attributeType: { id: savedAttributeType.id },
-                                        })
-                                    );
-                                    const savedAttributeValues = await transactionalEntityManager.save(AttributeValue, attributeValues);
-
-                                    return savedAttributeValues.map((savedValue) =>
-                                        this.variantAttributeRepository.create({
-                                            variant: { id: savedVariant.id },
-                                            attributeValue: { id: savedValue.id },
-                                        })
-                                    );
-                                })
-                            );
-
-                            const flattenedAttributes = attributes.flat();
-                            await transactionalEntityManager.save(VariantAttribute, flattenedAttributes);
-                        }
-
-                        const images = (varientImageMap[variantData.sku] || []).map((url) =>
-                            this.variantImageRepository.create({
-                                imageUrl: url,
-                                variant: { id: savedVariant.id },
-                                product: { id: savedProduct.id },
-                            })
-                        );
-                        await transactionalEntityManager.save(VariantImage, images);
-
-                        return savedVariant;
-                    })
-                );
-
-                savedProduct.variants = productVariants;
-            } else {
-                const images = uploadedImages.map((url) =>
-                    this.variantImageRepository.create({
-                        imageUrl: url,
-                        product: { id: savedProduct.id },
-                    })
-                );
-                await transactionalEntityManager.save(VariantImage, images);
-                savedProduct.productImages = images;
-            }
-
-            return savedProduct;
+        const savedProduct = this.productRepository.create({
+            name,
+            description,
+            basePrice,
+            discount,
+            discountType,
+            status,
+            stock,
+            subcategoryId,
+            vendorId,
+            dealId: dealId ? dealId : null,
+            bannerId: bannerId ? bannerId : null,
+            productImages: imageUrls
         });
 
-        return savedProduct;
+        return await this.productRepository.save(savedProduct);
     }
 
     async updateProduct(
@@ -298,16 +199,27 @@ export class ProductService {
         isAdmin: boolean,
         productId: number,
         data: Partial<ProductInterface>,
-        files: Express.Multer.File[],
+        files: { productImages?: Express.Multer.File[] } | undefined,
         categoryId: number,
         subcategoryId: number
     ): Promise<Product> {
+        const {
+            name,
+            description,
+            basePrice,
+            discount,
+            discountType,
+            status,
+            stock,
+            dealId,
+            bannerId,
+        } = data;
+
         const whereClause = isAdmin
             ? { id: productId }
             : { id: productId, vendor: { id: authId } };
         const product = await this.productRepository.findOne({
             where: whereClause,
-            relations: ['variants', 'productImages', 'variants.attributes', 'variants.images'],
         });
         if (!product) {
             throw new APIError(404, 'Product not found or not authorized');
@@ -323,15 +235,15 @@ export class ProductService {
             throw new APIError(404, 'Subcategory does not exist');
         }
 
-        if (data.bannerId) {
-            const bannerExists = await this.bannerService.getBannerById(data.bannerId);
+        if (bannerId) {
+            const bannerExists = await this.bannerService.getBannerById(bannerId);
             if (!bannerExists) {
                 throw new APIError(404, 'Banner does not exist');
             }
         }
 
-        if (data.dealId) {
-            const dealExists = await this.dealService.getDealById(data.dealId);
+        if (dealId) {
+            const dealExists = await this.dealService.getDealById(dealId);
             if (!dealExists) {
                 throw new APIError(404, 'Deal does not exist');
             }
@@ -342,18 +254,17 @@ export class ProductService {
         }
 
         let finalPrice: number | undefined;
-        if (!data.hasVariants && data.basePrice && data.discount && data.discountType) {
+        if (basePrice && discount && discountType) {
             finalPrice =
-                data.discountType === DiscountType.PERCENTAGE
-                    ? data.basePrice * (1 - data.discount / 100)
-                    : data.basePrice - data.discount;
+                discountType === DiscountType.PERCENTAGE
+                    ? basePrice * (1 - discount / 100)
+                    : basePrice - discount;
             if (finalPrice < 0) {
                 throw new APIError(400, 'Discount results in negative price');
             }
         }
 
-        const uploadedImages: string[] = [];
-        const varientImageMap: Record<string, string[]> = {};
+        let uploadedImages: string[] = product.productImages || [];
 
         const uploadImage = async (buffer: Buffer): Promise<string> => {
             return new Promise((resolve, reject) => {
@@ -369,120 +280,30 @@ export class ProductService {
             });
         };
 
-        if (data.hasVariants && data.variants) {
-            for (const variant of data.variants) {
-                const matchingFiles = files.filter(file => file.originalname.includes(`variant-${variant.sku}`));
-                const imageUrls = await Promise.all(matchingFiles.map(file => uploadImage(file.buffer)));
-                varientImageMap[variant.sku] = imageUrls;
-            }
-        } else if (files && files.length > 0) {
-            const imageUrls = await Promise.all(files.map(file => uploadImage(file.buffer)));
-            uploadedImages.push(...imageUrls);
+        const productImages = files?.productImages;
+        if (productImages && Array.isArray(productImages) && productImages.length > 0) {
+            const imageUrls = await Promise.all(productImages.map(file => uploadImage(file.buffer)));
+            uploadedImages = imageUrls;
         }
 
-        const updatedProduct = await this.dataSource.transaction(async (transactionalEntityManager) => {
-            const productData = {
-                name: data.name ?? product.name,
-                description: data.description ?? product.description,
-                basePrice: data.hasVariants ? undefined : (data.basePrice ?? product.basePrice),
-                discount: data.discount ?? product.discount,
-                discountType: data.discountType ?? product.discountType,
-                status: data.hasVariants ? undefined : (data.status ?? product.status),
-                stock: data.hasVariants ? undefined : (data.stock ?? product.stock),
-                hasVariants: data.hasVariants ?? product.hasVariants,
-                subcategory: data.subcategoryId ? { id: data.subcategoryId } : product.subcategory,
-                vendor: { id: isAdmin ? product.vendorId : authId },
-                deal: data.dealId ? { id: data.dealId } : product.deal,
-                banner: data.bannerId ? { id: data.bannerId } : product.banner,
-            };
+        product.name = name ?? product.name;
+        product.description = description ?? product.description;
+        product.basePrice = basePrice ?? product.basePrice;
+        product.discount = discount ?? product.discount;
+        product.discountType = discountType ?? product.discountType;
+        product.status = status ?? product.status;
+        product.stock = stock ?? product.stock;
+        product.subcategoryId = subcategoryId;
+        product.dealId = dealId !== undefined ? dealId : product.dealId;
+        product.bannerId = bannerId !== undefined ? bannerId : product.bannerId;
+        product.productImages = uploadedImages;
 
-            await transactionalEntityManager.update(Product, { id: productId }, productData);
-            const updatedProduct = await this.productRepository.findOneOrFail({
-                where: { id: productId },
-            });
-
-            if (data.hasVariants && data.variants) {
-                await transactionalEntityManager.delete(VariantImage, { variant: { product: { id: productId } } });
-                await transactionalEntityManager.delete(VariantAttribute, { variant: { product: { id: productId } } });
-                await transactionalEntityManager.delete(ProductVariant, { product: { id: productId } });
-                await transactionalEntityManager.delete(AttributeValue, { attributeType: { product: { id: productId } } });
-                await transactionalEntityManager.delete(AttributeType, { product: { id: productId } });
-
-                const productVariants = await Promise.all(
-                    data.variants.map(async (variantData) => {
-                        const variant = this.variantRepository.create({
-                            sku: variantData.sku,
-                            price: variantData.price,
-                            stock: variantData.stock,
-                            status: variantData.status,
-                            product: { id: updatedProduct.id },
-                        });
-
-                        const savedVariant = await transactionalEntityManager.save(ProductVariant, variant);
-
-                        if (variantData.attributes) {
-                            const attributes = await Promise.all(
-                                variantData.attributes.map(async (attr) => {
-                                    const attributeType = this.attributeTypeRepository.create({
-                                        name: attr.attributeType,
-                                        product: { id: updatedProduct.id },
-                                    });
-                                    const savedAttributeType = await transactionalEntityManager.save(AttributeType, attributeType);
-
-                                    const attributeValues = attr.attributeValues.map((value) =>
-                                        this.attributeValueRepository.create({
-                                            value,
-                                            attributeType: { id: savedAttributeType.id },
-                                        })
-                                    );
-                                    const savedAttributeValues = await transactionalEntityManager.save(AttributeValue, attributeValues);
-
-                                    return savedAttributeValues.map((savedValue) =>
-                                        this.variantAttributeRepository.create({
-                                            variant: { id: savedVariant.id },
-                                            attributeValue: { id: savedValue.id },
-                                        })
-                                    );
-                                })
-                            );
-
-                            const flattenedAttributes = attributes.flat();
-                            await transactionalEntityManager.save(VariantAttribute, flattenedAttributes);
-                        }
-
-                        const images = (varientImageMap[variantData.sku] || []).map((url) =>
-                            this.variantImageRepository.create({
-                                imageUrl: url,
-                                variant: { id: savedVariant.id },
-                                product: { id: updatedProduct.id },
-                            })
-                        );
-                        await transactionalEntityManager.save(VariantImage, images);
-
-                        return savedVariant;
-                    })
-                );
-
-                updatedProduct.variants = productVariants;
-            } else {
-                if (files && files.length > 0) {
-                    await transactionalEntityManager.delete(VariantImage, { product: { id: productId } });
-                    const images = uploadedImages.map((url) =>
-                        this.variantImageRepository.create({
-                            imageUrl: url,
-                            product: { id: updatedProduct.id },
-                        })
-                    );
-                    await transactionalEntityManager.save(VariantImage, images);
-                    updatedProduct.productImages = images;
-                }
-            }
-
-            return updatedProduct;
-        });
+        const updatedProduct = await this.productRepository.save(product);
 
         return updatedProduct;
     }
+
+
 
     async getAllProducts(): Promise<Product[]> {
         return await this.productRepository.find({

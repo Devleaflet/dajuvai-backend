@@ -6,7 +6,6 @@ import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
 import { DiscountType } from '../entities/product.enum';
-import { ProductVariant } from '../entities/productVariant.entity';
 
 /**
  * Service class for managing shopping cart operations.
@@ -16,13 +15,11 @@ export class CartService {
     private cartRepository: Repository<Cart>;
     private cartItemRepository: Repository<CartItem>;
     private productRepository: Repository<Product>;
-    private variantRepository: Repository<ProductVariant>;
 
     constructor() {
         this.cartRepository = AppDataSource.getRepository(Cart);
         this.cartItemRepository = AppDataSource.getRepository(CartItem);
         this.productRepository = AppDataSource.getRepository(Product);
-        this.variantRepository = AppDataSource.getRepository(ProductVariant);
     }
 
     /**
@@ -39,56 +36,28 @@ export class CartService {
      * @access Customer
      */
     async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
-        const { productId, variantId, quantity } = data;
+        const { productId, quantity } = data;
 
         // Validate product
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            relations: ['productImages', 'variants', 'variants.images'],
         });
         if (!product) throw new APIError(404, 'Product not found');
 
-        let price: number;
-        let stock: number;
-        let name: string;
-        let description: string;
-        let image: string | null;
-
-        if (product.hasVariants && !variantId) {
-            throw new APIError(400, 'Variant ID is required for products with variants');
+        // Handle non-variant product
+        if (!product.basePrice || product.stock === undefined) {
+            throw new APIError(400, 'Product must have basePrice and stock');
         }
+        if (product.stock < quantity) throw new APIError(400, 'Insufficient stock');
 
-        if (product.hasVariants && variantId) {
-            // Handle variant product
-            const variant = await this.variantRepository.findOne({
-                where: { id: variantId, product: { id: productId } },
-                relations: ['images'],
-            });
-            if (!variant) throw new APIError(404, 'Product variant not found');
-            if (variant.stock < quantity) throw new APIError(400, 'Insufficient stock for variant');
-
-            price = variant.price;
-            stock = variant.stock;
-            name = `${product.name} (${variant.sku})`;
-            description = product.description;
-            image = variant.images?.[0]?.imageUrl ?? product.productImages?.[0]?.imageUrl ?? null;
-        } else {
-            // Handle non-variant product
-            if (!product.basePrice || product.stock === undefined) {
-                throw new APIError(400, 'Non-variant product must have basePrice and stock');
-            }
-            if (product.stock < quantity) throw new APIError(400, 'Insufficient stock');
-
-            price = this.calculateDiscountedPrice(
-                product.basePrice,
-                product.discount || 0,
-                product.discountType || DiscountType.PERCENTAGE
-            );
-            stock = product.stock;
-            name = product.name;
-            description = product.description;
-            image = product.productImages?.[0]?.imageUrl ?? null;
-        }
+        const price = this.calculateDiscountedPrice(
+            product.basePrice,
+            product.discount || 0,
+            product.discountType || DiscountType.PERCENTAGE
+        );
+        const name = product.name;
+        const description = product.description || '';
+        const image = product.productImages?.[0] ?? null;
 
         // Get or create cart
         let cart = await this.cartRepository.findOne({
@@ -101,17 +70,14 @@ export class CartService {
             cart = await this.cartRepository.save(cart);
         }
 
-        // Check if product/variant already in cart
-        let cartItem = cart.items.find(item =>
-            item.product.id === productId &&
-            (variantId ? item.variantId === variantId : !item.variantId)
-        );
+        // Check if product already in cart
+        let cartItem = cart.items.find(item => item.product.id === productId);
 
         if (cartItem) {
             // Update quantity if already in cart
             cartItem.quantity += quantity;
-            if (cartItem.quantity > stock) {
-                throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${stock} available`);
+            if (cartItem.quantity > product.stock) {
+                throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${product.stock} available`);
             }
             cartItem.price = price;
             cartItem.name = name;
@@ -123,7 +89,6 @@ export class CartService {
             cartItem = this.cartItemRepository.create({
                 cart,
                 product,
-                variantId: variantId || null,
                 quantity,
                 price,
                 name,
@@ -138,6 +103,8 @@ export class CartService {
         cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         return await this.cartRepository.save(cart);
     }
+
+
     /**
      * Removes an item from the cart or reduces its quantity by 1.
      *
@@ -187,27 +154,14 @@ export class CartService {
     async getCart(userId: number): Promise<Cart> {
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: [
-                'items',
-                'items.product',
-                'items.product.vendor',
-                'items.product.variants',
-                'items.product.productImages'
-            ]
+            relations: ['items', 'items.product']
         });
 
         if (!cart) throw new APIError(404, 'Cart is empty');
 
-        const cartItemWithWarnings = cart.items.map(item => {
+        const cartItemsWithWarnings = cart.items.map(item => {
             let warningMessage: string | undefined;
-            let stock: number;
-
-            if (item.variantId) {
-                const variant = item.product.variants?.find(v => v.id === item.variantId);
-                stock = variant?.stock ?? 0;
-            } else {
-                stock = item.product.stock ?? 0;
-            }
+            const stock = item.product.stock ?? 0;
 
             if (item.quantity > stock) {
                 warningMessage = `Only ${stock} units available. You have ${item.quantity} in your cart.`;
@@ -217,10 +171,11 @@ export class CartService {
                 ...item,
                 warningMessage,
             };
-        })
+        });
+
         return {
             ...cart,
-            items: cartItemWithWarnings,
+            items: cartItemsWithWarnings,
         };
     }
 
@@ -268,7 +223,7 @@ export class CartService {
         if (discountType === DiscountType.PERCENTAGE) {
             finalPrice = basePrice - (basePrice * discount / 100);
         } else if (discountType === DiscountType.FLAT) {
-            finalPrice = Math.max(0, basePrice - discount); 
+            finalPrice = Math.max(0, basePrice - discount);
         }
 
         return Math.round(finalPrice * 100) / 100;

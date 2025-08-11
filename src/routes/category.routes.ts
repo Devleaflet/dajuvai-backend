@@ -1434,7 +1434,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, upload.array('images', 5), validateZod(ProductUpdateSchema), productController.updateProduct.bind(productController));
+router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, uploadMiddleware, productController.updateProduct.bind(productController));
 
 // /**
 //  * @swagger
