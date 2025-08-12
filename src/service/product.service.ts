@@ -115,6 +115,19 @@ export class ProductService {
             size
         } = data;
 
+        let parsedSize = size;
+        if (typeof parsedSize === 'string') {
+            try {
+                parsedSize = JSON.parse(parsedSize);
+            } catch (e) {
+                throw new APIError(400, 'Invalid size format');
+            }
+        }
+        if (!Array.isArray(parsedSize)) {
+            parsedSize = null;
+        }
+
+
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
         if (!categoryExists) {
             throw new APIError(404, 'Category does not exist');
@@ -187,7 +200,7 @@ export class ProductService {
             stock,
             subcategoryId,
             vendorId,
-            size,
+            size:parsedSize,
             dealId: dealId ? dealId : null,
             bannerId: bannerId ? bannerId : null,
             productImages: imageUrls

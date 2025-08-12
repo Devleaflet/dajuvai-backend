@@ -101,6 +101,7 @@ export class ProductController {
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
             console.log(files)
+           
 
             const savedProduct = await this.productService.createProduct(
                 data,
