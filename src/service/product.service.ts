@@ -115,18 +115,28 @@ export class ProductService {
             size
         } = data;
 
-        let parsedSize = size;
-        if (typeof parsedSize === 'string') {
-            try {
-                parsedSize = JSON.parse(parsedSize);
-            } catch (e) {
-                throw new APIError(400, 'Invalid size format');
-            }
-        }
-        if (!Array.isArray(parsedSize)) {
-            parsedSize = null;
-        }
+        let parsedSize: string[] | null = null;
 
+        if (typeof size === 'string') {
+            const trimmed = size.trim();
+
+            if (trimmed.startsWith('[')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (Array.isArray(parsed)) {
+                        parsedSize = parsed;
+                    } else {
+                        throw new APIError(400, 'Invalid size format: not an array');
+                    }
+                } catch {
+                    throw new APIError(400, 'Invalid size format: malformed JSON');
+                }
+            } else if (trimmed.length > 0) {
+                parsedSize = trimmed.split(',').map(s => s.trim());
+            }
+        } else if (Array.isArray(size)) {
+            parsedSize = size;
+        }
 
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
         if (!categoryExists) {
@@ -200,7 +210,7 @@ export class ProductService {
             stock,
             subcategoryId,
             vendorId,
-            size:parsedSize,
+            size: parsedSize,
             dealId: dealId ? dealId : null,
             bannerId: bannerId ? bannerId : null,
             productImages: imageUrls
@@ -233,6 +243,29 @@ export class ProductService {
             size,
             bannerId,
         } = data;
+        let parsedSize: string[] | null = null;
+
+        if (typeof size === 'string') {
+            const trimmed = size.trim();
+
+            if (trimmed.startsWith('[')) {
+                try {
+                    const parsed = JSON.parse(trimmed);
+                    if (Array.isArray(parsed)) {
+                        parsedSize = parsed;
+                    } else {
+                        throw new APIError(400, 'Invalid size format: not an array');
+                    }
+                } catch {
+                    throw new APIError(400, 'Invalid size format: malformed JSON');
+                }
+            } else if (trimmed.length > 0) {
+                parsedSize = trimmed.split(',').map(s => s.trim());
+            }
+        } else if (Array.isArray(size)) {
+            parsedSize = size;
+        }
+
 
         const whereClause = isAdmin
             ? { id: productId }
@@ -312,7 +345,7 @@ export class ProductService {
         product.discountType = discountType ?? product.discountType;
         product.status = status ?? product.status;
         product.stock = stock ?? product.stock;
-        product.size = size ?? product.size;
+        product.size = parsedSize ?? product.size;
         product.subcategoryId = subcategoryId;
         product.dealId = dealId !== undefined ? dealId : product.dealId;
         product.bannerId = bannerId !== undefined ? bannerId : product.bannerId;
