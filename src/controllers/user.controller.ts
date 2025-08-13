@@ -467,14 +467,14 @@ export class UserController {
                 { id: user.id, email: user.email, role: user.role }
                 ,
                 this.jwtSecret,
-                { expiresIn: '2h' }
+                { expiresIn: '7d' } // 7 days
             );
 
             res.cookie(!isVendor ? 'token' : 'vendorToken', token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'strict',
-                maxAge: 2 * 60 * 60 * 1000,
+                maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
             });
 
             res.status(200).json({
