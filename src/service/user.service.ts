@@ -4,6 +4,7 @@ import { User, UserRole } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { errorUtil } from 'zod/lib/helpers/errorUtil';
+import { waitForDebugger } from 'inspector';
 
 /**
  * User repository instance for database operations.
@@ -41,6 +42,10 @@ export const createUser = async (userData: Partial<User>): Promise<User> => {
 export const findUserByEmail = async (email: string): Promise<User | null> => {
     return await userDB.findOneBy({ email });
 };
+
+export const findUserById = async (id: number) => {
+    return await userDB.findOneBy({ id })
+}
 
 /**
  * Finds a user by email or username (for login).
@@ -83,6 +88,12 @@ export const getAllStaff = async () => {
         }
     })
 }
+
+
+export const deleteStaffById = async (id: number) => {
+    return await userDB.delete(id)
+}
+
 
 /**
  * Updates user data for a given user ID.

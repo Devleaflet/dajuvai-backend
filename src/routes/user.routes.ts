@@ -335,7 +335,61 @@ userRouter.post("/signup/staff", authMiddleware, isAdmin, userController.staffSi
  *       500:
  *         description: Internal server error
  */
-userRouter.get("/staff", authMiddleware, isAdmin, userController.getAllStaff.bind(userController));
+userRouter.get("/staff", userController.getAllStaff.bind(userController));
+
+
+/**
+ * @swagger
+ * /api/auth/staff/{id}:
+ *   delete:
+ *     summary: Delete a staff member
+ *     description: Permanently deletes a staff member by their ID. Only accessible by admins.
+ *     tags:
+ *       - Admin
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: The ID of the staff member to delete
+ *     responses:
+ *       200:
+ *         description: Staff deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: Staff deleted successfully
+ *       404:
+ *         description: Staff does not exist
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Staff does not exist
+ *       401:
+ *         description: Unauthorized - User is not authenticated
+ *       403:
+ *         description: Forbidden - User is not an admin
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.delete("/staff/:id", authMiddleware, isAdmin, userController.deleteStaff.bind(userController))
 
 
 /**
