@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken } from '../service/user.service';
+import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
@@ -199,6 +199,24 @@ export class UserController {
             });
         } catch (error) {
             // Handle API and internal errors
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+
+    async getAllStaff(req: Request, res: Response) {
+        try {
+            const staff = await getAllStaff();
+
+            res.status(200).json({
+                success: true,
+                data: staff
+            })
+        } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {

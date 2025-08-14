@@ -1,6 +1,6 @@
 import { MoreThan } from 'typeorm';
 import AppDataSource from '../config/db.config';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { errorUtil } from 'zod/lib/helpers/errorUtil';
@@ -75,6 +75,14 @@ export const findUserByResetToken = async (token: string): Promise<User | null> 
 export const getUserByIdService = async (id: number): Promise<User | null> => {
     return await userDB.findOneBy({ id });
 };
+
+export const getAllStaff = async () => {
+    return await userDB.find({
+        where: {
+            role: UserRole.STAFF
+        }
+    })
+}
 
 /**
  * Updates user data for a given user ID.

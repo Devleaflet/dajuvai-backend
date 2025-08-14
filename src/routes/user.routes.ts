@@ -230,6 +230,113 @@ userRouter.post("/admin/signup", userController.adminSignup.bind(userController)
  */
 userRouter.post("/signup/staff", authMiddleware, isAdmin, userController.staffSignup.bind(userController));
 
+/**
+ * @swagger
+ * /api/auth/staff:
+ *   get:
+ *     summary: Get all staff members
+ *     description: Returns a list of all users with the `staff` role. Requires admin authentication.
+ *     tags:
+ *       - Admin
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved staff list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 4
+ *                       username:
+ *                         type: string
+ *                         example: "staff"
+ *                       email:
+ *                         type: string
+ *                         example: "staff@gmail.com"
+ *                       role:
+ *                         type: string
+ *                         example: "staff"
+ *                       addressId:
+ *                         type: integer
+ *                         nullable: true
+ *                         example: null
+ *                       googleId:
+ *                         type: string
+ *                         nullable: true
+ *                         example: null
+ *                       facebookId:
+ *                         type: string
+ *                         nullable: true
+ *                         example: null
+ *                       provider:
+ *                         type: string
+ *                         example: "local"
+ *                       isVerified:
+ *                         type: boolean
+ *                         example: true
+ *                       password:
+ *                         type: string
+ *                         description: "Hashed password"
+ *                         example: "$2b$10$8Xz7qX9o4Buh4Nv4UpVuDuOx5pZRzh18kSM45O1xNZqLHZcP2M7Tm"
+ *                       verificationCode:
+ *                         type: string
+ *                         nullable: true
+ *                         example: null
+ *                       verificationCodeExpire:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         example: null
+ *                       resetToken:
+ *                         type: string
+ *                         nullable: true
+ *                         example: null
+ *                       resetTokenExpire:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         example: null
+ *                       resendCount:
+ *                         type: integer
+ *                         example: 0
+ *                       resendBlockUntil:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         example: null
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-08-14T10:14:24.780Z"
+ *                       updatedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-08-14T10:14:24.780Z"
+ *                       address:
+ *                         type: object
+ *                         nullable: true
+ *                         example: null
+ *       401:
+ *         description: Unauthorized - No token or invalid token
+ *       403:
+ *         description: Forbidden - Only admins can access this resource
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.get("/staff", authMiddleware, isAdmin, userController.getAllStaff.bind(userController));
+
 
 /**
  * @swagger
