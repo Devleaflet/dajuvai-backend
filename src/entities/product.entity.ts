@@ -3,13 +3,11 @@ import { Subcategory } from "./subcategory.entity";
 import { Vendor } from "./vendor.entity";
 import { Deal } from "./deal.entity";
 import { Banner } from "./banner.entity";
-import { ProductVariant } from "./productVariant.entity";
-import { VariantImage } from "./variantImages.entity";
-import { AttributeType } from "./attributeType.entity";
 import { DiscountType, InventoryStatus } from "./product.enum";
 import { OrderItem } from "./orderItems.entity";
 import { Brand } from "./brand.entity";
 import { Review } from "./reviews.entity";
+import { Variant } from "./variant.entity";
 
 @Entity('products')
 export class Product {
@@ -19,9 +17,10 @@ export class Product {
     @Column()
     name: string;
 
-    @Column()
-    description: string;
+    @Column({ nullable: true })
+    description?: string;
 
+    // Only used if hasVariants = false
     @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
     basePrice?: number;
 
@@ -36,9 +35,6 @@ export class Product {
 
     @Column({ nullable: true })
     stock?: number;
-
-    @Column()
-    hasVariants: boolean;
 
     @ManyToOne(() => Subcategory, { onDelete: "SET NULL" })
     @JoinColumn({ name: "subcategoryId" })
@@ -68,14 +64,8 @@ export class Product {
     @Column({ nullable: true })
     bannerId?: number;
 
-    @OneToMany(() => ProductVariant, (variant) => variant.product)
-    variants: ProductVariant[];
-
-    @OneToMany(() => VariantImage, (image) => image.product)
-    productImages: VariantImage[];
-
-    @OneToMany(() => AttributeType, (attributeType) => attributeType.product)
-    attributeTypes: AttributeType[];
+    @Column({ type: 'text', array: true, nullable: true })
+    productImages?: string[];
 
     @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
     orderItems: OrderItem[];
@@ -85,6 +75,12 @@ export class Product {
 
     @Column({ nullable: true })
     brandId?: number;
+
+    @Column({ type: 'boolean', default: false })
+    hasVariants: boolean;
+
+    @OneToMany(() => Variant, (variant) => variant.product, { cascade: true })
+    variants: Variant[];
 
     @OneToMany(() => Review, (review) => review.product, { cascade: true })
     reviews: Review[];

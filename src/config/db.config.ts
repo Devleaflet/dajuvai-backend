@@ -22,12 +22,8 @@ import { Contact } from "../entities/contact.entity";
 import { District } from "../entities/district.entity";
 import { HomePageSection } from "../entities/homePage.entity";
 import { Promo } from "../entities/promo.entity";
-import { AttributeType } from "../entities/attributeType.entity";
-import { AttributeValue } from "../entities/attributeValue.entity";
-import { ProductVariant } from "../entities/productVariant.entity";
-import { VariantAttribute } from "../entities/variantAttribute.entity";
-import { VariantImage } from "../entities/variantImages.entity";
-// import { VendorAddress } from "../entities/vendroAddress.entity";
+import { Variant } from "../entities/variant.entity";
+
 
 
 
@@ -43,7 +39,7 @@ const AppDataSource = new DataSource({
   synchronize: true,
   logging: true,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-    Banner, Contact, District, HomePageSection, Promo, AttributeType, AttributeValue, ProductVariant, VariantAttribute, VariantImage],
+    Banner, Contact, District, HomePageSection, Promo,Variant],
   migrations: [],
   ssl: false,
   // ssl: {
@@ -52,4 +48,3 @@ const AppDataSource = new DataSource({
 });
 
 export default AppDataSource;
-

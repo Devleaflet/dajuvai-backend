@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
+import { uploadMiddleware } from "../config/multer.config";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
@@ -133,8 +134,71 @@ productRouter.get("/:id", productController.getProductDetailById.bind(productCon
 
 productRouter.delete("/:id", productController.deleteProductById.bind(productController));
 
-productRouter.get("/", productController.getProductsTest.bind(productController));
-
+/**
+ * @swagger
+ * /api/product/image/upload:
+ *   post:
+ *     summary: Upload product images to Cloudinary
+ *     tags:
+ *       - Products
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               files:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: binary
+ *             required:
+ *               - files
+ *     responses:
+ *       200:
+ *         description: Images uploaded successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 urls:
+ *                   type: array
+ *                   items:
+ *                     type: string
+ *                     example: https://res.cloudinary.com/.../prod_12345.jpg
+ *       400:
+ *         description: No files uploaded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: No files uploaded
+ *       500:
+ *         description: Image upload failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Image upload failed
+ */
+productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
 
 export default productRouter;
 

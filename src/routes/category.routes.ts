@@ -888,7 +888,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
  *   post:
  *     summary: Create a new product
- *     description: Creates a new product with individual fields and optional images using multipart/form-data. Requires vendor or admin authorization via JWT. The name, subcategoryId, and hasVariants fields are required. For non-variant products, basePrice, stock, and status are required. For variant products, variants (JSON string) is required. Other fields and images are optional.
+ *     description: Creates a new product with individual fields using multipart/form-data. Requires vendor or admin authorization via JWT. The name, subcategoryId, and hasVariants fields are required. For non-variant products, basePrice, stock, and status are required. For variant products, variants (JSON string) is required. Other fields are optional.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -968,24 +968,6 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                 nullable: true
  *                 description: ID of the banner to associate (optional)
  *                 example: null
- *               variantImages1:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *                 description: Image files for the first variant (e.g., TSHIRT-RED, max 5, optional)
- *               variantImages2:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *                 description: Image files for the second variant (e.g., TSHIRT-BLUE, max 5, optional)
- *               productImages:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *                 description: Image files for non-variant products (max 5, optional)
  *             required:
  *               - name
  *               - subcategoryId
@@ -1088,14 +1070,6 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                             type: string
  *                             enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
  *                             example: AVAILABLE
- *                           images:
- *                             type: array
- *                             items:
- *                               type: object
- *                               properties:
- *                                 imageUrl:
- *                                   type: string
- *                                   example: https://res.cloudinary.com/example/image1.jpg
  *                           attributes:
  *                             type: array
  *                             items:
@@ -1113,14 +1087,6 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                                         name:
  *                                           type: string
  *                                           example: Color
- *                     productImages:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           imageUrl:
- *                             type: string
- *                             example: https://res.cloudinary.com/example/mug1.jpg
  *       400:
  *         description: Bad request (e.g., missing required fields, invalid categoryId, subcategoryId, or JSON format)
  *         content:
@@ -1161,7 +1127,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                   type: string
  *                   example: "Category does not exist"
  *       500:
- *         description: Internal server error (e.g., database or image upload failure)
+ *         description: Internal server error (e.g., database failure)
  *         content:
  *           application/json:
  *             schema:
@@ -1174,7 +1140,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, uploadMiddleware, productController.createProduct.bind(productController))
+router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, productController.createProduct.bind(productController))
 
 
 /**
@@ -1485,7 +1451,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{productId}:
  *   put:
  *     summary: Update an existing product
- *     description: Updates a product with individual optional fields and images using multipart/form-data. Supports partial updates for product details, variants, and images. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
+ *     description: Updates a product with individual optional fields using multipart/form-data. Supports partial updates for product details and variants. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -1569,24 +1535,6 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                 nullable: true
  *                 description: ID of the banner to associate (optional, null to remove)
  *                 example: null
- *               variantImages1:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *                 description: Image files for the first variant (e.g., TSHIRT-RED, max 5, optional)
- *               variantImages2:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *                 description: Image files for the second variant (e.g., TSHIRT-BLUE, max 5, optional)
- *               productImages:
- *                 type: array
- *                 items:
- *                   type: string
- *                   format: binary
- *                 description: Image files for non-variant products (max 5, optional)
  *     responses:
  *       200:
  *         description: Product updated successfully
@@ -1685,14 +1633,6 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                             type: string
  *                             enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
  *                             example: AVAILABLE
- *                           images:
- *                             type: array
- *                             items:
- *                               type: object
- *                               properties:
- *                                 imageUrl:
- *                                   type: string
- *                                   example: https://res.cloudinary.com/example/image1.jpg
  *                           attributes:
  *                             type: array
  *                             items:
@@ -1710,14 +1650,6 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                                         name:
  *                                           type: string
  *                                           example: Color
- *                     productImages:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           imageUrl:
- *                             type: string
- *                             example: https://res.cloudinary.com/example/mug1.jpg
  *       400:
  *         description: Bad request (e.g., invalid productId, categoryId, subcategoryId, or JSON format)
  *         content:
@@ -1758,7 +1690,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Product not found or not authorized"
  *       500:
- *         description: Internal server error (e.g., database or image upload failure)
+ *         description: Internal server error (e.g., database failure)
  *         content:
  *           application/json:
  *             schema:
