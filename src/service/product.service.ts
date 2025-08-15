@@ -328,79 +328,74 @@ export class ProductService {
             .where('(product.stock > 0 OR variants.stock > 0)');
 
         if (bannerId) {
-            const banner = await this.bannerRepository.findOne({
-                where: { id: bannerId }
-            });
-
-            if (!banner) {
-                throw new APIError(404, "Banner does not exist");
-            }
-
+            const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
+            if (!banner) throw new APIError(404, "Banner does not exist");
             query.andWhere('product.bannerId = :bannerId', { bannerId });
         }
 
         if (subcategoryId) {
             const subcategory = await this.subcategoryRepository.findOne({ where: { id: subcategoryId } });
-            if (!subcategory) {
-                throw new APIError(404, 'Subcategory does not exist');
-            }
+            if (!subcategory) throw new APIError(404, 'Subcategory does not exist');
             query.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
         } else if (categoryId) {
             const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
-            if (!category) {
-                throw new APIError(404, 'Category does not exist');
-            }
+            if (!category) throw new APIError(404, 'Category does not exist');
             query.andWhere('subcategory.categoryId = :categoryId', { categoryId });
         }
 
         if (brandId) {
             const brand = await this.brandRepository.findOne({ where: { id: brandId } });
-            if (!brand) {
-                throw new APIError(404, 'Brand does not exist');
-            }
-            query.andWhere('product.brand_id = :brandId', { brandId });
+            if (!brand) throw new APIError(404, 'Brand does not exist');
+            query.andWhere('product.brandId = :brandId', { brandId });
         }
 
         if (dealId) {
             const deal = await this.dealRepository.findOne({ where: { id: dealId } });
-            if (!deal) {
-                throw new APIError(404, 'Deal does not exist');
-            }
+            if (!deal) throw new APIError(404, 'Deal does not exist');
             query.andWhere('product.dealId = :dealId', { dealId });
         }
 
+        // Add GROUP BY to avoid Postgres aggregate error
+        query.groupBy('product.id')
+            .addGroupBy('subcategory.id')
+            .addGroupBy('brand.id')
+            .addGroupBy('vendor.id')
+            .addGroupBy('deal.id')
+            .addGroupBy('variants.id');
+
         if (sort === 'low-to-high') {
             query.addOrderBy(`
-        LEAST(
-            product.basePrice - CASE 
-                WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
-                ELSE product.discount 
-            END,
-            COALESCE(MIN(variants.basePrice - CASE 
-                WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
-                ELSE variants.discount
-            END), product.basePrice)
-        )
-    `, 'ASC');
+            LEAST(
+                product.basePrice - CASE 
+                    WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
+                    ELSE product.discount 
+                END,
+                COALESCE(MIN(variants.basePrice - CASE 
+                    WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
+                    ELSE variants.discount
+                END), product.basePrice)
+            )
+        `, 'ASC');
         } else if (sort === 'high-to-low') {
             query.addOrderBy(`
-        GREATEST(
-            product.basePrice - CASE 
-                WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
-                ELSE product.discount 
-            END,
-            COALESCE(MAX(variants.basePrice - CASE 
-                WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
-                ELSE variants.discount
-            END), product.basePrice)
-        )
-    `, 'DESC');
+            GREATEST(
+                product.basePrice - CASE 
+                    WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
+                    ELSE product.discount 
+                END,
+                COALESCE(MAX(variants.basePrice - CASE 
+                    WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
+                    ELSE variants.discount
+                END), product.basePrice)
+            )
+        `, 'DESC');
         } else {
             query.orderBy('product.created_at', 'DESC');
         }
 
         return await query.getMany();
     }
+
 
     async getAdminProducts(params: IAdminProductQueryParams): Promise<{ products: Product[]; total: number }> {
         const { page = 1, limit = 7, sort = 'createdAt' } = params;
@@ -591,7 +586,7 @@ export class ProductService {
         // Find products with vendor relation filtered by vendorId, paginated with total count
         const [products, total] = await this.productRepository.findAndCount({
             where: { vendor: { id: vendorId } },
-            relations: ['subcategory', 'vendor'],
+            relations: ['subcategory', 'vendor', "variants"],
             skip,
             take: limit,
         });
