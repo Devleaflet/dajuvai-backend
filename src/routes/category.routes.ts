@@ -888,7 +888,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
  *   post:
  *     summary: Create a new product
- *     description: Creates a new product with individual fields using multipart/form-data. Requires vendor or admin authorization via JWT. The name, subcategoryId, and hasVariants fields are required. For non-variant products, basePrice, stock, and status are required. For variant products, variants (JSON string) is required. Other fields are optional.
+ *     description: Creates a new product. Product images must be uploaded separately first to get URLs (e.g., from Cloudinary). Requires vendor or admin authorization via JWT.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -898,247 +898,105 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *         required: true
  *         schema:
  *           type: integer
- *           minimum: 1
  *         description: ID of the category
- *         example: 1
  *       - in: path
  *         name: subcategoryId
  *         required: true
  *         schema:
  *           type: integer
- *           minimum: 1
  *         description: ID of the subcategory
- *         example: 1
  *     requestBody:
  *       required: true
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
  *             properties:
  *               name:
  *                 type: string
- *                 description: Name of the product (required)
- *                 example: New T-Shirt
+ *                 example: T-Shirt
  *               description:
  *                 type: string
- *                 description: Description of the product (optional)
+ *                 nullable: true
  *                 example: Premium Cotton T-shirt
  *               basePrice:
  *                 type: number
- *                 description: Base price for non-variant products (required if hasVariants is false)
- *                 example: 20
+ *                 nullable: true
  *               discount:
  *                 type: number
- *                 description: Discount amount for non-variant products (optional, requires basePrice and discountType)
- *                 example: 5
+ *                 default: 0
  *               discountType:
  *                 type: string
  *                 enum: [PERCENTAGE, FLAT]
- *                 description: Discount type for non-variant products (optional, requires basePrice and discount)
- *                 example: FLAT
+ *                 default: PERCENTAGE
+ *               stock:
+ *                 type: integer
+ *                 nullable: true
  *               status:
  *                 type: string
  *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
- *                 description: Inventory status for non-variant products (required if hasVariants is false)
- *                 example: AVAILABLE
- *               stock:
- *                 type: integer
- *                 description: Stock quantity for non-variant products (required if hasVariants is false)
- *                 example: 100
  *               hasVariants:
  *                 type: boolean
- *                 description: Indicates if the product has variants (required)
- *                 example: true
+ *               productImages:
+ *                 type: array
+ *                 minItems: 1
+ *                 description: Array of Cloudinary URLs for product images (must have at least one)
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                   example: https://res.cloudinary.com/.../products/main_image.jpg
  *               variants:
- *                 type: string
- *                 description: JSON string of variant data (required if hasVariants is true)
- *                 example: "[{\"sku\":\"TSHIRT-RED\",\"price\":21,\"stock\":90,\"status\":\"AVAILABLE\",\"attributes\":[{\"attributeType\":\"Color\",\"attributeValues\":[\"Red\"]},{\"attributeType\":\"Size\",\"attributeValues\":[\"M\"]}]},{\"sku\":\"TSHIRT-BLUE\",\"price\":23,\"stock\":40,\"status\":\"AVAILABLE\",\"attributes\":[{\"attributeType\":\"Color\",\"attributeValues\":[\"Blue\"]},{\"attributeType\":\"Size\",\"attributeValues\":[\"L\"]}]}]"
- *               subcategoryId:
- *                 type: integer
- *                 description: ID of the subcategory (required)
- *                 example: 1
+ *                 type: array
+ *                 description: Required if hasVariants is true
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     sku:
+ *                       type: string
+ *                       example: TSHIRT-WHITE-L
+ *                     basePrice:
+ *                       type: number
+ *                       example: 25.00
+ *                     discount:
+ *                       type: number
+ *                       default: 0
+ *                     discountType:
+ *                       type: string
+ *                       enum: [PERCENTAGE, FLAT]
+ *                       default: PERCENTAGE
+ *                     attributes:
+ *                       type: object
+ *                       description: Key-value pairs of attributes
+ *                       example: { "color": "White", "size": "L" }
+ *                     variantImages:
+ *                       type: array
+ *                       description: Array of Cloudinary URLs for this variant
+ *                       items:
+ *                         type: string
+ *                         format: uri
+ *                         example: https://res.cloudinary.com/.../variants/white_l_1.jpg
+ *                     stock:
+ *                       type: integer
+ *                       example: 50
+ *                     status:
+ *                       type: string
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
  *               dealId:
  *                 type: integer
  *                 nullable: true
- *                 description: ID of the deal to associate (optional)
- *                 example: null
  *               bannerId:
  *                 type: integer
  *                 nullable: true
- *                 description: ID of the banner to associate (optional)
- *                 example: null
  *             required:
  *               - name
  *               - subcategoryId
  *               - hasVariants
+ *               - productImages
  *     responses:
  *       201:
  *         description: Product created successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Product created successfully"
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 13
- *                     name:
- *                       type: string
- *                       example: New T-Shirt
- *                     description:
- *                       type: string
- *                       example: Premium Cotton T-shirt
- *                     basePrice:
- *                       type: number
- *                       nullable: true
- *                       example: null
- *                     discount:
- *                       type: number
- *                       nullable: true
- *                       example: null
- *                     discountType:
- *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       nullable: true
- *                       example: null
- *                     status:
- *                       type: string
- *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
- *                       nullable: true
- *                       example: null
- *                     stock:
- *                       type: integer
- *                       nullable: true
- *                       example: null
- *                     hasVariants:
- *                       type: boolean
- *                       example: true
- *                     subcategory:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 1
- *                     vendor:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 3
- *                     deal:
- *                       type: object
- *                       nullable: true
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: null
- *                     banner:
- *                       type: object
- *                       nullable: true
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: null
- *                     variants:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                             example: 1
- *                           sku:
- *                             type: string
- *                             example: TSHIRT-RED
- *                           price:
- *                             type: number
- *                             example: 21
- *                           stock:
- *                             type: integer
- *                             example: 90
- *                           status:
- *                             type: string
- *                             enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
- *                             example: AVAILABLE
- *                           attributes:
- *                             type: array
- *                             items:
- *                               type: object
- *                               properties:
- *                                 attributeValue:
- *                                   type: object
- *                                   properties:
- *                                     value:
- *                                       type: string
- *                                       example: Red
- *                                     attributeType:
- *                                       type: object
- *                                       properties:
- *                                         name:
- *                                           type: string
- *                                           example: Color
  *       400:
- *         description: Bad request (e.g., missing required fields, invalid categoryId, subcategoryId, or JSON format)
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Missing required field: name"
- *       401:
- *         description: Unauthorized (e.g., invalid or missing token)
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Unauthorized: User or Vendor not found"
- *       404:
- *         description: Not found (e.g., category or subcategory not found)
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Category does not exist"
- *       500:
- *         description: Internal server error (e.g., database failure)
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Internal Server Error"
+ *         description: Bad request (missing fields or no product images)
  */
 router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, productController.createProduct.bind(productController))
 
@@ -1451,7 +1309,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{productId}:
  *   put:
  *     summary: Update an existing product
- *     description: Updates a product with individual optional fields using multipart/form-data. Supports partial updates for product details and variants. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
+ *     description: Updates a product with individual optional fields. Supports partial updates for product details and variants. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -1483,7 +1341,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *     requestBody:
  *       required: false
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
  *             properties:
@@ -1501,17 +1359,17 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                 example: 20
  *               discount:
  *                 type: number
- *                 description: Discount amount for non-variant products (optional, requires basePrice and discountType)
+ *                 description: Discount amount (optional)
  *                 example: 5
  *               discountType:
  *                 type: string
  *                 enum: [PERCENTAGE, FLAT]
- *                 description: Discount type for non-variant products (optional, requires basePrice and discount)
+ *                 description: Discount type (optional)
  *                 example: FLAT
  *               status:
  *                 type: string
  *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
- *                 description: Inventory status for non-variant products (optional, ignored if hasVariants is true)
+ *                 description: Inventory status (optional)
  *                 example: AVAILABLE
  *               stock:
  *                 type: integer
@@ -1522,9 +1380,45 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                 description: Indicates if the product has variants (optional)
  *                 example: true
  *               variants:
- *                 type: string
- *                 description: JSON string of variant data (optional, required if hasVariants is true)
- *                 example: "[{\"sku\":\"TSHIRT-RED\",\"price\":21,\"stock\":90,\"status\":\"AVAILABLE\",\"attributes\":[{\"attributeType\":\"Color\",\"attributeValues\":[\"Red\"]},{\"attributeType\":\"Size\",\"attributeValues\":[\"M\"]}]},{\"sku\":\"TSHIRT-BLUE\",\"price\":23,\"stock\":40,\"status\":\"AVAILABLE\",\"attributes\":[{\"attributeType\":\"Color\",\"attributeValues\":[\"Blue\"]},{\"attributeType\":\"Size\",\"attributeValues\":[\"L\"]}]}]"
+ *                 type: array
+ *                 description: Array of variant objects (optional, required if hasVariants is true)
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     sku:
+ *                       type: string
+ *                       example: TSHIRT-RED-L
+ *                     basePrice:
+ *                       type: number
+ *                       example: 25
+ *                     discount:
+ *                       type: number
+ *                       example: 0
+ *                     discountType:
+ *                       type: string
+ *                       enum: [PERCENTAGE, FLAT]
+ *                       example: PERCENTAGE
+ *                     attributes:
+ *                       type: object
+ *                       example: { "color": "Red", "size": "L" }
+ *                     variantImages:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["https://res.cloudinary.com/.../variants/red_l.jpg"]
+ *                     stock:
+ *                       type: integer
+ *                       example: 50
+ *                     status:
+ *                       type: string
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                       example: AVAILABLE
+ *               productImages:
+ *                 type: array
+ *                 description: Array of main product image URLs (optional)
+ *                 items:
+ *                   type: string
+ *                 example: ["https://res.cloudinary.com/.../products/main_image.jpg"]
  *               dealId:
  *                 type: integer
  *                 nullable: true
@@ -1551,107 +1445,8 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   example: "Product updated successfully"
  *                 data:
  *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 13
- *                     name:
- *                       type: string
- *                       example: Updated T-Shirt
- *                     description:
- *                       type: string
- *                       example: Premium Cotton T-shirt
- *                     basePrice:
- *                       type: number
- *                       nullable: true
- *                       example: null
- *                     discount:
- *                       type: number
- *                       nullable: true
- *                       example: null
- *                     discountType:
- *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       nullable: true
- *                       example: null
- *                     status:
- *                       type: string
- *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
- *                       nullable: true
- *                       example: null
- *                     stock:
- *                       type: integer
- *                       nullable: true
- *                       example: null
- *                     hasVariants:
- *                       type: boolean
- *                       example: true
- *                     subcategory:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 1
- *                     vendor:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 3
- *                     deal:
- *                       type: object
- *                       nullable: true
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: null
- *                     banner:
- *                       type: object
- *                       nullable: true
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: null
- *                     variants:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                             example: 1
- *                           sku:
- *                             type: string
- *                             example: TSHIRT-RED
- *                           price:
- *                             type: number
- *                             example: 21
- *                           stock:
- *                             type: integer
- *                             example: 90
- *                           status:
- *                             type: string
- *                             enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
- *                             example: AVAILABLE
- *                           attributes:
- *                             type: array
- *                             items:
- *                               type: object
- *                               properties:
- *                                 attributeValue:
- *                                   type: object
- *                                   properties:
- *                                     value:
- *                                       type: string
- *                                       example: Red
- *                                     attributeType:
- *                                       type: object
- *                                       properties:
- *                                         name:
- *                                           type: string
- *                                           example: Color
  *       400:
- *         description: Bad request (e.g., invalid productId, categoryId, subcategoryId, or JSON format)
+ *         description: Bad request (e.g., invalid productId or variant data)
  *         content:
  *           application/json:
  *             schema:
@@ -1664,7 +1459,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Invalid or missing productId"
  *       401:
- *         description: Unauthorized (e.g., invalid or missing token)
+ *         description: Unauthorized
  *         content:
  *           application/json:
  *             schema:
@@ -1677,7 +1472,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Unauthorized: User or Vendor not found"
  *       404:
- *         description: Not found (e.g., product, category, or subcategory not found)
+ *         description: Not found (product, category, or subcategory)
  *         content:
  *           application/json:
  *             schema:
@@ -1690,7 +1485,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Product not found or not authorized"
  *       500:
- *         description: Internal server error (e.g., database failure)
+ *         description: Internal server error
  *         content:
  *           application/json:
  *             schema:
@@ -1703,7 +1498,12 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, productController.updateProduct.bind(productController));
+router.put(
+    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    combinedAuthMiddleware,
+    isVendorAccountOwnerOrAdminOrStaff,
+    productController.updateProduct.bind(productController)
+);
 
 // /**
 //  * @swagger

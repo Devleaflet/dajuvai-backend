@@ -96,13 +96,15 @@ export class ProductController {
         res: Response
     ): Promise<void> {
         try {
+            console.log('BODY:', req.body);
+            console.log('HEADERS:', req.headers['content-type']);
+
             const data: ProductInterface = req.body;
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
 
-            if (!data.name) {
-                throw new APIError(400, 'Product name is required');
-            }
+            console.log(data)
+
             if (data.hasVariants === 'true' && (!data.variants || !Array.isArray(data.variants))) {
                 throw new APIError(400, 'Variants array is required for variant products');
             }
@@ -136,16 +138,20 @@ export class ProductController {
     ): Promise<void> {
         try {
             const data: Partial<ProductInterface> = req.body;
-            const productId = Number(req.params.id);
+            const productId = req.params.id;
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
+            
+            console.log("___________Product id _____________________")
+            console.log(data)
+            console.log(productId)
 
-            const vendorId = await this.productService.getVendorIdByProductId(productId);
+            const vendorId = await this.productService.getVendorIdByProductId(Number(productId));
 
             const updatedProduct = await this.productService.updateProduct(
                 req.vendor ? req.vendor.id : vendorId,
                 req.vendor ? false : true,  // admin flag
-                productId,
+                Number(productId),
                 data,
                 categoryId,
                 subcategoryId

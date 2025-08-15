@@ -118,8 +118,11 @@ export class ProductService {
             bannerId,
             hasVariants,
             variants,
-            productImages //frontend sends secure URLs
+            productImages // frontend sends secure URLs
         } = data;
+
+        // Normalize hasVariants to a boolean (handles string or boolean input)
+        const isVariantProduct = hasVariants === true || hasVariants === 'true';
 
         // Validate category and subcategory
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
@@ -130,34 +133,42 @@ export class ProductService {
 
         if (!vendorId) throw new APIError(401, 'Unauthorized: Vendor not found');
 
-        if (hasVariants !== 'true') {
-            if (!basePrice || !stock) throw new APIError(400, 'Base price and stock are required for non-variant products');
-            if (!productImages || productImages.length === 0) throw new APIError(400, 'At least one product image is required');
+        // Validate required fields based on product type
+        if (!isVariantProduct) {
+            if (basePrice == null || stock == null) {
+                throw new APIError(400, 'Base price and stock are required for non-variant products');
+            }
+            if (!productImages || productImages.length === 0) {
+                throw new APIError(400, 'At least one product image is required');
+            }
         } else {
-            if (!variants || variants.length === 0) throw new APIError(400, 'Variants array is required for variant products');
+            if (!variants || variants.length === 0) {
+                throw new APIError(400, 'Variants array is required for variant products');
+            }
         }
 
+        // Create product
         const product = this.productRepository.create({
             name,
             description,
-            basePrice: hasVariants === 'true' ? null : parseFloat(basePrice || '0'),
+            basePrice: isVariantProduct ? null : parseFloat(basePrice || '0'),
             discount: parseFloat(discount || '0'),
             discountType: discountType || DiscountType.PERCENTAGE,
             status: status || InventoryStatus.AVAILABLE,
-            stock: hasVariants === 'true' ? null : parseInt(stock || '0'),
+            stock: isVariantProduct ? null : parseInt(stock || '0'),
             subcategoryId,
             vendorId,
             brandId: data.brandId ? parseInt(data.brandId) : null,
             dealId: dealId ? parseInt(dealId) : null,
             bannerId: bannerId ? parseInt(bannerId) : null,
-            productImages: hasVariants === 'true' ? [] : productImages,
-            hasVariants: hasVariants === 'true'
+            productImages: isVariantProduct ? [] : productImages,
+            hasVariants: isVariantProduct
         });
 
         const savedProduct = await this.productRepository.save(product);
 
         // Handle variants
-        if (hasVariants === 'true' && variants) {
+        if (isVariantProduct && variants) {
             const savedVariants = await Promise.all(
                 variants.map(async (variant) => {
                     const newVariant = this.variantRepository.create({
@@ -165,8 +176,8 @@ export class ProductService {
                         basePrice: parseFloat(variant.basePrice),
                         discount: parseFloat(variant.discount || '0'),
                         discountType: variant.discountType || DiscountType.PERCENTAGE,
-                        attributes: variant.attributes, // { color: "Black", size: "L" }
-                        variantImages: variant.variantImages || [], // Frontend sends secure URLs
+                        attributes: variant.attributes,
+                        variantImages: variant.variantImages || [],
                         stock: parseInt(variant.stock),
                         status: variant.status || InventoryStatus.AVAILABLE,
                         productId: savedProduct.id.toString(),
@@ -184,6 +195,7 @@ export class ProductService {
     }
 
 
+
     async updateProduct(
         authId: number,
         isAdmin: boolean,
@@ -192,7 +204,21 @@ export class ProductService {
         categoryId: number,
         subcategoryId: number
     ): Promise<Product> {
-        const { name, description, basePrice, discount, discountType, status, stock, dealId, bannerId, hasVariants, variants, brandId, productImages } = data;
+        const {
+            name,
+            description,
+            basePrice,
+            discount,
+            discountType,
+            status,
+            stock,
+            dealId,
+            bannerId,
+            hasVariants,
+            variants,
+            brandId,
+            productImages
+        } = data;
 
         const whereClause = isAdmin ? { id: productId } : { id: productId, vendor: { id: authId } };
         const product = await this.productRepository.findOne({ where: whereClause, relations: ['variants'] });
@@ -206,30 +232,39 @@ export class ProductService {
         if (dealId !== undefined && !(await this.dealService.getDealById(Number(dealId)))) throw new APIError(404, 'Deal does not exist');
         if (bannerId !== undefined && !(await this.bannerService.getBannerById(Number(bannerId)))) throw new APIError(404, 'Banner does not exist');
 
-        // Update product
+        // Normalize hasVariants to boolean
+        const hasVariantsBool =
+            hasVariants === true || hasVariants === 'true' ? true :
+                hasVariants === false || hasVariants === 'false' ? false :
+                    undefined;
+
+        // Update product fields
         product.name = name ?? product.name;
         product.description = description ?? product.description;
-        product.basePrice = hasVariants === 'true' ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
+        product.basePrice = hasVariantsBool ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
         product.discount = discount !== undefined ? parseFloat(discount.toString()) : product.discount;
         product.discountType = discountType ?? product.discountType;
         product.status = status ?? product.status;
-        product.stock = hasVariants === 'true' ? null : (stock !== undefined ? parseInt(stock.toString()) : product.stock);
+        product.stock = hasVariantsBool ? null : (stock !== undefined ? parseInt(stock.toString()) : product.stock);
         product.subcategoryId = subcategoryId;
         product.dealId = dealId !== undefined ? parseInt(dealId.toString()) : product.dealId;
         product.bannerId = bannerId !== undefined ? parseInt(bannerId.toString()) : product.bannerId;
         product.brandId = brandId !== undefined ? parseInt(brandId.toString()) : product.brandId;
-        product.hasVariants = hasVariants === 'true' ? true : product.hasVariants;
+        if (hasVariantsBool !== undefined) product.hasVariants = hasVariantsBool;
 
-        // Product images sent as secure URLs from frontend
+        // Update product images (URLs from frontend)
         if (productImages && Array.isArray(productImages)) {
+            if (productImages.length === 0 && !hasVariantsBool) {
+                throw new APIError(400, 'At least one product image is required for non-variant products');
+            }
             product.productImages = productImages;
         }
 
         // Handle variants
-        if (hasVariants === 'true' && variants) {
+        if (hasVariantsBool && variants) {
             if (!Array.isArray(variants) || variants.length === 0) throw new APIError(400, 'Variants array is required for variant products');
 
-            // Remove existing variants if switching from non-variant
+            // Delete old variants if switching from non-variant to variant
             if (!product.hasVariants) await this.variantRepository.delete({ productId: productId.toString() });
 
             const savedVariants = await Promise.all(
@@ -250,12 +285,12 @@ export class ProductService {
                         // Create new variant
                         const newVariant = this.variantRepository.create({
                             sku: variant.sku,
-                            basePrice: parseFloat(variant.basePrice),
+                            basePrice: parseFloat(variant.basePrice.toString()),
                             discount: parseFloat(variant.discount?.toString() || '0'),
                             discountType: variant.discountType || DiscountType.PERCENTAGE,
                             attributes: variant.attributes,
                             variantImages: variant.variantImages || [],
-                            stock: parseInt(variant.stock),
+                            stock: parseInt(variant.stock.toString()),
                             status: variant.status || InventoryStatus.AVAILABLE,
                             productId: productId.toString(),
                             product
@@ -372,7 +407,7 @@ export class ProductService {
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
-            .leftJoinAndSelect('product.variants', 'variants') 
+            .leftJoinAndSelect('product.variants', 'variants')
             .select([
                 'product.id',
                 'product.name',

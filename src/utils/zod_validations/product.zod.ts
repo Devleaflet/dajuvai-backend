@@ -37,7 +37,7 @@ export interface ProductInterface {
     discountType?: DiscountType; // Optional, defaults to PERCENTAGE
     stock?: string; // Required for non-variant products
     status?: InventoryStatus; // Optional, defaults to AVAILABLE
-    hasVariants: 'true' | 'false'; // String from form
+    hasVariants: boolean | 'true' | 'false'; // String from form
     subcategoryId?: string; // From req.params.subcategoryId
     vendorId?: string; // From req.body or req.user.vendorId
     brandId?: string;
