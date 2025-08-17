@@ -540,7 +540,7 @@ export class OrderService {
      */
     async getCustomerOrders(): Promise<Order[]> {
         return this.orderRepository.find({
-            relations: ['orderedBy', 'orderItems', 'shippingAddress'],
+            relations: ['orderedBy', 'orderItems', 'shippingAddress', 'orderItems.product', 'orderItems.variant'],
             where: {
                 status: Not(OrderStatus.PENDING)
             },
@@ -563,13 +563,14 @@ export class OrderService {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
 
-            // Load related entities: customer, address, products, and vendor info
+            // Load related entities: customer, address, products, variant, and vendor info
             relations: [
                 'orderedBy',
                 'shippingAddress',
                 'orderItems',
                 'orderItems.product',
-                'orderItems.vendor'
+                'orderItems.vendor',
+                'orderItems.variant'
             ],
         });
 
@@ -580,6 +581,7 @@ export class OrderService {
 
         return order;
     }
+
 
 
 
@@ -675,6 +677,7 @@ export class OrderService {
                 'orderItems',
                 'orderItems.product',
                 'orderItems.vendor',
+                'orderItems.variant',
             ],
         });
     }
@@ -697,6 +700,7 @@ export class OrderService {
                 'orderItems',
                 'orderItems.product',
                 'orderItems.vendor',
+                'orderItems.variant',
             ],
 
         });
@@ -792,6 +796,7 @@ export class OrderService {
             .leftJoinAndSelect('order.shippingAddress', 'shippingAddress') // Include shipping address
             .leftJoinAndSelect('orderItems.product', 'product') // Include products in order items
             .leftJoinAndSelect('orderItems.vendor', 'vendor') // Include vendor info for order items
+            .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('orderItems.vendorId = :vendorId', { vendorId }) // Filter by vendorId
             .andWhere('order.status != :status', { status: OrderStatus.PENDING })
             .orderBy('order.createdAt', 'DESC')
@@ -817,6 +822,7 @@ export class OrderService {
             .leftJoinAndSelect('order.shippingAddress', 'shippingAddress') // Join shipping address
             .leftJoinAndSelect('orderItems.product', 'product') // Join products in order items
             .leftJoinAndSelect('orderItems.vendor', 'vendor') // Join vendor info for order items
+            .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('order.id = :orderId', { orderId }) // Filter by order ID
             .andWhere('orderItems.vendorId = :vendorId', { vendorId })
             .andWhere('order.status != :status', { status: OrderStatus.PENDING }) // Filter order items by vendor ID
@@ -849,6 +855,7 @@ export class OrderService {
             relations: [
                 'orderItems',
                 'orderItems.product',
+                'orderItems.variant',
                 'shippingAddress',
             ],
             order: { createdAt: 'DESC' }, // Sort orders by creation date descending
