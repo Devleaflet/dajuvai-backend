@@ -391,6 +391,97 @@ userRouter.get("/staff", userController.getAllStaff.bind(userController));
  */
 userRouter.delete("/staff/:id", authMiddleware, isAdmin, userController.deleteStaff.bind(userController))
 
+/**
+ * @swagger
+ * /api/auth/staff/{id}:
+ *   put:
+ *     summary: Update a staff member by ID
+ *     description: Update information of a staff user. Only accessible by admins.
+ *     tags:
+ *       - Users
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the staff member to update
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               data:
+ *                 type: object
+ *                 description: Fields to update for the staff user
+ *                 example:
+ *                   username: "newStaffName"
+ *                   email: "newstaff@example.com"
+ *     responses:
+ *       200:
+ *         description: Staff updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: "Staff updated successfully"
+ *       400:
+ *         description: Bad request - invalid data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid data provided"
+ *       401:
+ *         description: Unauthorized - user not authenticated
+ *       403:
+ *         description: Forbidden - user is not an admin
+ *       404:
+ *         description: Staff not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Staff does not exist"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ */
+userRouter.put("/staff/:id", authMiddleware, isAdmin, userController.updateStaff.bind(userController))
+
+
 
 /**
  * @swagger

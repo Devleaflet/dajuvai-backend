@@ -26,15 +26,18 @@ export class Vendor {
 
     @Column({ nullable: true })
     districtId: number;
-    
+
     @Column({ nullable: true })
     verificationCode: string | null;
 
     @Column({ nullable: true })
     verificationCodeExpire: Date | null;
 
-    // @Column({ default: true })
-    // isVerified: boolean;
+    @Column({ default: true })
+    isVerified: boolean;
+
+    @Column({ default: true })
+    isApproved: boolean;
 
     @Column({ nullable: true })
     resetToken: string | null; // used

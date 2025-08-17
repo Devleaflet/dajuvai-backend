@@ -145,6 +145,20 @@ export class VendorService {
         return await this.vendorRepository.save(vendor);
     }
 
+
+    async approveVendor(id: number) {
+        return await this.vendorRepository.update(
+            { id },
+            {
+                isApproved: true
+            }
+        )
+    }
+
+    async deleteVendor(id: number) {
+        return await this.vendorRepository.delete(id);
+    }
+
     /**
      * Saves a vendor entity directly to the database.
      * @param vendor - Vendor entity to save.

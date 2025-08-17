@@ -1,7 +1,7 @@
 import { Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { VendorAuthRequest } from '../middlewares/auth.middleware';
+import { AuthRequest, VendorAuthRequest, isVendor } from '../middlewares/auth.middleware';
 import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import { VendorService } from '../service/vendor.service';
 import {
@@ -133,6 +133,7 @@ export class VendorController {
                 password: hashedPassword,
                 phoneNumber,
                 district,
+                isVerified: false,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
             });
@@ -469,6 +470,65 @@ export class VendorController {
                 message: 'Vendor updated successfully',
                 data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
             });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                throw new APIError(503, 'Vendor update service temporarily unavailable');
+            }
+        }
+    }
+
+
+    async approveVendor(req: AuthRequest<{ id: string }>, res: Response) {
+        try {
+            const vendorId = req.params.id;
+
+            const isValid = await this.vendorService.findVendorById(Number(vendorId))
+
+            if (!isValid.isVerified) {
+                throw new APIError(400, "Vendor must be verified")
+            }
+
+            const approveVendor = await this.vendorService.approveVendor(Number(vendorId));
+
+            if (approveVendor.affected && approveVendor.affected > 0) {
+                res.status(200).json({
+                    success: true,
+                    message: "Vendor approved ✅ "
+                })
+            } else {
+                throw new APIError(400, "Approval failed")
+            }
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                throw new APIError(503, 'Vendor update service temporarily unavailable');
+            }
+        }
+    }
+
+
+    async deleteVendor(req: AuthRequest<{ id: string }, {}, {}, {}>, res: Response) {
+        try {
+            const vendorId = req.params.id;
+
+            const vendorExists = await this.vendorService.findVendorById(Number(vendorId))
+
+            if (!vendorExists) {
+                throw new APIError(404, "Vendor doesnot exists")
+            }
+
+            await this.vendorService.deleteVendor(Number(vendorId))
+
+
+            res.status(200).json({
+                success: true,
+                msg: "Vendor deleted"
+            })
+
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });

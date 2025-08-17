@@ -4,7 +4,7 @@ import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewa
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
 import { APIError } from '../utils/ApiError.utils';
 import { User, UserRole } from '../entities/user.entity';
-import { getUserByIdService } from '../service/user.service';
+import { findUserByEmail, getUserByIdService } from '../service/user.service';
 
 
 /**
@@ -325,27 +325,28 @@ export class OrderController {
         }
     }
 
-    async trackOrderById(req: AuthRequest<{}, {}, { orderId: string }, {}>, res: Response): Promise<void> {
+    async trackOrderById(req: AuthRequest<{}, {}, { orderId: string, email: string }, {}>, res: Response): Promise<void> {
         try {
 
             const orderId = Number(req.body.orderId);
 
-            const user = req.user;
+            const email = req.body.email;
+
 
             if (!orderId) {
                 throw new APIError(400, "Order id is requried")
             }
 
-            // get user by id 
-            // checks if user exists or not
-            const userExists = await getUserByIdService(user.id);
+            const userExists = await findUserByEmail(email);
 
             if (!userExists) {
                 throw new APIError(404, "User doesnot exists")
             }
 
             // get order details by user id and orderid
-            const order = await this.orderService.trackOrder(user.id, orderId);
+            const order = await this.orderService.trackOrder(email, orderId);
+
+            console.log(order);
 
             res.status(200).json({
                 success: true,

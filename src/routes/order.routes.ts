@@ -1411,11 +1411,9 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  * /api/order/user/track:
  *   get:
  *     summary: Track order status by order ID
- *     description: Returns the status of a specific order for the authenticated user.
+ *     description: Returns the status of a specific order by order ID.
  *     tags:
  *       - Orders
- *     security:
- *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -1457,10 +1455,8 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *                 message:
  *                   type: string
  *                   example: "Order id is required"
- *       401:
- *         description: Unauthorized - user not authenticated
  *       404:
- *         description: User or order not found
+ *         description: Order not found
  *         content:
  *           application/json:
  *             schema:
@@ -1471,11 +1467,11 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Order does not exist or does not belong to the user"
+ *                   example: "Order does not exist"
  *       500:
  *         description: Internal server error
  */
-router.get("/user/track", authMiddleware, asyncHandler(orderController.trackOrderById.bind(orderController)));
+router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(orderController)));
 
 /**
  * @swagger

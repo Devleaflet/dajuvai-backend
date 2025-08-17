@@ -19,6 +19,8 @@ const upload = multer(multerOptions);
 
 
 
+// CATEGORY
+
 /**
  * @swagger
  * /api/categories:
@@ -504,6 +506,9 @@ router.get("/search/name", authMiddleware, isAdminOrStaff, categoryController.se
 
 router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteCategory.bind(categoryController));
 
+
+
+// SUBCATEGORY
 /**
  * @swagger
  * /api/categories/{categoryId}/subcategories:

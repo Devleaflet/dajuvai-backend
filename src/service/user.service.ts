@@ -95,6 +95,21 @@ export const deleteStaffById = async (id: number) => {
 }
 
 
+export const updateStaffById = async (id: number, data: any) => {
+    await userDB.update({
+        id,
+        role: UserRole.STAFF
+    },
+        data
+    )
+
+    const updateStaff = await userDB.findOne({
+        where: { id }
+    })
+
+    return updateStaff
+}
+
 /**
  * Updates user data for a given user ID.
  * @param id - User ID

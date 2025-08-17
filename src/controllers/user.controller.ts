@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById } from '../service/user.service';
+import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
@@ -237,6 +237,34 @@ export class UserController {
             }
 
             const deletedStaff = await deleteStaffById(Number(id))
+
+            res.status(200).json({
+                success: true,
+                msg: "Staff deleted succesfully"
+            })
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+
+    async updateStaff(req: Request<{ id: string }, {}, { data: any }, {}>, res: Response) {
+        try {
+            const id = req.params.id;
+            const data = req.body.data;
+
+            const staffExists = await findUserById(Number(id))
+
+            if (!staffExists) {
+                throw new APIError(404, "Staff doesnot exists")
+            }
+
+            const deletedStaff = await updateStaffById(Number(id), data)
 
             res.status(200).json({
                 success: true,

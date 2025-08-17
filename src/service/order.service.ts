@@ -268,12 +268,14 @@ export class OrderService {
     }
 
 
-    async trackOrder(userId: number, orderId: number) {
+    async trackOrder(email: string, orderId: number) {
         const order = await this.orderRepository.findOne({
             where: {
                 id: orderId,
-                orderedById: userId
+                orderedBy: { email }
             },
+            relations: ["orderedBy"],
+            select: ["id", "status"]
         })
 
         if (!order) {
@@ -767,7 +769,6 @@ export class OrderService {
      * @access Admin or authorized users
      */
     async searchOrdersById(orderId: number): Promise<Order | null> {
-        // Query the order by ID with all relevant relations for detailed info
         return await this.orderRepository.findOne({
             where: { id: orderId },
             relations: ['orderedBy', 'shippingAddress', 'orderItems', 'orderItems.product', 'orderItems.vendor'],

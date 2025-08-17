@@ -6,6 +6,7 @@ export interface IVendorSignupRequest {
     verificationCode: string,
     verificationCodeExpire: Date,
     district: string;
+    isVerified: Boolean;
 }
 
 export interface IVendorLoginRequest {
