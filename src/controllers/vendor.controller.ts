@@ -196,6 +196,11 @@ export class VendorController {
             if (!vendor) {
                 throw new APIError(401, 'Vendor does not exist');
             }
+
+            if (!vendor.isApproved) {
+                throw new APIError(403, "Your account is not yet approved. You can only login once an admin approves you as a vendor.");
+            }
+
             const isMatch = await bcrypt.compare(password, vendor.password);
             if (!isMatch) {
                 throw new APIError(401, 'Invalid credentials');
@@ -493,6 +498,7 @@ export class VendorController {
             const approveVendor = await this.vendorService.approveVendor(Number(vendorId));
 
             if (approveVendor.affected && approveVendor.affected > 0) {
+                await sendVerificationEmail(isValid.email, "You account has been approved")
                 res.status(200).json({
                     success: true,
                     message: "Vendor approved ✅ "
