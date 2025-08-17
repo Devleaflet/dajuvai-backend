@@ -6,6 +6,7 @@ import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
 import { DiscountType } from '../entities/product.enum';
+import { Variant } from '../entities/variant.entity';
 
 /**
  * Service class for managing shopping cart operations.
@@ -15,11 +16,13 @@ export class CartService {
     private cartRepository: Repository<Cart>;
     private cartItemRepository: Repository<CartItem>;
     private productRepository: Repository<Product>;
+    private variantRepository: Repository<Variant>;
 
     constructor() {
         this.cartRepository = AppDataSource.getRepository(Cart);
         this.cartItemRepository = AppDataSource.getRepository(CartItem);
         this.productRepository = AppDataSource.getRepository(Product);
+        this.variantRepository = AppDataSource.getRepository(Variant);
     }
 
     /**
@@ -35,34 +38,58 @@ export class CartService {
      * @throws {APIError} - On validation, stock, or DB errors
      * @access Customer
      */
+
     async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
-        const { productId, quantity } = data;
+        const { productId, quantity, variantId } = data;
+
+        console.log("---------------Variant id -----------------")
+        console.log(variantId);
 
         // Validate product
         const product = await this.productRepository.findOne({
             where: { id: productId },
+            relations: ['variants'],
         });
         if (!product) throw new APIError(404, 'Product not found');
 
-        // Handle non-variant product
-        if (!product.basePrice || product.stock === undefined) {
-            throw new APIError(400, 'Product must have basePrice and stock');
-        }
-        if (product.stock < quantity) throw new APIError(400, 'Insufficient stock');
+        let price: number;
+        let name: string = product.name;
+        let description: string = product.description || '';
+        let image: string | null = product.productImages?.[0] ?? null;
+        let cartItem: CartItem;
 
-        const price = this.calculateDiscountedPrice(
-            product.basePrice,
-            product.discount || 0,
-            product.discountType || DiscountType.PERCENTAGE
-        );
-        const name = product.name;
-        const description = product.description || '';
-        const image = product.productImages?.[0] ?? null;
+        // Handle variant product
+        if (variantId) {
+            const variant = await this.variantRepository.findOne({
+                where: { id: variantId.toString(), productId: productId.toString() },
+            });
+            if (!variant) throw new APIError(404, 'Variant not found');
+            if (variant.status !== 'AVAILABLE' || variant.stock < quantity) {
+                throw new APIError(400, `Cannot add ${quantity} items; only ${variant.stock} available for this variant`);
+            }
+
+            price = this.calculateDiscountedPrice(variant.basePrice, variant.discount || 0, variant.discountType || DiscountType.PERCENTAGE);
+            if (variant.attributes?.name) name = `${product.name} - ${variant.attributes.name}`;
+            if (variant.variantImages?.length) image = variant.variantImages[0];
+        } else {
+            // Handle non-variant product
+            if (product.hasVariants) {
+                throw new APIError(400, 'Variant required for this product');
+            }
+            if (!product.basePrice || product.stock === undefined) {
+                throw new APIError(400, 'Product must have basePrice and stock');
+            }
+            if (product.status !== 'AVAILABLE' || product.stock < quantity) {
+                throw new APIError(400, `Cannot add ${quantity} items; only ${product.stock} available`);
+            }
+
+            price = this.calculateDiscountedPrice(product.basePrice, product.discount || 0, product.discountType || DiscountType.PERCENTAGE);
+        }
 
         // Get or create cart
         let cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product'],
+            relations: ['items', 'items.product', 'items.variant'],
         });
 
         if (!cart) {
@@ -70,13 +97,21 @@ export class CartService {
             cart = await this.cartRepository.save(cart);
         }
 
-        // Check if product already in cart
-        let cartItem = cart.items.find(item => item.product.id === productId);
+        // Check if product or variant already in cart
+        cartItem = cart.items.find(item =>
+            item.product.id === productId &&
+            (variantId ? item.variantId === variantId : !item.variantId)
+        );
 
         if (cartItem) {
             // Update quantity if already in cart
             cartItem.quantity += quantity;
-            if (cartItem.quantity > product.stock) {
+            if (variantId) {
+                const variant = await this.variantRepository.findOne({ where: { id: variantId.toString() } });
+                if (variant && cartItem.quantity > variant.stock) {
+                    throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${variant.stock} available`);
+                }
+            } else if (cartItem.quantity > product.stock!) {
                 throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${product.stock} available`);
             }
             cartItem.price = price;
@@ -94,6 +129,8 @@ export class CartService {
                 name,
                 description,
                 image,
+                variantId: variantId || null,
+                variant: variantId ? await this.variantRepository.findOne({ where: { id: variantId.toString() } }) : undefined,
             });
             await this.cartItemRepository.save(cartItem);
             cart.items.push(cartItem);
@@ -120,16 +157,31 @@ export class CartService {
     async removeFromCart(userId: number, data: ICartRemoveRequest): Promise<Cart> {
         const { cartItemId, decreaseOnly = false } = data;
 
+        // Fetch cart with items and their product and variant relations
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items'],
+            relations: ['items', 'items.product', 'items.variant'],
         });
 
         if (!cart) throw new APIError(404, 'Cart not found');
 
+        // Find the cart item
         const cartItem = cart.items.find(item => item.id === cartItemId);
         if (!cartItem) throw new APIError(404, 'Cart item not found');
 
+        // Validate stock for the associated product or variant
+        if (cartItem.variantId) {
+            const variant = await this.variantRepository.findOne({ where: { id: cartItem.variantId.toString() } });
+            if (!variant) throw new APIError(404, 'Associated variant not found');
+            if (variant.status !== 'AVAILABLE') throw new APIError(400, 'Variant is not available');
+        } else {
+            const product = await this.productRepository.findOne({ where: { id: cartItem.product.id } });
+            if (!product) throw new APIError(404, 'Associated product not found');
+            if (product.hasVariants) throw new APIError(400, 'Cart item references a product that requires a variant');
+            if (product.status !== 'AVAILABLE') throw new APIError(400, 'Product is not available');
+        }
+
+        // Handle decrease or remove
         if (decreaseOnly && cartItem.quantity > 1) {
             cartItem.quantity -= 1;
             await this.cartItemRepository.save(cartItem);
@@ -154,24 +206,49 @@ export class CartService {
     async getCart(userId: number): Promise<Cart> {
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product']
+            relations: ['items', 'items.product', 'items.variant'],
         });
 
-        if (!cart) throw new APIError(404, 'Cart is empty');
+        if (!cart) {
+            // Create an empty cart if none exists
+            const newCart = this.cartRepository.create({ userId, total: 0, items: [] });
+            return await this.cartRepository.save(newCart);
+        }
 
-        const cartItemsWithWarnings = cart.items.map(item => {
-            let warningMessage: string | undefined;
-            const stock = item.product.stock ?? 0;
+        const cartItemsWithWarnings = await Promise.all(
+            cart.items.map(async (item) => {
+                let warningMessage: string | undefined;
 
-            if (item.quantity > stock) {
-                warningMessage = `Only ${stock} units available. You have ${item.quantity} in your cart.`;
-            }
+                if (item.variantId) {
+                    // Check variant stock
+                    const variant = await this.variantRepository.findOne({ where: { id: item.variantId.toString() } });
+                    if (!variant) {
+                        warningMessage = 'Associated variant no longer exists';
+                    } else if (variant.status !== 'AVAILABLE') {
+                        warningMessage = 'Variant is not available';
+                    } else if (item.quantity > variant.stock) {
+                        warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
+                    }
+                } else {
+                    // Check product stock
+                    const product = await this.productRepository.findOne({ where: { id: item.product.id } });
+                    if (!product) {
+                        warningMessage = 'Associated product no longer exists';
+                    } else if (product.hasVariants) {
+                        warningMessage = 'Product requires a variant but none is selected';
+                    } else if (product.status !== 'AVAILABLE') {
+                        warningMessage = 'Product is not available';
+                    } else if (item.quantity > (product.stock ?? 0)) {
+                        warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
+                    }
+                }
 
-            return {
-                ...item,
-                warningMessage,
-            };
-        });
+                return {
+                    ...item,
+                    warningMessage,
+                };
+            })
+        );
 
         return {
             ...cart,
