@@ -1338,6 +1338,6 @@ router.put("/approve/:id", authMiddleware, isAdminOrStaff, vendorController.appr
  *                   type: string
  *                   example: "Vendor update service temporarily unavailable"
  */
-router.delete("/:id", authMiddleware, isAdminOrStaff, vendorController.deleteVendor.bind(vendorController));
+router.delete("/:id", authMiddleware, isAdmin, vendorController.deleteVendor.bind(vendorController));
 
 export default router;

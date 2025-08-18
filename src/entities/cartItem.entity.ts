@@ -12,7 +12,7 @@ export class CartItem {
     @JoinColumn({ name: 'cart_id' })
     cart: Cart;
 
-    @ManyToOne(() => Product)
+    @ManyToOne(() => Product, {onDelete:"CASCADE"})
     @JoinColumn({ name: 'product_id' })
     product: Product;
 

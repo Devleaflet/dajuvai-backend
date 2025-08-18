@@ -1,5 +1,6 @@
 export interface IWishlistAddRequest {
     productId: number;
+    variantId?: number;
 }
 
 export interface IWishlistRemoveRequest {

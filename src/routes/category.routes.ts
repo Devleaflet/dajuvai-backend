@@ -508,6 +508,10 @@ router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteC
 
 
 
+
+
+
+
 // SUBCATEGORY
 /**
  * @swagger
@@ -887,6 +891,13 @@ router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upl
 
 router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, subcategoryController.deleteSubcategory.bind(subcategoryController));
 
+
+
+
+
+
+
+// PRODUCT
 
 /**
  * @swagger
@@ -1510,56 +1521,6 @@ router.put(
     productController.updateProduct.bind(productController)
 );
 
-// /**
-//  * @swagger
-//  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{id}:
-//  *   delete:
-//  *     summary: Delete a product by ID
-//  *     description: Allows vendors to delete their own product or admins to delete any product.
-//  *     tags: [Product]
-//  *     security:
-//  *       - bearerAuth: []
-//  *     parameters:
-//  *       - in: path
-//  *         name: categoryId
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *         description: ID of the parent category
-//  *       - in: path
-//  *         name: subcategoryId
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *         description: ID of the subcategory
-//  *       - in: path
-//  *         name: id
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *         description: ID of the product to delete
-//  *     responses:
-//  *       204:
-//  *         description: Product deleted successfully
-//  *         content:
-//  *           application/json:
-//  *             schema:
-//  *               type: object
-//  *               properties:
-//  *                 success:
-//  *                   type: boolean
-//  *                   example: true
-//  *       401:
-//  *         description: Unauthorized (missing or invalid token)
-//  *       403:
-//  *         description: Forbidden (not allowed to delete this product)
-//  *       404:
-//  *         description: Product or user not found
-//  *       500:
-//  *         description: Internal server error
-//  */
-
-// router.delete('/:categoryId/subcategories/:subcategoryId/products/:id', authMiddleware, restrictToVendorOrAdmin, productController.deleteProduct.bind(productController));
 
 /**
  * @swagger
