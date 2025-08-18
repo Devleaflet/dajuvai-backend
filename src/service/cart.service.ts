@@ -155,8 +155,12 @@ export class CartService {
      * @access Customer
      */
     async removeFromCart(userId: number, data: ICartRemoveRequest): Promise<Cart> {
-        const { cartItemId, decreaseOnly = false } = data;
+        let { cartItemId, decreaseOnly } = data;
 
+        decreaseOnly = Boolean(decreaseOnly);
+
+        console.log("---------------------Decrease only ---------------------")
+        console.log(decreaseOnly)
         // Fetch cart with items and their product and variant relations
         const cart = await this.cartRepository.findOne({
             where: { userId },

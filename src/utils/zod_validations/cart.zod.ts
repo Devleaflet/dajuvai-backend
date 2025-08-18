@@ -13,4 +13,5 @@ export const addToCartSchema = z.object({
 export const removeFromCartSchema = z.object({
     // Cart item ID must be a positive integer
     cartItemId: z.number().int().positive('Cart item ID must be a positive integer'),
+    decreaseOnly: z.boolean().optional(), 
 });

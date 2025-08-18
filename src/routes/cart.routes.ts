@@ -6,14 +6,13 @@ import { CartController } from '../controllers/cart.controller';
 
 const cartRouter = Router();
 const cartController = new CartController();
-
 /**
  * @swagger
  * /api/cart:
  *   post:
- *     summary: Add product to shopping cart
- *     description: Adds a product to the authenticated user's shopping cart. If the product already exists in the cart, updates the quantity. Creates a new cart if the user doesn't have one.
- *     tags: [Cart]
+ *     summary: Add a product (or variant) to the authenticated user's cart
+ *     tags:
+ *       - Cart
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -22,23 +21,22 @@ const cartController = new CartController();
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - productId
- *               - quantity
  *             properties:
  *               productId:
  *                 type: integer
- *                 minimum: 1
- *                 description: Unique identifier of the product to add to cart (required, positive integer)
- *                 example: 42
+ *                 example: 35
+ *                 description: ID of the product to add
  *               quantity:
  *                 type: integer
- *                 minimum: 1
- *                 description: Number of units to add to cart (required, positive integer)
  *                 example: 2
- *           example:
- *             productId: 42
- *             quantity: 2
+ *                 description: Number of items to add
+ *               variantId:
+ *                 type: integer
+ *                 example: 60
+ *                 description: Optional variant ID if product has variants
+ *             required:
+ *               - productId
+ *               - quantity
  *     responses:
  *       200:
  *         description: Product successfully added to cart
@@ -49,152 +47,130 @@ const cartController = new CartController();
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates successful addition to cart
  *                   example: true
  *                 data:
  *                   type: object
- *                   description: Updated cart information with items
  *                   properties:
  *                     id:
  *                       type: integer
- *                       description: Cart's unique identifier
- *                       example: 123
+ *                       example: 3
  *                     userId:
  *                       type: integer
- *                       description: ID of the cart owner
- *                       example: 456
+ *                       example: 12
  *                     total:
  *                       type: number
- *                       format: decimal
- *                       description: Total price of all items in cart
- *                       example: 29.98
+ *                       example: 55992
  *                     items:
  *                       type: array
- *                       description: Array of items in the cart
  *                       items:
  *                         type: object
  *                         properties:
  *                           id:
  *                             type: integer
- *                             description: Cart item's unique identifier
- *                             example: 789
+ *                             example: 6
  *                           quantity:
  *                             type: integer
- *                             description: Number of units of this product
- *                             example: 2
+ *                             example: 8
  *                           price:
  *                             type: number
- *                             format: decimal
- *                             description: Price per unit of the product
- *                             example: 14.99
+ *                             example: 6999
  *                           name:
  *                             type: string
- *                             description: Product name
- *                             example: "Premium Coffee Beans"
+ *                             example: "RLX | Luxury Explorer | 16570"
  *                           description:
  *                             type: string
- *                             nullable: true
- *                             description: Product description
- *                             example: "Freshly roasted arabica coffee beans"
+ *                             example: ""
  *                           image:
  *                             type: string
- *                             nullable: true
- *                             description: Product image URL (first product image if available)
- *                             example: "https://example.com/images/coffee-beans.jpg"
+ *                             format: uri
+ *                             example: "https://res.cloudinary.com/dxvyc12au/image/upload/v1755502381/products/prod_1755502378837.jpg"
+ *                           variantId:
+ *                             type: integer
+ *                             example: 60
  *                           product:
  *                             type: object
- *                             description: Associated product information
  *                             properties:
  *                               id:
  *                                 type: integer
- *                                 description: Product's unique identifier
- *                                 example: 42
+ *                                 example: 35
  *                               name:
  *                                 type: string
- *                                 description: Product name
- *                                 example: "Premium Coffee Beans"
+ *                                 example: "RLX | Luxury Explorer | 16570"
+ *                               description:
+ *                                 type: string
+ *                                 example: null
  *                               basePrice:
  *                                 type: number
- *                                 format: decimal
- *                                 description: Base price of the product
- *                                 example: 14.99
+ *                                 example: null
+ *                               discount:
+ *                                 type: string
+ *                                 example: "0.00"
+ *                               discountType:
+ *                                 type: string
+ *                                 example: "PERCENTAGE"
+ *                               status:
+ *                                 type: string
+ *                                 example: "AVAILABLE"
  *                               stock:
  *                                 type: integer
- *                                 description: Available stock quantity
- *                                 example: 50
- *             example:
- *               success: true
- *               data:
- *                 id: 123
- *                 userId: 456
- *                 total: 29.98
- *                 items: [
- *                   {
- *                     id: 789,
- *                     quantity: 2,
- *                     price: 14.99,
- *                     name: "Premium Coffee Beans",
- *                     description: "Freshly roasted arabica coffee beans",
- *                     image: "https://example.com/images/coffee-beans.jpg",
- *                     product: {
- *                       id: 42,
- *                       name: "Premium Coffee Beans",
- *                       basePrice: 14.99,
- *                       stock: 50
- *                     }
- *                   }
- *                 ]
+ *                                 example: null
+ *                               hasVariants:
+ *                                 type: boolean
+ *                                 example: true
+ *                           variant:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 60
+ *                               sku:
+ *                                 type: string
+ *                                 example: "SKU-GRAY"
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: 6999
+ *                               discount:
+ *                                 type: string
+ *                                 example: "0.00"
+ *                               discountType:
+ *                                 type: string
+ *                                 example: "PERCENTAGE"
+ *                               attributes:
+ *                                 type: object
+ *                                 properties:
+ *                                   color:
+ *                                     type: string
+ *                                     example: "Gray"
+ *                               variantImages:
+ *                                 type: array
+ *                                 items:
+ *                                   type: string
+ *                                   format: uri
+ *                                   example: "https://res.cloudinary.com/dxvyc12au/image/upload/v1755502381/products/prod_1755502378837.jpg"
+ *                               stock:
+ *                                 type: integer
+ *                                 example: 10
+ *                               status:
+ *                                 type: string
+ *                                 example: "AVAILABLE"
+ *                               productId:
+ *                                 type: integer
+ *                                 example: 35
  *       400:
- *         description: Invalid input data, validation errors, or insufficient stock
+ *         description: Invalid input or insufficient stock
  *         content:
  *           application/json:
  *             schema:
- *               oneOf:
- *                 - type: object
- *                   properties:
- *                     success:
- *                       type: boolean
- *                       description: Indicates request failure
- *                       example: false
- *                     errors:
- *                       type: array
- *                       description: Array of validation errors from Zod schema
- *                       items:
- *                         type: object
- *                         properties:
- *                           path:
- *                             type: array
- *                             description: Field path that failed validation
- *                           message:
- *                             type: string
- *                             description: Validation error message
- *                 - type: object
- *                   properties:
- *                     success:
- *                       type: boolean
- *                       description: Indicates request failure
- *                       example: false
- *                     message:
- *                       type: string
- *                       description: Error message for specific business logic failure
- *             examples:
- *               validationErrors:
- *                 summary: Zod validation errors
- *                 value:
- *                   success: false
- *                   errors: [
- *                     {
- *                       "path": ["quantity"],
- *                       "message": "Quantity must be a positive integer"
- *                     }
- *                   ]
- *               insufficientStock:
- *                 summary: Insufficient product stock
- *                 value:
- *                   success: false
- *                   message: "Insufficient stock"
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Cannot add 8 items; only 5 available for this variant"
  *       401:
- *         description: Authentication required
+ *         description: Unauthorized - user not logged in
  *         content:
  *           application/json:
  *             schema:
@@ -202,17 +178,12 @@ const cartController = new CartController();
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates authentication failure
  *                   example: false
  *                 message:
  *                   type: string
- *                   description: Authentication error message
- *                   example: "Authentication required"
- *             example:
- *               success: false
- *               message: "Authentication required"
+ *                   example: "Unauthorized"
  *       404:
- *         description: Product not found
+ *         description: Product or variant not found
  *         content:
  *           application/json:
  *             schema:
@@ -220,17 +191,12 @@ const cartController = new CartController();
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates product not found
  *                   example: false
  *                 message:
  *                   type: string
- *                   description: Error message indicating product not found
  *                   example: "Product not found"
- *             example:
- *               success: false
- *               message: "Product not found"
- *       503:
- *         description: Service temporarily unavailable
+ *       500:
+ *         description: Internal server error
  *         content:
  *           application/json:
  *             schema:
@@ -238,25 +204,21 @@ const cartController = new CartController();
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates service unavailability
  *                   example: false
  *                 message:
  *                   type: string
- *                   description: Error message indicating service status
- *                   example: "Cart service temporarily unavailable"
- *             example:
- *               success: false
- *               message: "Cart service temporarily unavailable"
+ *                   example: "Internal server error"
  */
 cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartController.addToCart.bind(cartController));
+
 
 /**
  * @swagger
  * /api/cart:
  *   delete:
- *     summary: Remove item from shopping cart
- *     description: Removes a specified item from the authenticated user's shopping cart and updates the cart's total. Requires a valid cart item ID.
- *     tags: [Cart]
+ *     summary: Remove an item from the authenticated user's cart or decrease its quantity
+ *     tags:
+ *       - Cart
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -265,19 +227,20 @@ cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartControlle
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - cartItemId
  *             properties:
  *               cartItemId:
  *                 type: integer
- *                 minimum: 1
- *                 description: Unique identifier of the cart item to remove (required, positive integer)
- *                 example: 789
- *           example:
- *             cartItemId: 789
+ *                 example: 9
+ *                 description: ID of the cart item to remove or decrease
+ *               decreaseOnly:
+ *                 type: boolean
+ *                 example: true
+ *                 description: If true, decreases quantity by 1 instead of removing the item entirely
+ *             required:
+ *               - cartItemId
  *     responses:
  *       200:
- *         description: Item successfully removed from cart
+ *         description: Cart item removed or decreased successfully
  *         content:
  *           application/json:
  *             schema:
@@ -285,73 +248,117 @@ cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartControlle
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates successful removal from cart
  *                   example: true
  *                 data:
  *                   type: object
- *                   description: Updated cart information after removal
  *                   properties:
  *                     id:
  *                       type: integer
- *                       description: Cart's unique identifier
- *                       example: 123
+ *                       example: 3
  *                     userId:
  *                       type: integer
- *                       description: ID of the cart owner
- *                       example: 456
+ *                       example: 12
  *                     total:
  *                       type: number
- *                       format: decimal
- *                       description: Total price of all remaining items in cart
- *                       example: 14.99
+ *                       example: 43993
  *                     items:
  *                       type: array
- *                       description: Array of remaining items in the cart
  *                       items:
  *                         type: object
  *                         properties:
  *                           id:
  *                             type: integer
- *                             description: Cart item's unique identifier
- *                             example: 790
+ *                             example: 6
  *                           quantity:
  *                             type: integer
- *                             description: Number of units of this product
- *                             example: 1
+ *                             example: 2
  *                           price:
  *                             type: number
- *                             format: decimal
- *                             description: Price per unit of the product
- *                             example: 14.99
+ *                             example: 6999
  *                           name:
  *                             type: string
- *                             description: Product name
- *                             example: "Premium Coffee Beans"
+ *                             example: "RLX | Luxury Explorer | 16570"
  *                           description:
  *                             type: string
- *                             nullable: true
- *                             description: Product description
- *                             example: "Freshly roasted arabica coffee beans"
+ *                             example: ""
  *                           image:
  *                             type: string
- *                             nullable: true
- *                             description: Product image URL (first product image if available)
- *                             example: "https://example.com/images/coffee-beans.jpg"
- *             example:
- *               success: true
- *               data:
- *                 id: 123
- *                 userId: 456
- *                 total: 14.99
- *                 items:
- *                   - id: 790
- *                     quantity: 1
- *                     price: 14.99
- *                     name: "Premium Coffee Beans"
- *                     description: "Freshly roasted arabica coffee beans"
- *                     image: "https://example.com/images/coffee-beans.jpg"
+ *                             format: uri
+ *                             example: "https://res.cloudinary.com/dxvyc12au/image/upload/v1755502381/products/prod_1755502378837.jpg"
+ *                           variantId:
+ *                             type: integer
+ *                             example: 60
+ *                           product:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 35
+ *                               name:
+ *                                 type: string
+ *                                 example: "RLX | Luxury Explorer | 16570"
+ *                               description:
+ *                                 type: string
+ *                                 example: null
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: null
+ *                               discount:
+ *                                 type: string
+ *                                 example: "0.00"
+ *                               discountType:
+ *                                 type: string
+ *                                 example: "PERCENTAGE"
+ *                               status:
+ *                                 type: string
+ *                                 example: "AVAILABLE"
+ *                               stock:
+ *                                 type: integer
+ *                                 example: null
+ *                               hasVariants:
+ *                                 type: boolean
+ *                                 example: true
+ *                           variant:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 60
+ *                               sku:
+ *                                 type: string
+ *                                 example: "SKU-GRAY"
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: 6999
+ *                               discount:
+ *                                 type: string
+ *                                 example: "0.00"
+ *                               discountType:
+ *                                 type: string
+ *                                 example: "PERCENTAGE"
+ *                               attributes:
+ *                                 type: object
+ *                                 properties:
+ *                                   color:
+ *                                     type: string
+ *                                     example: "Gray"
+ *                               variantImages:
+ *                                 type: array
+ *                                 items:
+ *                                   type: string
+ *                                   format: uri
+ *                                   example: "https://res.cloudinary.com/dxvyc12au/image/upload/v1755502381/products/prod_1755502378837.jpg"
+ *                               stock:
+ *                                 type: integer
+ *                                 example: 10
+ *                               status:
+ *                                 type: string
+ *                                 example: "AVAILABLE"
+ *                               productId:
+ *                                 type: integer
+ *                                 example: 35
  *       400:
- *         description: Invalid input data or validation errors
+ *         description: Invalid input or cannot decrease quantity below 1
  *         content:
  *           application/json:
  *             schema:
@@ -359,40 +366,23 @@ cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartControlle
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates request failure
- *                   example: false
- *                 errors:
- *                   type: array
- *                   description: Array of validation errors from Zod schema
- *                   items:
- *                     type: object
- *                     properties:
- *                       path:
- *                         type: array
- *                         description: Field path that failed validation
- *                       message:
- *                         type: string
- *                         description: Validation error message
- *             example:
- *               success: false
- *               errors:
- *                 - path: ["cartItemId"]
- *                   message: "Cart item ID must be a positive integer"
- *       401:
- *         description: Authentication required
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   description: Indicates authentication failure
  *                   example: false
  *                 message:
  *                   type: string
- *                   description: Authentication error message
- *                   example: "Authentication required"
+ *                   example: "Cannot decrease quantity below 1. Use remove instead."
+ *       401:
+ *         description: Unauthorized - user not logged in
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
  *       404:
  *         description: Cart or cart item not found
  *         content:
@@ -402,25 +392,12 @@ cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartControlle
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates resource not found
  *                   example: false
  *                 message:
  *                   type: string
- *                   description: Error message indicating resource not found
- *                   example: "Cart not found"
- *             examples:
- *               cartNotFound:
- *                 summary: Cart not found
- *                 value:
- *                   success: false
- *                   message: "Cart not found"
- *               cartItemNotFound:
- *                 summary: Cart item not found
- *                 value:
- *                   success: false
- *                   message: "Cart item not found"
- *       503:
- *         description: Service temporarily unavailable
+ *                   example: "Cart item not found"
+ *       500:
+ *         description: Internal server error
  *         content:
  *           application/json:
  *             schema:
@@ -428,17 +405,18 @@ cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartControlle
  *               properties:
  *                 success:
  *                   type: boolean
- *                   description: Indicates service unavailability
  *                   example: false
  *                 message:
  *                   type: string
- *                   description: Error message indicating service status
- *                   example: "Cart service temporarily unavailable"
- *             example:
- *               success: false
- *               message: "Cart service temporarily unavailable"
+ *                   example: "Internal server error"
  */
-cartRouter.delete('/', authMiddleware, validateZod(removeFromCartSchema), cartController.removeFromCart.bind(cartController));
+cartRouter.delete(
+    '/',
+    authMiddleware,
+    validateZod(removeFromCartSchema),
+    cartController.removeFromCart.bind(cartController)
+);
+
 
 /**
  * @swagger

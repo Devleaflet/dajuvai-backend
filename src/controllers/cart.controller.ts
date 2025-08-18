@@ -95,6 +95,9 @@ export class CartController {
                 throw new APIError(401, 'Unauthorized');
             }
 
+            console.log("---------------------Decrease nonly -------------------")
+            console.log(req.body.decreaseOnly);
+
             // Extract and validate cart item ID
             const { cartItemId } = req.body;
             if (typeof cartItemId !== 'number' || cartItemId <= 0) {
