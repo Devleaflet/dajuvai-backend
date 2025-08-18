@@ -365,7 +365,7 @@ export const isAdminOrStaff = async (req: AuthRequest, res: Response, next: Next
     if (req.user && (req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF)) {
         return next();
     } else {
-        res.status(403).json({ success: false, message: 'Staff access required' });
+        res.status(403).json({ success: false, message: 'Staff or admin access required' });
     }
 }
 

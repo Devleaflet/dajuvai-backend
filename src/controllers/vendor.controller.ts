@@ -85,6 +85,30 @@ export class VendorController {
         }
     }
 
+
+    async getUnapprovedVendorList(req: AuthRequest, res: Response) {
+        try {
+            const unapprovedList = await this.vendorService.fetchAllUnapprovedVendor();
+
+            res.status(200).json({
+                success: true,
+                data: unapprovedList
+            })
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({
+                    success: false,
+                    msg: error.message
+                })
+            } else {
+                res.status(500).json({
+                    sucess: false,
+                    msg: "Internal server error"
+                })
+            }
+        }
+    }
+
     /**
      * POST /vendor/signup
      * Registers a new vendor, sends a verification email, and issues a JWT.

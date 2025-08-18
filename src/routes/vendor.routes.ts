@@ -147,6 +147,143 @@ const productController = new ProductController(AppDataSource);
 
 router.get('/', authMiddleware, isAdminOrStaff, vendorController.getVendors.bind(vendorController));
 
+/**
+ * @swagger
+ * /api/vendors/unapprove/list:
+ *   get:
+ *     summary: Get all unapproved vendors
+ *     description: Retrieves a list of all vendors whose accounts are not approved yet (Admin access required)
+ *     tags: [Vendors]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved unapproved vendors
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   description: Indicates if the request was successful
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   description: Array of unapproved vendor objects
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         description: Unique vendor identifier
+ *                         example: 1
+ *                       businessName:
+ *                         type: string
+ *                         description: Name of the vendor's business
+ *                         example: "GS Supports"
+ *                       email:
+ *                         type: string
+ *                         format: email
+ *                         description: Vendor's email address
+ *                         example: "gssupport@gmail.com"
+ *                       phoneNumber:
+ *                         type: string
+ *                         description: Business contact phone number
+ *                         example: "9811263522"
+ *                       districtId:
+ *                         type: integer
+ *                         description: Associated district ID
+ *                         example: 2
+ *                       isVerified:
+ *                         type: boolean
+ *                         description: Email verification status
+ *                         example: true
+ *                       isApproved:
+ *                         type: boolean
+ *                         description: Approval status of the vendor
+ *                         example: false
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Vendor creation timestamp
+ *                         example: "2025-08-04T21:03:26.319Z"
+ *                       updatedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Vendor last update timestamp
+ *                         example: "2025-08-04T21:03:26.319Z"
+ *                       district:
+ *                         type: object
+ *                         description: District details
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 2
+ *                           name:
+ *                             type: string
+ *                             example: "Pokhara"
+ *             example:
+ *               success: true
+ *               data: [
+ *                 {
+ *                   "id": 1,
+ *                   "businessName": "GS Supports",
+ *                   "email": "gssupport@gmail.com",
+ *                   "phoneNumber": "9811263522",
+ *                   "districtId": 2,
+ *                   "isVerified": true,
+ *                   "isApproved": false,
+ *                   "createdAt": "2025-08-04T21:03:26.319Z",
+ *                   "updatedAt": "2025-08-04T21:03:26.319Z",
+ *                   "district": {
+ *                     "id": 2,
+ *                     "name": "Pokhara"
+ *                   }
+ *                 }
+ *               ]
+ *       401:
+ *         description: Unauthorized - Invalid or missing authentication token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. No token provided."
+ *       403:
+ *         description: Forbidden - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Access denied. Admin privileges required."
+ *       503:
+ *         description: Service temporarily unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Service temporarily unavailable"
+ */
+router.get("/unapprove/list", authMiddleware, isAdminOrStaff, vendorController.getUnapprovedVendorList.bind(vendorController));
+
 
 /**
  * @swagger

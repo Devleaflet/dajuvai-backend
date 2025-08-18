@@ -34,6 +34,14 @@ export class VendorService {
         return await this.vendorRepository.find();
     }
 
+    async fetchAllUnapprovedVendor() {
+        return await this.vendorRepository.find({
+            where: {
+                isApproved: false
+            }
+        })
+    }
+
     /**
      * Creates a new vendor with validation on email uniqueness and district existence.
      * @param vendorSignupData - Vendor data for signup, including business info and optional verification.
