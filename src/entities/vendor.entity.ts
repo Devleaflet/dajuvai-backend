@@ -39,6 +39,12 @@ export class Vendor {
     @Column({ default: true })
     isApproved: boolean;
 
+    @Column({ type: "varchar", nullable: true })
+    taxNumber: string; // vat or pan number
+
+    @Column({ type: "text", nullable: true })
+    taxDocument: string; // pdf or image link 
+
     @Column({ nullable: true })
     resetToken: string | null; // used
 

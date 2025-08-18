@@ -18,6 +18,8 @@ export const vendorSignupSchema = z.object({
         .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format'),
     district: z.string()
         .min(1, "district field cannot be empty"),
+    taxNumber: z.string().optional(),
+    taxDocument: z.string().optional()
 });
 
 /**

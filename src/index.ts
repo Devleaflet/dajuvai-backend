@@ -31,6 +31,7 @@ import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
 import { orderCleanUp, tokenCleanUp } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
+import imageRouter from "./routes/image.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, 'uploads');
@@ -90,6 +91,7 @@ app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/vendor/dashboard", vendorDashBoardRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
+app.use("/api/image", imageRouter);
 
 const port = process.env.PORT || 4000;
 

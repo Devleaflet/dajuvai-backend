@@ -128,7 +128,7 @@ export class VendorController {
             }
 
             /* Extract validated data */
-            const { businessName, email, password, phoneNumber, district } = parsed.data;
+            const { businessName, email, password, phoneNumber, district, taxNumber, taxDocument } = parsed.data;
 
             /* Check for existing vendor */
             const existingVendor = await this.vendorService.findVendorByEmail(email);
@@ -160,6 +160,8 @@ export class VendorController {
                 isVerified: false,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
+                taxNumber,
+                taxDocument
             });
 
             /* Send verification email */

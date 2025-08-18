@@ -7,6 +7,8 @@ export interface IVendorSignupRequest {
     verificationCodeExpire: Date,
     district: string;
     isVerified: Boolean;
+    taxNumber?: string;
+    taxDocument?: string;
 }
 
 export interface IVendorLoginRequest {
