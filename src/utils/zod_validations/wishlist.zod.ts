@@ -6,6 +6,7 @@ import { z } from 'zod';
  */
 export const addToWishlistSchema = z.object({
     productId: z.number().int().positive('Product ID must be a positive integer'),
+    variantId: z.number().int().positive('Variant ID must be a positive integer').optional(),
 });
 
 /**

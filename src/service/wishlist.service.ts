@@ -6,6 +6,7 @@ import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveToCartRequest } from '../interface/wishlist.interface';
 import { CartService } from './cart.service';
+import { Variant } from '../entities/variant.entity';
 
 /**
  * Service for managing wishlist-related operations such as
@@ -52,10 +53,11 @@ export class WishlistService {
      * @throws APIError if the product doesn't exist or is already in the wishlist
      */
     async addToWishlist(userId: number, data: IWishlistAddRequest): Promise<Wishlist> {
-        const { productId } = data;
+        const { productId, variantId } = data;
 
         return await AppDataSource.transaction(async (manager) => {
             const productRepository = manager.getRepository(Product);
+            const variantRepository = manager.getRepository(Variant);
             const wishlistRepository = manager.getRepository(Wishlist);
             const wishlistItemRepository = manager.getRepository(WishlistItem);
 
@@ -65,10 +67,26 @@ export class WishlistService {
                 throw new APIError(404, 'Product not found');
             }
 
+            // if variant provided
+            let variant: Variant;
+
+            if (variantId) {
+                variant = await variantRepository.findOne({
+                    where: {
+                        id: variantId.toString(), productId: productId.toString()
+                    }
+                })
+
+                if (!variant) {
+                    throw new APIError(404, "Variant not found")
+                }
+            }
+
+
             // Find existing wishlist or create a new one if none exists
             let wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product'],
+                relations: ['items', 'items.product', 'items.variant'],
             });
 
             if (!wishlist) {
@@ -80,7 +98,7 @@ export class WishlistService {
             }
 
             // Check if product is already in wishlist to prevent duplicates
-            const exists = wishlist.items.some((item) => item.productId === productId);
+            const exists = wishlist.items.some((item) => item.productId === productId && item.variantId === (variantId || null));
             if (exists) {
                 throw new APIError(400, 'Product already in wishlist');
             }
@@ -90,13 +108,15 @@ export class WishlistService {
                 wishlist,
                 product,
                 productId,
+                variant: variant || null,
+                variantId: variantId || null
             });
             await wishlistItemRepository.save(wishlistItem);
 
             // Reload wishlist to get updated items relation
             wishlist = await wishlistRepository.findOne({
                 where: { id: wishlist.id },
-                relations: ['items', 'items.product'],
+                relations: ['items', 'items.product', 'items.variant'],
             });
 
             return wishlist!;
@@ -113,10 +133,13 @@ export class WishlistService {
      * @returns Promise<Wishlist> - Updated wishlist without the removed item
      * @throws APIError if wishlist or item not found, or invalid ID
      */
-    async removeFromWishlist(userId: number, data: IWishlistRemoveRequest): Promise<Wishlist> {
+    async removeFromWishlist(
+        userId: number,
+        data: IWishlistRemoveRequest
+    ): Promise<Wishlist> {
         const { wishlistItemId } = data;
 
-        // Validate wishlistItemId to prevent invalid operations
+        // Validate wishlistItemId
         if (!wishlistItemId || isNaN(wishlistItemId) || wishlistItemId <= 0) {
             throw new APIError(400, 'Valid Wishlist Item ID is required');
         }
@@ -125,29 +148,38 @@ export class WishlistService {
             const wishlistRepository = manager.getRepository(Wishlist);
             const wishlistItemRepository = manager.getRepository(WishlistItem);
 
-            // Fetch wishlist with items for user
+            // Fetch wishlist with items for user, including product & variant
             const wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items'],
+                relations: ['items', 'items.product', 'items.variant'],
             });
             if (!wishlist) {
                 throw new APIError(404, 'Wishlist not found');
             }
 
-            // Check if item exists in wishlist
+            // Find the item to remove
             const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
             if (!wishlistItem) {
                 throw new APIError(404, 'Wishlist item not found');
             }
 
-            // Delete item and remove it from wishlist.items array
+            // Delete the item
             await wishlistItemRepository.delete(wishlistItemId);
+
+            // Remove it from the local array
             wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
 
-            // Save updated wishlist
-            return await wishlistRepository.save(wishlist);
+
+            wishlist.items = wishlist.items.filter((item) => {
+                if (!item.product) return false;
+                if (item.variant) return item.variant.stock > 0;
+                return item.product.stock && item.product.stock > 0;
+            });
+
+            return wishlist;
         });
     }
+
 
     /**
      * Retrieves the wishlist for a given user including product details.
@@ -158,7 +190,7 @@ export class WishlistService {
     async getWishlist(userId: number): Promise<Wishlist | null> {
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product'],
+            relations: ['items', 'items.product', 'items.variant'],
         });
 
         if (!wishlist) {
@@ -166,9 +198,19 @@ export class WishlistService {
         }
 
         // Filter out wishlist items where product is missing or stock is zero
-        wishlist.items = wishlist.items.filter(
-            (item) => item.product && item.product.stock > 0
-        );
+        wishlist.items = wishlist.items.filter((item) => {
+            // Keep if product exists
+            if (!item.product) return false;
+
+            // If product has variants, check variant stock
+            if (item.variant) {
+                return item.variant.stock > 0;
+            }
+
+            // If product has no variants, check product stock
+            return item.product.stock && item.product.stock > 0;
+        });
+
 
         return wishlist;
     }
@@ -181,32 +223,47 @@ export class WishlistService {
      * @returns Promise<Wishlist> - Updated wishlist after removal
      * @throws APIError if wishlist, item, or product not found or stock is insufficient
      */
-    async moveToCart(userId: number, data: IWishlistMoveToCartRequest): Promise<Wishlist> {
+    async moveToCart(
+        userId: number,
+        data: IWishlistMoveToCartRequest
+    ): Promise<Wishlist> {
         const { wishlistItemId, quantity } = data;
 
-        // Fetch wishlist with items and related products
+        // Fetch wishlist with items, including product & variant relations
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product'],
+            relations: ['items', 'items.product', 'items.variant'],
         });
+
         if (!wishlist) {
             throw new APIError(404, 'Wishlist not found');
         }
 
-        // Find the wishlist item and validate product existence
+        // Find the wishlist item
         const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
         if (!wishlistItem || !wishlistItem.product) {
             throw new APIError(404, 'Wishlist item or product not found');
         }
 
-        // Use CartService to add product to cart (handles stock validation internally)
-        await this.cartService.addToCart(userId, { productId: wishlistItem.productId, quantity });
+        // Add to cart, passing variantId if exists
+        await this.cartService.addToCart(userId, {
+            productId: wishlistItem.productId,
+            variantId: wishlistItem.variantId || undefined,
+            quantity,
+        });
 
-        // Remove item from wishlist in DB and local array
+        // Remove from wishlist
         wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
         await this.wishlistItemRepository.delete(wishlistItemId);
 
-        // Save and return updated wishlist
-        return await this.wishlistRepository.save(wishlist);
+        // Optional: filter out items with no stock
+        wishlist.items = wishlist.items.filter((item) => {
+            if (!item.product) return false;
+            if (item.variant) return item.variant.stock > 0;
+            return item.product.stock && item.product.stock > 0;
+        });
+
+        return wishlist;
     }
+
 }

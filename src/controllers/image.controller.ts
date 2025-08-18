@@ -1,6 +1,5 @@
 import { Request, Response } from "express";
 import { APIError } from "../utils/ApiError.utils";
-import { MulterFile } from '../config/multer.config';
 import { ImageService } from '../service/image.service';
 
 export class ImageController {
