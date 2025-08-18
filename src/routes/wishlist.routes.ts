@@ -10,13 +10,13 @@ const wishlistController = new WishlistController();
  * @swagger
  * /api/wishlist:
  *   post:
- *     summary: Add a product to the authenticated user's wishlist
- *     description: Adds the specified product to the wishlist of the authenticated user. Returns the updated wishlist.
- *     tags: [Wishlist]
+ *     summary: Add a product (and optional variant) to the user's wishlist
+ *     description: Creates or updates the authenticated user's wishlist by adding a product. Prevents duplicates.
+ *     tags:
+ *       - Wishlist
  *     security:
  *       - bearerAuth: []
  *     requestBody:
- *       description: Product ID to add to wishlist
  *       required: true
  *       content:
  *         application/json:
@@ -27,11 +27,15 @@ const wishlistController = new WishlistController();
  *             properties:
  *               productId:
  *                 type: integer
- *                 example: 123
- *                 description: The ID of the product to add
+ *                 example: 35
+ *                 description: ID of the product to add
+ *               variantId:
+ *                 type: integer
+ *                 example: 60
+ *                 description: Optional variant ID if the product has variants
  *     responses:
  *       200:
- *         description: Product successfully added to wishlist
+ *         description: Wishlist updated successfully
  *         content:
  *           application/json:
  *             schema:
@@ -42,17 +46,110 @@ const wishlistController = new WishlistController();
  *                   example: true
  *                 data:
  *                   type: object
- *                   description: The updated wishlist object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 3
+ *                     userId:
+ *                       type: integer
+ *                       example: 12
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 6
+ *                           variantId:
+ *                             type: integer
+ *                             example: 60
+ *                           productId:
+ *                             type: integer
+ *                             example: 35
+ *                           createdAt:
+ *                             type: string
+ *                             format: date-time
+ *                             example: "2025-08-18T09:41:49.319Z"
+ *                           product:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 35
+ *                               name:
+ *                                 type: string
+ *                                 example: "RLX | Luxury Explorer | 16570"
+ *                               discount:
+ *                                 type: string
+ *                                 example: "0.00"
+ *                               discountType:
+ *                                 type: string
+ *                                 enum: [PERCENTAGE, FIXED]
+ *                                 example: "PERCENTAGE"
+ *                               status:
+ *                                 type: string
+ *                                 example: "AVAILABLE"
+ *                               hasVariants:
+ *                                 type: boolean
+ *                                 example: true
+ *                               created_at:
+ *                                 type: string
+ *                                 format: date-time
+ *                               updated_at:
+ *                                 type: string
+ *                                 format: date-time
+ *                           variant:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 60
+ *                               sku:
+ *                                 type: string
+ *                                 example: "SKU-GRAY"
+ *                               basePrice:
+ *                                 type: string
+ *                                 example: "6999.00"
+ *                               discount:
+ *                                 type: string
+ *                                 example: "0.00"
+ *                               discountType:
+ *                                 type: string
+ *                                 enum: [PERCENTAGE, FIXED]
+ *                                 example: "PERCENTAGE"
+ *                               attributes:
+ *                                 type: object
+ *                                 example: { "color": "Gray" }
+ *                               variantImages:
+ *                                 type: array
+ *                                 items:
+ *                                   type: string
+ *                                   example: "https://res.cloudinary.com/dxvyc12au/image/upload/v1755502381/products/prod_1755502378837.jpg"
+ *                               stock:
+ *                                 type: integer
+ *                                 example: 10
+ *                               status:
+ *                                 type: string
+ *                                 example: "AVAILABLE"
+ *                               productId:
+ *                                 type: string
+ *                                 example: "35"
+ *                               created_at:
+ *                                 type: string
+ *                                 format: date-time
+ *                               updated_at:
+ *                                 type: string
+ *                                 format: date-time
  *       400:
- *         description: Bad request (e.g., product already in wishlist or missing productId)
+ *         description: Invalid input or product already in wishlist
  *       401:
- *         description: Unauthorized (user not authenticated)
+ *         description: Unauthorized
  *       404:
- *         description: Product not found
+ *         description: Product or variant not found
  *       500:
  *         description: Internal server error
  */
-
 router.post('/', authMiddleware, validateZod(addToWishlistSchema), wishlistController.addToWishlist.bind(wishlistController));
 
 /**
