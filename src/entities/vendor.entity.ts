@@ -36,7 +36,7 @@ export class Vendor {
     @Column({ default: true })
     isVerified: boolean;
 
-    @Column({ default: true })
+    @Column({ default: false })
     isApproved: boolean;
 
     @Column({ type: "varchar", nullable: true })

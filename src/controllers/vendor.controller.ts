@@ -158,6 +158,7 @@ export class VendorController {
                 phoneNumber,
                 district,
                 isVerified: false,
+                isApproved: false,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
                 taxNumber,
@@ -540,7 +541,10 @@ export class VendorController {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
-                throw new APIError(503, 'Vendor update service temporarily unavailable');
+                res.status(500).json({
+                    success: false,
+                    msg: error
+                })
             }
         }
     }

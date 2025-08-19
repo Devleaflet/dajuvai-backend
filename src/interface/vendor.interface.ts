@@ -9,6 +9,7 @@ export interface IVendorSignupRequest {
     isVerified: Boolean;
     taxNumber?: string;
     taxDocument?: string;
+    isApproved?: Boolean;
 }
 
 export interface IVendorLoginRequest {
