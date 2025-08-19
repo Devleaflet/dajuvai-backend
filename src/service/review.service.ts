@@ -93,4 +93,16 @@ export class ReviewService {
 
         return { reviews, averageRating };
     }
+
+    async getAverageRating(productId: number): Promise<number> {
+        const { avg } = await this.reviewRepository
+            .createQueryBuilder("review")
+            .select("AVG(review.rating)", "avg")
+            .where("review.productId = :productId", { productId })
+            .getRawOne();
+
+        // return 0 if no reviews
+        return avg ? parseFloat(parseFloat(avg).toFixed(1)) : 0;
+    }
+
 }

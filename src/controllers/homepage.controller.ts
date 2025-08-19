@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { HomePageSectionService } from '../service/homePageSection.service';
 import { APIError } from '../utils/ApiError.utils';
+import { ReviewService } from '../service/review.service';
 
 /**
  * @class HomePageSectionController
@@ -8,6 +9,7 @@ import { APIError } from '../utils/ApiError.utils';
  */
 export class HomePageSectionController {
     private homePageSectionService: HomePageSectionService;
+    private reviewService: ReviewService
 
     /**
      * @constructor
@@ -15,6 +17,7 @@ export class HomePageSectionController {
      */
     constructor() {
         this.homePageSectionService = new HomePageSectionService();
+        this.reviewService = new ReviewService();
     }
 
     /**
@@ -132,11 +135,29 @@ export class HomePageSectionController {
             // Fetch sections via service
             const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool);
 
+            const sectionsWithRatings = await Promise.all(
+                sections.map(async (section) => {
+                    const productsWithRatings = await Promise.all(
+                        section.products.map(async (product) => {
+                            const avgRating = await this.reviewService.getAverageRating(product.id);
+                            return {
+                                ...product,
+                                avgRating,
+                            };
+                        })
+                    );
+                    return {
+                        ...section,
+                        products: productsWithRatings,
+                    };
+                })
+            );
+
             // Send success response
             res.status(200).json({
                 success: true,
                 message: 'Home page sections retrieved successfully',
-                data: sections,
+                data: sectionsWithRatings,
                 count: sections.length
             });
         } catch (error) {
@@ -172,11 +193,18 @@ export class HomePageSectionController {
             // Fetch section via service
             const section = await this.homePageSectionService.getHomePageSectionById(Number(id));
 
+            const productsWithRatings = await Promise.all(
+                section.products.map(async (product) => {
+                    const avgRating = await this.reviewService.getAverageRating(product.id);
+                    return { ...product, avgRating };
+                })
+            );
+
             // Send success response
             res.status(200).json({
                 success: true,
                 message: 'Home page section retrieved successfully',
-                data: section
+                data: productsWithRatings
             });
         } catch (error) {
             // Handle known API errors

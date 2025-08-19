@@ -22,7 +22,7 @@ export const sendContactEmail = async (dto: ContactInput) => {
     // Email options including recipient, subject, and HTML body generated from dto
     const mailOptions = {
         from: `"Contact Form" <${process.env.USER_EMAIL}>`, // sender address with friendly name
-        to: 'support@yourdomain.com',                       // support or admin email address
+        to: `${dto.email}`,                       // support or admin email address
         subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
         html: generateContactEmailHTML(dto),                // formatted HTML content of the message
     };
