@@ -114,7 +114,7 @@ export class HomePageSectionService {
 
         return await this.homepageSectionRepository.find({
             where: whereCondition,
-            relations: ['products'],
+            relations: ['products', 'products.variants'],
             order: { id: 'ASC' }
         });
     }
@@ -130,7 +130,7 @@ export class HomePageSectionService {
     async getHomePageSectionById(sectionId: number) {
         const section = await this.homepageSectionRepository.findOne({
             where: { id: sectionId },
-            relations: ['products']
+            relations: ['products', 'products.variants']
         });
 
         if (!section) {
