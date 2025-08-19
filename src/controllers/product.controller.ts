@@ -445,16 +445,8 @@ export class ProductController {
         try {
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);
-            const productsWithRatings = await Promise.all(
-                products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return {
-                        ...product,
-                        avgRating,
-                    };
-                })
-            );
-            res.status(200).json({ success: true, data: { productsWithRatings, total } });
+           
+            res.status(200).json({ success: true, data: { products, total } });
         } catch (error) {
             // Handle API errors with specific status codes
             if (error instanceof APIError) {
