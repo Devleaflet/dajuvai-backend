@@ -325,12 +325,12 @@ export class OrderController {
         }
     }
 
-    async trackOrderById(req: AuthRequest<{}, {}, { orderId: string, email: string }, {}>, res: Response): Promise<void> {
+    async trackOrderById(req: AuthRequest<{}, {}, {}, { orderId: string, email: string }>, res: Response): Promise<void> {
         try {
 
-            const orderId = Number(req.body.orderId);
+            const orderId = Number(req.query.orderId);
 
-            const email = req.body.email;
+            const email = req.query.email;
 
 
             if (!orderId) {
