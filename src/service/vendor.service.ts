@@ -31,7 +31,11 @@ export class VendorService {
      */
     async fetchAllVendors(): Promise<Vendor[]> {
         // Simple find all vendors, no filtering.
-        return await this.vendorRepository.find();
+        return await this.vendorRepository.find({
+            where: {
+                isApproved: true
+            }
+        });
     }
 
     async fetchAllUnapprovedVendor() {

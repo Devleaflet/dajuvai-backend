@@ -40,7 +40,7 @@ export const sendContactEmail = async (dto: ContactInput) => {
 export const sendVerificationEmail = async (to: string, sub: string, token?: string) => {
     const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login"
     const mailOptions = {
-        from: `Leaflet <${process.env.USER_EMAIL}>`,
+        from: `<${process.env.USER_EMAIL}>`,
         to,
         subject: sub,
         html: `
