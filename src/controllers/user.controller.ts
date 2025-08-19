@@ -9,6 +9,7 @@ import { User, UserRole } from '../entities/user.entity';
 import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
 import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import AppDataSource from '../config/db.config';
+import { VendorService } from '../service/vendor.service';
 
 /**
  * @class TokenUtils
@@ -44,6 +45,7 @@ class TokenUtils {
  */
 export class UserController {
     private readonly jwtSecret: string;
+    private vendorService: VendorService;
 
     /**
       * @constructor
@@ -51,6 +53,7 @@ export class UserController {
       */
     constructor() {
         this.jwtSecret = process.env.JWT_SECRET || 'your_jwt_secret';
+        this.vendorService = new VendorService();
     }
 
     /**
@@ -401,6 +404,12 @@ export class UserController {
 
             // Check if a user with this email already exists
             let existingUser = await findUserByEmail(email);
+
+            const existingAccount = await this.vendorService.findVendorByEmail(email)
+
+            if (existingAccount) {
+                throw new APIError(400, "User already exists")
+            }
 
             //  Prepare hashed password and verification token
             const hashedPassword = await bcrypt.hash(password, 10);

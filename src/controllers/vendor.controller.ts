@@ -20,6 +20,7 @@ import {
 } from '../utils/zod_validations/vendor.zod';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from '../service/district.service';
+import { findUserByEmail } from '../service/user.service';
 
 /**
  * Utility class for token management
@@ -132,6 +133,13 @@ export class VendorController {
 
             /* Check for existing vendor */
             const existingVendor = await this.vendorService.findVendorByEmail(email);
+
+            const existingUser = await findUserByEmail(email);
+
+            if(existingUser){
+                throw new APIError(409, 'User already exists');
+            }
+            
             if (existingVendor) {
                 throw new APIError(409, 'Vendor already exists');
             }
