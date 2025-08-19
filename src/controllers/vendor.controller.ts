@@ -193,7 +193,10 @@ export class VendorController {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
                 console.error('Vendor signup error:', error);
-                throw new APIError(503, 'Vendor registration service temporarily unavailable');
+                res.status(500).json({
+                    success: false,
+                    msg: error
+                })
             }
         }
     }
