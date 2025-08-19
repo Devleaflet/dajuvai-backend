@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { WishlistController } from '../controllers/wishlist.controller';
-import { authMiddleware, validateZod } from '../middlewares/auth.middleware';
+import { authMiddleware, requireUserRole, validateZod } from '../middlewares/auth.middleware';
 import { addToWishlistSchema, removeFromWishlistSchema, moveToCartSchema } from '../utils/zod_validations/wishlist.zod';
 
 const router = Router();
@@ -150,7 +150,7 @@ const wishlistController = new WishlistController();
  *       500:
  *         description: Internal server error
  */
-router.post('/', authMiddleware, validateZod(addToWishlistSchema), wishlistController.addToWishlist.bind(wishlistController));
+router.post('/', authMiddleware, requireUserRole, validateZod(addToWishlistSchema), wishlistController.addToWishlist.bind(wishlistController));
 
 /**
  * @swagger
@@ -199,7 +199,7 @@ router.post('/', authMiddleware, validateZod(addToWishlistSchema), wishlistContr
  *         description: Internal server error
  */
 
-router.delete('/', authMiddleware, validateZod(removeFromWishlistSchema), wishlistController.removeFromWishlist.bind(wishlistController));
+router.delete('/', authMiddleware, requireUserRole, validateZod(removeFromWishlistSchema), wishlistController.removeFromWishlist.bind(wishlistController));
 
 /**
  * @swagger
@@ -251,7 +251,7 @@ router.delete('/', authMiddleware, validateZod(removeFromWishlistSchema), wishli
  *       500:
  *         description: Internal server error
  */
-router.get('/', authMiddleware, wishlistController.getWishlist.bind(wishlistController));
+router.get('/', authMiddleware, requireUserRole, wishlistController.getWishlist.bind(wishlistController));
 
 /**
  * @swagger
@@ -304,6 +304,6 @@ router.get('/', authMiddleware, wishlistController.getWishlist.bind(wishlistCont
  *       500:
  *         description: Internal server error
  */
-router.post('/move-to-cart', authMiddleware, validateZod(moveToCartSchema), wishlistController.moveToCart.bind(wishlistController));
+router.post('/move-to-cart', authMiddleware, requireUserRole, validateZod(moveToCartSchema), wishlistController.moveToCart.bind(wishlistController));
 
 export default router;

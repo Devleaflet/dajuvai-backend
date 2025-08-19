@@ -1,6 +1,6 @@
 import { Router } from 'express';
 
-import { authMiddleware, isAccountOwner, validateZod } from '../middlewares/auth.middleware';
+import { authMiddleware, isAccountOwner, requireUserRole, validateZod } from '../middlewares/auth.middleware';
 import { addToCartSchema, removeFromCartSchema } from '../utils/zod_validations/cart.zod';
 import { CartController } from '../controllers/cart.controller';
 
@@ -209,7 +209,7 @@ const cartController = new CartController();
  *                   type: string
  *                   example: "Internal server error"
  */
-cartRouter.post('/', authMiddleware, validateZod(addToCartSchema), cartController.addToCart.bind(cartController));
+cartRouter.post('/', authMiddleware, requireUserRole, validateZod(addToCartSchema), cartController.addToCart.bind(cartController));
 
 
 /**
@@ -574,7 +574,7 @@ cartRouter.delete(
  *                   description: Error message indicating service status
  *                   example: "Cart service temporarily unavailable"
  */
-cartRouter.get('/', authMiddleware, cartController.getCart.bind(cartController));
+cartRouter.get('/', authMiddleware, requireUserRole, cartController.getCart.bind(cartController));
 
 // cartRouter.get("/vendor/cart", authMiddleware, cartController.getCartWithVendor.bind(cartController));
 
