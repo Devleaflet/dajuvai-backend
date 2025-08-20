@@ -142,7 +142,8 @@ export class HomePageSectionController {
                             const avgRating = await this.reviewService.getAverageRating(product.id);
                             return {
                                 ...product,
-                                avgRating,
+                                avgRating: avgRating.avgRating,
+                                ratingCount: avgRating.count
                             };
                         })
                     );
@@ -196,7 +197,7 @@ export class HomePageSectionController {
             const productsWithRatings = await Promise.all(
                 section.products.map(async (product) => {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return { ...product, avgRating };
+                    return { ...product, avgRating: avgRating.avgRating, count: avgRating.count };
                 })
             );
 

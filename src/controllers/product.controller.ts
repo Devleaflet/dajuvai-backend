@@ -87,7 +87,8 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating,
+                        avgRating: avgRating.avgRating,
+                        count: avgRating.count
                     };
                 })
             );
@@ -207,7 +208,8 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating,
+                        avgRating: avgRating.avgRating,
+                        count: avgRating.count
                     };
                 })
             );
@@ -244,7 +246,8 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating,
+                        avgRating: avgRating.avgRating,
+                        count: avgRating.count
                     };
                 })
             );
@@ -316,7 +319,18 @@ export class ProductController {
                 Number(limit)
             );
 
-            res.status(200).json({ success: true, data: { products, total } });
+            const productsWithRatings = await Promise.all(
+                products.map(async (product) => {
+                    const avgRating = await this.reviewService.getAverageRating(product.id);
+                    return {
+                        ...product,
+                        avgRating: avgRating.avgRating,
+                        count: avgRating.count
+                    };
+                })
+            );
+
+            res.status(200).json({ success: true, data: { productsWithRatings, total } });
         } catch (error) {
             // Handle API errors with specific status codes
             if (error instanceof APIError) {
@@ -445,7 +459,7 @@ export class ProductController {
         try {
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);
-           
+
             res.status(200).json({ success: true, data: { products, total } });
         } catch (error) {
             // Handle API errors with specific status codes

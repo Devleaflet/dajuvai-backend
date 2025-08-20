@@ -41,7 +41,8 @@ export class VendorService {
     async fetchAllUnapprovedVendor() {
         return await this.vendorRepository.find({
             where: {
-                isApproved: false
+                isApproved: false,
+                isVerified: true
             }
         })
     }
