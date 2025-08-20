@@ -94,20 +94,17 @@ export class ReviewService {
         return { reviews, averageRating };
     }
 
-    async getAverageRating(productId: number): Promise<{ avgRating: number; count: number }> {
+    async getAverageRating(productId: number) {
         const result = await this.reviewRepository
             .createQueryBuilder("review")
             .select("AVG(review.rating)", "avg")
-            .addSelect("COUNT(reviews.id)", "count")
+            // .addSelect("COUNT(reviews.id)", "count")
             .where("review.productId = :productId", { productId })
             .getRawOne();
 
         // return 0 if no reviews
 
-        return {
-            avgRating: result?.avg ? parseFloat(result.avg) : 0,
-            count: result?.count ? parseInt(result.count, 10) : 0,
-        };
+        return result
     }
 
 }

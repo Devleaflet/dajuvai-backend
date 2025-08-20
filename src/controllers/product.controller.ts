@@ -87,8 +87,7 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating: avgRating.avgRating,
-                        count: avgRating.count
+                        avgRating
                     };
                 })
             );
@@ -208,8 +207,7 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating: avgRating.avgRating,
-                        count: avgRating.count
+                        avgRating,
                     };
                 })
             );
@@ -246,8 +244,7 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating: avgRating.avgRating,
-                        count: avgRating.count
+                        avgRating
                     };
                 })
             );
@@ -324,8 +321,7 @@ export class ProductController {
                     const avgRating = await this.reviewService.getAverageRating(product.id);
                     return {
                         ...product,
-                        avgRating: avgRating.avgRating,
-                        count: avgRating.count
+                        avgRating
                     };
                 })
             );

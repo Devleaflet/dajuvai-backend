@@ -135,31 +135,12 @@ export class HomePageSectionController {
             // Fetch sections via service
             const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool);
 
-            const sectionsWithRatings = await Promise.all(
-                sections.map(async (section) => {
-                    const productsWithRatings = await Promise.all(
-                        section.products.map(async (product) => {
-                            const avgRating = await this.reviewService.getAverageRating(product.id);
-                            return {
-                                ...product,
-                                avgRating: avgRating.avgRating,
-                                ratingCount: avgRating.count
-                            };
-                        })
-                    );
-                    return {
-                        ...section,
-                        products: productsWithRatings,
-                    };
-                })
-            );
 
             // Send success response
             res.status(200).json({
                 success: true,
                 message: 'Home page sections retrieved successfully',
-                data: sectionsWithRatings,
-                count: sections.length
+                data: sections,
             });
         } catch (error) {
             // Handle known API errors
@@ -194,18 +175,18 @@ export class HomePageSectionController {
             // Fetch section via service
             const section = await this.homePageSectionService.getHomePageSectionById(Number(id));
 
-            const productsWithRatings = await Promise.all(
-                section.products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return { ...product, avgRating: avgRating.avgRating, count: avgRating.count };
-                })
-            );
+            // const productsWithRatings = await Promise.all(
+            //     section.products.map(async (product) => {
+            //         const avgRating = await this.reviewService.getAverageRating(product.id);
+            //         return { ...product, avgRating: avgRating.avgRating, count: avgRating.count };
+            //     })
+            // );
 
             // Send success response
             res.status(200).json({
                 success: true,
                 message: 'Home page section retrieved successfully',
-                data: productsWithRatings
+                data: section
             });
         } catch (error) {
             // Handle known API errors
