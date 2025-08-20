@@ -316,17 +316,17 @@ export class ProductController {
                 Number(limit)
             );
 
-            const productsWithRatings = await Promise.all(
-                products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return {
-                        ...product,
-                        avgRating
-                    };
-                })
-            );
+            // const productsWithRatings = await Promise.all(
+            //     products.map(async (product) => {
+            //         const avgRating = await this.reviewService.getAverageRating(product.id);
+            //         return {
+            //             ...product,
+            //             avgRating
+            //         };
+            //     })
+            // );
 
-            res.status(200).json({ success: true, data: { productsWithRatings, total } });
+            res.status(200).json({ success: true, data: { products, total } });
         } catch (error) {
             // Handle API errors with specific status codes
             if (error instanceof APIError) {
