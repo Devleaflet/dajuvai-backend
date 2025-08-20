@@ -1,15 +1,19 @@
 import { v2 as cloudinary } from 'cloudinary';
-import { APIError } from '../utils/ApiError.utils';
 export class ImageService {
 
     async uploadSingleImage(file: Express.Multer.File, folderName: string) {
         if (!file) throw new Error("No file provided");
 
+        const isPdf = file.mimetype === "application/pdf";
+
         const result = await new Promise<string>((resolve, reject) => {
             cloudinary.uploader.upload_stream(
-                { folder: folderName, resource_type: 'auto' },
+                {
+                    folder: folderName,
+                    resource_type: isPdf ? "raw" : "auto" 
+                },
                 (error, result) => {
-                    if (error || !result) return reject(error || new Error('Upload failed'));
+                    if (error || !result) return reject(error || new Error("Upload failed"));
                     resolve(result.secure_url);
                 }
             ).end(file.buffer);

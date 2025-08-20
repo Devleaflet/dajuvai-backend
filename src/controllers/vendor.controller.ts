@@ -173,6 +173,9 @@ export class VendorController {
                 taxDocument
             });
 
+            console.log("-------------------Vendor -----------------------------")
+            console.log(vendor);
+
             /* Send verification email */
             await sendVerificationEmail(email, 'Vendor Email Verification', verificationToken);
 

@@ -33,7 +33,7 @@ export class Vendor {
     @Column({ nullable: true })
     verificationCodeExpire: Date | null;
 
-    @Column({ default: true })
+    @Column({ default: false })
     isVerified: boolean;
 
     @Column({ default: false })

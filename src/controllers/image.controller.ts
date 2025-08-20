@@ -16,7 +16,7 @@ export class ImageController {
                 return res.status(400).json({ message: 'No file uploaded' });
             }
 
-            const file = files[0]; 
+            const file = files[0];
             const folder = req.query.folder;
 
             const upload = await this.imageService.uploadSingleImage(file, folder);

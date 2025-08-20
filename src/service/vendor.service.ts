@@ -79,6 +79,8 @@ export class VendorService {
                 districtId: districtEntity.id,
                 verificationCode,
                 verificationCodeExpire,
+                isVerified: false,
+                isApproved: false,
                 taxNumber,
                 taxDocument
             });
