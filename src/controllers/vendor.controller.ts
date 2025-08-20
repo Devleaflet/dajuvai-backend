@@ -131,16 +131,19 @@ export class VendorController {
             /* Extract validated data */
             const { businessName, email, password, phoneNumber, district, taxNumber, taxDocument } = parsed.data;
 
+            const verificationToken = TokenUtils.generateToken();
+
             /* Check for existing vendor */
             const existingVendor = await this.vendorService.findVendorByEmail(email);
 
             const existingUser = await findUserByEmail(email);
 
-            if(existingUser){
+            if (existingUser) {
                 throw new APIError(409, 'User already exists');
             }
-            
+
             if (existingVendor) {
+                if(existingVendor.isVerified)
                 throw new APIError(409, 'Vendor already exists');
             }
 
@@ -154,7 +157,6 @@ export class VendorController {
             const hashedPassword = await bcrypt.hash(password, 10);
 
             /* Generate verification token */
-            const verificationToken = TokenUtils.generateToken();
             const hashedToken = await TokenUtils.hashToken(verificationToken);
             const verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
 

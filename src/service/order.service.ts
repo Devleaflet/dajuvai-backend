@@ -16,6 +16,7 @@ import { PromoService } from './promo.service';
 import { add } from 'winston';
 import { number, string } from 'zod';
 import { InventoryStatus } from '../entities/product.enum';
+import { Variant } from '../entities/variant.entity';
 
 
 /**
@@ -36,6 +37,7 @@ export class OrderService {
     private districtRepository: Repository<District>;
     private productRepository: Repository<Product>;
     private promoService: PromoService;
+    private variantRepository: Repository<Variant>;
 
 
     /**
@@ -71,6 +73,8 @@ export class OrderService {
         this.productRepository = AppDataSource.getRepository(Product);
 
         this.promoService = new PromoService();
+
+        this.variantRepository = AppDataSource.getTreeRepository(Variant);
     }
 
     /**
@@ -100,14 +104,9 @@ export class OrderService {
      * @returns {Promise<Cart>} The cart entity with items and related product/vendor/district data.
      */
     private async getCart(userId: number): Promise<Cart> {
-        // Fetch the cart belonging to the user, including nested relations:
-        // - items in the cart
-        // - each item's associated product
-        // - the vendor of each product
-        // - the district of each vendor
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.product.vendor', 'items.product.vendor.district'],
+            relations: ['items', 'items.product', 'items.product.vendor', 'items.product.vendor.district', 'items.variant'],
         });
 
         // If cart not found or cart has no items, throw an error indicating cart is empty
@@ -312,11 +311,35 @@ export class OrderService {
 
             // Check stock before creating the order
             for (const item of cart.items) {
-                const product = await this.productRepository.findOne({ where: { id: item.product.id } });
-                if (!product || product.stock < item.quantity) {
-                    throw new APIError(400, `Insufficient stock for product: ${product?.name || 'unknown'}`);
+                // If the cart item has a variant
+                if (item.variantId) {
+                    const variant = await this.variantRepository.findOne({
+                        where: { id: item.variantId.toString() },
+                    });
+
+                    if (!variant) {
+                        throw new APIError(404, `Variant not found for product: ${item.product.name}`);
+                    }
+
+                    if (variant.stock < item.quantity) {
+                        throw new APIError(400, `Insufficient stock for variant of product: ${item.product.name}`);
+                    }
+                } else {
+                    // Fallback to product-level stock if no variant
+                    const product = await this.productRepository.findOne({
+                        where: { id: item.product.id },
+                    });
+
+                    if (!product) {
+                        throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+                    }
+
+                    if (!product.stock || product.stock < item.quantity) {
+                        throw new APIError(400, `Insufficient stock for product: ${product.name}`);
+                    }
                 }
             }
+
 
 
             // Either fetch user's existing address or create a new one based on input
@@ -338,34 +361,58 @@ export class OrderService {
 
 
                 for (const item of order.orderItems) {
-                    const product = await this.productRepository.findOne({
-                        where: {
-                            id: item.product.id
+                    if (item.variantId) {
+                        const variant = await this.variantRepository.findOne({
+                            where: { id: item.variantId.toString() },
+                        });
+
+                        if (!variant) {
+                            throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
                         }
-                    })
 
-                    if (!product) {
-                        throw new APIError(404, `Product not found for order item ID: ${item.id}`);
-                    }
+                        if (variant.stock < item.quantity) {
+                            throw new APIError(400, `Insufficient stock for variant of product ${item.product.name}`);
+                        }
 
+                        variant.stock -= item.quantity;
 
-                    if (product.stock < item.quantity) {
-                        throw new APIError(400, `Insufficient stock for product ${product.name}`);
-                    }
+                        if (variant.stock <= 0) {
+                            variant.status = InventoryStatus.OUT_OF_STOCK;
+                        } else if (variant.stock < 5) {
+                            variant.status = InventoryStatus.LOW_STOCK;
+                        } else {
+                            variant.status = InventoryStatus.AVAILABLE;
+                        }
 
-                    product.stock -= item.quantity;
+                        await this.variantRepository.save(variant);
 
-                    // update product status
-                    if (product.stock <= 0) {
-                        product.status = InventoryStatus.OUT_OF_STOCK;
-                    } else if (product.stock < 5) {
-                        product.status = InventoryStatus.LOW_STOCK;
                     } else {
-                        product.status = InventoryStatus.AVAILABLE;
-                    }
+                        const product = await this.productRepository.findOne({
+                            where: { id: item.product.id },
+                        });
 
-                    await this.productRepository.save(product);
+                        if (!product) {
+                            throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                        }
+
+                        if (!product.stock || product.stock < item.quantity) {
+                            throw new APIError(400, `Insufficient stock for product ${product.name}`);
+                        }
+
+                        product.stock -= item.quantity;
+
+                        if (product.stock <= 0) {
+                            product.status = InventoryStatus.OUT_OF_STOCK;
+                        } else if (product.stock < 5) {
+                            product.status = InventoryStatus.LOW_STOCK;
+                        } else {
+                            product.status = InventoryStatus.AVAILABLE;
+                        }
+
+                        await this.productRepository.save(product);
+                    }
                 }
+
 
                 await this.cartService.clearCart(userId);
             } else if (

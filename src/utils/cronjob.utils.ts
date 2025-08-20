@@ -3,9 +3,11 @@ import { User } from "../entities/user.entity";
 import { LessThan, Not } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { OrderStatus, Order } from '../entities/order.entity';
+import { Vendor } from "../entities/vendor.entity";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
+const vendorDB = AppDataSource.getRepository(Vendor);
 
 /**
  * Periodic cleanup of expired user verification tokens.
@@ -103,3 +105,10 @@ export const orderCleanUp = () => {
         }
     });
 };
+
+
+export const unverifiedVenorCleanUP = () => {
+    cron.schedule("* * * *", async ()=> {
+
+    })
+} 
