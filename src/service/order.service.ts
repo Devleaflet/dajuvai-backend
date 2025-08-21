@@ -513,12 +513,10 @@ export class OrderService {
                 }
 
                 if (variant.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". 
-                        Available: ${variant.stock}, Requested: ${item.quantity}`
+                    throw new APIError(400,
+                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
+                        `Available: ${variant.stock}, Requested: ${item.quantity}`
                     );
-
                 }
             } else {
                 // Fallback to product-level stock if no variant
@@ -531,9 +529,9 @@ export class OrderService {
                 }
 
                 if (!product.stock || product.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for product "${product.name}". Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                    throw new APIError(400,
+                        `Insufficient stock for product "${product.name}". ` +
+                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`
                     );
                 }
             }
@@ -554,12 +552,10 @@ export class OrderService {
 
                 // Double-check stock again (in case of concurrent orders)
                 if (variant.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". 
-                        Available: ${variant.stock}, Requested: ${item.quantity}`
+                    throw new APIError(400,
+                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
+                        `Available: ${variant.stock}, Requested: ${item.quantity}`
                     );
-
                 }
 
                 variant.stock -= item.quantity;
@@ -586,11 +582,10 @@ export class OrderService {
 
                 // Double-check stock again (in case of concurrent orders)
                 if (!product.stock || product.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for product "${product.name}". Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                    throw new APIError(400,
+                        `Insufficient stock for product "${product.name}". ` +
+                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`
                     );
-
                 }
 
                 product.stock -= item.quantity;
@@ -608,6 +603,8 @@ export class OrderService {
             }
         }
     }
+
+
     /**
      * Verify payment for an order and update its status accordingly.
      *
