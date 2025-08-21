@@ -553,7 +553,7 @@ private async updateStock(orderItems: any[]): Promise<void> {
             // Double-check stock again (in case of concurrent orders)
             if (variant.stock < item.quantity) {
                 throw new APIError(400, 
-                    `Insufficient stock for variant "${variant.name || 'N/A'}" of product "${item.product.name}". ` +
+                    `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
                     `Available: ${variant.stock}, Requested: ${item.quantity}`
                 );
             }
