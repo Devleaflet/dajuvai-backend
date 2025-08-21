@@ -121,83 +121,87 @@ export class VendorController {
      */
     async vendorSignup(req: VendorAuthRequest<{}, {}, IVendorSignupRequest>, res: Response): Promise<void> {
         try {
-            /* Validate request body using Zod schema */
+            /* ✅ Validate request body using Zod schema */
             const parsed = vendorSignupSchema.safeParse(req.body);
             if (!parsed.success) {
                 res.status(400).json({ success: false, errors: parsed.error.errors });
                 return;
             }
 
-            /* Extract validated data */
-            const { businessName, email, password, phoneNumber, district, taxNumber, taxDocument, companyDocument } = parsed.data;
+            const {
+                businessName,
+                email,
+                password,
+                phoneNumber,
+                district,
+                businessRegNumber,
+                taxNumber,
+                taxDocuments,
+                citizenshipDocuments,
+                chequePhoto,
+                bankDetails,
+            } = parsed.data;
 
             const verificationToken = TokenUtils.generateToken();
 
-            /* Check for existing vendor */
+            /* ✅ Check for existing vendor or user */
             const existingVendor = await this.vendorService.findVendorByEmail(email);
-
             const existingUser = await findUserByEmail(email);
 
-            if (existingUser) {
-                throw new APIError(409, 'User already exists');
-            }
+            if (existingUser) throw new APIError(409, "User already exists");
+            if (existingVendor && existingVendor.isVerified) throw new APIError(409, "Vendor already exists");
 
-            if (existingVendor) {
-                if (existingVendor.isVerified)
-                    throw new APIError(409, 'Vendor already exists');
-            }
+            /* ✅ Check if district exists */
+            const districtEntity = await this.districtService.findDistrictByName(district);
+            if (!districtEntity) throw new APIError(400, "District does not exist");
 
-            /* Check if district exists */
-            const districtExists = await this.districtService.findDistrictByName(district);
-            if (!districtExists) {
-                throw new APIError(400, 'District does not exists');
-            }
-
-            /* Hash password */
+            /* ✅ Hash password */
             const hashedPassword = await bcrypt.hash(password, 10);
 
-            /* Generate verification token */
+            /* ✅ Generate verification token */
             const hashedToken = await TokenUtils.hashToken(verificationToken);
-            const verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
+            const verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
-            /* Create vendor */
+            /* ✅ Create vendor */
             const vendor = await this.vendorService.createVendor({
                 businessName,
                 email,
                 password: hashedPassword,
                 phoneNumber,
                 district,
-                isVerified: false,
-                isApproved: false,
+                businessRegNumber,
+                taxNumber,
+                taxDocuments, // array
+                citizenshipDocuments, // optional array
+                chequePhoto,
+                accountName: bankDetails.accountName,
+                bankName: bankDetails.bankName,
+                accountNumber: bankDetails.accountNumber,
+                bankBranch: bankDetails.bankBranch,
+                bankCode: bankDetails.bankCode,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
-                taxNumber,
-                taxDocument,
-                companyDocument
             });
 
-            console.log("-------------------Vendor -----------------------------")
-            console.log(vendor);
+            /* ✅ Send verification email */
+            await sendVerificationEmail(email, "Vendor Email Verification", verificationToken);
 
-            /* Send verification email */
-            await sendVerificationEmail(email, 'Vendor Email Verification', verificationToken);
-
-            /* Generate JWT */
+            /* ✅ Generate JWT */
             const token = jwt.sign(
                 { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
                 this.jwtSecret,
-                { expiresIn: '2h' }
+                { expiresIn: "2h" }
             );
 
-            /* Set JWT cookie */
-            res.cookie('vendorToken', token, {
+            /* ✅ Set JWT cookie */
+            res.cookie("vendorToken", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
                 maxAge: 2 * 60 * 60 * 1000,
             });
 
-            /* Send success response */
+            /* ✅ Send success response */
             res.status(201).json({
                 success: true,
                 vendor,
@@ -207,11 +211,8 @@ export class VendorController {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
-                console.error('Vendor signup error:', error);
-                res.status(500).json({
-                    success: false,
-                    msg: error
-                })
+                console.error("Vendor signup error:", error);
+                res.status(500).json({ success: false, msg: error.message || "Internal Server Error" });
             }
         }
     }

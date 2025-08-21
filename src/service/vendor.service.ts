@@ -55,21 +55,35 @@ export class VendorService {
      */
     async createVendor(vendorSignupData: IVendorSignupRequest): Promise<Vendor> {
         try {
-            const { businessName, email, password, phoneNumber, district, verificationCode, verificationCodeExpire, taxNumber, taxDocument, companyDocument } = vendorSignupData;
+            const {
+                businessName,
+                email,
+                password,
+                phoneNumber,
+                district,
+                businessRegNumber,
+                taxNumber,
+                taxDocuments,
+                citizenshipDocuments,
+                chequePhoto,
+                accountName,
+                bankName,
+                accountNumber,
+                bankBranch,
+                bankCode,
+                verificationCode,
+                verificationCodeExpire,
+            } = vendorSignupData;
 
-            // Check if vendor with this email already exists to prevent duplicates
+            // ✅ Prevent duplicate vendors
             const existing = await this.vendorRepository.findOne({ where: { email } });
-            if (existing) {
-                throw new APIError(409, 'Vendor already exists');
-            }
+            if (existing) throw new APIError(409, "Vendor already exists");
 
-            // Validate district exists in DB, if not throw error
+            // ✅ Ensure district exists
             const districtEntity = await this.districtService.findDistrictByName(district);
-            if (!districtEntity) {
-                throw new APIError(400, 'District does not exist');
-            }
+            if (!districtEntity) throw new APIError(400, "District does not exist");
 
-            // Create new vendor entity with district relation
+            // ✅ Create vendor entity
             const vendor = this.vendorRepository.create({
                 businessName,
                 email,
@@ -77,24 +91,27 @@ export class VendorService {
                 phoneNumber,
                 district: districtEntity,
                 districtId: districtEntity.id,
+                businessRegNumber,
+                taxNumber,
+                taxDocuments,
+                citizenshipDocuments,
+                chequePhoto,
+                accountName,
+                bankName,
+                accountNumber,
+                bankBranch,
+                bankCode,
                 verificationCode,
                 verificationCodeExpire,
                 isVerified: false,
                 isApproved: false,
-                taxNumber,
-                taxDocument,
-                companyDocument
             });
 
-            // Save vendor to DB
             return await this.vendorRepository.save(vendor);
-
         } catch (error) {
-            // Re-throw with more context for easier debugging
             throw new Error(`Failed to create vendor: ${error.message}`);
         }
     }
-
     /**
      * Finds a vendor by email.
      * @param email - Vendor's email to search for.
