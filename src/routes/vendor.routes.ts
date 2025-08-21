@@ -434,7 +434,7 @@ router.get('/:vendorId/products', productController.getProductsByVendorId.bind(p
  *                   type: string
  *                   example: "Vendor service temporarily unavailable"
  */
-router.get('/:id', authMiddleware, isAdminOrStaff, vendorController.getVendorById.bind(vendorController));
+router.get('/:id', vendorController.getVendorById.bind(vendorController));
 
 /**
  * @swagger
