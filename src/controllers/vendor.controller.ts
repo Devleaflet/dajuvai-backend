@@ -172,7 +172,8 @@ export class VendorController {
                 verificationCode: hashedToken,
                 verificationCodeExpire,
                 taxNumber,
-                taxDocument
+                taxDocument,
+                companyDocument
             });
 
             console.log("-------------------Vendor -----------------------------")
