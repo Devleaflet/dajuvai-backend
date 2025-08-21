@@ -2,6 +2,9 @@ import { Request, Response, NextFunction } from 'express';
 import { HomePageSectionService } from '../service/homePageSection.service';
 import { APIError } from '../utils/ApiError.utils';
 import { ReviewService } from '../service/review.service';
+import { ProductController } from './product.controller';
+import { DataSource } from 'typeorm';
+import AppDataSource from '../config/db.config';
 
 /**
  * @class HomePageSectionController
@@ -10,6 +13,7 @@ import { ReviewService } from '../service/review.service';
 export class HomePageSectionController {
     private homePageSectionService: HomePageSectionService;
     private reviewService: ReviewService
+    private productController: ProductController;
 
     /**
      * @constructor
@@ -18,6 +22,7 @@ export class HomePageSectionController {
     constructor() {
         this.homePageSectionService = new HomePageSectionService();
         this.reviewService = new ReviewService();
+        this.productController = new ProductController(AppDataSource)
     }
 
     /**
@@ -129,19 +134,39 @@ export class HomePageSectionController {
     getAllHomePageSections = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             // Parse and convert includeInactive query parameter
+            // Parse and convert includeInactive query parameter
             const includeInactiveRaw = req.query.includeInactive;
             const includeInactiveBool = includeInactiveRaw?.toString().toLowerCase() === 'true';
 
-            // Fetch sections via service
+            // Fetch sections with products
             const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool);
 
+            const sectionsWithRatings = await Promise.all(
+                sections.map(async (section) => {
+                    const productsWithRatings = await Promise.all(
+                        section.products.map(async (product) => {
+                            const { avg, count } = await this.reviewService.getAverageRating(product.id);
+                            return {
+                                ...product,
+                                avgRating: avg,
+                                reviewCount: count,
+                            };
+                        })
+                    );
+                    return {
+                        ...section,
+                        products: productsWithRatings,
+                    };
+                })
+            );
 
-            // Send success response
             res.status(200).json({
                 success: true,
                 message: 'Home page sections retrieved successfully',
-                data: sections,
+                data: sectionsWithRatings,
             });
+
+
         } catch (error) {
             // Handle known API errors
             if (error instanceof APIError) {
@@ -175,18 +200,18 @@ export class HomePageSectionController {
             // Fetch section via service
             const section = await this.homePageSectionService.getHomePageSectionById(Number(id));
 
-            // const productsWithRatings = await Promise.all(
-            //     section.products.map(async (product) => {
-            //         const avgRating = await this.reviewService.getAverageRating(product.id);
-            //         return { ...product, avgRating: avgRating.avgRating, count: avgRating.count };
-            //     })
-            // );
+            const productsWithRatings = await Promise.all(
+                section.products.map(async (product) => {
+                    const avgRating = await this.reviewService.getAverageRating(product.id);
+                    return { ...product, avgRating: avgRating.avg, count: avgRating.count };
+                })
+            );
 
             // Send success response
             res.status(200).json({
                 success: true,
                 message: 'Home page section retrieved successfully',
-                data: section
+                data: productsWithRatings
             });
         } catch (error) {
             // Handle known API errors

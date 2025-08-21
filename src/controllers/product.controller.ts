@@ -6,7 +6,6 @@ import { APIError } from '../utils/ApiError.utils';
 import { IAdminProductQueryParams, IProductQueryParams } from '../interface/product.interface';
 import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
-import { MulterFile } from '../config/multer.config';
 import { ReviewService } from '../service/review.service';
 
 
@@ -69,39 +68,7 @@ export class ProductController {
         }
     }
 
-    /**
-     * @method getAll
-     * @route GET /admin/products/all
-     * @description Retrieve all products with admin-level access.
-     * @param {Request} req - Express request object.
-     * @param {Response} res - Express response object.
-     * @returns {Promise<void>} Responds with array of all products.
-     * @access Admin and staff
-     */
-    async getAll(req: Request, res: Response): Promise<void> {
-        try {
-            // Fetch all products from service layer
-            const products = await this.productService.getAlllProducts();
-            const productsWithRatings = await Promise.all(
-                products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return {
-                        ...product,
-                        avgRating
-                    };
-                })
-            );
-            res.status(200).json({ success: true, data: productsWithRatings });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Handle unexpected errors with generic 500 response
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
-    }
+
 
 
 
@@ -187,46 +154,21 @@ export class ProductController {
     }
 
 
-    async getProducts(req: Request<{ categoryId: string, subcategoryId: string }, {}, {}, IProductQueryParams>, res: Response) {
-        try {
-            console.log('Route params:', req.params);
-            console.log('Query params:', req.query);
 
-            // Merge route params with query params for comprehensive filtering
-            const queryParams = {
-                ...req.query,
-                categoryId: req.params.categoryId ? Number(req.params.categoryId) : req.query.categoryId,
-                subcategoryId: req.params.subcategoryId ? Number(req.params.subcategoryId) : req.query.subcategoryId
-            };
 
-            // Filter products based on merged parameters
-            const products = await this.productService.filterProducts(queryParams);
+    async returnProuctRatings(products: any) {
+        const productsWithRatings = await Promise.all(
+            products.map(async (product) => {
+                const avgRating = await this.reviewService.getAverageRating(product.id);
+                return {
+                    ...product,
+                    avgRating: avgRating.avg,
+                    count: avgRating.count
+                };
+            })
+        );
 
-            const productsWithRatings = await Promise.all(
-                products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return {
-                        ...product,
-                        avgRating,
-                    };
-                })
-            );
-            res.status(200).json({ success: true, data: productsWithRatings });
-        } catch (error) {
-            console.error('getProducts error details:', error);
-
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Include error details in development environment
-                res.status(500).json({
-                    success: false,
-                    message: 'Internal Server Error',
-                    error: process.env.NODE_ENV === 'development' ? error.message : undefined
-                });
-            }
-        }
+        return productsWithRatings
     }
 
 
@@ -239,20 +181,12 @@ export class ProductController {
 
             // Filter products through service layer
             const products = await this.productService.filterProducts(queryParams);
-            const productsWithRatings = await Promise.all(
-                products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return {
-                        ...product,
-                        avgRating
-                    };
-                })
-            );
+            const product = await this.returnProuctRatings(products);
 
             return res.status(200).json({
                 success: true,
                 message: "All products retrieved succesfully",
-                data: productsWithRatings
+                data: product
             })
         } catch (error) {
             // Handle API errors with specific status codes
@@ -275,6 +209,8 @@ export class ProductController {
             // Fetch product by ID and subcategory
             const product = await this.productService.getProductById(Number(id), Number(subcategoryId));
 
+            const productWithRating = await this.returnProuctRatings(product);
+
             // Return 404 if product doesn't exist
             if (!product) {
                 return res.status(404).json({ success: false, message: 'Product not found' });
@@ -282,7 +218,7 @@ export class ProductController {
 
             res.status(200).json({
                 success: true,
-                data: product,
+                data: productWithRating,
             });
         } catch (error) {
             // Handle API errors with specific status codes
@@ -316,17 +252,10 @@ export class ProductController {
                 Number(limit)
             );
 
-            // const productsWithRatings = await Promise.all(
-            //     products.map(async (product) => {
-            //         const avgRating = await this.reviewService.getAverageRating(product.id);
-            //         return {
-            //             ...product,
-            //             avgRating
-            //         };
-            //     })
-            // );
+            const product = await this.returnProuctRatings(products);
 
-            res.status(200).json({ success: true, data: { products, total } });
+
+            res.status(200).json({ success: true, data: { product, total } });
         } catch (error) {
             // Handle API errors with specific status codes
             if (error instanceof APIError) {
