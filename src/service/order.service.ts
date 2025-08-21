@@ -293,6 +293,151 @@ export class OrderService {
      * @returns {Promise<{ order: Order; redirectUrl?: string }>} - Returns the created order and optional redirect URL for online payment.
      * @access Customer
      */
+    // async createOrder(
+    //     userId: number,
+    //     orderData: IOrderCreateRequest
+    // ): Promise<{ order: Order; redirectUrl?: string }> {
+    //     try {
+    //         const { shippingAddress, paymentMethod, phoneNumber } = orderData;
+
+    //         console.log(shippingAddress);
+
+    //         // Fetch user, cart, and shipping district in parallel
+    //         const [user, cart, _district] = await Promise.all([
+    //             this.getUser(userId),                                  // Get user and their saved address
+    //             this.getCart(userId),                                  // Get cart with populated product and vendor info
+    //             this.getDistrict(shippingAddress.district),            // Validate if district exists in system
+    //         ]);
+
+    //         // Check stock before creating the order
+    //         for (const item of cart.items) {
+    //             // If the cart item has a variant
+    //             if (item.variantId) {
+    //                 const variant = await this.variantRepository.findOne({
+    //                     where: { id: item.variantId.toString() },
+    //                 });
+
+    //                 if (!variant) {
+    //                     throw new APIError(404, `Variant not found for product: ${item.product.name}`);
+    //                 }
+
+    //                 if (variant.stock < item.quantity) {
+    //                     throw new APIError(400, `Insufficient stock for variant of product: ${item.product.name}`);
+    //                 }
+    //             } else {
+    //                 // Fallback to product-level stock if no variant
+    //                 const product = await this.productRepository.findOne({
+    //                     where: { id: item.product.id },
+    //                 });
+
+    //                 if (!product) {
+    //                     throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+    //                 }
+
+    //                 if (!product.stock || product.stock < item.quantity) {
+    //                     throw new APIError(400, `Insufficient stock for product: ${product.name}`);
+    //                 }
+    //             }
+    //         }
+
+
+
+    //         // Either fetch user's existing address or create a new one based on input
+    //         const address = await this.getOrCreateAddress(userId, shippingAddress, user);
+
+    //         // Calculate total shipping fee based on cart items and destination address
+    //         const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
+
+    //         // Create the Order entity (not yet saved in DB)
+    //         let order = await this.createOrderEntity(userId, user, cart, address, shippingFee, orderData);
+    //         console.log(order);
+
+    //         let redirectUrl: string | undefined;
+
+    //         // Handle different payment methods
+    //         if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+    //             // Save order directly for COD
+    //             order = await this.orderRepository.save(order);
+
+
+    //             for (const item of order.orderItems) {
+    //                 if (item.variantId) {
+    //                     const variant = await this.variantRepository.findOne({
+    //                         where: { id: item.variantId.toString() },
+    //                     });
+
+    //                     if (!variant) {
+    //                         throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+    //                     }
+
+    //                     if (variant.stock < item.quantity) {
+    //                         throw new APIError(400, `Insufficient stock for variant of product ${item.product.name}`);
+    //                     }
+
+    //                     variant.stock -= item.quantity;
+
+    //                     if (variant.stock <= 0) {
+    //                         variant.status = InventoryStatus.OUT_OF_STOCK;
+    //                     } else if (variant.stock < 5) {
+    //                         variant.status = InventoryStatus.LOW_STOCK;
+    //                     } else {
+    //                         variant.status = InventoryStatus.AVAILABLE;
+    //                     }
+
+    //                     await this.variantRepository.save(variant);
+
+    //                 } else {
+    //                     const product = await this.productRepository.findOne({
+    //                         where: { id: item.product.id },
+    //                     });
+
+    //                     if (!product) {
+    //                         throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+    //                     }
+
+    //                     if (!product.stock || product.stock < item.quantity) {
+    //                         throw new APIError(400, `Insufficient stock for product ${product.name}`);
+    //                     }
+
+    //                     product.stock -= item.quantity;
+
+    //                     if (product.stock <= 0) {
+    //                         product.status = InventoryStatus.OUT_OF_STOCK;
+    //                     } else if (product.stock < 5) {
+    //                         product.status = InventoryStatus.LOW_STOCK;
+    //                     } else {
+    //                         product.status = InventoryStatus.AVAILABLE;
+    //                     }
+
+    //                     await this.productRepository.save(product);
+    //                 }
+    //             }
+
+
+    //             await this.cartService.clearCart(userId);
+    //         } else if (
+    //             paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
+    //             paymentMethod === PaymentMethod.ESEWA ||
+    //             paymentMethod === PaymentMethod.KHALIT
+    //         ) {
+    //             // Save order first before initiating online payment
+    //             order = await this.orderRepository.save(order);
+    //             console.log(order);
+    //         } else {
+    //             // Invalid payment method fallback
+    //             throw new APIError(400, 'Invalid payment method');
+    //         }
+
+    //         return { order, redirectUrl };
+
+    //     } catch (error) {
+    //         // Wrap unexpected errors in a generic 500 API error
+    //         console.log(error)
+    //         throw error instanceof APIError ? error : new APIError(500, 'Failed to create order');
+    //     }
+    // }
+
+
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
@@ -304,43 +449,13 @@ export class OrderService {
 
             // Fetch user, cart, and shipping district in parallel
             const [user, cart, _district] = await Promise.all([
-                this.getUser(userId),                                  // Get user and their saved address
-                this.getCart(userId),                                  // Get cart with populated product and vendor info
-                this.getDistrict(shippingAddress.district),            // Validate if district exists in system
+                this.getUser(userId),
+                this.getCart(userId),
+                this.getDistrict(shippingAddress.district),
             ]);
 
             // Check stock before creating the order
-            for (const item of cart.items) {
-                // If the cart item has a variant
-                if (item.variantId) {
-                    const variant = await this.variantRepository.findOne({
-                        where: { id: item.variantId.toString() },
-                    });
-
-                    if (!variant) {
-                        throw new APIError(404, `Variant not found for product: ${item.product.name}`);
-                    }
-
-                    if (variant.stock < item.quantity) {
-                        throw new APIError(400, `Insufficient stock for variant of product: ${item.product.name}`);
-                    }
-                } else {
-                    // Fallback to product-level stock if no variant
-                    const product = await this.productRepository.findOne({
-                        where: { id: item.product.id },
-                    });
-
-                    if (!product) {
-                        throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
-                    }
-
-                    if (!product.stock || product.stock < item.quantity) {
-                        throw new APIError(400, `Insufficient stock for product: ${product.name}`);
-                    }
-                }
-            }
-
-
+            await this.validateStock(cart.items);
 
             // Either fetch user's existing address or create a new one based on input
             const address = await this.getOrCreateAddress(userId, shippingAddress, user);
@@ -359,62 +474,10 @@ export class OrderService {
                 // Save order directly for COD
                 order = await this.orderRepository.save(order);
 
-
-                for (const item of order.orderItems) {
-                    if (item.variantId) {
-                        const variant = await this.variantRepository.findOne({
-                            where: { id: item.variantId.toString() },
-                        });
-
-                        if (!variant) {
-                            throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
-                        }
-
-                        if (variant.stock < item.quantity) {
-                            throw new APIError(400, `Insufficient stock for variant of product ${item.product.name}`);
-                        }
-
-                        variant.stock -= item.quantity;
-
-                        if (variant.stock <= 0) {
-                            variant.status = InventoryStatus.OUT_OF_STOCK;
-                        } else if (variant.stock < 5) {
-                            variant.status = InventoryStatus.LOW_STOCK;
-                        } else {
-                            variant.status = InventoryStatus.AVAILABLE;
-                        }
-
-                        await this.variantRepository.save(variant);
-
-                    } else {
-                        const product = await this.productRepository.findOne({
-                            where: { id: item.product.id },
-                        });
-
-                        if (!product) {
-                            throw new APIError(404, `Product not found for order item ID: ${item.id}`);
-                        }
-
-                        if (!product.stock || product.stock < item.quantity) {
-                            throw new APIError(400, `Insufficient stock for product ${product.name}`);
-                        }
-
-                        product.stock -= item.quantity;
-
-                        if (product.stock <= 0) {
-                            product.status = InventoryStatus.OUT_OF_STOCK;
-                        } else if (product.stock < 5) {
-                            product.status = InventoryStatus.LOW_STOCK;
-                        } else {
-                            product.status = InventoryStatus.AVAILABLE;
-                        }
-
-                        await this.productRepository.save(product);
-                    }
-                }
-
-
+                // Update stock after successful order creation
+                await this.updateStock(order.orderItems);
                 await this.cartService.clearCart(userId);
+
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
                 paymentMethod === PaymentMethod.ESEWA ||
@@ -437,9 +500,114 @@ export class OrderService {
         }
     }
 
+    // Separate method for stock validation
+    private async validateStock(cartItems: any[]): Promise<void> {
+        for (const item of cartItems) {
+            if (item.variantId) {
+                const variant = await this.variantRepository.findOne({
+                    where: { id: item.variantId.toString() },
+                });
 
+                if (!variant) {
+                    throw new APIError(404, `Variant not found for product: ${item.product.name}`);
+                }
 
+                if (variant.stock < item.quantity) {
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". 
+                        Available: ${variant.stock}, Requested: ${item.quantity}`
+                    );
 
+                }
+            } else {
+                // Fallback to product-level stock if no variant
+                const product = await this.productRepository.findOne({
+                    where: { id: item.product.id },
+                });
+
+                if (!product) {
+                    throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+                }
+
+                if (!product.stock || product.stock < item.quantity) {
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for product "${product.name}". Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                    );
+                }
+            }
+        }
+    }
+
+    // Separate method for stock updates
+    private async updateStock(orderItems: any[]): Promise<void> {
+        for (const item of orderItems) {
+            if (item.variantId) {
+                const variant = await this.variantRepository.findOne({
+                    where: { id: item.variantId.toString() },
+                });
+
+                if (!variant) {
+                    throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+                }
+
+                // Double-check stock again (in case of concurrent orders)
+                if (variant.stock < item.quantity) {
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". 
+                        Available: ${variant.stock}, Requested: ${item.quantity}`
+                    );
+
+                }
+
+                variant.stock -= item.quantity;
+
+                // Update inventory status
+                if (variant.stock <= 0) {
+                    variant.status = InventoryStatus.OUT_OF_STOCK;
+                } else if (variant.stock < 5) {
+                    variant.status = InventoryStatus.LOW_STOCK;
+                } else {
+                    variant.status = InventoryStatus.AVAILABLE;
+                }
+
+                await this.variantRepository.save(variant);
+
+            } else {
+                const product = await this.productRepository.findOne({
+                    where: { id: item.product.id },
+                });
+
+                if (!product) {
+                    throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                }
+
+                // Double-check stock again (in case of concurrent orders)
+                if (!product.stock || product.stock < item.quantity) {
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for product "${product.name}". Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                    );
+
+                }
+
+                product.stock -= item.quantity;
+
+                // Update inventory status
+                if (product.stock <= 0) {
+                    product.status = InventoryStatus.OUT_OF_STOCK;
+                } else if (product.stock < 5) {
+                    product.status = InventoryStatus.LOW_STOCK;
+                } else {
+                    product.status = InventoryStatus.AVAILABLE;
+                }
+
+                await this.productRepository.save(product);
+            }
+        }
+    }
     /**
      * Verify payment for an order and update its status accordingly.
      *
