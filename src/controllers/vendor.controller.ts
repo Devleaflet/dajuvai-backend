@@ -129,7 +129,7 @@ export class VendorController {
             }
 
             /* Extract validated data */
-            const { businessName, email, password, phoneNumber, district, taxNumber, taxDocument } = parsed.data;
+            const { businessName, email, password, phoneNumber, district, taxNumber, taxDocument, companyDocument } = parsed.data;
 
             const verificationToken = TokenUtils.generateToken();
 
@@ -143,8 +143,8 @@ export class VendorController {
             }
 
             if (existingVendor) {
-                if(existingVendor.isVerified)
-                throw new APIError(409, 'Vendor already exists');
+                if (existingVendor.isVerified)
+                    throw new APIError(409, 'Vendor already exists');
             }
 
             /* Check if district exists */

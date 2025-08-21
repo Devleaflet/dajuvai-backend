@@ -55,7 +55,7 @@ export class VendorService {
      */
     async createVendor(vendorSignupData: IVendorSignupRequest): Promise<Vendor> {
         try {
-            const { businessName, email, password, phoneNumber, district, verificationCode, verificationCodeExpire, taxNumber, taxDocument } = vendorSignupData;
+            const { businessName, email, password, phoneNumber, district, verificationCode, verificationCodeExpire, taxNumber, taxDocument, companyDocument } = vendorSignupData;
 
             // Check if vendor with this email already exists to prevent duplicates
             const existing = await this.vendorRepository.findOne({ where: { email } });
@@ -82,7 +82,8 @@ export class VendorService {
                 isVerified: false,
                 isApproved: false,
                 taxNumber,
-                taxDocument
+                taxDocument,
+                companyDocument
             });
 
             // Save vendor to DB

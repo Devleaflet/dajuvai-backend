@@ -42,8 +42,11 @@ export class Vendor {
     @Column({ type: "varchar", nullable: true })
     taxNumber: string; // vat or pan number
 
-    @Column({ type: "text", nullable: true })
-    taxDocument: string; // pdf or image link 
+    @Column("text", { array: true, nullable: true })
+    taxDocument: string[]; // pdf or image links
+
+    @Column("text", { array: true, nullable: true })
+    companyDocument: string[]; // pdf or image links
 
     @Column({ nullable: true })
     resetToken: string | null; // used

@@ -19,7 +19,8 @@ export const vendorSignupSchema = z.object({
     district: z.string()
         .min(1, "district field cannot be empty"),
     taxNumber: z.string().optional(),
-    taxDocument: z.string().optional()
+    taxDocument: z.array(z.string()).optional(),
+    companyDocument: z.array(z.string()).optional(),
 });
 
 /**

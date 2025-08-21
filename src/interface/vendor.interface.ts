@@ -8,7 +8,8 @@ export interface IVendorSignupRequest {
     district: string;
     isVerified: Boolean;
     taxNumber?: string;
-    taxDocument?: string;
+    taxDocument?: string[];
+    companyDocument?: string[];
     isApproved?: Boolean;
 }
 
