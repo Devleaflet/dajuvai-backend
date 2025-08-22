@@ -30,7 +30,7 @@ export class ReviewController {
      * @returns {Promise<void>} Responds with the created review or appropriate error.
      * @access Authenticated
      */
-    async createReview(req: AuthRequest<{}, {}, ICreateReviewRequest>, res: Response) {
+    async createReview(req: AuthRequest<{}, {}, ICreateReviewRequest, {}>, res: Response) {
         try {
             // Create review through service layer with user ID from authenticated request
             const review = await this.reviewService.createReview(req.body, req.user!.id);
@@ -61,13 +61,15 @@ export class ReviewController {
      * @returns {Promise<void>} Responds with product reviews and review statistics.
      * @access Public
      */
-    async getReviewsByProductId(req: Request<{ productId: string }>, res: Response) {
+    async getReviewsByProductId(req: Request<{ productId: string }, {}, {}, { page: number }>, res: Response) {
         try {
+            const page = req.query.page;
+
             // Extract product ID from route parameters
             const { productId } = req.params;
 
             // Fetch reviews for the specified product
-            const result = await this.reviewService.getReviewsByProductId(Number(productId));
+            const result = await this.reviewService.getReviewsByProductId(Number(productId), page);
 
             // Return reviews data with success status
             res.status(200).json({ success: true, data: result });
