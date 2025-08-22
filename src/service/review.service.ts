@@ -73,7 +73,7 @@ export class ReviewService {
     async getReviewsByProductId(
         productId: number,
         page: number = 1,
-        limit: number = 2
+        limit: number = 4
     ): Promise<{ reviews: Review[]; averageRating: number; total: number; totalPages: number }> {
 
         // Check if product exists
