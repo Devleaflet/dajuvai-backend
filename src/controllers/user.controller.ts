@@ -517,67 +517,54 @@ export class UserController {
             // Verify user existence and password
             const { email, password } = parsed.data;
             const user = await findUserByEmailLogin(email);
-            let isVendor = false;
-            const vendor = await findVendorByEmail(email);
 
             if (!user) {
-                if (!vendor) {
-                    throw new APIError(404, "user does not exists")
-                }
-                isVendor = true
+                throw new APIError(404, "User does not exist");
             }
 
-            if (!isVendor) {
-                if (!user.isVerified) {
-                    // Reject unverified users
-                    throw new APIError(403, 'Please verify your email before logging in');
-                }
+            if (!user.isVerified) {
+                throw new APIError(403, "Please verify your email before logging in");
             }
 
-            const isMatch = isVendor ? await bcrypt.compare(password, vendor.password) : await bcrypt.compare(password, user.password);
-
+            // Compare password
+            const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
-                throw new APIError(401, 'Invalid credentials');
+                throw new APIError(401, "Invalid credentials");
             }
 
-
-
-            // Generate JWT and set cookie
-            const token = jwt.sign(isVendor ?
-                { id: vendor.id, email: vendor.email, businessName: vendor.businessName }
-                :
-                { id: user.id, email: user.email, role: user.role }
-                ,
+            // Generate JWT
+            const token = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: '2h' }
+                { expiresIn: "2h" }
             );
 
-            res.cookie(!isVendor ? 'token' : 'vendorToken', token, {
+            // Set cookie
+            res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
                 maxAge: 2 * 60 * 60 * 1000,
             });
 
+            // Response
             res.status(200).json({
                 success: true,
-                token: token,
-                data: !isVendor
-                    ? { userId: user.id, email: user.email, role: user.role }
-                    : { vendorId: vendor.id, email: vendor.email, businessName: vendor.businessName }
+                token,
+                data: { userId: user.id, email: user.email, role: user.role },
             });
 
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
-                console.error('Unexpected error during login:', error);
-                res.status(503).json({ success: false, message: 'Authentication service temporarily unavailable' });
+                console.error("Unexpected error during login:", error);
+                res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
             }
         }
     }
 
-
+    
     /**
      * @method sendVerificationToken
      * @route POST /auth/resend-verification
