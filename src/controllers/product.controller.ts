@@ -6,6 +6,7 @@ import { APIError } from '../utils/ApiError.utils';
 import { IAdminProductQueryParams, IProductQueryParams } from '../interface/product.interface';
 import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
+import { ReviewService } from '../service/review.service';
 
 
 /**
@@ -14,13 +15,14 @@ import { DataSource } from 'typeorm';
  */
 export class ProductController {
     private productService: ProductService;
-
+    private reviewService: ReviewService;
     /**
      * @constructor
      * @description Instantiates ProductService for business logic related to products.
      */
     constructor(dataSource: DataSource) {
         this.productService = new ProductService(dataSource);
+        this.reviewService = new ReviewService();
 
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -46,10 +48,13 @@ export class ProductController {
             // Fetch product details from service layer
             const product = await this.productService.getProductDetailsById(productId);
 
+            const averageRating = await this.reviewService.getReviewsByProductId(productId);
+
             // Send success response with product data
             res.status(200).json({
                 success: true,
-                product: product
+                product: product,
+                avgRating: averageRating
             })
 
         } catch (error) {
@@ -63,30 +68,6 @@ export class ProductController {
         }
     }
 
-    /**
-     * @method getAll
-     * @route GET /admin/products/all
-     * @description Retrieve all products with admin-level access.
-     * @param {Request} req - Express request object.
-     * @param {Response} res - Express response object.
-     * @returns {Promise<void>} Responds with array of all products.
-     * @access Admin and staff
-     */
-    async getAll(req: Request, res: Response): Promise<void> {
-        try {
-            // Fetch all products from service layer
-            const products = await this.productService.getAlllProducts();
-            res.status(200).json({ success: true, data: products });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Handle unexpected errors with generic 500 response
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
-    }
 
 
 
@@ -96,33 +77,33 @@ export class ProductController {
         res: Response
     ): Promise<void> {
         try {
+            console.log('BODY:', req.body);
+            console.log('HEADERS:', req.headers['content-type']);
+
             const data: ProductInterface = req.body;
-            const files = req.files as { productImages?: Express.Multer.File[] };
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
-            console.log(files)
-           
+
+            console.log(data)
+
+            if (data.hasVariants === 'true' && (!data.variants || !Array.isArray(data.variants))) {
+                throw new APIError(400, 'Variants array is required for variant products');
+            }
 
             const savedProduct = await this.productService.createProduct(
                 data,
-                files,
                 categoryId,
                 subcategoryId,
-                Number(req.vendor.id),
+                Number(req.vendor.id)
             );
-
-            console.log("------------------------------------saved product-------------------------------")
-            console.log(savedProduct);
 
             res.status(201).json({
                 success: true,
                 message: 'Product created successfully',
-                data: savedProduct,
+                data: savedProduct
             });
-
         } catch (error) {
             if (error instanceof APIError) {
-                console.log(error)
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
                 console.error('createProduct error:', error);
@@ -133,28 +114,26 @@ export class ProductController {
 
 
     async updateProduct(
-        req: VendorAuthRequest<{ id: string; subcategoryId: string; categoryId: string }, {}, Partial<ProductInterface>, {}>,
+        req: VendorAuthRequest<{ id: string; categoryId: string; subcategoryId: string }, {}, Partial<ProductInterface>, {}>,
         res: Response
     ): Promise<void> {
         try {
-            const files = req.files as { productImages?: Express.Multer.File[] };
             const data: Partial<ProductInterface> = req.body;
-            const productId = Number(req.params.id);
+            const productId = req.params.id;
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
 
-            console.log("__________________________________Product id ________________________________________")
+            console.log("___________Product id _____________________")
+            console.log(data)
             console.log(productId)
 
-            // get veendor id by product id 
-            const vendorId = await this.productService.getVendorIdByProductId(productId);
+            const vendorId = await this.productService.getVendorIdByProductId(Number(productId));
 
             const updatedProduct = await this.productService.updateProduct(
                 req.vendor ? req.vendor.id : vendorId,
-                req.vendor ? false : true, // is admin trying to update the product or not 
-                productId,
+                req.vendor ? false : true,  // admin flag
+                Number(productId),
                 data,
-                files,
                 categoryId,
                 subcategoryId
             );
@@ -162,7 +141,7 @@ export class ProductController {
             res.status(200).json({
                 success: true,
                 message: 'Product updated successfully',
-                data: updatedProduct,
+                data: updatedProduct
             });
         } catch (error) {
             if (error instanceof APIError) {
@@ -175,36 +154,21 @@ export class ProductController {
     }
 
 
-    async getProducts(req: Request<{ categoryId: string, subcategoryId: string }, {}, {}, IProductQueryParams>, res: Response) {
-        try {
-            console.log('Route params:', req.params);
-            console.log('Query params:', req.query);
 
-            // Merge route params with query params for comprehensive filtering
-            const queryParams = {
-                ...req.query,
-                categoryId: req.params.categoryId ? Number(req.params.categoryId) : req.query.categoryId,
-                subcategoryId: req.params.subcategoryId ? Number(req.params.subcategoryId) : req.query.subcategoryId
-            };
 
-            // Filter products based on merged parameters
-            const products = await this.productService.filterProducts(queryParams);
-            res.status(200).json({ success: true, data: products });
-        } catch (error) {
-            console.error('getProducts error details:', error);
+    async returnProuctRatings(products: any) {
+        const productsWithRatings = await Promise.all(
+            products.map(async (product) => {
+                const avgRating = await this.reviewService.getAverageRating(product.id);
+                return {
+                    ...product,
+                    avgRating: avgRating.avg,
+                    count: avgRating.count
+                };
+            })
+        );
 
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Include error details in development environment
-                res.status(500).json({
-                    success: false,
-                    message: 'Internal Server Error',
-                    error: process.env.NODE_ENV === 'development' ? error.message : undefined
-                });
-            }
-        }
+        return productsWithRatings
     }
 
 
@@ -217,11 +181,12 @@ export class ProductController {
 
             // Filter products through service layer
             const products = await this.productService.filterProducts(queryParams);
+            const product = await this.returnProuctRatings(products);
 
             return res.status(200).json({
                 success: true,
                 message: "All products retrieved succesfully",
-                data: products
+                data: product
             })
         } catch (error) {
             // Handle API errors with specific status codes
@@ -244,6 +209,8 @@ export class ProductController {
             // Fetch product by ID and subcategory
             const product = await this.productService.getProductById(Number(id), Number(subcategoryId));
 
+            const productWithRating = await this.returnProuctRatings(product);
+
             // Return 404 if product doesn't exist
             if (!product) {
                 return res.status(404).json({ success: false, message: 'Product not found' });
@@ -251,7 +218,7 @@ export class ProductController {
 
             res.status(200).json({
                 success: true,
-                data: product,
+                data: productWithRating,
             });
         } catch (error) {
             // Handle API errors with specific status codes
@@ -285,7 +252,10 @@ export class ProductController {
                 Number(limit)
             );
 
-            res.status(200).json({ success: true, data: { products, total } });
+            const product = await this.returnProuctRatings(products);
+
+
+            res.status(200).json({ success: true, data: { product, total } });
         } catch (error) {
             // Handle API errors with specific status codes
             if (error instanceof APIError) {
@@ -414,6 +384,7 @@ export class ProductController {
         try {
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);
+
             res.status(200).json({ success: true, data: { products, total } });
         } catch (error) {
             // Handle API errors with specific status codes
@@ -423,6 +394,36 @@ export class ProductController {
                 // Handle unexpected errors with generic 500 response
                 res.status(500).json({ success: false, message: 'Internal server error' });
             }
+        }
+    }
+
+    async uplaodImage(req: Request, res: Response) {
+        try {
+            if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
+                return res.status(400).json({ success: false, message: 'No files uploaded' });
+            }
+
+            const files = req.files as Express.Multer.File[];
+
+            const uploadedUrls = await Promise.all(
+                files.map(
+                    file =>
+                        new Promise<string>((resolve, reject) => {
+                            cloudinary.uploader.upload_stream(
+                                { resource_type: 'image', folder: 'products', public_id: `prod_${Date.now()}` },
+                                (error, result) => {
+                                    if (error || !result) return reject(error || new Error('Upload failed'));
+                                    resolve(result.secure_url);
+                                }
+                            ).end(file.buffer);
+                        })
+                )
+            );
+
+            res.status(200).json({ success: true, urls: uploadedUrls });
+        } catch (err) {
+            console.error('Image upload error:', err);
+            res.status(500).json({ success: false, message: 'Image upload failed' });
         }
     }
 }

@@ -13,13 +13,13 @@ import { CartService } from "../service/cart.service";
 
 
 const CONFIG = {
-    MERCHANT_ID: '7468',
-    MERCHANT_NAME: 'dajubhai',
-    API_USERNAME: 'dajubhai',
-    API_PASSWORD: 'D@jubhai#765',
-    SECRET_KEY: 'key_OmqGpQ1',
+    MERCHANT_ID: '545',
+    MERCHANT_NAME: 'dajuvaiapi',
+    API_USERNAME: 'dajuvaiapi',
+    API_PASSWORD: 'W#8rXp2!kL9z@Vm',
+    SECRET_KEY: 'gT7$yMn#45v!QbA',
     BASE_URL: 'https://apisandbox.nepalpayment.com',
-    GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com',
+    GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com/payment/index',
 };
 
 // Generate HMAC SHA512 Signature
@@ -53,7 +53,6 @@ paymentRouter.get('/payment-instruments', async (_req: Request, res: Response) =
                 'Content-Type': 'application/json',
             },
         });
-
         res.json(response.data);
     } catch (error: any) {
         console.error('Error getting payment instruments:', error.response?.data || error.message);
@@ -222,52 +221,6 @@ paymentRouter.post('/check-status', async (req: Request, res: Response) => {
     }
 });
 
-// Notification URL (Webhook)
-paymentRouter.get('/notification', async (req: Request, res: Response) => {
-    try {
-
-        const { MerchantTxnId, GatewayTxnId } = req.query;
-
-        console.log('Payment notification received:', {
-            MerchantTxnId,
-            GatewayTxnId,
-            timestamp: new Date().toISOString(),
-        });
-
-        if (!MerchantTxnId || typeof MerchantTxnId !== 'string') {
-            throw new APIError(400, "Invalid or missing MerchantTxnId")
-        }
-
-        const order = await orderDb.findOne({
-            where: {
-                mTransactionId: MerchantTxnId
-            }
-        })
-        if (!order) {
-            throw new APIError(404, "Order not found")
-        }
-
-        const userId = order.orderedById;
-
-        order.paymentStatus = PaymentStatus.PAID;
-        order.status = OrderStatus.CONFIRMED;
-
-        const cartservice = new CartService();
-        await cartservice.clearCart(userId);
-
-        await orderDb.save(order);
-
-        res.send('received');
-    } catch (error) {
-        // Handle known API errors
-        if (error instanceof APIError) {
-            console.log(error);
-            res.status(error.status).json({ success: false, message: error.message });
-        } else {
-            res.status(500).json({ success: false, message: 'Internal server error' });
-        }
-    }
-});
 
 // Response URL handler
 paymentRouter.get('/response', (req: Request, res: Response) => {

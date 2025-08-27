@@ -4,7 +4,7 @@ import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewa
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
 import { APIError } from '../utils/ApiError.utils';
 import { User, UserRole } from '../entities/user.entity';
-import { getUserByIdService } from '../service/user.service';
+import { findUserByEmail, getUserByIdService } from '../service/user.service';
 
 
 /**
@@ -33,6 +33,12 @@ export class OrderController {
 
             // Call service to create order and possibly get payment redirect URL
             const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
+
+            console.log("---------------Req body ----------------------")
+            console.log(req.body)
+            // const { order, redirectUrl } = await this.orderService.createOrder(20, req.body);
+
+            console.log(order);
 
             if (redirectUrl) {
                 // Payment redirection needed
@@ -113,9 +119,9 @@ export class OrderController {
      */
     async getCustomerOrders(req: AuthRequest, res: Response): Promise<void> {
         try {
-            if (!req.user) {
-                throw new APIError(401, 'User not authenticated');
-            }
+            // if (!req.user) {
+            //     throw new APIError(401, 'User not authenticated');
+            // }
             // Fetch customer orders from service
             const orders = await this.orderService.getCustomerOrders();
             res.status(200).json({ success: true, data: orders });
@@ -325,27 +331,28 @@ export class OrderController {
         }
     }
 
-    async trackOrderById(req: AuthRequest<{ orderId: string }, {}, {}, {}>, res: Response): Promise<void> {
+    async trackOrderById(req: AuthRequest<{}, {}, {}, { orderId: string, email: string }>, res: Response): Promise<void> {
         try {
 
-            const orderId = Number(req.params.orderId);
+            const orderId = Number(req.query.orderId);
 
-            const user = req.user;
+            const email = req.query.email;
+
 
             if (!orderId) {
                 throw new APIError(400, "Order id is requried")
             }
 
-            // get user by id 
-            // checks if user exists or not
-            const userExists = await getUserByIdService(user.id);
+            const userExists = await findUserByEmail(email);
 
             if (!userExists) {
                 throw new APIError(404, "User doesnot exists")
             }
 
             // get order details by user id and orderid
-            const order = await this.orderService.trackOrder(user.id, orderId);
+            const order = await this.orderService.trackOrder(email, orderId);
+
+            console.log(order);
 
             res.status(200).json({
                 success: true,

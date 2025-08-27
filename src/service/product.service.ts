@@ -18,6 +18,8 @@ import { CategoryService } from './category.service';
 import { BannerService } from './banner.service';
 import { DealService } from './deal.service';
 import { SubcategoryService } from './subcategory.service';
+import { MulterFile } from '../config/multer.config';
+import { Variant } from '../entities/variant.entity';
 
 
 /**
@@ -47,6 +49,7 @@ export class ProductService {
     private subcategoryService: SubcategoryService;
     private bannerService: BannerService;
     private dealService: DealService;
+    private variantRepository: Repository<Variant>;
 
     constructor(private dataSource: DataSource) {
         this.productRepository = this.dataSource.getRepository(Product);
@@ -64,6 +67,7 @@ export class ProductService {
         this.subcategoryService = new SubcategoryService();
         this.bannerService = new BannerService();
         this.dealService = new DealService();
+        this.variantRepository = this.dataSource.getRepository(Variant)
 
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
@@ -84,7 +88,7 @@ export class ProductService {
     async getProductDetailsById(productId: number): Promise<Product> {
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            relations: ['vendor'],
+            relations: ['vendor', 'variants', 'reviews'], // Include variants relation
         });
 
         if (!product) {
@@ -95,9 +99,9 @@ export class ProductService {
     }
 
 
+
     async createProduct(
-        data: ProductInterface,
-        files: { productImages?: Express.Multer.File[] } | undefined,
+        data: Partial<ProductInterface>,
         categoryId: number,
         subcategoryId: number,
         vendorId: number
@@ -112,122 +116,91 @@ export class ProductService {
             stock,
             dealId,
             bannerId,
-            size
+            hasVariants,
+            variants,
+            productImages // frontend sends secure URLs
         } = data;
 
-        let parsedSize: string[] | null = null;
+        // Normalize hasVariants to a boolean (handles string or boolean input)
+        const isVariantProduct = hasVariants === true || hasVariants === 'true';
 
-        if (typeof size === 'string') {
-            const trimmed = size.trim();
-
-            if (trimmed.startsWith('[')) {
-                try {
-                    const parsed = JSON.parse(trimmed);
-                    if (Array.isArray(parsed)) {
-                        parsedSize = parsed;
-                    } else {
-                        throw new APIError(400, 'Invalid size format: not an array');
-                    }
-                } catch {
-                    throw new APIError(400, 'Invalid size format: malformed JSON');
-                }
-            } else if (trimmed.length > 0) {
-                parsedSize = trimmed.split(',').map(s => s.trim());
-            }
-        } else if (Array.isArray(size)) {
-            parsedSize = size;
-        }
-
+        // Validate category and subcategory
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
-        if (!categoryExists) {
-            throw new APIError(404, 'Category does not exist');
-        }
+        if (!categoryExists) throw new APIError(404, 'Category does not exist');
 
         const subcategoryExists = await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId);
-        if (!subcategoryExists) {
-            throw new APIError(404, 'Subcategory does not exist');
-        }
+        if (!subcategoryExists) throw new APIError(404, 'Subcategory does not exist');
 
-        if (bannerId) {
-            const bannerExists = await this.bannerService.getBannerById(bannerId);
-            if (!bannerExists) {
-                throw new APIError(404, 'Banner does not exist');
+        if (!vendorId) throw new APIError(401, 'Unauthorized: Vendor not found');
+
+        // Validate required fields based on product type
+        if (!isVariantProduct) {
+            if (basePrice == null || stock == null) {
+                throw new APIError(400, 'Base price and stock are required for non-variant products');
+            }
+            if (!productImages || productImages.length === 0) {
+                throw new APIError(400, 'At least one product image is required');
+            }
+        } else {
+            if (!variants || variants.length === 0) {
+                throw new APIError(400, 'Variants array is required for variant products');
             }
         }
 
-        if (dealId) {
-            const dealExists = await this.dealService.getDealById(dealId);
-            if (!dealExists) {
-                throw new APIError(404, 'Deal does not exist');
-            }
-        }
-
-        if (!vendorId) {
-            throw new APIError(401, 'Unauthorized: Vendor not found');
-        }
-
-        let finalPrice: number | undefined;
-        if (basePrice && discount && discountType) {
-            finalPrice =
-                discountType === DiscountType.PERCENTAGE
-                    ? basePrice * (1 - discount / 100)
-                    : basePrice - discount;
-            if (finalPrice < 0) {
-                throw new APIError(400, 'Discount results in negative price');
-            }
-        }
-
-        const productImages = files?.productImages;
-        if (!productImages || !Array.isArray(productImages) || productImages.length === 0) {
-            throw new APIError(400, 'No image files provided');
-        }
-        const uploadedImages: string[] = [];
-
-        const uploadImage = async (buffer: Buffer): Promise<string> => {
-            return new Promise((resolve, reject) => {
-                cloudinary.uploader.upload_stream(
-                    { resource_type: 'image' },
-                    (error, result) => {
-                        if (error || !result) {
-                            return reject(new APIError(500, 'Image upload failed'));
-                        }
-                        resolve(result.secure_url);
-                    }
-                ).end(buffer);
-            });
-        };
-
-        const imageUrls = await Promise.all(productImages.map(file => uploadImage(file.buffer)));
-        uploadedImages.push(...imageUrls);
-
-        const savedProduct = this.productRepository.create({
+        // Create product
+        const product = this.productRepository.create({
             name,
             description,
-            basePrice,
-            discount,
-            discountType,
-            status,
-            stock,
+            basePrice: isVariantProduct ? null : parseFloat(basePrice || '0'),
+            discount: parseFloat(discount || '0'),
+            discountType: discountType || DiscountType.PERCENTAGE,
+            status: status || InventoryStatus.AVAILABLE,
+            stock: isVariantProduct ? null : parseInt(stock || '0'),
             subcategoryId,
             vendorId,
-            size: parsedSize,
-            dealId: dealId ? dealId : null,
-            bannerId: bannerId ? bannerId : null,
-            productImages: imageUrls
+            brandId: data.brandId ? parseInt(data.brandId) : null,
+            dealId: dealId ? parseInt(dealId) : null,
+            bannerId: bannerId ? parseInt(bannerId) : null,
+            productImages: isVariantProduct ? [] : productImages,
+            hasVariants: isVariantProduct
         });
 
+        const savedProduct = await this.productRepository.save(product);
 
-        console.log(savedProduct);
+        // Handle variants
+        if (isVariantProduct && variants) {
+            const savedVariants = await Promise.all(
+                variants.map(async (variant) => {
+                    const newVariant = this.variantRepository.create({
+                        sku: variant.sku,
+                        basePrice: parseFloat(variant.basePrice),
+                        discount: parseFloat(variant.discount || '0'),
+                        discountType: variant.discountType || DiscountType.PERCENTAGE,
+                        attributes: variant.attributes,
+                        variantImages: variant.variantImages || [],
+                        stock: parseInt(variant.stock),
+                        status: variant.status || InventoryStatus.AVAILABLE,
+                        productId: savedProduct.id.toString(),
+                        product: savedProduct
+                    });
 
-        return await this.productRepository.save(savedProduct);
+                    return this.variantRepository.save(newVariant);
+                })
+            );
+
+            savedProduct.variants = savedVariants;
+        }
+
+        return savedProduct;
     }
+
+
 
     async updateProduct(
         authId: number,
         isAdmin: boolean,
         productId: number,
         data: Partial<ProductInterface>,
-        files: { productImages?: Express.Multer.File[] } | undefined,
         categoryId: number,
         subcategoryId: number
     ): Promise<Product> {
@@ -240,127 +213,103 @@ export class ProductService {
             status,
             stock,
             dealId,
-            size,
             bannerId,
+            hasVariants,
+            variants,
+            brandId,
+            productImages
         } = data;
-        let parsedSize: string[] | null = null;
 
-        if (typeof size === 'string') {
-            const trimmed = size.trim();
+        const whereClause = isAdmin ? { id: productId } : { id: productId, vendor: { id: authId } };
+        const product = await this.productRepository.findOne({ where: whereClause, relations: ['variants'] });
+        if (!product) throw new APIError(404, 'Product not found or not authorized');
 
-            if (trimmed.startsWith('[')) {
-                try {
-                    const parsed = JSON.parse(trimmed);
-                    if (Array.isArray(parsed)) {
-                        parsedSize = parsed;
-                    } else {
-                        throw new APIError(400, 'Invalid size format: not an array');
-                    }
-                } catch {
-                    throw new APIError(400, 'Invalid size format: malformed JSON');
-                }
-            } else if (trimmed.length > 0) {
-                parsedSize = trimmed.split(',').map(s => s.trim());
-            }
-        } else if (Array.isArray(size)) {
-            parsedSize = size;
-        }
+        // Validate category & subcategory
+        if (!(await this.categoryService.getCategoryById(categoryId))) throw new APIError(404, 'Category does not exist');
+        if (!(await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId))) throw new APIError(404, 'Subcategory does not exist');
 
+        // Validate banner & deal
+        if (dealId !== undefined && !(await this.dealService.getDealById(Number(dealId)))) throw new APIError(404, 'Deal does not exist');
+        if (bannerId !== undefined && !(await this.bannerService.getBannerById(Number(bannerId)))) throw new APIError(404, 'Banner does not exist');
 
-        const whereClause = isAdmin
-            ? { id: productId }
-            : { id: productId, vendor: { id: authId } };
-        const product = await this.productRepository.findOne({
-            where: whereClause,
-        });
-        if (!product) {
-            throw new APIError(404, 'Product not found or not authorized');
-        }
+        // Normalize hasVariants to boolean
+        const hasVariantsBool =
+            hasVariants === true || hasVariants === 'true' ? true :
+                hasVariants === false || hasVariants === 'false' ? false :
+                    undefined;
 
-        const categoryExists = await this.categoryService.getCategoryById(categoryId);
-        if (!categoryExists) {
-            throw new APIError(404, 'Category does not exist');
-        }
-
-        const subcategoryExists = await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId);
-        if (!subcategoryExists) {
-            throw new APIError(404, 'Subcategory does not exist');
-        }
-
-        if (bannerId) {
-            const bannerExists = await this.bannerService.getBannerById(bannerId);
-            if (!bannerExists) {
-                throw new APIError(404, 'Banner does not exist');
-            }
-        }
-
-        if (dealId) {
-            const dealExists = await this.dealService.getDealById(dealId);
-            if (!dealExists) {
-                throw new APIError(404, 'Deal does not exist');
-            }
-        }
-
-        if (!authId) {
-            throw new APIError(401, 'Unauthorized: User or Vendor not found');
-        }
-
-        let finalPrice: number | undefined;
-        if (basePrice && discount && discountType) {
-            finalPrice =
-                discountType === DiscountType.PERCENTAGE
-                    ? basePrice * (1 - discount / 100)
-                    : basePrice - discount;
-            if (finalPrice < 0) {
-                throw new APIError(400, 'Discount results in negative price');
-            }
-        }
-
-        let uploadedImages: string[] = product.productImages || [];
-
-        const uploadImage = async (buffer: Buffer): Promise<string> => {
-            return new Promise((resolve, reject) => {
-                cloudinary.uploader.upload_stream(
-                    { resource_type: 'image' },
-                    (error, result) => {
-                        if (error || !result) {
-                            return reject(new APIError(500, 'Image upload failed'));
-                        }
-                        resolve(result.secure_url);
-                    }
-                ).end(buffer);
-            });
-        };
-
-        const productImages = files?.productImages;
-        if (productImages && Array.isArray(productImages) && productImages.length > 0) {
-            const imageUrls = await Promise.all(productImages.map(file => uploadImage(file.buffer)));
-            uploadedImages = imageUrls;
-        }
-
+        // Update product fields
         product.name = name ?? product.name;
         product.description = description ?? product.description;
-        product.basePrice = basePrice ?? product.basePrice;
-        product.discount = discount ?? product.discount;
+        product.basePrice = hasVariantsBool ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
+        product.discount = discount !== undefined ? parseFloat(discount.toString()) : product.discount;
         product.discountType = discountType ?? product.discountType;
         product.status = status ?? product.status;
-        product.stock = stock ?? product.stock;
-        product.size = parsedSize ?? product.size;
+        product.stock = hasVariantsBool ? null : (stock !== undefined ? parseInt(stock.toString()) : product.stock);
         product.subcategoryId = subcategoryId;
-        product.dealId = dealId !== undefined ? dealId : product.dealId;
-        product.bannerId = bannerId !== undefined ? bannerId : product.bannerId;
-        product.productImages = uploadedImages;
+        product.dealId = dealId !== undefined ? parseInt(dealId.toString()) : product.dealId;
+        product.bannerId = bannerId !== undefined ? parseInt(bannerId.toString()) : product.bannerId;
+        product.brandId = brandId !== undefined ? parseInt(brandId.toString()) : product.brandId;
+        if (hasVariantsBool !== undefined) product.hasVariants = hasVariantsBool;
 
-        const updatedProduct = await this.productRepository.save(product);
+        // Update product images (URLs from frontend)
+        if (productImages && Array.isArray(productImages)) {
+            if (productImages.length === 0 && !hasVariantsBool) {
+                throw new APIError(400, 'At least one product image is required for non-variant products');
+            }
+            product.productImages = productImages;
+        }
 
-        return updatedProduct;
+        // Handle variants
+        if (hasVariantsBool && variants) {
+            if (!Array.isArray(variants) || variants.length === 0) throw new APIError(400, 'Variants array is required for variant products');
+
+            // Delete old variants if switching from non-variant to variant
+            if (!product.hasVariants) await this.variantRepository.delete({ productId: productId.toString() });
+
+            const savedVariants = await Promise.all(
+                variants.map(async variant => {
+                    const existingVariant = await this.variantRepository.findOne({ where: { sku: variant.sku, productId: productId.toString() } });
+
+                    if (existingVariant) {
+                        // Update existing variant
+                        existingVariant.basePrice = parseFloat(variant.basePrice.toString());
+                        existingVariant.discount = parseFloat(variant.discount?.toString() || '0');
+                        existingVariant.discountType = variant.discountType || DiscountType.PERCENTAGE;
+                        existingVariant.attributes = variant.attributes;
+                        existingVariant.variantImages = variant.variantImages || existingVariant.variantImages;
+                        existingVariant.stock = parseInt(variant.stock.toString());
+                        existingVariant.status = variant.status || InventoryStatus.AVAILABLE;
+                        return this.variantRepository.save(existingVariant);
+                    } else {
+                        // Create new variant
+                        const newVariant = this.variantRepository.create({
+                            sku: variant.sku,
+                            basePrice: parseFloat(variant.basePrice.toString()),
+                            discount: parseFloat(variant.discount?.toString() || '0'),
+                            discountType: variant.discountType || DiscountType.PERCENTAGE,
+                            attributes: variant.attributes,
+                            variantImages: variant.variantImages || [],
+                            stock: parseInt(variant.stock.toString()),
+                            status: variant.status || InventoryStatus.AVAILABLE,
+                            productId: productId.toString(),
+                            product
+                        });
+                        return this.variantRepository.save(newVariant);
+                    }
+                })
+            );
+
+            product.variants = savedVariants;
+            product.hasVariants = true;
+        }
+
+        return await this.productRepository.save(product);
     }
-
-
 
     async getAllProducts(): Promise<Product[]> {
         return await this.productRepository.find({
-            relations: ['subcategory', 'vendor', 'brand', 'deal'],
+            relations: ['subcategory', 'vendor', 'brand', 'deal', 'variants'],
             order: {
                 created_at: 'DESC',
             },
@@ -375,64 +324,71 @@ export class ProductService {
             .leftJoinAndSelect('product.brand', 'brand')
             .leftJoinAndSelect('product.vendor', 'vendor')
             .leftJoinAndSelect('product.deal', 'deal')
-            .where('product.stock > 0');
+            .leftJoinAndSelect('product.variants', 'variants')
+            .where('(product.stock > 0 OR variants.stock > 0)');
 
         if (bannerId) {
-            const banner = await this.bannerRepository.findOne({
-                where: { id: bannerId }
-            });
-
-            if (!banner) {
-                throw new APIError(404, "Banner does not exist");
-            }
-
+            const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
+            if (!banner) throw new APIError(404, "Banner does not exist");
             query.andWhere('product.bannerId = :bannerId', { bannerId });
         }
 
         if (subcategoryId) {
             const subcategory = await this.subcategoryRepository.findOne({ where: { id: subcategoryId } });
-            if (!subcategory) {
-                throw new APIError(404, 'Subcategory does not exist');
-            }
+            if (!subcategory) throw new APIError(404, 'Subcategory does not exist');
             query.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
         } else if (categoryId) {
             const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
-            if (!category) {
-                throw new APIError(404, 'Category does not exist');
-            }
+            if (!category) throw new APIError(404, 'Category does not exist');
             query.andWhere('subcategory.categoryId = :categoryId', { categoryId });
         }
 
         if (brandId) {
             const brand = await this.brandRepository.findOne({ where: { id: brandId } });
-            if (!brand) {
-                throw new APIError(404, 'Brand does not exist');
-            }
-            query.andWhere('product.brand_id = :brandId', { brandId });
+            if (!brand) throw new APIError(404, 'Brand does not exist');
+            query.andWhere('product.brandId = :brandId', { brandId });
         }
 
         if (dealId) {
             const deal = await this.dealRepository.findOne({ where: { id: dealId } });
-            if (!deal) {
-                throw new APIError(404, 'Deal does not exist');
-            }
+            if (!deal) throw new APIError(404, 'Deal does not exist');
             query.andWhere('product.dealId = :dealId', { dealId });
         }
 
+        // Add GROUP BY to avoid Postgres aggregate error
+        query.groupBy('product.id')
+            .addGroupBy('subcategory.id')
+            .addGroupBy('brand.id')
+            .addGroupBy('vendor.id')
+            .addGroupBy('deal.id')
+            .addGroupBy('variants.id');
+
         if (sort === 'low-to-high') {
-            query.orderBy(`
+            query.addOrderBy(`
+            LEAST(
                 product.basePrice - CASE 
                     WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
                     ELSE product.discount 
-                END
-            `, 'ASC');
+                END,
+                COALESCE(MIN(variants.basePrice - CASE 
+                    WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
+                    ELSE variants.discount
+                END), product.basePrice)
+            )
+        `, 'ASC');
         } else if (sort === 'high-to-low') {
-            query.orderBy(`
+            query.addOrderBy(`
+            GREATEST(
                 product.basePrice - CASE 
                     WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
                     ELSE product.discount 
-                END
-            `, 'DESC');
+                END,
+                COALESCE(MAX(variants.basePrice - CASE 
+                    WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
+                    ELSE variants.discount
+                END), product.basePrice)
+            )
+        `, 'DESC');
         } else {
             query.orderBy('product.created_at', 'DESC');
         }
@@ -440,11 +396,13 @@ export class ProductService {
         return await query.getMany();
     }
 
+
     async getAdminProducts(params: IAdminProductQueryParams): Promise<{ products: Product[]; total: number }> {
         const { page = 1, limit = 7, sort = 'createdAt' } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
+            .leftJoinAndSelect('product.variants', 'variants')
             .select([
                 'product.id',
                 'product.name',
@@ -453,14 +411,21 @@ export class ProductService {
                 'product.created_at',
                 'vendor.id',
                 'vendor.name',
+                'variants.id',
+                'variants.sku',
+                'variants.basePrice',
+                'variants.stock',
+                'variants.status',
             ]);
 
+        // Sorting
         if (sort === 'name') {
             query.orderBy('product.name', 'ASC');
         } else {
             query.orderBy('product.created_at', 'DESC');
         }
 
+        // Pagination
         const skip = (page - 1) * limit;
         query.skip(skip).take(limit);
 
@@ -469,15 +434,19 @@ export class ProductService {
         return { products, total };
     }
 
+
+
     async getProductById(id: number, subcategoryId: number): Promise<Product | null> {
         return this.productRepository
             .createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
             .leftJoinAndSelect('product.subcategory', 'subcategory')
+            .leftJoinAndSelect('product.variants', 'variant')
             .where('product.id = :id', { id })
             .andWhere('subcategory.id = :subcategoryId', { subcategoryId })
             .getOne();
     }
+
 
     async getVendorIdByProductId(productId: number): Promise<number> {
         const product = await this.productRepository.findOne({
@@ -510,10 +479,6 @@ export class ProductService {
             throw new APIError(403, 'You can only delete your own products');
         }
 
-        if (product.productImages && product.productImages.length > 0) {
-            // Handle image deletion logic if needed
-        }
-
         await this.productRepository.delete(id);
     }
 
@@ -524,19 +489,18 @@ export class ProductService {
         imageUrl: string
     ): Promise<Product | null> {
         const user = await this.userRepository.findOne({ where: { id: userId } });
-        const vendor = !user ?
-            await this.vendorRepository.findOne({
-                where: { id: userId }
-            })
+        const vendor = !user
+            ? await this.vendorRepository.findOne({ where: { id: userId } })
             : null;
 
         if (!user && !vendor) {
             throw new APIError(404, 'User not found');
         }
 
+        // Fetch product with variants
         const product = await this.productRepository.findOne({
             where: { id, subcategory: { id: subcategoryId } },
-            relations: ['vendor'],
+            relations: ['vendor', 'variants'],
         });
         if (!product) {
             throw new APIError(404, 'Product not found');
@@ -549,18 +513,45 @@ export class ProductService {
             throw new APIError(403, 'You can only delete images from your own products');
         }
 
+        // Determine if the image belongs to the main product or a variant
+        let updatedProductImages = product.productImages || [];
+        let variantToUpdate: any = null;
+
+        if (updatedProductImages.includes(imageUrl)) {
+            // Image belongs to main product
+            updatedProductImages = updatedProductImages.filter(img => img !== imageUrl);
+        } else if (product.variants && product.variants.length > 0) {
+            // Check each variant
+            for (const variant of product.variants) {
+                if (variant.variantImages?.includes(imageUrl)) {
+                    variantToUpdate = variant;
+                    variant.variantImages = variant.variantImages.filter(img => img !== imageUrl);
+                    break;
+                }
+            }
+        } else {
+            throw new APIError(400, 'Image not found in product or variants');
+        }
+
+        // Delete image from Cloudinary
         const deletionResult = await this.imageDeletionService.deleteSingleImage(imageUrl);
         if (!deletionResult.success) {
             throw new APIError(500, `Failed to delete image: ${deletionResult.error || 'Unknown error'}`);
         }
 
-        await this.productRepository.update(id, { productImages: product.productImages });
+        // Save changes
+        if (variantToUpdate) {
+            await this.variantRepository.save(variantToUpdate);
+        } else {
+            await this.productRepository.update(id, { productImages: updatedProductImages });
+        }
 
         return this.productRepository.findOne({
             where: { id, subcategory: { id: subcategoryId } },
-            relations: ['subcategory', 'vendor'],
+            relations: ['subcategory', 'vendor', 'variants'],
         });
     }
+
 
     async calculateProductPrice(
         product: Product
@@ -595,7 +586,7 @@ export class ProductService {
         // Find products with vendor relation filtered by vendorId, paginated with total count
         const [products, total] = await this.productRepository.findAndCount({
             where: { vendor: { id: vendorId } },
-            relations: ['subcategory', 'vendor'],
+            relations: ['subcategory', 'vendor', "variants"],
             skip,
             take: limit,
         });

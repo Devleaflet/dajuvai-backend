@@ -35,6 +35,8 @@ export class ReviewService {
      * @access Public (requires authenticated user)
      */
     async createReview(dto: CreateReviewInput, userId: number): Promise<Review> {
+
+        // default value for limit is 5 
         // Check if product exists
         const product = await this.productRepository.findOne({ where: { id: dto.productId } });
         if (!product) {
@@ -68,29 +70,60 @@ export class ReviewService {
      * @throws {APIError} Throws 404 if product doesn't exist.
      * @access Public
      */
-    async getReviewsByProductId(productId: number): Promise<{ reviews: Review[]; averageRating: number }> {
+    async getReviewsByProductId(
+        productId: number,
+        page: number = 1,
+        limit: number = 4
+    ): Promise<{ reviews: Review[]; averageRating: number; total: number; totalPages: number }> {
+
         // Check if product exists
         const product = await this.productRepository.findOne({ where: { id: productId } });
         if (!product) {
             throw new APIError(404, 'Product not found');
         }
 
-        // Fetch all reviews with associated user info for the product
-        const reviews = await this.reviewRepository.find({
+        // Fetch paginated reviews with associated user info
+        const [reviews, total] = await this.reviewRepository.findAndCount({
             where: { productId },
             relations: ['user'],
+            order: { createdAt: 'DESC' },
+            skip: (page - 1) * limit,
+            take: limit,
         });
 
-        // Calculate average rating using SQL aggregation for accuracy and performance
+        // Calculate average rating (SQL aggregation is best for performance)
         const result = await this.reviewRepository
             .createQueryBuilder('review')
             .select('AVG(review.rating)', 'average')
             .where('review.productId = :productId', { productId })
             .getRawOne();
 
-        // Parse and round average rating to 1 decimal place, fallback to 0 if no reviews
         const averageRating = result?.average ? Number(parseFloat(result.average).toFixed(1)) : 0;
 
-        return { reviews, averageRating };
+        return {
+            reviews,
+            averageRating,
+            total,
+            totalPages: Math.ceil(total / limit),
+        };
     }
+
+
+    async getAverageRating(productId: number): Promise<{ avg: number; count: number }> {
+        const result = await this.reviewRepository
+            .createQueryBuilder("review")
+            .select("AVG(review.rating)", "avg")
+            .addSelect("COUNT(review.id)", "count")
+            .where("review.productId = :productId", { productId })
+            .getRawOne();
+
+        const avg = result?.avg ? parseFloat(result.avg) : 0;
+        const count = result?.count ? parseInt(result.count, 10) : 0;
+
+        return {
+            avg: Math.round(avg * 10) / 10,
+            count,
+        };
+    }
+
 }

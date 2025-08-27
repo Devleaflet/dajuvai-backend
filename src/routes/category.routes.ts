@@ -19,6 +19,8 @@ const upload = multer(multerOptions);
 
 
 
+// CATEGORY
+
 /**
  * @swagger
  * /api/categories:
@@ -504,6 +506,13 @@ router.get("/search/name", authMiddleware, isAdminOrStaff, categoryController.se
 
 router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteCategory.bind(categoryController));
 
+
+
+
+
+
+
+// SUBCATEGORY
 /**
  * @swagger
  * /api/categories/{categoryId}/subcategories:
@@ -882,7 +891,130 @@ router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upl
 
 router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, subcategoryController.deleteSubcategory.bind(subcategoryController));
 
-router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, uploadMiddleware, productController.createProduct.bind(productController))
+
+
+
+
+
+
+// PRODUCT
+
+/**
+ * @swagger
+ * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
+ *   post:
+ *     summary: Create a new product
+ *     description: Creates a new product. Product images must be uploaded separately first to get URLs (e.g., from Cloudinary). Requires vendor or admin authorization via JWT.
+ *     tags: [Products]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: categoryId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the category
+ *       - in: path
+ *         name: subcategoryId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the subcategory
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name:
+ *                 type: string
+ *                 example: T-Shirt
+ *               description:
+ *                 type: string
+ *                 nullable: true
+ *                 example: Premium Cotton T-shirt
+ *               basePrice:
+ *                 type: number
+ *                 nullable: true
+ *               discount:
+ *                 type: number
+ *                 default: 0
+ *               discountType:
+ *                 type: string
+ *                 enum: [PERCENTAGE, FLAT]
+ *                 default: PERCENTAGE
+ *               stock:
+ *                 type: integer
+ *                 nullable: true
+ *               status:
+ *                 type: string
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *               hasVariants:
+ *                 type: boolean
+ *               productImages:
+ *                 type: array
+ *                 minItems: 1
+ *                 description: Array of Cloudinary URLs for product images (must have at least one)
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                   example: https://res.cloudinary.com/.../products/main_image.jpg
+ *               variants:
+ *                 type: array
+ *                 description: Required if hasVariants is true
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     sku:
+ *                       type: string
+ *                       example: TSHIRT-WHITE-L
+ *                     basePrice:
+ *                       type: number
+ *                       example: 25.00
+ *                     discount:
+ *                       type: number
+ *                       default: 0
+ *                     discountType:
+ *                       type: string
+ *                       enum: [PERCENTAGE, FLAT]
+ *                       default: PERCENTAGE
+ *                     attributes:
+ *                       type: object
+ *                       description: Key-value pairs of attributes
+ *                       example: { "color": "White", "size": "L" }
+ *                     variantImages:
+ *                       type: array
+ *                       description: Array of Cloudinary URLs for this variant
+ *                       items:
+ *                         type: string
+ *                         format: uri
+ *                         example: https://res.cloudinary.com/.../variants/white_l_1.jpg
+ *                     stock:
+ *                       type: integer
+ *                       example: 50
+ *                     status:
+ *                       type: string
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *               dealId:
+ *                 type: integer
+ *                 nullable: true
+ *               bannerId:
+ *                 type: integer
+ *                 nullable: true
+ *             required:
+ *               - name
+ *               - subcategoryId
+ *               - hasVariants
+ *               - productImages
+ *     responses:
+ *       201:
+ *         description: Product created successfully
+ *       400:
+ *         description: Bad request (missing fields or no product images)
+ */
+router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, productController.createProduct.bind(productController))
 
 
 /**
@@ -1190,11 +1322,11 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
 
 /**
  * @swagger
- * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{id}:
+ * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{productId}:
  *   put:
- *     summary: Update a product
- *     description: Updates an existing product by ID. Only admins or the product's vendor can update the product. Supports uploading up to 5 images.
- *     tags: [Product]
+ *     summary: Update an existing product
+ *     description: Updates a product with individual optional fields. Supports partial updates for product details and variants. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
+ *     tags: [Products]
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -1204,89 +1336,115 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: The ID of the category
+ *         description: ID of the category
+ *         example: 1
  *       - in: path
  *         name: subcategoryId
  *         required: true
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: The ID of the subcategory
+ *         description: ID of the subcategory
+ *         example: 1
  *       - in: path
- *         name: id
+ *         name: productId
  *         required: true
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: The ID of the product to update
+ *         description: ID of the product to update
+ *         example: 13
  *     requestBody:
- *       required: true
+ *       required: false
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
  *             properties:
  *               name:
  *                 type: string
- *                 description: Product name
- *                 example: "Updated Product"
+ *                 description: Updated name of the product (optional)
+ *                 example: Updated T-Shirt
  *               description:
  *                 type: string
- *                 description: Product description
- *                 example: "This is an updated product description."
+ *                 description: Updated description of the product (optional)
+ *                 example: Premium Cotton T-shirt
  *               basePrice:
- *                 type: string
- *                 description: Base price of the product (will be converted to number)
- *                 example: "99.99"
- *               stock:
- *                 type: string
- *                 description: Stock quantity (will be converted to integer)
- *                 example: "50"
+ *                 type: number
+ *                 description: Base price for non-variant products (optional, ignored if hasVariants is true)
+ *                 example: 20
  *               discount:
- *                 type: string
- *                 description: Discount amount (will be converted to number)
- *                 example: "10"
+ *                 type: number
+ *                 description: Discount amount (optional)
+ *                 example: 5
  *               discountType:
  *                 type: string
  *                 enum: [PERCENTAGE, FLAT]
- *                 description: Type of discount
- *                 example: "PERCENTAGE"
- *               size:
- *                 type: string
- *                 description: Comma-separated list of available sizes (e.g., "S,M,L")
- *                 example: "S,M,L"
+ *                 description: Discount type (optional)
+ *                 example: FLAT
  *               status:
  *                 type: string
- *                 enum: [AVAILABLE, LOW_STOCK, OUT_OF_STOCK]
- *                 description: Inventory status
- *                 example: "AVAILABLE"
- *               quantity:
- *                 type: string
- *                 description: Quantity of the product (will be converted to number)
- *                 example: "100"
- *               brand_id:
- *                 type: string
- *                 description: Brand ID (will be converted to number or null)
- *                 example: "1"
- *               dealId:
- *                 type: string
- *                 description: Deal ID (will be converted to number or null)
- *                 example: "2"
- *               vendorId:
- *                 type: string
- *                 description: Vendor ID (will be converted to number or null)
- *                 example: "3"
- *               userId:
- *                 type: string
- *                 description: User ID (will be converted to number or null)
- *                 example: "4"
- *               images:
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                 description: Inventory status (optional)
+ *                 example: AVAILABLE
+ *               stock:
+ *                 type: integer
+ *                 description: Stock quantity for non-variant products (optional, ignored if hasVariants is true)
+ *                 example: 100
+ *               hasVariants:
+ *                 type: boolean
+ *                 description: Indicates if the product has variants (optional)
+ *                 example: true
+ *               variants:
  *                 type: array
+ *                 description: Array of variant objects (optional, required if hasVariants is true)
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     sku:
+ *                       type: string
+ *                       example: TSHIRT-RED-L
+ *                     basePrice:
+ *                       type: number
+ *                       example: 25
+ *                     discount:
+ *                       type: number
+ *                       example: 0
+ *                     discountType:
+ *                       type: string
+ *                       enum: [PERCENTAGE, FLAT]
+ *                       example: PERCENTAGE
+ *                     attributes:
+ *                       type: object
+ *                       example: { "color": "Red", "size": "L" }
+ *                     variantImages:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: ["https://res.cloudinary.com/.../variants/red_l.jpg"]
+ *                     stock:
+ *                       type: integer
+ *                       example: 50
+ *                     status:
+ *                       type: string
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                       example: AVAILABLE
+ *               productImages:
+ *                 type: array
+ *                 description: Array of main product image URLs (optional)
  *                 items:
  *                   type: string
- *                   format: binary
- *                 description: Up to 5 product images
- *                 maxItems: 5
+ *                 example: ["https://res.cloudinary.com/.../products/main_image.jpg"]
+ *               dealId:
+ *                 type: integer
+ *                 nullable: true
+ *                 description: ID of the deal to associate (optional, null to remove)
+ *                 example: null
+ *               bannerId:
+ *                 type: integer
+ *                 nullable: true
+ *                 description: ID of the banner to associate (optional, null to remove)
+ *                 example: null
  *     responses:
  *       200:
  *         description: Product updated successfully
@@ -1298,91 +1456,13 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                 success:
  *                   type: boolean
  *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product updated successfully"
  *                 data:
  *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 1
- *                     name:
- *                       type: string
- *                       example: "Updated Product"
- *                     description:
- *                       type: string
- *                       example: "This is an updated product description."
- *                     basePrice:
- *                       type: number
- *                       example: 99.99
- *                     stock:
- *                       type: integer
- *                       example: 50
- *                     discount:
- *                       type: number
- *                       example: 10
- *                     discountType:
- *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       example: "PERCENTAGE"
- *                     size:
- *                       type: array
- *                       items:
- *                         type: string
- *                       example: ["S", "M", "L"]
- *                     status:
- *                       type: string
- *                       enum: [AVAILABLE, LOW_STOCK, OUT_OF_STOCK]
- *                       example: "AVAILABLE"
- *                     quantity:
- *                       type: number
- *                       example: 100
- *                     productImages:
- *                       type: array
- *                       items:
- *                         type: string
- *                       example: ["https://res.cloudinary.com/example/image1.jpg"]
- *                     subcategory:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 1
- *                         name:
- *                           type: string
- *                           example: "Electronics"
- *                     vendor:
- *                       type: object
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 3
- *                         name:
- *                           type: string
- *                           example: "Vendor Name"
- *                     brand:
- *                       type: object
- *                       nullable: true
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 1
- *                         name:
- *                           type: string
- *                           example: "Brand Name"
- *                     deal:
- *                       type: object
- *                       nullable: true
- *                       properties:
- *                         id:
- *                           type: integer
- *                           example: 2
- *                         discountPercentage:
- *                           type: number
- *                           example: 20
- *                     finalPrice:
- *                       type: number
- *                       example: 79.99
  *       400:
- *         description: Bad request (e.g., invalid deal or total discount exceeds 100%)
+ *         description: Bad request (e.g., invalid productId or variant data)
  *         content:
  *           application/json:
  *             schema:
@@ -1393,9 +1473,9 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Total discount cannot exceed 100%"
- *       403:
- *         description: Unauthorized (user is not the vendor or admin)
+ *                   example: "Invalid or missing productId"
+ *       401:
+ *         description: Unauthorized
  *         content:
  *           application/json:
  *             schema:
@@ -1406,9 +1486,9 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Unauthorized"
+ *                   example: "Unauthorized: User or Vendor not found"
  *       404:
- *         description: Product or vendor not found
+ *         description: Not found (product, category, or subcategory)
  *         content:
  *           application/json:
  *             schema:
@@ -1419,7 +1499,7 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Product not found or access denied"
+ *                   example: "Product not found or not authorized"
  *       500:
  *         description: Internal server error
  *         content:
@@ -1434,58 +1514,13 @@ router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productCont
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.put('/:categoryId/subcategories/:subcategoryId/products/:id', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, uploadMiddleware, productController.updateProduct.bind(productController));
+router.put(
+    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    combinedAuthMiddleware,
+    isVendorAccountOwnerOrAdminOrStaff,
+    productController.updateProduct.bind(productController)
+);
 
-// /**
-//  * @swagger
-//  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{id}:
-//  *   delete:
-//  *     summary: Delete a product by ID
-//  *     description: Allows vendors to delete their own product or admins to delete any product.
-//  *     tags: [Product]
-//  *     security:
-//  *       - bearerAuth: []
-//  *     parameters:
-//  *       - in: path
-//  *         name: categoryId
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *         description: ID of the parent category
-//  *       - in: path
-//  *         name: subcategoryId
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *         description: ID of the subcategory
-//  *       - in: path
-//  *         name: id
-//  *         required: true
-//  *         schema:
-//  *           type: integer
-//  *         description: ID of the product to delete
-//  *     responses:
-//  *       204:
-//  *         description: Product deleted successfully
-//  *         content:
-//  *           application/json:
-//  *             schema:
-//  *               type: object
-//  *               properties:
-//  *                 success:
-//  *                   type: boolean
-//  *                   example: true
-//  *       401:
-//  *         description: Unauthorized (missing or invalid token)
-//  *       403:
-//  *         description: Forbidden (not allowed to delete this product)
-//  *       404:
-//  *         description: Product or user not found
-//  *       500:
-//  *         description: Internal server error
-//  */
-
-// router.delete('/:categoryId/subcategories/:subcategoryId/products/:id', authMiddleware, restrictToVendorOrAdmin, productController.deleteProduct.bind(productController));
 
 /**
  * @swagger

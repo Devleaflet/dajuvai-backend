@@ -7,6 +7,7 @@ import { DiscountType, InventoryStatus } from "./product.enum";
 import { OrderItem } from "./orderItems.entity";
 import { Brand } from "./brand.entity";
 import { Review } from "./reviews.entity";
+import { Variant } from "./variant.entity";
 
 @Entity('products')
 export class Product {
@@ -19,6 +20,7 @@ export class Product {
     @Column({ nullable: true })
     description?: string;
 
+    // Only used if hasVariants = false
     @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
     basePrice?: number;
 
@@ -76,6 +78,12 @@ export class Product {
 
     @Column({ nullable: true })
     brandId?: number;
+
+    @Column({ type: 'boolean', default: false })
+    hasVariants: boolean;
+
+    @OneToMany(() => Variant, (variant) => variant.product, { cascade: true })
+    variants: Variant[];
 
     @OneToMany(() => Review, (review) => review.product, { cascade: true })
     reviews: Review[];

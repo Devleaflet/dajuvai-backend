@@ -18,28 +18,33 @@ interface Image {
     url: string;
 }
 
+interface VariantInterface {
+    sku: string;
+    basePrice: string; // String from form, parsed to number
+    discount?: string; // Optional, defaults to "0"
+    discountType?: DiscountType; // Optional, defaults to PERCENTAGE
+    stock: string; // String from form, parsed to number
+    status?: InventoryStatus; // Optional, defaults to AVAILABLE
+    attributes: { [key: string]: string }; // e.g., { color: "White", size: "L" }
+    variantImages?: string[];
+}
+
 export interface ProductInterface {
-    name?: string;
+    name: string;
     description?: string;
-    basePrice?: number;
-    discount?: number;
-    size?: string | string[];
-    discountType?: DiscountType;
-    status?: InventoryStatus;
-    stock?: number;
-    hasVariants?: boolean;
-    variants?: {
-        sku: string;
-        price: number;
-        stock: number;
-        status: InventoryStatus;
-        attributes?: { attributeType: string; attributeValues: string[] }[];
-        images?: Image[];
-    }[];
-    productImages?: Image[];
-    subcategoryId?: number;
-    dealId?: number;
-    bannerId?: number;
+    basePrice?: string; // Required for non-variant products
+    discount?: string; // Optional, defaults to "0"
+    discountType?: DiscountType; // Optional, defaults to PERCENTAGE
+    stock?: string; // Required for non-variant products
+    status?: InventoryStatus; // Optional, defaults to AVAILABLE
+    hasVariants: boolean | 'true' | 'false'; // String from form
+    subcategoryId?: string; // From req.params.subcategoryId
+    vendorId?: string; // From req.body or req.user.vendorId
+    brandId?: string;
+    dealId?: string;
+    bannerId?: string;
+    variants?: VariantInterface[]; // Required if hasVariants is "true"
+    productImages?: string[];
 }
 
 const ProductBaseSchema = z.object({
@@ -98,6 +103,23 @@ export const ProductCreateSchema = ProductBaseSchema.refine(
     {
         message: "Discount requires discountType and basePrice to be provided.",
         path: ["discount"],
+    }
+).refine(
+    (data) => {
+        // For variant products, ensure each variant has required fields
+        if (data.hasVariants === true && data.variants) {
+            return data.variants.every(variant =>
+                variant.sku &&
+                variant.price !== undefined &&
+                variant.stock !== undefined &&
+                variant.status
+            );
+        }
+        return true;
+    },
+    {
+        message: "Each variant must have SKU, price, stock, and status.",
+        path: ["variants"],
     }
 );
 

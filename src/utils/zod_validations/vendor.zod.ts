@@ -6,19 +6,25 @@ import { z } from 'zod';
  * Business address commented out but can be added as nested object if needed.
  */
 export const vendorSignupSchema = z.object({
-    businessName: z.string()
-        .min(3, 'Business name must be at least 3 characters long')
-        .max(100, 'Business name must not exceed 100 characters'),
-    email: z.string()
-        .email('Invalid email format'),
-    password: z.string()
-        .min(8, 'Password must be at least 8 characters long')
-        .max(25, 'Password must not exceed 25 characters'),
-    phoneNumber: z.string()
-        .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format'),
-    district: z.string()
-        .min(1, "district field cannot be empty"),
+    businessName: z.string().min(3).max(100),
+    email: z.string().email(),
+    password: z.string().min(8).max(25),
+    phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/),
+    district: z.string().min(1),
+    businessRegNumber: z.string().min(1, 'Business registration number is required'),
+    taxNumber: z.string().optional(),
+    taxDocuments: z.array(z.string().url()).min(1),
+    citizenshipDocuments: z.array(z.string().url()).optional(),
+    chequePhoto: z.string().url().min(1),
+    bankDetails: z.object({
+        accountName: z.string().min(1),
+        bankName: z.string().min(1),
+        accountNumber: z.string().min(1),
+        bankBranch: z.string().min(1),
+        bankCode: z.string().optional(),
+    }),
 });
+
 
 /**
  * Schema for vendor login input validation.
@@ -64,6 +70,7 @@ export const resetPasswordSchema = z.object({
     message: 'Passwords must match',
     path: ['confirmPass'],
 });
+
 
 /**
  * Schema to update vendor info.

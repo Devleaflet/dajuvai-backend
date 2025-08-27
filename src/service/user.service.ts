@@ -1,9 +1,10 @@
 import { MoreThan } from 'typeorm';
 import AppDataSource from '../config/db.config';
-import { User } from '../entities/user.entity';
+import { User, UserRole } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { errorUtil } from 'zod/lib/helpers/errorUtil';
+import { waitForDebugger } from 'inspector';
 
 /**
  * User repository instance for database operations.
@@ -42,6 +43,10 @@ export const findUserByEmail = async (email: string): Promise<User | null> => {
     return await userDB.findOneBy({ email });
 };
 
+export const findUserById = async (id: number) => {
+    return await userDB.findOneBy({ id })
+}
+
 /**
  * Finds a user by email or username (for login).
  * @param email - Email or username string
@@ -73,8 +78,45 @@ export const findUserByResetToken = async (token: string): Promise<User | null> 
  * @returns Promise<User | null> - User entity if found, else null
  */
 export const getUserByIdService = async (id: number): Promise<User | null> => {
-    return await userDB.findOneBy({ id });
+    const user = await userDB.findOne({
+        where: { id: id },
+        relations: ['address']
+    })
+
+    console.log("----------------User------------------------")
+    console.log(user)
+    return user;
+    // return await userDB.findOneBy({ id });
 };
+
+export const getAllStaff = async () => {
+    return await userDB.find({
+        where: {
+            role: UserRole.STAFF
+        }
+    })
+}
+
+
+export const deleteStaffById = async (id: number) => {
+    return await userDB.delete(id)
+}
+
+
+export const updateStaffById = async (id: number, data: any) => {
+    await userDB.update({
+        id,
+        role: UserRole.STAFF
+    },
+        data
+    )
+
+    const updateStaff = await userDB.findOne({
+        where: { id }
+    })
+
+    return updateStaff
+}
 
 /**
  * Updates user data for a given user ID.

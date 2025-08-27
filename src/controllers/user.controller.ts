@@ -1,7 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken } from '../service/user.service';
+import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
@@ -9,6 +9,7 @@ import { User, UserRole } from '../entities/user.entity';
 import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
 import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import AppDataSource from '../config/db.config';
+import { VendorService } from '../service/vendor.service';
 
 /**
  * @class TokenUtils
@@ -44,6 +45,7 @@ class TokenUtils {
  */
 export class UserController {
     private readonly jwtSecret: string;
+    private vendorService: VendorService;
 
     /**
       * @constructor
@@ -51,6 +53,7 @@ export class UserController {
       */
     constructor() {
         this.jwtSecret = process.env.JWT_SECRET || 'your_jwt_secret';
+        this.vendorService = new VendorService();
     }
 
     /**
@@ -208,6 +211,79 @@ export class UserController {
     }
 
 
+    async getAllStaff(req: Request, res: Response) {
+        try {
+            const staff = await getAllStaff();
+
+            res.status(200).json({
+                success: true,
+                data: staff
+            })
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+
+    async deleteStaff(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
+        try {
+            const id = req.params.id;
+
+            const staffExists = await findUserById(Number(id))
+
+            if (!staffExists) {
+                throw new APIError(404, "Staff doesnot exists")
+            }
+
+            const deletedStaff = await deleteStaffById(Number(id))
+
+            res.status(200).json({
+                success: true,
+                msg: "Staff deleted succesfully"
+            })
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+
+    async updateStaff(req: Request<{ id: string }, {}, { data: any }, {}>, res: Response) {
+        try {
+            const id = req.params.id;
+            const data = req.body.data;
+
+            const staffExists = await findUserById(Number(id))
+
+            if (!staffExists) {
+                throw new APIError(404, "Staff doesnot exists")
+            }
+
+            const deletedStaff = await updateStaffById(Number(id), data)
+
+            res.status(200).json({
+                success: true,
+                msg: "Staff deleted succesfully"
+            })
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+
 
     async staffSignup(req: AuthRequest, res: Response): Promise<void> {
         try {
@@ -329,6 +405,12 @@ export class UserController {
             // Check if a user with this email already exists
             let existingUser = await findUserByEmail(email);
 
+            const existingAccount = await this.vendorService.findVendorByEmail(email)
+
+            if (existingAccount) {
+                throw new APIError(400, "User already exists")
+            }
+
             //  Prepare hashed password and verification token
             const hashedPassword = await bcrypt.hash(password, 10);
             const verificationToken = TokenUtils.generateToken(); // raw token for email
@@ -435,67 +517,54 @@ export class UserController {
             // Verify user existence and password
             const { email, password } = parsed.data;
             const user = await findUserByEmailLogin(email);
-            let isVendor = false;
-            const vendor = await findVendorByEmail(email);
 
             if (!user) {
-                if (!vendor) {
-                    throw new APIError(404, "user does not exists")
-                }
-                isVendor = true
+                throw new APIError(404, "User does not exist");
             }
 
-            if (!isVendor) {
-                if (!user.isVerified) {
-                    // Reject unverified users
-                    throw new APIError(403, 'Please verify your email before logging in');
-                }
+            if (!user.isVerified) {
+                throw new APIError(403, "Please verify your email before logging in");
             }
 
-            const isMatch = isVendor ? await bcrypt.compare(password, vendor.password) : await bcrypt.compare(password, user.password);
-
+            // Compare password
+            const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
-                throw new APIError(401, 'Invalid credentials');
+                throw new APIError(401, "Invalid credentials");
             }
 
-
-
-            // Generate JWT and set cookie
-            const token = jwt.sign(isVendor ?
-                { id: vendor.id, email: vendor.email, businessName: vendor.businessName }
-                :
-                { id: user.id, email: user.email, role: user.role }
-                ,
+            // Generate JWT
+            const token = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: '7d' } // 7 days
+                { expiresIn: "2h" }
             );
 
-            res.cookie(!isVendor ? 'token' : 'vendorToken', token, {
+            // Set cookie
+            res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                sameSite: 'strict',
-                maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days in ms
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 2 * 60 * 60 * 1000,
             });
 
+            // Response
             res.status(200).json({
                 success: true,
-                token: token,
-                data: !isVendor
-                    ? { userId: user.id, email: user.email, role: user.role }
-                    : { vendorId: vendor.id, email: vendor.email, businessName: vendor.businessName }
+                token,
+                data: { userId: user.id, email: user.email, role: user.role },
             });
 
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
-                console.error('Unexpected error during login:', error);
-                res.status(503).json({ success: false, message: 'Authentication service temporarily unavailable' });
+                console.error("Unexpected error during login:", error);
+                res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
             }
         }
     }
 
-
+    
     /**
      * @method sendVerificationToken
      * @route POST /auth/resend-verification

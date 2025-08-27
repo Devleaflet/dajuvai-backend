@@ -22,7 +22,7 @@ export const sendContactEmail = async (dto: ContactInput) => {
     // Email options including recipient, subject, and HTML body generated from dto
     const mailOptions = {
         from: `"Contact Form" <${process.env.USER_EMAIL}>`, // sender address with friendly name
-        to: 'support@yourdomain.com',                       // support or admin email address
+        to: `${dto.email}`,                       // support or admin email address
         subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
         html: generateContactEmailHTML(dto),                // formatted HTML content of the message
     };
@@ -37,20 +37,38 @@ export const sendContactEmail = async (dto: ContactInput) => {
  * @param sub - Subject line for the verification email
  * @param token - Verification code to include in the email body
  */
-export const sendVerificationEmail = async (to: string, sub: string, token: string) => {
+export const sendVerificationEmail = async (to: string, sub: string, token?: string) => {
+    const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login"
     const mailOptions = {
-        from: `Leaflet <${process.env.USER_EMAIL}>`, // sender info with application name
-        to,                                           // recipient email
-        subject: sub,                                 // subject line (corrected property name to lowercase)
+        from: `<${process.env.USER_EMAIL}>`,
+        to,
+        subject: sub,
         html: `
-            <div>
+        <div>
+            ${token ? `
                 <h2>Email Verification</h2>
                 <p>Your 6-digit verification code is:</p>
                 <h3>${token}</h3>
                 <p>This code will expire in 2 minutes</p>
-            </div>
-        `
+            ` : `
+                <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
+                    <h2 style="color: #2E7D32; text-align: center;">Vendor Approved ✅</h2>
+                    <p style="font-size: 16px; text-align: center;">
+                        Congratulations! Your account has been successfully approved as a vendor.
+                    </p>
+                    <p style="font-size: 16px; text-align: center;">
+                        You can now log in to your account via the app and start using your vendor features.
+                    </p>
+                    <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+                    <p style="font-size: 12px; color: #888; text-align: center;">
+                        If you did not expect this email, please contact our support team immediately.
+                    </p>
+                </div>
+            `}
+        </div>
+    `
     };
+
 
     // Send the verification email
     await transporter.sendMail(mailOptions);

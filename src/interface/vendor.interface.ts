@@ -3,10 +3,28 @@ export interface IVendorSignupRequest {
     email: string;
     password: string;
     phoneNumber: string;
-    verificationCode: string,
-    verificationCodeExpire: Date,
-    district: string;
+    district: string; // name of district (we map to entity later)
+    businessRegNumber: string;
+    taxNumber?: string;
+    isVerified?: boolean;
+
+    taxDocuments: string[]; // PAN/VAT documents (pdf/image links)
+    citizenshipDocuments?: string[]; // optional
+
+    chequePhoto: string; // single cheque image URL
+
+    // ✅ Flattened bank details (from frontend.bankDetails)
+    accountName: string;
+    bankName: string;
+    accountNumber: string;
+    bankBranch: string;
+    bankCode?: string;
+
+    // handled internally
+    verificationCode?: string;
+    verificationCodeExpire?: Date;
 }
+
 
 export interface IVendorLoginRequest {
     email: string;

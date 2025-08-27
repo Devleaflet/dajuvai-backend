@@ -3,9 +3,11 @@ import { User } from "../entities/user.entity";
 import { LessThan, Not } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { OrderStatus, Order } from '../entities/order.entity';
+import { Vendor } from "../entities/vendor.entity";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
+const vendorDB = AppDataSource.getRepository(Vendor);
 
 /**
  * Periodic cleanup of expired user verification tokens.
@@ -24,39 +26,52 @@ const orderDB = AppDataSource.getRepository(Order);
  * - Reset resend limits and blocks so user can try verification again later.
  */
 export const tokenCleanUp = () => {
-    cron.schedule("*/2 * * * *", async () => { // runs every 2 minutes
+    cron.schedule("*/2 * * * *", async () => { // every 2 minutes
         try {
-            // Find all users whose verification token has expired and still present
+            // Only select known columns to avoid missing column issues
             const expiredUsers = await userDB.find({
+                select: [
+                    "id",
+                    "fullName",
+                    "username",
+                    "email",
+                    "role",
+                    "googleId",
+                    "facebookId",
+                    "provider",
+                    "isVerified",
+                    "verificationCode",
+                    "verificationCodeExpire",
+                    "resendCount",
+                    "resendBlockUntil"
+                ],
                 where: {
-                    verificationCodeExpire: LessThan(new Date()), // expired date check
-                    verificationCode: Not(null)                    // token exists
+                    verificationCodeExpire: LessThan(new Date()),
+                    verificationCode: Not(null)
                 }
             });
 
-            console.log(expiredUsers);
-
             if (expiredUsers.length > 0) {
                 for (const user of expiredUsers) {
-                    // Clear verification related fields
-                    user.verificationCode = null;
-                    user.verificationCodeExpire = null;
-                    user.resendBlockUntil = null;
-                    user.resendCount = null;
+                    try {
+                        user.verificationCode = null;
+                        user.verificationCodeExpire = null;
+                        user.resendBlockUntil = null;
+                        user.resendCount = null;
 
-                    // Persist changes to DB
-                    await userDB.save(user);
-                    console.log(" Token 🗑️✅");
+                        await userDB.save(user);
+                        console.log(`Token cleared for user ${user.id} ✅`);
+                    } catch (err) {
+                        console.error(`Failed to update user ${user.id}:`, err);
+                    }
                 }
             }
             console.log("Cron job completed for token cleanup");
         } catch (err) {
-            // Log any unexpected errors to troubleshoot cron failures
             console.error("❌ Error in cron job:", err);
         }
     });
-}
-
+};
 /**
  * Periodic cleanup of stale pending orders.
  * Runs every 2 hours on the hour (e.g., 12:00, 14:00, 16:00).
@@ -102,3 +117,10 @@ export const orderCleanUp = () => {
         }
     });
 };
+
+
+export const unverifiedVenorCleanUP = () => {
+    cron.schedule("* * * *", async () => {
+
+    })
+} 

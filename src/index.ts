@@ -31,6 +31,7 @@ import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
 import { orderCleanUp, tokenCleanUp } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
+import imageRouter from "./routes/image.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, 'uploads');
@@ -45,7 +46,8 @@ config();
 const allowedOrigins = [
     'https://dajuvai-frontend-ykrq.vercel.app',
     'https://dajuvai.com',
-    "http://localhost:5173"
+    "http://localhost:5173",
+    'https://dev.dajuvai.com'
 ]
 
 app.use(cors({
@@ -54,6 +56,7 @@ app.use(cors({
     allowedHeaders: ['Content-Type', 'Authorization'],
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
 }))
+
 
 
 // Middleware to parse JSON request bodies
@@ -88,6 +91,7 @@ app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/vendor/dashboard", vendorDashBoardRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
+app.use("/api/image", imageRouter);
 
 const port = process.env.PORT || 4000;
 

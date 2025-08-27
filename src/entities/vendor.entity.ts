@@ -1,4 +1,4 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne, JoinColumn, OneToOne } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
 import { Product } from './product.entity';
 import { OrderItem } from './orderItems.entity';
 import { District } from './district.entity';
@@ -26,21 +26,55 @@ export class Vendor {
 
     @Column({ nullable: true })
     districtId: number;
-    
+
+    @Column({ nullable: true })
+    businessRegNumber: string; // ✅ Added
+
+    @Column({ type: "varchar", nullable: true })
+    taxNumber: string;
+
+    @Column("text", { array: true, nullable: true })
+    taxDocuments: string[];
+
+    @Column("text", { array: true, nullable: true })
+    citizenshipDocuments: string[];
+
+    @Column({ type: "varchar", nullable: true })
+    chequePhoto: string;
+
+    // ✅ Flattened bank details
+    @Column({ type: "varchar", nullable: true })
+    accountName: string;
+
+    @Column({ type: "varchar", nullable: true })
+    bankName: string;
+
+    @Column({ type: "varchar", nullable: true })
+    accountNumber: string;
+
+    @Column({ type: "varchar", nullable: true })
+    bankBranch: string;
+
+    @Column({ type: "varchar", nullable: true })
+    bankCode: string | null;
+
     @Column({ nullable: true })
     verificationCode: string | null;
 
     @Column({ nullable: true })
     verificationCodeExpire: Date | null;
 
-    // @Column({ default: true })
-    // isVerified: boolean;
+    @Column({ default: false })
+    isVerified: boolean;
+
+    @Column({ default: false })
+    isApproved: boolean;
 
     @Column({ nullable: true })
-    resetToken: string | null; // used
+    resetToken: string | null;
 
     @Column({ nullable: true })
-    resetTokenExpire: Date | null; // used
+    resetTokenExpire: Date | null;
 
     @Column({ default: 0 })
     resendCount: number;

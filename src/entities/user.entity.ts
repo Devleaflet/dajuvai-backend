@@ -22,10 +22,16 @@ export class User {
     id: number;
 
     @Column({ nullable: true })
+    fullName: string;
+
+    @Column({ nullable: true })
     username: string;
 
     @Column({ unique: true, nullable: true })
     email: string;
+
+    @Column({unique: true, nullable: true})
+    phoneNumber: string;
 
     @Column({
         type: "enum",
@@ -36,9 +42,7 @@ export class User {
 
     @OneToMany(() => Product, (product) => product.vendor)
     products: Product[]
-
     @OneToOne(() => Address, (address) => address.user, { cascade: true, eager: true })
-    @JoinColumn({ name: 'addressId' })
     address: Address;
 
     @Column({ nullable: true })

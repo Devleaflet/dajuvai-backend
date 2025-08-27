@@ -62,7 +62,8 @@ export const createOrderSchema = z.object({
     paymentMethod: PaymentMethodEnum,
     phoneNumber: z.string()
         .min(10, "Phone number must be 10 digits").max(10, "Phone number must be 10 digits"),
-    promoCode: z.string().optional()
+    promoCode: z.string().optional(),
+    fullName: z.string().optional()
 });
 
 

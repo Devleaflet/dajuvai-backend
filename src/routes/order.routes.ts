@@ -173,7 +173,7 @@ const orderController = new OrderController();
  */
 
 router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
-
+//authMiddleware,
 
 /**
  * @swagger
@@ -1411,9 +1411,10 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  * /api/order/user/track/{orderId}:
  *   get:
  *     summary: Track order status by order ID
- *     description: Returns the status of a specific order for the authenticated user.
+ *     description: Returns the status of a specific order by order ID.
  *     tags:
  *       - Orders
+<<<<<<< HEAD
  *     security:
  *       - bearerAuth: []
  *     parameters:
@@ -1424,6 +1425,21 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *           type: number
  *         example: 123
  *         description: ID of the order to be tracked.
+=======
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderId
+ *             properties:
+ *               orderId:
+ *                 type: number
+ *                 example: 123
+ *                 description: ID of the order to be tracked.
+>>>>>>> dev
  *     responses:
  *       200:
  *         description: Order status retrieved successfully
@@ -1452,10 +1468,8 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *                 message:
  *                   type: string
  *                   example: "Order id is required"
- *       401:
- *         description: Unauthorized - user not authenticated
  *       404:
- *         description: User or order not found
+ *         description: Order not found
  *         content:
  *           application/json:
  *             schema:
@@ -1466,11 +1480,15 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Order does not exist or does not belong to the user"
+ *                   example: "Order does not exist"
  *       500:
  *         description: Internal server error
  */
+<<<<<<< HEAD
 router.get("/user/track/:orderId", authMiddleware, asyncHandler(orderController.trackOrderById.bind(orderController)));
+=======
+router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(orderController)));
+>>>>>>> dev
 
 /**
  * @swagger

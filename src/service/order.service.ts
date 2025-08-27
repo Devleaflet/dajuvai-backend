@@ -16,6 +16,7 @@ import { PromoService } from './promo.service';
 import { add } from 'winston';
 import { number, string } from 'zod';
 import { InventoryStatus } from '../entities/product.enum';
+import { Variant } from '../entities/variant.entity';
 
 
 /**
@@ -36,6 +37,7 @@ export class OrderService {
     private districtRepository: Repository<District>;
     private productRepository: Repository<Product>;
     private promoService: PromoService;
+    private variantRepository: Repository<Variant>;
 
 
     /**
@@ -71,6 +73,8 @@ export class OrderService {
         this.productRepository = AppDataSource.getRepository(Product);
 
         this.promoService = new PromoService();
+
+        this.variantRepository = AppDataSource.getTreeRepository(Variant);
     }
 
     /**
@@ -100,14 +104,9 @@ export class OrderService {
      * @returns {Promise<Cart>} The cart entity with items and related product/vendor/district data.
      */
     private async getCart(userId: number): Promise<Cart> {
-        // Fetch the cart belonging to the user, including nested relations:
-        // - items in the cart
-        // - each item's associated product
-        // - the vendor of each product
-        // - the district of each vendor
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.product.vendor', 'items.product.vendor.district'],
+            relations: ['items', 'items.product', 'items.product.vendor', 'items.product.vendor.district', 'items.variant'],
         });
 
         // If cart not found or cart has no items, throw an error indicating cart is empty
@@ -152,34 +151,49 @@ export class OrderService {
     private async getOrCreateAddress(
         userId: number,
         shippingAddress: IShippingAddressRequest,
-        user: any
+        phoneNumber: string,
+        user: User
     ): Promise<Address> {
 
-        let address = await this.addressRepository.findOne({
-            where: {
-                userId: userId
-            }
-        })
+        let address = await this.addressRepository.findOne({ where: { userId } });
 
         if (address) {
-
-            //  Check if user's existing address matches the shipping address from the request
             if (
-                address.province === shippingAddress.province &&
-                address.district === shippingAddress.district &&
-                address.city === shippingAddress.city &&
-                address.localAddress === shippingAddress.streetAddress
+                address.province !== shippingAddress.province ||
+                address.district !== shippingAddress.district ||
+                address.city !== shippingAddress.city ||
+                address.localAddress !== shippingAddress.streetAddress
             ) {
-                return address;
-            }
+                address.province = shippingAddress.province;
+                address.district = shippingAddress.district;
+                address.city = shippingAddress.city;
+                address.localAddress = shippingAddress.streetAddress;
+                // address.phoneNumber = phoneNumber; // uncomment if needed
 
-            address = { ...address, ...shippingAddress }
-            return this.addressRepository.save(address);
+                const savedAddress = await this.addressRepository.save(address);
+                user.address = savedAddress;
+                await this.userRepository.save(user); // link for eager loading
+                return savedAddress;
+            }
+            return address;
         }
 
-        const newAddress = this.addressRepository.create({ ...shippingAddress, userId });
-        return this.addressRepository.save(newAddress);
+        // Create new address
+        const newAddress = this.addressRepository.create({
+            province: shippingAddress.province,
+            district: shippingAddress.district,
+            city: shippingAddress.city,
+            localAddress: shippingAddress.streetAddress,
+            // phoneNumber,
+            userId
+        });
+
+        const savedAddress = await this.addressRepository.save(newAddress);
+        user.address = savedAddress;
+        await this.userRepository.save(user);
+        return savedAddress;
     }
+
 
 
     /**
@@ -190,17 +204,17 @@ export class OrderService {
      * @returns {OrderItem[]} - Array of OrderItem entities ready to be saved to the database.
      */
     private createOrderItems(cartItems: any[]): OrderItem[] {
-        // Map each cart item into a new OrderItem entity using the orderItemRepository
-        return cartItems.map(item =>
-            this.orderItemRepository.create({
-                productId: item.product.id,            // Reference to the product being ordered
-                quantity: item.quantity,               // Quantity ordered
-                price: item.price,                     // Final price at time of order
-                vendorId: item.product.vendorId,       // Associated vendor (for vendor-specific order access)
-                product: item.product,                 // Optionally include full product object (for ORM relation mapping)
-            })
-        );
+        return cartItems.map(item => {
+            return this.orderItemRepository.create({
+                productId: item.product.id,
+                quantity: item.quantity,
+                price: item.price,
+                vendorId: item.product.vendorId,
+                variantId: item.variant ? item.variant.id : null,
+            });
+        });
     }
+
 
 
     /**
@@ -268,12 +282,14 @@ export class OrderService {
     }
 
 
-    async trackOrder(userId: number, orderId: number) {
+    async trackOrder(email: string, orderId: number) {
         const order = await this.orderRepository.findOne({
             where: {
                 id: orderId,
-                orderedById: userId
+                orderedBy: { email }
             },
+            relations: ["orderedBy"],
+            select: ["id", "status"]
         })
 
         if (!order) {
@@ -292,33 +308,202 @@ export class OrderService {
      * @returns {Promise<{ order: Order; redirectUrl?: string }>} - Returns the created order and optional redirect URL for online payment.
      * @access Customer
      */
+    // async createOrder(
+    //     userId: number,
+    //     orderData: IOrderCreateRequest
+    // ): Promise<{ order: Order; redirectUrl?: string }> {
+    //     try {
+    //         const { shippingAddress, paymentMethod, phoneNumber } = orderData;
+
+    //         console.log(shippingAddress);
+
+    //         // Fetch user, cart, and shipping district in parallel
+    //         const [user, cart, _district] = await Promise.all([
+    //             this.getUser(userId),                                  // Get user and their saved address
+    //             this.getCart(userId),                                  // Get cart with populated product and vendor info
+    //             this.getDistrict(shippingAddress.district),            // Validate if district exists in system
+    //         ]);
+
+    //         // Check stock before creating the order
+    //         for (const item of cart.items) {
+    //             // If the cart item has a variant
+    //             if (item.variantId) {
+    //                 const variant = await this.variantRepository.findOne({
+    //                     where: { id: item.variantId.toString() },
+    //                 });
+
+    //                 if (!variant) {
+    //                     throw new APIError(404, `Variant not found for product: ${item.product.name}`);
+    //                 }
+
+    //                 if (variant.stock < item.quantity) {
+    //                     throw new APIError(400, `Insufficient stock for variant of product: ${item.product.name}`);
+    //                 }
+    //             } else {
+    //                 // Fallback to product-level stock if no variant
+    //                 const product = await this.productRepository.findOne({
+    //                     where: { id: item.product.id },
+    //                 });
+
+    //                 if (!product) {
+    //                     throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+    //                 }
+
+    //                 if (!product.stock || product.stock < item.quantity) {
+    //                     throw new APIError(400, `Insufficient stock for product: ${product.name}`);
+    //                 }
+    //             }
+    //         }
+
+
+
+    //         // Either fetch user's existing address or create a new one based on input
+    //         const address = await this.getOrCreateAddress(userId, shippingAddress, user);
+
+    //         // Calculate total shipping fee based on cart items and destination address
+    //         const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
+
+    //         // Create the Order entity (not yet saved in DB)
+    //         let order = await this.createOrderEntity(userId, user, cart, address, shippingFee, orderData);
+    //         console.log(order);
+
+    //         let redirectUrl: string | undefined;
+
+    //         // Handle different payment methods
+    //         if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+    //             // Save order directly for COD
+    //             order = await this.orderRepository.save(order);
+
+
+    //             for (const item of order.orderItems) {
+    //                 if (item.variantId) {
+    //                     const variant = await this.variantRepository.findOne({
+    //                         where: { id: item.variantId.toString() },
+    //                     });
+
+    //                     if (!variant) {
+    //                         throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+    //                     }
+
+    //                     if (variant.stock < item.quantity) {
+    //                         throw new APIError(400, `Insufficient stock for variant of product ${item.product.name}`);
+    //                     }
+
+    //                     variant.stock -= item.quantity;
+
+    //                     if (variant.stock <= 0) {
+    //                         variant.status = InventoryStatus.OUT_OF_STOCK;
+    //                     } else if (variant.stock < 5) {
+    //                         variant.status = InventoryStatus.LOW_STOCK;
+    //                     } else {
+    //                         variant.status = InventoryStatus.AVAILABLE;
+    //                     }
+
+    //                     await this.variantRepository.save(variant);
+
+    //                 } else {
+    //                     const product = await this.productRepository.findOne({
+    //                         where: { id: item.product.id },
+    //                     });
+
+    //                     if (!product) {
+    //                         throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+    //                     }
+
+    //                     if (!product.stock || product.stock < item.quantity) {
+    //                         throw new APIError(400, `Insufficient stock for product ${product.name}`);
+    //                     }
+
+    //                     product.stock -= item.quantity;
+
+    //                     if (product.stock <= 0) {
+    //                         product.status = InventoryStatus.OUT_OF_STOCK;
+    //                     } else if (product.stock < 5) {
+    //                         product.status = InventoryStatus.LOW_STOCK;
+    //                     } else {
+    //                         product.status = InventoryStatus.AVAILABLE;
+    //                     }
+
+    //                     await this.productRepository.save(product);
+    //                 }
+    //             }
+
+
+    //             await this.cartService.clearCart(userId);
+    //         } else if (
+    //             paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
+    //             paymentMethod === PaymentMethod.ESEWA ||
+    //             paymentMethod === PaymentMethod.KHALIT
+    //         ) {
+    //             // Save order first before initiating online payment
+    //             order = await this.orderRepository.save(order);
+    //             console.log(order);
+    //         } else {
+    //             // Invalid payment method fallback
+    //             throw new APIError(400, 'Invalid payment method');
+    //         }
+
+    //         return { order, redirectUrl };
+
+    //     } catch (error) {
+    //         // Wrap unexpected errors in a generic 500 API error
+    //         console.log(error)
+    //         throw error instanceof APIError ? error : new APIError(500, 'Failed to create order');
+    //     }
+    // }
+
+    async updateUserDetail(id: number, fullName: string, phoneNumber: string) {
+        const userDb = AppDataSource.getRepository(User);
+
+        // Fetch the user first
+        const user = await userDb.findOne({ where: { id: id } });
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        // Update the fields
+        user.fullName = fullName;
+        user.phoneNumber = phoneNumber;
+
+        // Save changes
+        const updatedUser = await userDb.save(user);
+
+        console.log("--------------updated user------------------")
+
+        console.log(updatedUser);
+    }
+
+
+
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
     ): Promise<{ order: Order; redirectUrl?: string }> {
         try {
-            const { shippingAddress, paymentMethod, phoneNumber } = orderData;
+            const { shippingAddress, paymentMethod, phoneNumber, fullName } = orderData;
+
+            console.log("-----------------Order data-------------------")
+            console.log(orderData);
+
+            await this.updateUserDetail(userId, fullName, phoneNumber);
 
             console.log(shippingAddress);
 
             // Fetch user, cart, and shipping district in parallel
             const [user, cart, _district] = await Promise.all([
-                this.getUser(userId),                                  // Get user and their saved address
-                this.getCart(userId),                                  // Get cart with populated product and vendor info
-                this.getDistrict(shippingAddress.district),            // Validate if district exists in system
+                this.getUser(userId),
+                this.getCart(userId),
+                this.getDistrict(shippingAddress.district),
             ]);
 
-            // Check stock before creating the order
-            for (const item of cart.items) {
-                const product = await this.productRepository.findOne({ where: { id: item.product.id } });
-                if (!product || product.stock < item.quantity) {
-                    throw new APIError(400, `Insufficient stock for product: ${product?.name || 'unknown'}`);
-                }
-            }
+            console.log("----------------cart-------------------")
+            console.log(cart.items)
 
+            // Check stock before creating the order
+            await this.validateStock(cart.items);
 
             // Either fetch user's existing address or create a new one based on input
-            const address = await this.getOrCreateAddress(userId, shippingAddress, user);
+            const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
 
             // Calculate total shipping fee based on cart items and destination address
             const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
@@ -334,38 +519,19 @@ export class OrderService {
                 // Save order directly for COD
                 order = await this.orderRepository.save(order);
 
+                // Reload the order with relations
+                order = await this.orderRepository.findOne({
+                    where: { id: order.id },
+                    relations: ["orderItems", "orderItems.product", "orderItems.variant"],
+                });
 
-                for (const item of order.orderItems) {
-                    const product = await this.productRepository.findOne({
-                        where: {
-                            id: item.product.id
-                        }
-                    })
+                console.log("----------------Order console-----------------------")
+                console.log(order)
 
-                    if (!product) {
-                        throw new APIError(404, `Product not found for order item ID: ${item.id}`);
-                    }
-
-
-                    if (product.stock < item.quantity) {
-                        throw new APIError(400, `Insufficient stock for product ${product.name}`);
-                    }
-
-                    product.stock -= item.quantity;
-
-                    // update product status
-                    if (product.stock <= 0) {
-                        product.status = InventoryStatus.OUT_OF_STOCK;
-                    } else if (product.stock < 5) {
-                        product.status = InventoryStatus.LOW_STOCK;
-                    } else {
-                        product.status = InventoryStatus.AVAILABLE;
-                    }
-
-                    await this.productRepository.save(product);
-                }
-
+                // Update stock after successful order creation
+                await this.updateStock(order.orderItems);
                 await this.cartService.clearCart(userId);
+
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
                 paymentMethod === PaymentMethod.ESEWA ||
@@ -388,6 +554,133 @@ export class OrderService {
         }
     }
 
+    // Separate method for stock validation
+    private async validateStock(cartItems: CartItem[]): Promise<void> {
+        for (const item of cartItems) {
+            if (item.variantId) {
+                const variant = await this.variantRepository.findOne({
+                    where: { id: item.variantId.toString() },
+                });
+
+                console.log("----------Variant-------------------")
+                console.log(variant.stock)
+                console.log(item.quantity)
+
+                if (!variant) {
+                    throw new APIError(404, `Variant not found for product: ${item.product.name}`);
+                }
+
+                if (variant.stock < item.quantity) {
+                    throw new APIError(400,
+                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
+                        `Available: ${variant.stock}, Requested: ${item.quantity}`
+                    );
+                }
+
+                continue;
+            }
+            // Fallback to product-level stock if no variant
+            const product = await this.productRepository.findOne({
+                where: { id: item.product.id },
+            });
+
+            console.log("------------------Products----------------------")
+            console.log(product)
+            console.log(product.stock)
+            console.log(item.quantity)
+
+            if (!product) {
+                throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+            }
+
+            if (!product.stock || product.stock < item.quantity) {
+                throw new APIError(400,
+                    `Insufficient stock for product "${product.name}". ` +
+                    `Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                );
+            }
+
+        }
+    }
+
+    // Separate method for stock updates
+    private async updateStock(orderItems: any[]): Promise<void> {
+        for (const item of orderItems) {
+            // --- Handle Variant Stock ---
+            if (item.variantId) {
+                const variant = await this.variantRepository.findOne({
+                    where: { id: item.variantId },
+                    relations: ["product"],
+                });
+
+                if (!variant) {
+                    throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+                }
+
+                // Double-check stock
+                if (variant.stock < item.quantity) {
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for variant "${variant.sku || variant.id}" of product "${variant.product?.name || "Unknown"}". ` +
+                        `Available: ${variant.stock}, Requested: ${item.quantity}`
+                    );
+                }
+
+                // Deduct stock
+                variant.stock -= item.quantity;
+
+                // Update inventory status
+                if (variant.stock <= 0) {
+                    variant.status = InventoryStatus.OUT_OF_STOCK;
+                } else if (variant.stock < 5) {
+                    variant.status = InventoryStatus.LOW_STOCK;
+                } else {
+                    variant.status = InventoryStatus.AVAILABLE;
+                }
+
+                await this.variantRepository.save(variant);
+
+            }
+            // --- Handle Product Stock ---
+            else if (item.productId) {
+                const product = await this.productRepository.findOne({
+                    where: { id: item.productId },
+                });
+
+                if (!product) {
+                    throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                }
+
+                // Double-check stock
+                if (!product.stock || product.stock < item.quantity) {
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for product "${product.name || product.id}". ` +
+                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                    );
+                }
+
+                // Deduct stock
+                product.stock -= item.quantity;
+
+                // Update inventory status
+                if (product.stock <= 0) {
+                    product.status = InventoryStatus.OUT_OF_STOCK;
+                } else if (product.stock < 5) {
+                    product.status = InventoryStatus.LOW_STOCK;
+                } else {
+                    product.status = InventoryStatus.AVAILABLE;
+                }
+
+                await this.productRepository.save(product);
+
+            }
+            // --- Invalid Order Item ---
+            else {
+                throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+            }
+        }
+    }
 
 
 
@@ -538,7 +831,7 @@ export class OrderService {
      */
     async getCustomerOrders(): Promise<Order[]> {
         return this.orderRepository.find({
-            relations: ['orderedBy', 'orderItems', 'shippingAddress'],
+            relations: ['orderedBy', 'orderItems', 'shippingAddress', 'orderItems.product', 'orderItems.variant'],
             where: {
                 status: Not(OrderStatus.PENDING)
             },
@@ -561,13 +854,14 @@ export class OrderService {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
 
-            // Load related entities: customer, address, products, and vendor info
+            // Load related entities: customer, address, products, variant, and vendor info
             relations: [
                 'orderedBy',
                 'shippingAddress',
                 'orderItems',
                 'orderItems.product',
-                'orderItems.vendor'
+                'orderItems.vendor',
+                'orderItems.variant'
             ],
         });
 
@@ -578,6 +872,7 @@ export class OrderService {
 
         return order;
     }
+
 
 
 
@@ -673,6 +968,7 @@ export class OrderService {
                 'orderItems',
                 'orderItems.product',
                 'orderItems.vendor',
+                'orderItems.variant',
             ],
         });
     }
@@ -695,6 +991,7 @@ export class OrderService {
                 'orderItems',
                 'orderItems.product',
                 'orderItems.vendor',
+                'orderItems.variant',
             ],
 
         });
@@ -767,7 +1064,6 @@ export class OrderService {
      * @access Admin or authorized users
      */
     async searchOrdersById(orderId: number): Promise<Order | null> {
-        // Query the order by ID with all relevant relations for detailed info
         return await this.orderRepository.findOne({
             where: { id: orderId },
             relations: ['orderedBy', 'shippingAddress', 'orderItems', 'orderItems.product', 'orderItems.vendor'],
@@ -791,6 +1087,7 @@ export class OrderService {
             .leftJoinAndSelect('order.shippingAddress', 'shippingAddress') // Include shipping address
             .leftJoinAndSelect('orderItems.product', 'product') // Include products in order items
             .leftJoinAndSelect('orderItems.vendor', 'vendor') // Include vendor info for order items
+            .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('orderItems.vendorId = :vendorId', { vendorId }) // Filter by vendorId
             .andWhere('order.status != :status', { status: OrderStatus.PENDING })
             .orderBy('order.createdAt', 'DESC')
@@ -816,6 +1113,7 @@ export class OrderService {
             .leftJoinAndSelect('order.shippingAddress', 'shippingAddress') // Join shipping address
             .leftJoinAndSelect('orderItems.product', 'product') // Join products in order items
             .leftJoinAndSelect('orderItems.vendor', 'vendor') // Join vendor info for order items
+            .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('order.id = :orderId', { orderId }) // Filter by order ID
             .andWhere('orderItems.vendorId = :vendorId', { vendorId })
             .andWhere('order.status != :status', { status: OrderStatus.PENDING }) // Filter order items by vendor ID
@@ -848,6 +1146,7 @@ export class OrderService {
             relations: [
                 'orderItems',
                 'orderItems.product',
+                'orderItems.variant',
                 'shippingAddress',
             ],
             order: { createdAt: 'DESC' }, // Sort orders by creation date descending

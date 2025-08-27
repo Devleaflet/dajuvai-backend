@@ -1,6 +1,7 @@
 import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { Product } from "./product.entity";
 import { Wishlist } from "./wishlist.entity";
+import { Variant } from "./variant.entity";
 
 @Entity('wishlist_items')
 export class WishlistItem {
@@ -14,6 +15,13 @@ export class WishlistItem {
     @ManyToOne(() => Product, { onDelete: 'SET NULL' })
     @JoinColumn({ name: 'product_id' })
     product: Product;
+
+    @ManyToOne(() => Variant, { nullable: true })
+    @JoinColumn({ name: 'variantId' })
+    variant?: Variant;
+
+    @Column({ nullable: true })
+    variantId?: number;
 
     @Column()
     productId: number;

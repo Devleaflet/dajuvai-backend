@@ -42,8 +42,11 @@ export class CartController {
                 throw new APIError(401, 'Unauthorized');
             }
 
+            console.log("-----------------Body------------------------")
+            console.log(req.body)
+
             // Extract and validate input
-            const { productId, quantity } = req.body;
+            const { productId, quantity, variantId } = req.body;
             if (
                 typeof productId !== 'number' ||
                 !Number.isInteger(productId) ||
@@ -56,7 +59,7 @@ export class CartController {
             }
 
             // Add item to cart via service
-            const cart = await this.cartService.addToCart(userId, { productId, quantity });
+            const cart = await this.cartService.addToCart(userId, { productId, quantity, variantId });
 
             // Send success response
             res.status(200).json({ success: true, data: cart });
@@ -91,6 +94,9 @@ export class CartController {
             if (!userId) {
                 throw new APIError(401, 'Unauthorized');
             }
+
+            console.log("---------------------Decrease nonly -------------------")
+            console.log(req.body.decreaseOnly);
 
             // Extract and validate cart item ID
             const { cartItemId } = req.body;
