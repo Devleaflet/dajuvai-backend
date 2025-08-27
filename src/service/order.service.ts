@@ -190,7 +190,7 @@ export class OrderService {
 
         const savedAddress = await this.addressRepository.save(newAddress);
         user.address = savedAddress;
-        await this.userRepository.save(user); 
+        await this.userRepository.save(user);
         return savedAddress;
     }
 
@@ -452,13 +452,40 @@ export class OrderService {
     //     }
     // }
 
+    async updateUserDetail(id: number, fullName: string, phoneNumber: string) {
+        const userDb = AppDataSource.getRepository(User);
+
+        // Fetch the user first
+        const user = await userDb.findOne({ where: { id: id } });
+        if (!user) {
+            throw new Error('User not found');
+        }
+
+        // Update the fields
+        user.fullName = fullName;
+        user.phoneNumber = phoneNumber;
+
+        // Save changes
+        const updatedUser = await userDb.save(user);
+
+        console.log("--------------updated user------------------")
+
+        console.log(updatedUser);
+    }
+
+
 
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
     ): Promise<{ order: Order; redirectUrl?: string }> {
         try {
-            const { shippingAddress, paymentMethod, phoneNumber } = orderData;
+            const { shippingAddress, paymentMethod, phoneNumber, fullName } = orderData;
+
+            console.log("-----------------Order data-------------------")
+            console.log(orderData);
+
+            await this.updateUserDetail(userId, fullName, phoneNumber);
 
             console.log(shippingAddress);
 
