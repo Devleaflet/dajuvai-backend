@@ -31,7 +31,7 @@ export class Address {
     localAddress: string;
 
     @OneToOne(() => User, user => user.address, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'userId' })
+    @JoinColumn({ name: 'userId' }) 
     user: User;
 
     @Column()

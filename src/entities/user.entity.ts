@@ -39,13 +39,11 @@ export class User {
 
     @OneToMany(() => Product, (product) => product.vendor)
     products: Product[]
-
     @OneToOne(() => Address, (address) => address.user, { cascade: true, eager: true })
-    @JoinColumn({ name: 'addressId' })
     address: Address;
 
-    @Column({ nullable: true })
-    addressId: number;
+    // @Column({ nullable: true })
+    // addressId: number;
 
     @OneToMany(() => Order, (order) => order.orderedBy)
     orders: Order[];

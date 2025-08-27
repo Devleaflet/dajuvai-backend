@@ -155,32 +155,27 @@ export class OrderService {
         user: User
     ): Promise<Address> {
 
-        let address = await this.addressRepository.findOne({
-            where: {
-                userId: userId
-            }
-        });
+        let address = await this.addressRepository.findOne({ where: { userId } });
 
         if (address) {
-            // Check if user's existing address matches the shipping address from the request 
             if (
-                address.province === shippingAddress.province &&
-                address.district === shippingAddress.district &&
-                address.city === shippingAddress.city &&
-                address.localAddress === shippingAddress.streetAddress
-                // address.phoneNumber === phoneNumber
+                address.province !== shippingAddress.province ||
+                address.district !== shippingAddress.district ||
+                address.city !== shippingAddress.city ||
+                address.localAddress !== shippingAddress.streetAddress
             ) {
-                return address;
+                address.province = shippingAddress.province;
+                address.district = shippingAddress.district;
+                address.city = shippingAddress.city;
+                address.localAddress = shippingAddress.streetAddress;
+                // address.phoneNumber = phoneNumber; // uncomment if needed
+
+                const savedAddress = await this.addressRepository.save(address);
+                user.address = savedAddress;
+                await this.userRepository.save(user); // link for eager loading
+                return savedAddress;
             }
-
-            // Update with new details (set explicitly)
-            address.province = shippingAddress.province;
-            address.district = shippingAddress.district;
-            address.city = shippingAddress.city;
-            address.localAddress = shippingAddress.streetAddress;
-            // address.phoneNumber = phoneNumber;
-
-            return this.addressRepository.save(address);
+            return address;
         }
 
         // Create new address
@@ -192,8 +187,13 @@ export class OrderService {
             // phoneNumber,
             userId
         });
-        return this.addressRepository.save(newAddress);
+
+        const savedAddress = await this.addressRepository.save(newAddress);
+        user.address = savedAddress;
+        await this.userRepository.save(user); 
+        return savedAddress;
     }
+
 
 
     /**
@@ -204,16 +204,16 @@ export class OrderService {
      * @returns {OrderItem[]} - Array of OrderItem entities ready to be saved to the database.
      */
     private createOrderItems(cartItems: any[]): OrderItem[] {
-    return cartItems.map(item => {
-        return this.orderItemRepository.create({
-            productId: item.product.id,
-            quantity: item.quantity,
-            price: item.price,
-            vendorId: item.product.vendorId,
-            variantId: item.variant ? item.variant.id : null, 
+        return cartItems.map(item => {
+            return this.orderItemRepository.create({
+                productId: item.product.id,
+                quantity: item.quantity,
+                price: item.price,
+                vendorId: item.product.vendorId,
+                variantId: item.variant ? item.variant.id : null,
+            });
         });
-    });
-}
+    }
 
 
 
