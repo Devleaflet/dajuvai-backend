@@ -8,6 +8,7 @@ export const multerOptions = {
             'image/png',
             'image/jpg',
             'image/webp',
+            'image/avif',
             'application/pdf'
         ];
 
