@@ -6,6 +6,7 @@ export interface IVendorSignupRequest {
     district: string; // name of district (we map to entity later)
     businessRegNumber: string;
     taxNumber?: string;
+    isVerified?: boolean;
 
     taxDocuments: string[]; // PAN/VAT documents (pdf/image links)
     citizenshipDocuments?: string[]; // optional

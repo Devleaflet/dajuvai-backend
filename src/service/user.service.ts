@@ -78,7 +78,15 @@ export const findUserByResetToken = async (token: string): Promise<User | null> 
  * @returns Promise<User | null> - User entity if found, else null
  */
 export const getUserByIdService = async (id: number): Promise<User | null> => {
-    return await userDB.findOneBy({ id });
+    const user = await userDB.findOne({
+        where: { id: id },
+        relations: ['address']
+    })
+
+    console.log("----------------User------------------------")
+    console.log(user)
+    return user;
+    // return await userDB.findOneBy({ id });
 };
 
 export const getAllStaff = async () => {

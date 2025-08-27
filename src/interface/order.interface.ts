@@ -47,7 +47,7 @@ export interface IShippingAddressRequest {
     province: Province;
     city: string;
     streetAddress: string;
-    district: string; // Added district for shipping address
+    district: string;
 }
 
 export interface IOrderCreateRequest {
@@ -57,6 +57,7 @@ export interface IOrderCreateRequest {
     serviceCharge?: number;
     instrumentName?: string;
     promoCode?: string;
+    fullName?: string;
 }
 
 export interface IOrderItemResponse {

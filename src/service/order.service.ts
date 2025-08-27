@@ -151,32 +151,47 @@ export class OrderService {
     private async getOrCreateAddress(
         userId: number,
         shippingAddress: IShippingAddressRequest,
-        user: any
+        phoneNumber: string,
+        user: User
     ): Promise<Address> {
 
         let address = await this.addressRepository.findOne({
             where: {
                 userId: userId
             }
-        })
+        });
 
         if (address) {
-
-            //  Check if user's existing address matches the shipping address from the request
+            // Check if user's existing address matches the shipping address from the request 
             if (
                 address.province === shippingAddress.province &&
                 address.district === shippingAddress.district &&
                 address.city === shippingAddress.city &&
                 address.localAddress === shippingAddress.streetAddress
+                // address.phoneNumber === phoneNumber
             ) {
                 return address;
             }
 
-            address = { ...address, ...shippingAddress }
+            // Update with new details (set explicitly)
+            address.province = shippingAddress.province;
+            address.district = shippingAddress.district;
+            address.city = shippingAddress.city;
+            address.localAddress = shippingAddress.streetAddress;
+            // address.phoneNumber = phoneNumber;
+
             return this.addressRepository.save(address);
         }
 
-        const newAddress = this.addressRepository.create({ ...shippingAddress, userId });
+        // Create new address
+        const newAddress = this.addressRepository.create({
+            province: shippingAddress.province,
+            district: shippingAddress.district,
+            city: shippingAddress.city,
+            localAddress: shippingAddress.streetAddress,
+            // phoneNumber,
+            userId
+        });
         return this.addressRepository.save(newAddress);
     }
 
@@ -189,17 +204,17 @@ export class OrderService {
      * @returns {OrderItem[]} - Array of OrderItem entities ready to be saved to the database.
      */
     private createOrderItems(cartItems: any[]): OrderItem[] {
-        // Map each cart item into a new OrderItem entity using the orderItemRepository
-        return cartItems.map(item =>
-            this.orderItemRepository.create({
-                productId: item.product.id,            // Reference to the product being ordered
-                quantity: item.quantity,               // Quantity ordered
-                price: item.price,                     // Final price at time of order
-                vendorId: item.product.vendorId,       // Associated vendor (for vendor-specific order access)
-                product: item.product,                 // Optionally include full product object (for ORM relation mapping)
-            })
-        );
-    }
+    return cartItems.map(item => {
+        return this.orderItemRepository.create({
+            productId: item.product.id,
+            quantity: item.quantity,
+            price: item.price,
+            vendorId: item.product.vendorId,
+            variantId: item.variant ? item.variant.id : null, 
+        });
+    });
+}
+
 
 
     /**
@@ -454,11 +469,14 @@ export class OrderService {
                 this.getDistrict(shippingAddress.district),
             ]);
 
+            console.log("----------------cart-------------------")
+            console.log(cart.items)
+
             // Check stock before creating the order
             await this.validateStock(cart.items);
 
             // Either fetch user's existing address or create a new one based on input
-            const address = await this.getOrCreateAddress(userId, shippingAddress, user);
+            const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
 
             // Calculate total shipping fee based on cart items and destination address
             const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
@@ -473,6 +491,15 @@ export class OrderService {
             if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
                 // Save order directly for COD
                 order = await this.orderRepository.save(order);
+
+                // Reload the order with relations
+                order = await this.orderRepository.findOne({
+                    where: { id: order.id },
+                    relations: ["orderItems", "orderItems.product", "orderItems.variant"],
+                });
+
+                console.log("----------------Order console-----------------------")
+                console.log(order)
 
                 // Update stock after successful order creation
                 await this.updateStock(order.orderItems);
@@ -501,12 +528,16 @@ export class OrderService {
     }
 
     // Separate method for stock validation
-    private async validateStock(cartItems: any[]): Promise<void> {
+    private async validateStock(cartItems: CartItem[]): Promise<void> {
         for (const item of cartItems) {
             if (item.variantId) {
                 const variant = await this.variantRepository.findOne({
                     where: { id: item.variantId.toString() },
                 });
+
+                console.log("----------Variant-------------------")
+                console.log(variant.stock)
+                console.log(item.quantity)
 
                 if (!variant) {
                     throw new APIError(404, `Variant not found for product: ${item.product.name}`);
@@ -518,46 +549,57 @@ export class OrderService {
                         `Available: ${variant.stock}, Requested: ${item.quantity}`
                     );
                 }
-            } else {
-                // Fallback to product-level stock if no variant
-                const product = await this.productRepository.findOne({
-                    where: { id: item.product.id },
-                });
 
-                if (!product) {
-                    throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
-                }
-
-                if (!product.stock || product.stock < item.quantity) {
-                    throw new APIError(400,
-                        `Insufficient stock for product "${product.name}". ` +
-                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`
-                    );
-                }
+                continue;
             }
+            // Fallback to product-level stock if no variant
+            const product = await this.productRepository.findOne({
+                where: { id: item.product.id },
+            });
+
+            console.log("------------------Products----------------------")
+            console.log(product)
+            console.log(product.stock)
+            console.log(item.quantity)
+
+            if (!product) {
+                throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+            }
+
+            if (!product.stock || product.stock < item.quantity) {
+                throw new APIError(400,
+                    `Insufficient stock for product "${product.name}". ` +
+                    `Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                );
+            }
+
         }
     }
 
     // Separate method for stock updates
     private async updateStock(orderItems: any[]): Promise<void> {
         for (const item of orderItems) {
+            // --- Handle Variant Stock ---
             if (item.variantId) {
                 const variant = await this.variantRepository.findOne({
-                    where: { id: item.variantId.toString() },
+                    where: { id: item.variantId },
+                    relations: ["product"],
                 });
 
                 if (!variant) {
                     throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
                 }
 
-                // Double-check stock again (in case of concurrent orders)
+                // Double-check stock
                 if (variant.stock < item.quantity) {
-                    throw new APIError(400,
-                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for variant "${variant.sku || variant.id}" of product "${variant.product?.name || "Unknown"}". ` +
                         `Available: ${variant.stock}, Requested: ${item.quantity}`
                     );
                 }
 
+                // Deduct stock
                 variant.stock -= item.quantity;
 
                 // Update inventory status
@@ -571,23 +613,27 @@ export class OrderService {
 
                 await this.variantRepository.save(variant);
 
-            } else {
+            }
+            // --- Handle Product Stock ---
+            else if (item.productId) {
                 const product = await this.productRepository.findOne({
-                    where: { id: item.product.id },
+                    where: { id: item.productId },
                 });
 
                 if (!product) {
                     throw new APIError(404, `Product not found for order item ID: ${item.id}`);
                 }
 
-                // Double-check stock again (in case of concurrent orders)
+                // Double-check stock
                 if (!product.stock || product.stock < item.quantity) {
-                    throw new APIError(400,
-                        `Insufficient stock for product "${product.name}". ` +
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for product "${product.name || product.id}". ` +
                         `Available: ${product.stock || 0}, Requested: ${item.quantity}`
                     );
                 }
 
+                // Deduct stock
                 product.stock -= item.quantity;
 
                 // Update inventory status
@@ -600,9 +646,15 @@ export class OrderService {
                 }
 
                 await this.productRepository.save(product);
+
+            }
+            // --- Invalid Order Item ---
+            else {
+                throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
             }
         }
     }
+
 
 
     /**

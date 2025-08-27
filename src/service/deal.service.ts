@@ -95,6 +95,14 @@ export class DealService {
         return deal;
     }
 
+    async handleGetDealById(id: number) {
+        return this.dealRepository.findOne({
+            where: {
+                id: id
+            }
+        })
+    }
+
     /**
      * Retrieves all deals optionally filtered by status.
      * Also returns the number of products associated with each deal.

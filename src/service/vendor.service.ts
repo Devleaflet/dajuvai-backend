@@ -36,6 +36,8 @@ export class VendorService {
                 isApproved: true
             }
         });
+
+        // return await this.vendorRepository.find({})
     }
 
     async fetchAllUnapprovedVendor() {

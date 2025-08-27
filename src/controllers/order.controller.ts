@@ -34,6 +34,12 @@ export class OrderController {
             // Call service to create order and possibly get payment redirect URL
             const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
 
+            console.log("---------------Req body ----------------------")
+            console.log(req.body)
+            // const { order, redirectUrl } = await this.orderService.createOrder(12, req.body);
+
+            console.log(order);
+
             if (redirectUrl) {
                 // Payment redirection needed
                 res.status(200).json({ success: true, data: order, redirectUrl });
@@ -113,9 +119,9 @@ export class OrderController {
      */
     async getCustomerOrders(req: AuthRequest, res: Response): Promise<void> {
         try {
-            if (!req.user) {
-                throw new APIError(401, 'User not authenticated');
-            }
+            // if (!req.user) {
+            //     throw new APIError(401, 'User not authenticated');
+            // }
             // Fetch customer orders from service
             const orders = await this.orderService.getCustomerOrders();
             res.status(200).json({ success: true, data: orders });
