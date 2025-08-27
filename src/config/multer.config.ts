@@ -9,7 +9,10 @@ export const multerOptions = {
             'image/jpg',
             'image/webp',
             'image/avif',
-            'application/pdf'
+            'application/pdf',
+            'image/heic',   
+            'image/heif',   
+            'image/x-canon-cr2' 
         ];
 
         if (!allowedTypes.includes(file.mimetype)) {
