@@ -1534,7 +1534,7 @@ userRouter.post('/reset-password', authRateLimiter, validateZod(resetPasswordSch
  *       404:
  *         description: User not found
  */
-userRouter.get('/users/:id', authMiddleware, userController.getUserById.bind(userController));
+userRouter.get('/users/:id',  userController.getUserById.bind(userController));
 
 /**
  * @swagger
