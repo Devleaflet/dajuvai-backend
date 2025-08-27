@@ -1414,18 +1414,6 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *     description: Returns the status of a specific order by order ID.
  *     tags:
  *       - Orders
-<<<<<<< HEAD
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: number
- *         example: 123
- *         description: ID of the order to be tracked.
-=======
  *     requestBody:
  *       required: true
  *       content:
@@ -1439,7 +1427,6 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *                 type: number
  *                 example: 123
  *                 description: ID of the order to be tracked.
->>>>>>> dev
  *     responses:
  *       200:
  *         description: Order status retrieved successfully
@@ -1484,11 +1471,7 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *       500:
  *         description: Internal server error
  */
-<<<<<<< HEAD
-router.get("/user/track/:orderId", authMiddleware, asyncHandler(orderController.trackOrderById.bind(orderController)));
-=======
 router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(orderController)));
->>>>>>> dev
 
 /**
  * @swagger
