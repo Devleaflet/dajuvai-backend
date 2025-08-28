@@ -16,6 +16,7 @@ import { PromoService } from './promo.service';
 import { InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
+import { sendOrderStatusEmail } from '../utils/nodemailer.utils';
 
 
 /**
@@ -1147,25 +1148,22 @@ export class OrderService {
             relations: ['orderedBy', 'shippingAddress', 'orderItems', 'orderItems.product', 'orderItems.vendor'],
         });
 
-        // Throw error if order does not exist
         if (!order) {
             throw new APIError(404, 'Order not found');
         }
 
-        // defining valid transition 
         const validTransition: Record<OrderStatus, OrderStatus[]> = {
             [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
             [OrderStatus.CONFIRMED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
             [OrderStatus.DELIVERED]: [OrderStatus.CANCELLED],
             [OrderStatus.CANCELLED]: []
-        }
+        };
 
-        // check if new status is valid based on the currentstatus
         if (order.status !== status && !validTransition[order.status].includes(status)) {
             throw new APIError(400, `Invalid status transition from ${order.status} to ${status}`);
         }
 
-        // Update the order status
+        // Update status
         order.status = status;
 
         if (status === OrderStatus.DELIVERED && order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
@@ -1174,12 +1172,17 @@ export class OrderService {
             }
         }
 
-        // Save the updated order entity in the database
+        // Save updated order
         await this.orderRepository.save(order);
 
-        // Return the updated order
+        // ✅ Send notification email to user
+        if (order.orderedBy?.email) {
+            await sendOrderStatusEmail(order.orderedBy.email, order.id, order.status);
+        }
+
         return order;
     }
+
 
     /**
      * Search for an order by its ID, including related entities.

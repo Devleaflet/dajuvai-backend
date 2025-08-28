@@ -135,3 +135,51 @@ export const sendVendorOrderEmail = async (to: string, orderId: number, products
 
     await transporter.sendMail(mailOptions);
 };
+
+
+export const sendOrderStatusEmail = async (
+    to: string,
+    orderId: number,
+    status: string,
+    subject = "Your Order Status Has Been Updated"
+) => {
+    const mailOptions = {
+        from: `<${process.env.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #e3f2fd;">
+        <h2 style="color: #1976d2; text-align: center;">Order Update 📦</h2>
+        
+        <p style="font-size: 16px; text-align: center;">
+          The status of your order <strong>#${orderId}</strong> has been updated.
+        </p>
+        
+        <div style="text-align: center; margin: 20px 0;">
+          <span style="display: inline-block; padding: 10px 20px; border-radius: 6px; background-color: #1976d2; color: white; font-size: 16px; font-weight: bold;">
+            ${status.toUpperCase()}
+          </span>
+        </div>
+
+        <p style="font-size: 16px; text-align: center;">
+          You can track your order in your account for more details.
+        </p>
+        
+        <div style="text-align: center; margin-top: 20px;">
+          <a href="${process.env.FRONTEND_URL}/orders/${orderId}" 
+             style="display: inline-block; padding: 10px 18px; border-radius: 6px; background-color: #388e3c; color: white; text-decoration: none; font-weight: bold;">
+            View Order
+          </a>
+        </div>
+        
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        
+        <p style="font-size: 12px; color: #888; text-align: center;">
+          If you have any questions, please contact our support team.
+        </p>
+      </div>
+    `
+    };
+
+    await transporter.sendMail(mailOptions);
+};
