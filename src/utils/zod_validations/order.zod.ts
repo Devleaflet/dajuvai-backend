@@ -66,7 +66,12 @@ export const createOrderSchema = z.object({
     phoneNumber: z.string()
         .min(10, "Phone number must be 10 digits").max(10, "Phone number must be 10 digits"),
     promoCode: z.string().optional(),
-    fullName: z.string().optional()
+    fullName: z.string().optional(),
+    // Buy Now fields (optional)
+    isBuyNow: z.boolean().optional(),
+    productId: z.number().int().optional(),
+    variantId: z.string().optional(),
+    quantity: z.number().int().positive().optional().default(1), 
 });
 
 

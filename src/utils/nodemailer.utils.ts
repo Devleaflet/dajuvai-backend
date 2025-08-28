@@ -73,3 +73,33 @@ export const sendVerificationEmail = async (to: string, sub: string, token?: str
     // Send the verification email
     await transporter.sendMail(mailOptions);
 };
+
+
+export const sendOrderPlacedEmail = async (to: string, subject = "Your Order Has Been Placed") => {
+    const mailOptions = {
+        from: `<${process.env.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
+        <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
+            <h2 style="color: #2E7D32; text-align: center;">Order Confirmation ✅</h2>
+            <p style="font-size: 16px; text-align: center;">
+                Thank you for your order! We are pleased to inform you that your order has been successfully placed.
+            </p>
+            <p style="font-size: 16px; text-align: center;">
+                Our team is now processing your order and you will receive another email once it has been shipped.
+            </p>
+            <p style="font-size: 16px; text-align: center;">
+                You can track your order and manage your account by logging in to your vendor account.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+            <p style="font-size: 12px; color: #888; text-align: center;">
+                If you did not place this order or have any concerns, please contact our support team immediately.
+            </p>
+        </div>
+        `
+    };
+
+    // Send the order confirmation email
+    await transporter.sendMail(mailOptions);
+};
