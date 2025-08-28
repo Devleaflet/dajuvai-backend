@@ -32,11 +32,11 @@ export class OrderController {
             // }
 
             // Call service to create order and possibly get payment redirect URL
-            // const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
+            const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
 
             console.log("---------------Req body ----------------------")
             console.log(req.body)
-            const { order, redirectUrl } = await this.orderService.createOrder(20, req.body);
+            // const { order, redirectUrl } = await this.orderService.createOrder(20, req.body);
 
             console.log(order);
 
