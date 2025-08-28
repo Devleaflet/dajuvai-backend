@@ -27,16 +27,16 @@ export class OrderController {
      */
     async createOrder(req: AuthRequest<{}, {}, IOrderCreateRequest>, res: Response): Promise<void> {
         try {
-            if (!req.user) {
-                throw new APIError(401, 'User not authenticated');
-            }
+            // if (!req.user) {
+            //     throw new APIError(401, 'User not authenticated');
+            // }
 
             // Call service to create order and possibly get payment redirect URL
-            const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
+            // const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
 
             console.log("---------------Req body ----------------------")
             console.log(req.body)
-            // const { order, redirectUrl } = await this.orderService.createOrder(20, req.body);
+            const { order, redirectUrl } = await this.orderService.createOrder(20, req.body);
 
             console.log(order);
 

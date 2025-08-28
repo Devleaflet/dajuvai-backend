@@ -13,8 +13,6 @@ import { PaymentService } from './payment.service';
 import { District } from '../entities/district.entity';
 import { Product } from '../entities/product.entity';
 import { PromoService } from './promo.service';
-import { add } from 'winston';
-import { number, string } from 'zod';
 import { InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 
@@ -206,12 +204,16 @@ export class OrderService {
      *                            Each item must include a `product` object with `id` and `vendorId`, along with `quantity` and `price`.
      * @returns {OrderItem[]} - Array of OrderItem entities ready to be saved to the database.
      */
-    private createOrderItems(cartItems: any[]): OrderItem[] {
-        return cartItems.map(item => {
+    private createOrderItems(items: any[]): OrderItem[] {
+        return items.map(item => {
+            const price = item.variant
+                ? item.variant.basePrice
+                : item.product.basePrice;
+
             return this.orderItemRepository.create({
                 productId: item.product.id,
                 quantity: item.quantity,
-                price: item.price,
+                price,
                 vendorId: item.product.vendorId,
                 variantId: item.variant ? item.variant.id : null,
             });
@@ -235,15 +237,21 @@ export class OrderService {
     private async createOrderEntity(
         userId: number,
         user: any,
-        cart: any,
+        items: any[],
         address: Address,
         shippingFee: number,
         orderData: IOrderCreateRequest
     ): Promise<Order> {
-        // Convert cart items into OrderItem entities
-        const orderItems = this.createOrderItems(cart.items);
+        // Convert items into OrderItem entities
+        const orderItems = this.createOrderItems(items);
 
-        // initialize discount 
+        // Calculate subtotal from items
+        const subtotal = items.reduce((sum, item) => {
+            const basePrice = item.variant ? item.variant.basePrice : item.product.basePrice;
+            return sum + (basePrice * item.quantity);
+        }, 0);
+
+        // apply promo code if provided
         let discountAmount = 0;
         let appliedPromoCode: string | null = null;
 
@@ -252,37 +260,32 @@ export class OrderService {
             if (!promo) {
                 throw new APIError(400, 'Invalid or expired promo code');
             }
-            discountAmount = (parseFloat(cart.total) * promo.discountPercentage) / 100;
+            discountAmount = (subtotal * promo.discountPercentage) / 100;
             appliedPromoCode = promo.promoCode;
-
         }
 
+        const totalPrice = subtotal - discountAmount + shippingFee;
 
-        // Compute the total price (cart total + shipping)
-        const totalPrice = parseFloat(cart.total) - discountAmount + shippingFee;
-
-        // Return a new Order entity with all details set
         return this.orderRepository.create({
-            orderedById: userId,                             // FK to user
-            orderedBy: user,                                 // ORM relation (optional, for eager loading)
-            totalPrice: totalPrice,            // Total cost to customer
+            orderedById: userId,
+            orderedBy: user,
+            totalPrice,
             shippingFee,
             serviceCharge: orderData.serviceCharge || 0,
             instrumentName: orderData.instrumentName || null,
-            paymentStatus: PaymentStatus.UNPAID,             // Default status is unpaid
-            paymentMethod: orderData.paymentMethod,          // Payment method from user input
+            paymentStatus: PaymentStatus.UNPAID,
+            paymentMethod: orderData.paymentMethod,
             appliedPromoCode,
-            // Determine order status based on payment method
             status:
                 orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
-                    ? OrderStatus.CONFIRMED                  // Confirmed for COD
-                    : OrderStatus.PENDING,                   // Else pending
-
+                    ? OrderStatus.CONFIRMED
+                    : OrderStatus.PENDING,
             shippingAddress: address,
             orderItems,
             phoneNumber: orderData.phoneNumber,
         });
     }
+
 
 
     async trackOrder(email: string, orderId: number) {
@@ -564,7 +567,7 @@ export class OrderService {
         orderData: IOrderCreateRequest
     ): Promise<{ order: Order; redirectUrl?: string }> {
         try {
-            const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity = 1 } = orderData;
+            const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity } = orderData;
 
             console.log("-----------------Order data-------------------")
             console.log(orderData);
@@ -583,8 +586,11 @@ export class OrderService {
                 // 🔹 Buy Now: create a temporary item list from product/variant
                 const product = await this.productRepository.findOne({
                     where: { id: productId },
-                    relations: ["variants"],
+                    relations: ["variants", "vendor", "vendor.district"],
                 });
+
+                console.log("------------------Product------------------")
+                console.log(product)
 
                 if (!product) throw new APIError(404, "Product not found");
 
@@ -895,6 +901,8 @@ export class OrderService {
         // Loop through cart items to extract and validate each vendor's district
         for (const item of cartItems) {
             const vendorDistrict = item.product?.vendor?.district;
+
+            console.log(vendorDistrict)
 
             // Ensure vendor and district information is present
             if (!vendorDistrict || !vendorDistrict.name) {
