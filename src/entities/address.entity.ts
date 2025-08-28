@@ -30,6 +30,9 @@ export class Address {
     @Column({ nullable: true })
     localAddress: string;
 
+    @Column({nullable: true})
+    landmark: string;
+
     @OneToOne(() => User, user => user.address, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'userId' }) 
     user: User;

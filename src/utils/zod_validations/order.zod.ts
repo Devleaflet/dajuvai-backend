@@ -48,6 +48,9 @@ export const shippingAddressSchema = z.object({
         .string()
         .min(5, 'streetAddress must be at least 5 characters long')
         .max(255, 'streetAddress must not exceed 255 characters'),
+    landmark: z
+        .string()
+        .optional()
 });
 
 /**

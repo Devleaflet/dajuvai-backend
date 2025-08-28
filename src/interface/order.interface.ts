@@ -48,6 +48,7 @@ export interface IShippingAddressRequest {
     city: string;
     streetAddress: string;
     district: string;
+    landmark: string;
 }
 
 export interface IOrderCreateRequest {

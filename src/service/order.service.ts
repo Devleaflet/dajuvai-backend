@@ -162,12 +162,14 @@ export class OrderService {
                 address.province !== shippingAddress.province ||
                 address.district !== shippingAddress.district ||
                 address.city !== shippingAddress.city ||
-                address.localAddress !== shippingAddress.streetAddress
+                address.localAddress !== shippingAddress.streetAddress ||
+                address.landmark !== shippingAddress.landmark
             ) {
                 address.province = shippingAddress.province;
                 address.district = shippingAddress.district;
                 address.city = shippingAddress.city;
                 address.localAddress = shippingAddress.streetAddress;
+                address.landmark = shippingAddress.landmark;
                 // address.phoneNumber = phoneNumber; // uncomment if needed
 
                 const savedAddress = await this.addressRepository.save(address);
@@ -184,6 +186,7 @@ export class OrderService {
             district: shippingAddress.district,
             city: shippingAddress.city,
             localAddress: shippingAddress.streetAddress,
+            landmark: shippingAddress.landmark,
             // phoneNumber,
             userId
         });
