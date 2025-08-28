@@ -478,62 +478,167 @@ export class OrderService {
 
 
 
+    // async createOrder(
+    //     userId: number,
+    //     orderData: IOrderCreateRequest
+    // ): Promise<{ order: Order; redirectUrl?: string }> {
+    //     try {
+    //         const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity = 1 } = orderData;
+
+    //         console.log("-----------------Order data-------------------")
+    //         console.log(orderData);
+
+    //         await this.updateUserDetail(userId, fullName, phoneNumber);
+
+    //         console.log(shippingAddress);
+
+    //         // Fetch user, cart, and shipping district in parallel
+    //         const [user, cart, _district] = await Promise.all([
+    //             this.getUser(userId),
+    //             this.getCart(userId),
+    //             this.getDistrict(shippingAddress.district),
+    //         ]);
+
+    //         console.log("----------------cart-------------------")
+    //         console.log(cart.items)
+
+    //         let items: any[];
+
+    //         // Check stock before creating the order
+    //         await this.validateStock(cart.items);
+
+    //         // Either fetch user's existing address or create a new one based on input
+    //         const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
+
+    //         // Calculate total shipping fee based on cart items and destination address
+    //         const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
+
+    //         // Create the Order entity (not yet saved in DB)
+    //         let order = await this.createOrderEntity(userId, user, cart, address, shippingFee, orderData);
+    //         console.log(order);
+
+    //         let redirectUrl: string | undefined;
+
+    //         // Handle different payment methods
+    //         if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+    //             // Save order directly for COD
+    //             order = await this.orderRepository.save(order);
+
+    //             // Reload the order with relations
+    //             order = await this.orderRepository.findOne({
+    //                 where: { id: order.id },
+    //                 relations: ["orderItems", "orderItems.product", "orderItems.variant"],
+    //             });
+
+    //             console.log("----------------Order console-----------------------")
+    //             console.log(order)
+
+    //             // Update stock after successful order creation
+    //             await this.updateStock(order.orderItems);
+    //             await this.cartService.clearCart(userId);
+
+    //         } else if (
+    //             paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
+    //             paymentMethod === PaymentMethod.ESEWA ||
+    //             paymentMethod === PaymentMethod.KHALIT
+    //         ) {
+    //             // Save order first before initiating online payment
+    //             order = await this.orderRepository.save(order);
+    //             console.log(order);
+    //         } else {
+    //             // Invalid payment method fallback
+    //             throw new APIError(400, 'Invalid payment method');
+    //         }
+
+    //         return { order, redirectUrl };
+
+    //     } catch (error) {
+    //         // Wrap unexpected errors in a generic 500 API error
+    //         console.log(error)
+    //         throw error instanceof APIError ? error : new APIError(500, 'Failed to create order');
+    //     }
+    // }
+
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
     ): Promise<{ order: Order; redirectUrl?: string }> {
         try {
-            const { shippingAddress, paymentMethod, phoneNumber, fullName } = orderData;
+            const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity = 1 } = orderData;
 
             console.log("-----------------Order data-------------------")
             console.log(orderData);
 
             await this.updateUserDetail(userId, fullName, phoneNumber);
 
-            console.log(shippingAddress);
-
-            // Fetch user, cart, and shipping district in parallel
-            const [user, cart, _district] = await Promise.all([
+            // Fetch user and district (always needed)
+            const [user, _district] = await Promise.all([
                 this.getUser(userId),
-                this.getCart(userId),
                 this.getDistrict(shippingAddress.district),
             ]);
 
-            console.log("----------------cart-------------------")
-            console.log(cart.items)
+            let items: any[];
+
+            if (isBuyNow) {
+                // 🔹 Buy Now: create a temporary item list from product/variant
+                const product = await this.productRepository.findOne({
+                    where: { id: productId },
+                    relations: ["variants"],
+                });
+
+                if (!product) throw new APIError(404, "Product not found");
+
+                let variant = null;
+                if (variantId) {
+                    variant = await this.variantRepository.findOne({ where: { id: variantId } });
+                    if (!variant) throw new APIError(404, "Variant not found");
+                }
+
+                items = [
+                    {
+                        product,
+                        variant,
+                        quantity,
+                    },
+                ];
+            } else {
+                const cart = await this.getCart(userId);
+                items = cart.items;
+            }
+
+            console.log("----------------items-------------------")
+            console.log(items);
 
             // Check stock before creating the order
-            await this.validateStock(cart.items);
+            await this.validateStock(items);
 
             // Either fetch user's existing address or create a new one based on input
             const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
 
-            // Calculate total shipping fee based on cart items and destination address
-            const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
+            // Calculate total shipping fee based on items and destination address
+            const shippingFee = await this.calculateShippingFee(address, userId, items);
 
             // Create the Order entity (not yet saved in DB)
-            let order = await this.createOrderEntity(userId, user, cart, address, shippingFee, orderData);
+            let order = await this.createOrderEntity(userId, user, items, address, shippingFee, orderData);
             console.log(order);
 
             let redirectUrl: string | undefined;
 
             // Handle different payment methods
             if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
-                // Save order directly for COD
                 order = await this.orderRepository.save(order);
 
-                // Reload the order with relations
                 order = await this.orderRepository.findOne({
                     where: { id: order.id },
                     relations: ["orderItems", "orderItems.product", "orderItems.variant"],
                 });
 
-                console.log("----------------Order console-----------------------")
-                console.log(order)
-
-                // Update stock after successful order creation
                 await this.updateStock(order.orderItems);
-                await this.cartService.clearCart(userId);
+
+                // 🔹 Only clear cart if it's not Buy Now
+                if (!isBuyNow) {
+                    await this.cartService.clearCart(userId);
+                }
 
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
@@ -542,20 +647,18 @@ export class OrderService {
             ) {
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
-                console.log(order);
             } else {
-                // Invalid payment method fallback
-                throw new APIError(400, 'Invalid payment method');
+                throw new APIError(400, "Invalid payment method");
             }
 
             return { order, redirectUrl };
 
         } catch (error) {
-            // Wrap unexpected errors in a generic 500 API error
-            console.log(error)
-            throw error instanceof APIError ? error : new APIError(500, 'Failed to create order');
+            console.log(error);
+            throw error instanceof APIError ? error : new APIError(500, "Failed to create order");
         }
     }
+
 
     // Separate method for stock validation
     private async validateStock(cartItems: CartItem[]): Promise<void> {

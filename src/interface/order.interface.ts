@@ -59,6 +59,12 @@ export interface IOrderCreateRequest {
     instrumentName?: string;
     promoCode?: string;
     fullName?: string;
+
+    // buy now 
+    isBuyNow?: boolean;   
+    productId?: number;   
+    variantId?: string;   
+    quantity?: number;    
 }
 
 export interface IOrderItemResponse {
