@@ -15,6 +15,7 @@ import { Product } from '../entities/product.entity';
 import { PromoService } from './promo.service';
 import { InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
+import { findUserById } from './user.service';
 
 
 /**
@@ -565,7 +566,7 @@ export class OrderService {
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
-    ): Promise<{ order: Order; redirectUrl?: string }> {
+    ): Promise<{ order: Order; redirectUrl?: string, vendorids: any[], useremail: string }> {
         try {
             const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity } = orderData;
 
@@ -624,8 +625,15 @@ export class OrderService {
             // Calculate total shipping fee based on items and destination address
             const shippingFee = await this.calculateShippingFee(address, userId, items);
 
+            const vendorids = shippingFee.vendorIds;
+
+            const userDetail = await findUserById(userId);
+
+            const useremail = userDetail.email
+
+
             // Create the Order entity (not yet saved in DB)
-            let order = await this.createOrderEntity(userId, user, items, address, shippingFee, orderData);
+            let order = await this.createOrderEntity(userId, user, items, address, shippingFee.shippingFee, orderData);
             console.log(order);
 
             let redirectUrl: string | undefined;
@@ -657,7 +665,7 @@ export class OrderService {
                 throw new APIError(400, "Invalid payment method");
             }
 
-            return { order, redirectUrl };
+            return { order, redirectUrl, vendorids, useremail };
 
         } catch (error) {
             console.log(error);
@@ -889,49 +897,52 @@ export class OrderService {
      * @returns {Promise<number>} - The total calculated shipping fee.
      * @access Internal (used during order creation)
      */
-    private async calculateShippingFee(shippingAddress: Address, userId: number, cartItems: CartItem[]): Promise<number> {
-        // Validate presence of shipping address
+    private async calculateShippingFee(
+        shippingAddress: Address,
+        userId: number,
+        cartItems: CartItem[]
+    ): Promise<{ shippingFee: number; vendorIds: number[] }> {
+
         if (!shippingAddress) {
             throw new APIError(400, "Shipping address is missing");
         }
 
-        // Track unique vendor districts for this cart
+        // Track unique vendor districts and vendor IDs
         const vendorDistrictSet = new Set<string>();
+        const vendorIdsSet = new Set<number>();
 
-        // Loop through cart items to extract and validate each vendor's district
         for (const item of cartItems) {
-            const vendorDistrict = item.product?.vendor?.district;
+            const vendor = item.product?.vendor;
 
-            console.log(vendorDistrict)
-
-            // Ensure vendor and district information is present
-            if (!vendorDistrict || !vendorDistrict.name) {
+            if (!vendor || !vendor.district || !vendor.district.name) {
                 throw new APIError(400, `Vendor for product ${item.product.id} has no valid address`);
             }
 
-            vendorDistrictSet.add(vendorDistrict.name);
+            vendorDistrictSet.add(vendor.district.name);
+            vendorIdsSet.add(vendor.id);
         }
 
-        // Extract user's district from the shipping address
+        // User district
         const userDistrict = shippingAddress.district;
 
-        // These districts are treated as part of the same metro area for lower shipping
+        // Districts treated as same metro area
         const sameDistrictGroup = ['Kathmandu', 'Bhaktapur', 'Lalitpur'];
 
         let shippingFee = 0;
 
-        // For each unique vendor district, calculate fee based on proximity
+        // Calculate fee per unique vendor district
         for (const vendorDistrict of vendorDistrictSet) {
             const isSameCity =
                 userDistrict === vendorDistrict ||
                 (sameDistrictGroup.includes(userDistrict) && sameDistrictGroup.includes(vendorDistrict));
 
-            // Add either local (100) or non-local (200) fee
             shippingFee += isSameCity ? 100 : 200;
         }
 
-        // Return total shipping fee
-        return shippingFee;
+        return {
+            shippingFee,
+            vendorIds: Array.from(vendorIdsSet),
+        };
     }
 
 

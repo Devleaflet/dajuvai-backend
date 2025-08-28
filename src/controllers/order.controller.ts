@@ -4,7 +4,9 @@ import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewa
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
 import { APIError } from '../utils/ApiError.utils';
 import { User, UserRole } from '../entities/user.entity';
-import { findUserByEmail, getUserByIdService } from '../service/user.service';
+import { findUserByEmail, findUserById, getUserByIdService } from '../service/user.service';
+import { sendCustomerOrderEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
+import { VendorService } from '../service/vendor.service';
 
 
 /**
@@ -13,9 +15,11 @@ import { findUserByEmail, getUserByIdService } from '../service/user.service';
  */
 export class OrderController {
     private orderService: OrderService;
+    private vendorService: VendorService;
 
     constructor() {
         this.orderService = new OrderService();
+        this.vendorService = new VendorService();
     }
 
     /**
@@ -27,17 +31,51 @@ export class OrderController {
      */
     async createOrder(req: AuthRequest<{}, {}, IOrderCreateRequest>, res: Response): Promise<void> {
         try {
-            // if (!req.user) {
-            //     throw new APIError(401, 'User not authenticated');
-            // }
+            if (!req.user) {
+                throw new APIError(401, 'User not authenticated');
+            }
+            // const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(20, req.body);
 
             // Call service to create order and possibly get payment redirect URL
-            const { order, redirectUrl } = await this.orderService.createOrder(req.user.id, req.body);
+            const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(req.user.id, req.body);
+
+            console.log("---------user email------------")
+            console.log(useremail)
+            // send customer email
+            await sendCustomerOrderEmail(useremail, order.id)
+
+            const orderItems = order.orderItems
+
+            console.log("--------------Order items----------------")
+            console.log(orderItems);
+
+            // send vendor email 
+            for (const vendorId of vendorids) {
+
+                // Filter items that belong to this vendor
+                console.log("----------Vendor ids-------------")
+                console.log(vendorId)
+                const itemsForVendor = orderItems
+                    .filter(item => item.vendorId === vendorId)
+                    .map(item => ({
+                        // name: item.product.name,
+                        quantity: item.quantity
+                    }));
+
+                if (itemsForVendor.length === 0) continue;
+
+                // findVendorByEmail
+                const vendor = await this.vendorService.findVendorById(vendorId)
+
+                console.log("----------Vendor email-------------")
+                console.log(vendor.email)
+
+                // Send email to this vendor
+                await sendVendorOrderEmail(vendor.email, order.id, itemsForVendor);
+            }
 
             console.log("---------------Req body ----------------------")
             console.log(req.body)
-            // const { order, redirectUrl } = await this.orderService.createOrder(20, req.body);
-
             console.log(order);
 
             if (redirectUrl) {
@@ -51,6 +89,7 @@ export class OrderController {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
+                console.log(error)
                 res.status(500).json({ success: false, message: 'Internal server error' });
             }
         }

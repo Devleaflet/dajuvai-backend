@@ -75,7 +75,7 @@ export const sendVerificationEmail = async (to: string, sub: string, token?: str
 };
 
 
-export const sendOrderPlacedEmail = async (to: string, subject = "Your Order Has Been Placed") => {
+export const sendCustomerOrderEmail = async (to: string, orderId: number, subject = "Your Order Has Been Placed") => {
     const mailOptions = {
         from: `<${process.env.USER_EMAIL}>`,
         to,
@@ -84,13 +84,13 @@ export const sendOrderPlacedEmail = async (to: string, subject = "Your Order Has
         <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
             <h2 style="color: #2E7D32; text-align: center;">Order Confirmation ✅</h2>
             <p style="font-size: 16px; text-align: center;">
-                Thank you for your order! We are pleased to inform you that your order has been successfully placed.
+                Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.
             </p>
             <p style="font-size: 16px; text-align: center;">
-                Our team is now processing your order and you will receive another email once it has been shipped.
+                We are processing your order and will notify you once it has been shipped.
             </p>
             <p style="font-size: 16px; text-align: center;">
-                You can track your order and manage your account by logging in to your vendor account.
+                You can track your order and manage your account by logging into your account.
             </p>
             <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
             <p style="font-size: 12px; color: #888; text-align: center;">
@@ -100,6 +100,38 @@ export const sendOrderPlacedEmail = async (to: string, subject = "Your Order Has
         `
     };
 
-    // Send the order confirmation email
+    await transporter.sendMail(mailOptions);
+};
+
+
+
+export const sendVendorOrderEmail = async (to: string, orderId: number, products: { quantity: number }[], subject = "New Order Received") => {
+    const productList = products.map(p => `<li> x ${p.quantity}</li>`).join("");
+
+    const mailOptions = {
+        from: `<${process.env.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
+        <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #fff3e0;">
+            <h2 style="color: #EF6C00; text-align: center;">New Order Received 🛒</h2>
+            <p style="font-size: 16px; text-align: center;">
+                You have received a new order <strong>#${orderId}</strong>.
+            </p>
+            <p style="font-size: 16px;">Order details:</p>
+            <ul>
+                ${productList}
+            </ul>
+            <p style="font-size: 16px;">
+                Please process and ship the order promptly.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+            <p style="font-size: 12px; color: #888; text-align: center;">
+                Contact support if you notice any issues with this order.
+            </p>
+        </div>
+        `
+    };
+
     await transporter.sendMail(mailOptions);
 };
