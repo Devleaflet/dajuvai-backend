@@ -23,6 +23,7 @@ import { District } from "../entities/district.entity";
 import { HomePageSection } from "../entities/homePage.entity";
 import { Promo } from "../entities/promo.entity";
 import { Variant } from "../entities/variant.entity";
+import { HomeCategory } from "../entities/home.category";
 
 
 
@@ -39,7 +40,7 @@ const AppDataSource = new DataSource({
   synchronize: true,
   logging: true,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-    Banner, Contact, District, HomePageSection, Promo, Variant],
+    Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory],
   migrations: [],
   ssl: false,
   // ssl: {

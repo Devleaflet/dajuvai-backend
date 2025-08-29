@@ -19,8 +19,22 @@ export class HomeCategoryService {
 
 
     async getHomeCategory() {
-        return this.homecategoryRepo.find({
-            relations: ["category", "category.subcategories"]
-        })
+        const categories = await this.homecategoryRepo
+            .createQueryBuilder("homeCategory")
+            .leftJoinAndSelect("homeCategory.category", "category")
+            .leftJoinAndSelect("category.subcategories", "subcategory")
+            .select([
+                "homeCategory.id",
+                "category.id",
+                "category.name",
+                "category.image",
+                "subcategory.id",
+                "subcategory.name",
+                "subcategory.image"
+            ])
+            .getMany();
+
+        return categories;
     }
+
 }
