@@ -23,7 +23,7 @@ export class Banner {
     @Column({ unique: true })
     name: string;
 
-    @Column()
+    @Column({ nullable: true })
     image: string;
 
     @Column({ type: 'enum', enum: BannerType })
