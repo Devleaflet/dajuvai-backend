@@ -125,19 +125,22 @@ interface CustomerInfo {
 
 export const sendVendorOrderEmail = async (
   to: string,
+  paymentMethod: string,
   orderId: number,
   products: VendorOrderItem[],
   customer: CustomerInfo,
   subject = "New Order Received"
 ) => {
-
   // Generate HTML rows for each product
   const productList = products.map(item => {
     let variantAttributes = "";
     if (item.variantAttributes) {
-      variantAttributes = " (" + Object.entries(item.variantAttributes)
-        .map(([key, val]) => `${key}: ${val}`)
-        .join(", ") + ")";
+      variantAttributes =
+        " (" +
+        Object.entries(item.variantAttributes)
+          .map(([key, val]) => `${key}: ${val}`)
+          .join(", ") +
+        ")";
     }
 
     return `
@@ -145,7 +148,7 @@ export const sendVendorOrderEmail = async (
         <td style="padding: 8px; border: 1px solid #ddd;">${item.name}${variantAttributes}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.sku || "-"}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.quantity}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;"> Rs${item.price}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${item.price}</td>
       </tr>
     `;
   }).join("");
@@ -159,7 +162,9 @@ export const sendVendorOrderEmail = async (
     customer.landmark,
     customer.city,
     customer.district
-  ].filter(Boolean).join(", ");
+  ]
+    .filter(Boolean)
+    .join(", ");
 
   // Email HTML
   const mailHtml = `
@@ -178,6 +183,7 @@ export const sendVendorOrderEmail = async (
         ${customer.email ? `<p><strong>Email:</strong> ${customer.email}</p>` : ""}
         <p><strong>Phone:</strong> ${customer.phone}</p>
         ${fullAddress ? `<p><strong>Address:</strong> ${fullAddress}</p>` : ""}
+        <p><strong>Payment Method:</strong> ${paymentMethod}</p>
       </div>
 
       <!-- Products Table -->

@@ -86,7 +86,7 @@ export class OrderController {
                 console.log(vendor.email)
 
                 // Send email to this vendor
-                await sendVendorOrderEmail(vendor.email, order.id, itemsForVendor, {
+                await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
                     name: userexists.fullName,
                     phone: userexists.phoneNumber,
                     email: userexists.email,
