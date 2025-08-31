@@ -5,6 +5,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { CreateBannerInput, UpdateBannerInput } from '../utils/zod_validations/banner.zod';
 import { APIError } from '../utils/ApiError.utils';
 import cron from 'node-cron';
+import { ifError } from 'assert';
 
 
 
@@ -111,6 +112,10 @@ export class BannerService {
         mobileFile?: Express.Multer.File,
         adminId?: number
     ): Promise<Banner> {
+        if (dto.startDate > dto.endDate) {
+            throw new APIError(400, "End data must be greater than start date")
+        }
+
         const banner = await this.bannerRepository.findOne({ where: { id } });
 
         if (!banner) {
@@ -159,7 +164,7 @@ export class BannerService {
             mobileImage,
             startDate: dto.startDate ? new Date(dto.startDate) : banner.startDate,
             endDate: dto.endDate ? new Date(dto.endDate) : banner.endDate,
-            status: dto.status || this.determineStatus(
+            status: this.determineStatus(
                 dto.startDate ? new Date(dto.startDate) : banner.startDate,
                 dto.endDate ? new Date(dto.endDate) : banner.endDate
             ),

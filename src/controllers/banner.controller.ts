@@ -32,30 +32,30 @@ export class BannerController {
      * @access Admin and staff 
      * */
     async createBanner(req: AuthRequest<{}, {}, CreateBannerInput>, res: Response): Promise<void> {
-    try {
-        console.log('Create banner request:', { body: req.body, files: req.files, user: req.user });
+        try {
+            console.log('Create banner request:', { body: req.body, files: req.files, user: req.user });
 
-        if (!req.user) {
-            throw new APIError(401, 'Unauthorized: No user found');
-        }
+            if (!req.user) {
+                throw new APIError(401, 'Unauthorized: No user found');
+            }
 
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+            const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-        const desktopFile = files?.desktopImage?.[0];
-        const mobileFile = files?.mobileImage?.[0];
+            const desktopFile = files?.desktopImage?.[0];
+            const mobileFile = files?.mobileImage?.[0];
 
-        const banner = await this.bannerService.createBanner(req.body, desktopFile, mobileFile, req.user.id);
+            const banner = await this.bannerService.createBanner(req.body, desktopFile, mobileFile, req.user.id);
 
-        res.status(201).json({ success: true, data: banner });
-    } catch (error) {
-        if (error instanceof APIError) {
-            res.status(error.status).json({ success: false, message: error.message });
-        } else {
-            console.error('Create banner error:', error);
-            res.status(500).json({ success: false, message: 'Internal server error' });
+            res.status(201).json({ success: true, data: banner });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                console.error('Create banner error:', error);
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
         }
     }
-}
 
 
     /**
@@ -69,30 +69,30 @@ export class BannerController {
      * @access Admin and Staff 
      */
     async updateBanner(req: AuthRequest<{ id: number }, {}, UpdateBannerInput>, res: Response): Promise<void> {
-    try {
-        const { id } = req.params;
-        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
+        try {
+            const { id } = req.params;
+            const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-        const desktopFile = files?.desktopImage?.[0];
-        const mobileFile = files?.mobileImage?.[0];
+            const desktopFile = files?.desktopImage?.[0];
+            const mobileFile = files?.mobileImage?.[0];
 
-        const banner = await this.bannerService.updateBanner(
-            Number(id),
-            req.body,
-            desktopFile,
-            mobileFile,
-            req.user!.id
-        );
+            const banner = await this.bannerService.updateBanner(
+                Number(id),
+                req.body,
+                desktopFile,
+                mobileFile,
+                req.user!.id
+            );
 
-        res.status(200).json({ success: true, data: banner });
-    } catch (error) {
-        if (error instanceof APIError) {
-            res.status(error.status).json({ success: false, message: error.message });
-        } else {
-            res.status(500).json({ success: false, message: 'Internal server error' });
+            res.status(200).json({ success: true, data: banner });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
         }
     }
-}
 
 
     /**
