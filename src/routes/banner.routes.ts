@@ -50,9 +50,14 @@ const upload = multer({ storage: multer.memoryStorage() });
  *                 type: string
  *                 format: date-time
  *                 example: "2025-06-30T23:59:59Z"
- *               image:
+ *               desktopImage:
  *                 type: string
  *                 format: binary
+ *                 description: Image for desktop view (required)
+ *               mobileImage:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image for mobile view (required)
  *     responses:
  *       201:
  *         description: Banner created successfully
@@ -67,7 +72,10 @@ router.post(
 	"/",
 	authMiddleware,
 	isAdminOrStaff,
-	upload.single("image"),
+	upload.fields([
+		{ name: "desktopImage", maxCount: 1 },
+		{ name: "mobileImage", maxCount: 1 },
+	]),
 	validateZod(createBannerSchema),
 	bannerController.createBanner.bind(bannerController)
 );
@@ -108,9 +116,14 @@ router.post(
  *               endDate:
  *                 type: string
  *                 format: date-time
- *               image:
+ *               desktopImage:
  *                 type: string
  *                 format: binary
+ *                 description: Image for desktop view (optional)
+ *               mobileImage:
+ *                 type: string
+ *                 format: binary
+ *                 description: Image for mobile view (optional)
  *     responses:
  *       200:
  *         description: Banner updated successfully
@@ -127,10 +140,14 @@ router.patch(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
-	upload.single("image"),
+	upload.fields([
+		{ name: "desktopImage", maxCount: 1 },
+		{ name: "mobileImage", maxCount: 1 },
+	]),
 	validateZod(updateBannerSchema),
 	bannerController.updateBanner.bind(bannerController)
 );
+
 
 /**
  * @swagger

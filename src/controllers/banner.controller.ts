@@ -32,34 +32,31 @@ export class BannerController {
      * @access Admin and staff 
      * */
     async createBanner(req: AuthRequest<{}, {}, CreateBannerInput>, res: Response): Promise<void> {
-        try {
-            // Log request details for debugging
-            console.log('Create banner request:', { body: req.body, hasFile: !!req.file, user: req.user });
+    try {
+        console.log('Create banner request:', { body: req.body, files: req.files, user: req.user });
 
-            // Validate authenticated user
-            if (!req.user) {
-                throw new APIError(401, 'Unauthorized: No user found');
-            }
+        if (!req.user) {
+            throw new APIError(401, 'Unauthorized: No user found');
+        }
 
-            // Extract uploaded file
-            const file = req.file as Express.Multer.File;
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-            // Call service to create banner
-            const banner = await this.bannerService.createBanner(req.body, file, req.user.id);
+        const desktopFile = files?.desktopImage?.[0];
+        const mobileFile = files?.mobileImage?.[0];
 
-            // Send success response
-            res.status(201).json({ success: true, data: banner });
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('Create banner error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
+        const banner = await this.bannerService.createBanner(req.body, desktopFile, mobileFile, req.user.id);
+
+        res.status(201).json({ success: true, data: banner });
+    } catch (error) {
+        if (error instanceof APIError) {
+            res.status(error.status).json({ success: false, message: error.message });
+        } else {
+            console.error('Create banner error:', error);
+            res.status(500).json({ success: false, message: 'Internal server error' });
         }
     }
+}
+
 
     /**
      * @method updateBanner
@@ -72,26 +69,31 @@ export class BannerController {
      * @access Admin and Staff 
      */
     async updateBanner(req: AuthRequest<{ id: number }, {}, UpdateBannerInput>, res: Response): Promise<void> {
-        try {
-            // Extract banner ID from params
-            const { id } = req.params;
-            // Extract optional uploaded file
-            const file = req.file as Express.Multer.File | undefined;
+    try {
+        const { id } = req.params;
+        const files = req.files as { [fieldname: string]: Express.Multer.File[] };
 
-            // Call service to update banner
-            const banner = await this.bannerService.updateBanner(id, req.body, file, req.user!.id);
+        const desktopFile = files?.desktopImage?.[0];
+        const mobileFile = files?.mobileImage?.[0];
 
-            // Send success response
-            res.status(200).json({ success: true, data: banner });
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
+        const banner = await this.bannerService.updateBanner(
+            Number(id),
+            req.body,
+            desktopFile,
+            mobileFile,
+            req.user!.id
+        );
+
+        res.status(200).json({ success: true, data: banner });
+    } catch (error) {
+        if (error instanceof APIError) {
+            res.status(error.status).json({ success: false, message: error.message });
+        } else {
+            res.status(500).json({ success: false, message: 'Internal server error' });
         }
     }
+}
+
 
     /**
      * @method getBannerById

@@ -47,54 +47,48 @@ export class BannerService {
      * @throws {APIError} - If image is missing, duplicate name exists, or upload fails
      * @access Admin
      */
-    async createBanner(dto: CreateBannerInput, file: Express.Multer.File, adminId: number): Promise<Banner> {
-        // Ensure a banner image is provided
-        if (!file) {
-            throw new APIError(400, 'Banner image is required');
+    async createBanner(dto: CreateBannerInput, desktopFile: Express.Multer.File, mobileFile: Express.Multer.File, adminId: number): Promise<Banner> {
+        if (!desktopFile || !mobileFile) {
+            throw new APIError(400, 'Both desktop and mobile banner images are required');
         }
 
-        // Check if a banner with the same name already exists
-        const exists = await this.bannerRepository.findOne({
-            where: {
-                name: dto.name
-            }
-        });
-
+        const exists = await this.bannerRepository.findOne({ where: { name: dto.name } });
         if (exists) {
             throw new APIError(409, 'Banner with this name already exists');
         }
 
-        // Upload image to Cloudinary and retrieve its secure URL
-        const uploadResult = await new Promise<string>((resolve, reject) => {
-            cloudinary.uploader.upload_stream(
-                { resource_type: 'image' },
-                (error, result) => {
-                    if (error || !result) {
-                        reject(new APIError(500, 'Image upload failed'));
-                    } else {
-                        resolve(result.secure_url); // Get secure image URL
+        const uploadToCloudinary = (file: Express.Multer.File) => {
+            return new Promise<string>((resolve, reject) => {
+                cloudinary.uploader.upload_stream(
+                    { resource_type: 'image' },
+                    (error, result) => {
+                        if (error || !result) {
+                            reject(new APIError(500, 'Image upload failed'));
+                        } else {
+                            resolve(result.secure_url);
+                        }
                     }
-                }
-            ).end(file.buffer);
-        });
+                ).end(file.buffer);
+            });
+        };
 
-        // Determine banner status based on start and end dates
-        const status = this.determineStatus(
-            new Date(dto.startDate),
-            new Date(dto.endDate)
-        );
+        const [desktopImageUrl, mobileImageUrl] = await Promise.all([
+            uploadToCloudinary(desktopFile),
+            uploadToCloudinary(mobileFile),
+        ]);
 
-        // Create banner entity using repository
+        const status = this.determineStatus(new Date(dto.startDate), new Date(dto.endDate));
+
         const banner = this.bannerRepository.create({
             ...dto,
-            image: uploadResult, // Uploaded image URL
+            desktopImage: desktopImageUrl,
+            mobileImage: mobileImageUrl,
             status,
             startDate: new Date(dto.startDate),
             endDate: new Date(dto.endDate),
             createdById: adminId,
         });
 
-        // Save the new banner to the database
         return await this.bannerRepository.save(banner);
     }
 
@@ -113,79 +107,69 @@ export class BannerService {
     async updateBanner(
         id: number,
         dto: UpdateBannerInput,
-        file?: Express.Multer.File,
+        desktopFile?: Express.Multer.File,
+        mobileFile?: Express.Multer.File,
         adminId?: number
     ): Promise<Banner> {
-        console.log('Updating banner:', { id, dto, hasFile: !!file, adminId });
-
-        // Find existing banner
         const banner = await this.bannerRepository.findOne({ where: { id } });
 
         if (!banner) {
             throw new APIError(404, 'Banner not found');
         }
 
-        let image = banner.image;
+        let desktopImage = banner.desktopImage;
+        let mobileImage = banner.mobileImage;
 
-        try {
-            // If a new image file is provided, upload to Cloudinary
-            if (file) {
-                console.log('Uploading new image...');
-                const uploadResult = await new Promise<string>((resolve, reject) => {
-                    cloudinary.uploader.upload_stream(
-                        { resource_type: 'image' },
-                        (error, result) => {
-                            if (error || !result) {
-                                console.error('Cloudinary upload error:', error);
-                                reject(new APIError(500, 'Image upload failed'));
-                            } else {
-                                console.log('Upload success:', result.secure_url);
-                                resolve(result.secure_url);
-                            }
+        const uploadToCloudinary = (file: Express.Multer.File) => {
+            return new Promise<string>((resolve, reject) => {
+                cloudinary.uploader.upload_stream(
+                    { resource_type: 'image' },
+                    (error, result) => {
+                        if (error || !result) {
+                            reject(new APIError(500, 'Image upload failed'));
+                        } else {
+                            resolve(result.secure_url);
                         }
-                    ).end(file.buffer);
-                });
+                    }
+                ).end(file.buffer);
+            });
+        };
 
-                // Delete previous image from Cloudinary
-                if (banner.image) {
-                    const publicId = banner.image.split('/').pop()?.split('.')[0] || '';
-                    console.log('Deleting old image:', publicId);
-                    await cloudinary.uploader.destroy(publicId);
-                }
-
-                // Replace image with new one
-                image = uploadResult;
+        // If new desktop image is provided
+        if (desktopFile) {
+            if (banner.desktopImage) {
+                const publicId = banner.desktopImage.split('/').pop()?.split('.')[0] || '';
+                await cloudinary.uploader.destroy(publicId);
             }
-
-            // Prepare updated data
-            const updatedData = {
-                ...dto,
-                image,
-                startDate: dto.startDate ? new Date(dto.startDate) : banner.startDate,
-                endDate: dto.endDate ? new Date(dto.endDate) : banner.endDate,
-                status: dto.status || this.determineStatus(
-                    dto.startDate ? new Date(dto.startDate) : banner.startDate,
-                    dto.endDate ? new Date(dto.endDate) : banner.endDate
-                ),
-                createdById: adminId || banner.createdById,
-            };
-
-            console.log('Updating DB with:', updatedData);
-
-            // Update banner in the database
-            await this.bannerRepository.update(id, updatedData);
-
-            // Retrieve the updated banner
-            const updatedBanner = await this.bannerRepository.findOneOrFail({ where: { id } });
-
-            console.log('Updated banner:', updatedBanner);
-            return updatedBanner;
-
-        } catch (error) {
-            console.error('Update banner error:', error);
-            throw error;
+            desktopImage = await uploadToCloudinary(desktopFile);
         }
+
+        // If new mobile image is provided
+        if (mobileFile) {
+            if (banner.mobileImage) {
+                const publicId = banner.mobileImage.split('/').pop()?.split('.')[0] || '';
+                await cloudinary.uploader.destroy(publicId);
+            }
+            mobileImage = await uploadToCloudinary(mobileFile);
+        }
+
+        const updatedData = {
+            ...dto,
+            desktopImage,
+            mobileImage,
+            startDate: dto.startDate ? new Date(dto.startDate) : banner.startDate,
+            endDate: dto.endDate ? new Date(dto.endDate) : banner.endDate,
+            status: dto.status || this.determineStatus(
+                dto.startDate ? new Date(dto.startDate) : banner.startDate,
+                dto.endDate ? new Date(dto.endDate) : banner.endDate
+            ),
+            createdById: adminId || banner.createdById,
+        };
+
+        await this.bannerRepository.update(id, updatedData);
+        return await this.bannerRepository.findOneOrFail({ where: { id } });
     }
+
 
     /**
   * Fetch a single banner by its ID including its creator.
