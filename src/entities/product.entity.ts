@@ -73,9 +73,6 @@ export class Product {
     @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
     brand: Brand;
 
-    @Column({ type: "text", array: true, nullable: true })
-    size?: string[];
-
     @Column({ nullable: true })
     brandId?: number;
 
@@ -95,13 +92,3 @@ export class Product {
     updated_at: Date;
 }
 
-// @OneToMany(() => ProductVariant, (variant) => variant.product)
-// variants?: ProductVariant[];
-
-// @OneToMany(() => VariantImage, (image) => image.product)
-// productImages?: VariantImage[];
-
-// @OneToMany(() => AttributeType, (attributeType) => attributeType.product)
-// attributeTypes: AttributeType[];
-// @Column()
-// hasVariants?: boolean;

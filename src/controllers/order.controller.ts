@@ -34,10 +34,21 @@ export class OrderController {
             if (!req.user) {
                 throw new APIError(401, 'User not authenticated');
             }
+
+            const userId = req.user.id;
+
+            const userexists = await findUserById(userId);
+
+            if (!userexists) {
+                throw new APIError(404, "User doesnot exists")
+            }
             // const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(20, req.body);
 
             // Call service to create order and possibly get payment redirect URL
             const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(req.user.id, req.body);
+
+            console.log("------------Order-----------------")
+            console.log(order)
 
             console.log("---------user email------------")
             console.log(useremail)
@@ -58,9 +69,13 @@ export class OrderController {
                 const itemsForVendor = orderItems
                     .filter(item => item.vendorId === vendorId)
                     .map(item => ({
-                        // name: item.product.name,
-                        quantity: item.quantity
+                        name: item.product.name,
+                        sku: item.variant?.sku || null,
+                        quantity: item.quantity,
+                        price: item.price,
+                        variantAttributes: item.variant?.attributes || null
                     }));
+
 
                 if (itemsForVendor.length === 0) continue;
 
@@ -71,7 +86,15 @@ export class OrderController {
                 console.log(vendor.email)
 
                 // Send email to this vendor
-                await sendVendorOrderEmail(vendor.email, order.id, itemsForVendor);
+                await sendVendorOrderEmail(vendor.email, order.id, itemsForVendor, {
+                    name: userexists.fullName,
+                    phone: userexists.phoneNumber,
+                    email: userexists.email,
+                    city: userexists.address.city,
+                    district: userexists.address.district,
+                    localAddress: userexists.address.localAddress,
+                    landmark: userexists.address.landmark
+                });
             }
 
             console.log("---------------Req body ----------------------")

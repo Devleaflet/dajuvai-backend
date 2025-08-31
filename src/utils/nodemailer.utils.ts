@@ -7,11 +7,11 @@ config(); // Load environment variables from .env
 
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
 const transporter = nodemailer.createTransport({
-    service: "Gmail",
-    auth: {
-        user: process.env.USER_EMAIL, // Your Gmail email address
-        pass: process.env.PASS_EMAIL  // App password or actual password (prefer app password for security)
-    }
+  service: "Gmail",
+  auth: {
+    user: process.env.USER_EMAIL, // Your Gmail email address
+    pass: process.env.PASS_EMAIL  // App password or actual password (prefer app password for security)
+  }
 });
 
 /**
@@ -19,16 +19,16 @@ const transporter = nodemailer.createTransport({
  * @param dto - ContactInput object validated by Zod with form data (name, email, subject, message)
  */
 export const sendContactEmail = async (dto: ContactInput) => {
-    // Email options including recipient, subject, and HTML body generated from dto
-    const mailOptions = {
-        from: `"Contact Form" <${process.env.USER_EMAIL}>`, // sender address with friendly name
-        to: `${dto.email}`,                       // support or admin email address
-        subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
-        html: generateContactEmailHTML(dto),                // formatted HTML content of the message
-    };
+  // Email options including recipient, subject, and HTML body generated from dto
+  const mailOptions = {
+    from: `"Contact Form" <${process.env.USER_EMAIL}>`, // sender address with friendly name
+    to: `${dto.email}`,                       // support or admin email address
+    subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
+    html: generateContactEmailHTML(dto),                // formatted HTML content of the message
+  };
 
-    // Send mail asynchronously
-    await transporter.sendMail(mailOptions);
+  // Send mail asynchronously
+  await transporter.sendMail(mailOptions);
 };
 
 /**
@@ -38,12 +38,12 @@ export const sendContactEmail = async (dto: ContactInput) => {
  * @param token - Verification code to include in the email body
  */
 export const sendVerificationEmail = async (to: string, sub: string, token?: string) => {
-    const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login"
-    const mailOptions = {
-        from: `<${process.env.USER_EMAIL}>`,
-        to,
-        subject: sub,
-        html: `
+  const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login"
+  const mailOptions = {
+    from: `<${process.env.USER_EMAIL}>`,
+    to,
+    subject: sub,
+    html: `
         <div>
             ${token ? `
                 <h2>Email Verification</h2>
@@ -67,20 +67,20 @@ export const sendVerificationEmail = async (to: string, sub: string, token?: str
             `}
         </div>
     `
-    };
+  };
 
 
-    // Send the verification email
-    await transporter.sendMail(mailOptions);
+  // Send the verification email
+  await transporter.sendMail(mailOptions);
 };
 
 
 export const sendCustomerOrderEmail = async (to: string, orderId: number, subject = "Your Order Has Been Placed") => {
-    const mailOptions = {
-        from: `<${process.env.USER_EMAIL}>`,
-        to,
-        subject,
-        html: `
+  const mailOptions = {
+    from: `<${process.env.USER_EMAIL}>`,
+    to,
+    subject,
+    html: `
         <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
             <h2 style="color: #2E7D32; text-align: center;">Order Confirmation ✅</h2>
             <p style="font-size: 16px; text-align: center;">
@@ -98,56 +98,138 @@ export const sendCustomerOrderEmail = async (to: string, orderId: number, subjec
             </p>
         </div>
         `
-    };
+  };
 
-    await transporter.sendMail(mailOptions);
+  await transporter.sendMail(mailOptions);
 };
 
 
 
-export const sendVendorOrderEmail = async (to: string, orderId: number, products: { quantity: number }[], subject = "New Order Received") => {
-    const productList = products.map(p => `<li> x ${p.quantity}</li>`).join("");
+interface VendorOrderItem {
+  name: string;
+  sku?: string | null;
+  quantity: number;
+  price: number;
+  variantAttributes?: Record<string, string> | null;
+}
 
-    const mailOptions = {
-        from: `<${process.env.USER_EMAIL}>`,
-        to,
-        subject,
-        html: `
-        <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #fff3e0;">
-            <h2 style="color: #EF6C00; text-align: center;">New Order Received 🛒</h2>
-            <p style="font-size: 16px; text-align: center;">
-                You have received a new order <strong>#${orderId}</strong>.
-            </p>
-            <p style="font-size: 16px;">Order details:</p>
-            <ul>
-                ${productList}
-            </ul>
-            <p style="font-size: 16px;">
-                Please process and ship the order promptly.
-            </p>
-            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-            <p style="font-size: 12px; color: #888; text-align: center;">
-                Contact support if you notice any issues with this order.
-            </p>
-        </div>
-        `
-    };
+interface CustomerInfo {
+  name: string;
+  phone: string;
+  email?: string;
+  city?: string;
+  district?: string;
+  localAddress?: string;
+  landmark?: string;
+}
 
-    await transporter.sendMail(mailOptions);
+export const sendVendorOrderEmail = async (
+  to: string,
+  orderId: number,
+  products: VendorOrderItem[],
+  customer: CustomerInfo,
+  subject = "New Order Received"
+) => {
+
+  // Generate HTML rows for each product
+  const productList = products.map(item => {
+    let variantAttributes = "";
+    if (item.variantAttributes) {
+      variantAttributes = " (" + Object.entries(item.variantAttributes)
+        .map(([key, val]) => `${key}: ${val}`)
+        .join(", ") + ")";
+    }
+
+    return `
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">${item.name}${variantAttributes}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.sku || "-"}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.quantity}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;"> Rs${item.price}</td>
+      </tr>
+    `;
+  }).join("");
+
+  // Calculate total price
+  const totalPrice = products.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  // Combine address fields into a single string
+  const fullAddress = [
+    customer.localAddress,
+    customer.landmark,
+    customer.city,
+    customer.district
+  ].filter(Boolean).join(", ");
+
+  // Email HTML
+  const mailHtml = `
+    <div style="font-family: Arial, sans-serif; max-width: 650px; margin: auto; padding: 20px; background: #ffffff; border-radius: 8px; border: 1px solid #e0e0e0;">
+      
+      <!-- Header -->
+      <h2 style="color: #333; text-align: center;">🛒 New Order Received</h2>
+      <p style="text-align: center; font-size: 16px;">
+        Order <strong>#${orderId}</strong> has been placed. Please review and fulfill it promptly.
+      </p>
+
+      <!-- Customer Info -->
+      <div style="margin-bottom: 20px;">
+        <h3>Customer Details</h3>
+        <p><strong>Name:</strong> ${customer.name}</p>
+        ${customer.email ? `<p><strong>Email:</strong> ${customer.email}</p>` : ""}
+        <p><strong>Phone:</strong> ${customer.phone}</p>
+        ${fullAddress ? `<p><strong>Address:</strong> ${fullAddress}</p>` : ""}
+      </div>
+
+      <!-- Products Table -->
+      <h3>Order Items</h3>
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
+        <thead>
+          <tr style="background-color: #f5f5f5;">
+            <th style="padding: 8px; border: 1px solid #ddd;">Product</th>
+            <th style="padding: 8px; border: 1px solid #ddd;">SKU</th>
+            <th style="padding: 8px; border: 1px solid #ddd;">Qty</th>
+            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Price</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${productList}
+        </tbody>
+      </table>
+
+      <!-- Total -->
+      <p style="text-align: right; font-size: 16px; margin-bottom: 30px;">
+        <strong>Total: Rs ${totalPrice.toFixed(2)}</strong>
+      </p>
+
+      <!-- Footer -->
+      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
+      <p style="font-size: 13px; text-align: center; color: #666;">
+        This is an automated notification. Contact support if there are any issues with this order.
+      </p>
+    </div>
+  `;
+
+  // Send email
+  await transporter.sendMail({
+    from: `<${process.env.USER_EMAIL}>`,
+    to,
+    subject,
+    html: mailHtml
+  });
 };
 
 
 export const sendOrderStatusEmail = async (
-    to: string,
-    orderId: number,
-    status: string,
-    subject = "Your Order Status Has Been Updated"
+  to: string,
+  orderId: number,
+  status: string,
+  subject = "Your Order Status Has Been Updated"
 ) => {
-    const mailOptions = {
-        from: `<${process.env.USER_EMAIL}>`,
-        to,
-        subject,
-        html: `
+  const mailOptions = {
+    from: `<${process.env.USER_EMAIL}>`,
+    to,
+    subject,
+    html: `
       <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #e3f2fd;">
         <h2 style="color: #1976d2; text-align: center;">Order Update 📦</h2>
         
@@ -179,7 +261,7 @@ export const sendOrderStatusEmail = async (
         </p>
       </div>
     `
-    };
+  };
 
-    await transporter.sendMail(mailOptions);
+  await transporter.sendMail(mailOptions);
 };

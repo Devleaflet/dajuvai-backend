@@ -3,7 +3,6 @@ import AppDataSource from '../config/db.config';
 import { User, UserRole } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { APIError } from '../utils/ApiError.utils';
-import { errorUtil } from 'zod/lib/helpers/errorUtil';
 import { waitForDebugger } from 'inspector';
 
 /**
@@ -43,7 +42,7 @@ export const findUserByEmail = async (email: string): Promise<User | null> => {
     return await userDB.findOneBy({ email });
 };
 
-export const findUserById = async (id: number) => {
+export const findUserById = async (id: number): Promise<User> => {
     return await userDB.findOneBy({ id })
 }
 

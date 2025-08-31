@@ -678,9 +678,12 @@ export class OrderService {
     // Separate method for stock validation
     private async validateStock(cartItems: CartItem[]): Promise<void> {
         for (const item of cartItems) {
-            if (item.variantId) {
+
+            console.log("------------this is a items for debugging----------------")
+            console.log(item)
+            if (item.variant.id) {
                 const variant = await this.variantRepository.findOne({
-                    where: { id: item.variantId.toString() },
+                    where: { id: item.variant.id },
                 });
 
                 console.log("----------Variant-------------------")
@@ -1280,8 +1283,7 @@ export class OrderService {
             order: { createdAt: 'DESC' }, // Sort orders by creation date descending
         });
 
-        // Debug log: output fetched orders (can be removed in production)
-        console.log(orders);
+        // console.log(orders);
 
         return orders;
     }
