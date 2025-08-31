@@ -681,7 +681,7 @@ export class OrderService {
 
             console.log("------------this is a items for debugging----------------")
             console.log(item)
-            if (item.variant.id) {
+            if (item.variant) {
                 const variant = await this.variantRepository.findOne({
                     where: { id: item.variant.id },
                 });
