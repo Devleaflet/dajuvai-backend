@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { UserRole } from '../../entities/user.entity';
+import { Province } from '../../entities/address.entity';
 
 /**
  * Schema for user signup input validation.
@@ -59,9 +60,26 @@ export const verifyTokenSchema = z.object({
  * Validates role against UserRole enum.
  */
 export const updateUserSchema = z.object({
-    username: z.string().min(1, 'Username is required').optional(),
-    email: z.string().email('Invalid email format').optional(),
-    role: z.nativeEnum(UserRole, { errorMap: () => ({ message: 'Invalid role' }) }).optional(),
+    fullName: z.string().min(1, "Full name is required").optional(),
+    username: z.string().min(1, "Username is required").optional(),
+    email: z.string().email("Invalid email format").optional(),
+    phoneNumber: z
+        .string()
+        .regex(/^[0-9]{7,15}$/, "Invalid phone number")
+        .optional(),
+    role: z.nativeEnum(UserRole, {
+        errorMap: () => ({ message: "Invalid role" }),
+    }).optional(),
+    address: z
+        .object({
+            province: z.nativeEnum(Province).optional(),
+            district: z.string().optional(),
+            city: z.string().min(1, "City is required").optional(),
+            localAddress: z.string().optional(),
+            landmark: z.string().optional(),
+        })
+        .optional(),
+
 });
 
 /**

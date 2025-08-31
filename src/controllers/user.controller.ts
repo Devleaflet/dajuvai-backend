@@ -564,7 +564,7 @@ export class UserController {
         }
     }
 
-    
+
     /**
      * @method sendVerificationToken
      * @route POST /auth/resend-verification
@@ -971,6 +971,12 @@ export class UserController {
                 throw new APIError(400, 'Invalid user ID');
             }
 
+            const userExists = await findUserById(id);
+
+            if (!userExists) {
+                throw new APIError(404, "USer does not existsf")
+            }
+
             // Enforce role update restrictions: only admins can change roles
             if (parsed.data.role && req.user?.role !== UserRole.ADMIN) {
                 throw new APIError(403, 'Only admins can change roles');
@@ -978,7 +984,7 @@ export class UserController {
 
             // Proceed to update user data with validated input
             const updateData = parsed.data;
-            const user = await updateUserService(id, updateData);
+            const user = await updateUserService(id, updateData, userExists);
             if (!user) {
                 throw new APIError(404, 'User not found');
             }
@@ -1017,12 +1023,15 @@ export class UserController {
         res: Response
     ): Promise<void> {
         try {
+            console.log(req.user)
+            console.log(req.body)
             // Validate request body using Zod schema
             const parsed = changeEmailSchema.safeParse(req.body);
             if (!parsed.success) {
                 res.status(400).json({ success: false, errors: parsed.error.errors });
                 return;
             }
+
 
             // Verify user or vendor authentication
             const { newEmail } = parsed.data;
@@ -1031,16 +1040,18 @@ export class UserController {
             if (!user && !vendor) {
                 throw new APIError(401, 'Unauthorized. Please log in.');
             }
-
-            const isVendor = !vendor;
-            const entity = isVendor ? vendor : user;
-
             // Check if new email is already in use
             const existingUser = await findUserByEmail(newEmail);
             const existingVendor = await findVendorByEmail(newEmail);
+
+            const isVendor = vendor;
+
+            const entity = isVendor ? existingVendor : existingUser;
+
             if (existingUser || existingVendor) {
                 throw new APIError(409, 'Email already in use.');
             }
+
 
             // Generate verification token and JWT for email change
             const verificationToken = TokenUtils.generateToken();
@@ -1069,6 +1080,7 @@ export class UserController {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
+                console.log(error)
                 throw new APIError(503, 'Email change service temporarily unavailable');
             }
         }

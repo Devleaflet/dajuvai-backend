@@ -1178,7 +1178,7 @@ export class OrderService {
         // Save updated order
         await this.orderRepository.save(order);
 
-        // ✅ Send notification email to user
+        // Send notification email to user
         if (order.orderedBy?.email) {
             await sendOrderStatusEmail(order.orderedBy.email, order.id, order.status);
         }

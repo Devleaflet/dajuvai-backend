@@ -1,9 +1,12 @@
-import { MoreThan } from 'typeorm';
+import { DataSource, MoreThan } from 'typeorm';
 import AppDataSource from '../config/db.config';
 import { User, UserRole } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { waitForDebugger } from 'inspector';
+import { IUpdateUserRequest } from '../interface/user.interface';
+import { Address } from '../entities/address.entity';
+import { add } from 'winston';
 
 /**
  * User repository instance for database operations.
@@ -123,12 +126,32 @@ export const updateStaffById = async (id: number, data: any) => {
  * @param data - Partial user data to update
  * @returns Promise<User | null> - Updated user entity if found, else null
  */
-export const updateUserService = async (id: number, data: Partial<User>): Promise<User | null> => {
-    const user = await userDB.findOneBy({ id });
-    if (!user) return null;
+export const updateUserService = async (id: number, data: IUpdateUserRequest, user: User): Promise<User | null> => {
+    const addressDb = AppDataSource.getRepository(Address)
 
-    await userDB.update(id, data);
-    return await userDB.findOneBy({ id });
+    // update address 
+    if (data.address) {
+        if (user.address) {
+            // update existing address
+            const updateAddress = await addressDb.update(user.address.id, data.address)
+            console.log(updateAddress)
+        } else {
+            // create address if user dont have any
+            const newAddress = addressDb.create({
+                ...data.address,
+                userId: user.id
+            })
+            await addressDb.save(newAddress)
+        }
+    }
+
+    const { address, ...userData } = data;
+    await userDB.update(id, userData)
+
+    return await userDB.findOne({
+        where: { id },
+        relations: ["address"]
+    });
 };
 
 /**
