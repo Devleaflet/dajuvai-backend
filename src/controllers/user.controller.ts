@@ -300,8 +300,10 @@ export class UserController {
             //  Prepare hashed password and verification token
             const hashedPassword = await bcrypt.hash(password, 10);
 
+            const loweredCaseEmail = this.toLowerEmail(email)
+
             // Check if user already exists by email
-            const existingUser = await findUserByEmail(email);
+            const existingUser = await findUserByEmail(loweredCaseEmail);
             if (existingUser) {
                 throw new APIError(409, 'User with this email already exists');
             }
@@ -309,7 +311,7 @@ export class UserController {
             // Create user with verified status and ADMIN role
             const user = await createUser({
                 username,
-                email,
+                email: loweredCaseEmail,
                 password: hashedPassword,
                 verificationCode: null,
                 isVerified: true,
@@ -402,10 +404,13 @@ export class UserController {
             //  Extract validated fields
             const { username, email, password } = parsed.data;
 
-            // Check if a user with this email already exists
-            let existingUser = await findUserByEmail(email);
 
-            const existingAccount = await this.vendorService.findVendorByEmail(email)
+            const loweredEmail = this.toLowerEmail(email)
+
+            // Check if a user with this email already exists
+            let existingUser = await findUserByEmail(loweredEmail);
+
+            const existingAccount = await this.vendorService.findVendorByEmail(loweredEmail)
 
             if (existingAccount) {
                 throw new APIError(400, "User already exists")
@@ -443,7 +448,7 @@ export class UserController {
             // Create and save new user (first-time signup)
             const user = await createUser({
                 username,
-                email,
+                email: loweredEmail,
                 password: hashedPassword,
                 verificationCode: hashedToken,
                 verificationCodeExpire: expire,
@@ -516,7 +521,10 @@ export class UserController {
 
             // Verify user existence and password
             const { email, password } = parsed.data;
-            const user = await findUserByEmailLogin(email);
+
+            const loweredEmail = this.toLowerEmail(email);
+
+            const user = await findUserByEmailLogin(loweredEmail);
 
             if (!user) {
                 throw new APIError(404, "User does not exist");
@@ -564,6 +572,10 @@ export class UserController {
         }
     }
 
+    toLowerEmail(email: string): string {
+        return email.toLowerCase()
+    }
+
 
     /**
      * @method sendVerificationToken
@@ -591,14 +603,16 @@ export class UserController {
             // Extract email from validated data
             const { email } = parsed.data;
 
+            const loweredEmail = this.toLowerEmail(email)
+
             // Attempt to find user by email
-            let user = await findUserByEmail(email);
+            let user = await findUserByEmail(loweredEmail);
             let vendor = null;
             let isVendor = false;
 
             // If no user found, attempt to find vendor by email
             if (!user) {
-                vendor = await findVendorByEmail(email);
+                vendor = await findVendorByEmail(loweredEmail);
                 isVendor = true;
                 if (!vendor) {
                     // If neither user nor vendor exists, respond with 404 Not Found

@@ -7,6 +7,8 @@ import { User, UserRole } from '../entities/user.entity';
 import { findUserByEmail, findUserById, getUserByIdService } from '../service/user.service';
 import { sendCustomerOrderEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
 import { VendorService } from '../service/vendor.service';
+import { copyFileSync } from 'fs';
+import { add } from 'winston';
 
 
 /**
@@ -35,6 +37,9 @@ export class OrderController {
                 throw new APIError(401, 'User not authenticated');
             }
 
+            console.log("------------Logged in user details ---------------")
+            console.log(req.user)
+
             const userId = req.user.id;
 
             const userexists = await findUserById(userId);
@@ -42,10 +47,14 @@ export class OrderController {
             if (!userexists) {
                 throw new APIError(404, "User doesnot exists")
             }
+
+            const data = req.body;
+            console.log("----------------data--------------------")
+            console.log(data)
             // const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(20, req.body);
 
             // Call service to create order and possibly get payment redirect URL
-            const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(req.user.id, req.body);
+            const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(req.user.id, data);
 
             console.log("------------Order-----------------")
             console.log(order)
@@ -53,7 +62,17 @@ export class OrderController {
             console.log("---------user email------------")
             console.log(useremail)
             // send customer email
-            await sendCustomerOrderEmail(useremail, order.id)
+            await sendCustomerOrderEmail(
+                useremail,
+                order.id,
+                order.orderItems.map(item => ({
+                    name: item.product.name,
+                    sku: item.variant?.sku || null,
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantAttributes: item.variant?.attributes || null
+                }))
+            )
 
             const orderItems = order.orderItems
 
@@ -86,6 +105,18 @@ export class OrderController {
                 console.log(vendor.email)
 
                 // Send email to this vendor
+                const userexists = await findUserById(userId);
+
+                console.log("--------------User detaisl before sendign dmail to vendor ---------------------")
+                console.log(userexists.fullName);
+                console.log(userexists.phoneNumber);
+                console.log(userexists.email);
+                console.log(userexists.address.city);
+                console.log(userexists.address.district);
+                console.log(userexists.address.localAddress);
+                console.log(userexists.address.landmark);
+
+
                 await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
                     name: userexists.fullName,
                     phone: userexists.phoneNumber,
@@ -95,6 +126,13 @@ export class OrderController {
                     localAddress: userexists.address.localAddress,
                     landmark: userexists.address.landmark
                 });
+                // name: string;
+                // phone: string;
+                // email ?: string;
+                // city ?: string;
+                // district ?: string;
+                // localAddress ?: string;
+                // landmark ?: string;
             }
 
             console.log("---------------Req body ----------------------")

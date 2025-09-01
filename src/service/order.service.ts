@@ -17,6 +17,7 @@ import { InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
 import { sendOrderStatusEmail } from '../utils/nodemailer.utils';
+import { add } from 'winston';
 
 
 /**
@@ -151,7 +152,6 @@ export class OrderService {
     private async getOrCreateAddress(
         userId: number,
         shippingAddress: IShippingAddressRequest,
-        phoneNumber: string,
         user: User
     ): Promise<Address> {
 
@@ -621,7 +621,10 @@ export class OrderService {
             await this.validateStock(items);
 
             // Either fetch user's existing address or create a new one based on input
-            const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
+            const address = await this.getOrCreateAddress(userId, shippingAddress, user);
+
+            console.log("-----------saved address----------------")
+            console.log(address)
 
             // Calculate total shipping fee based on items and destination address
             const shippingFee = await this.calculateShippingFee(address, userId, items);

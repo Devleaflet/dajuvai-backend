@@ -29,7 +29,7 @@ export class Order {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @ManyToOne(() => User, (user) => user.orders)
+    @ManyToOne(() => User, (user) => user.orders, { onDelete: "CASCADE" })
     @JoinColumn({ name: 'orderedById' })
     orderedBy: User;
 

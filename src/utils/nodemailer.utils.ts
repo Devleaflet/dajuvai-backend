@@ -75,33 +75,92 @@ export const sendVerificationEmail = async (to: string, sub: string, token?: str
 };
 
 
-export const sendCustomerOrderEmail = async (to: string, orderId: number, subject = "Your Order Has Been Placed") => {
+export const sendCustomerOrderEmail = async (
+  to: string,
+  orderId: number,
+  items: {
+    name: string;
+    sku?: string | null;
+    quantity: number;
+    price: number;
+    variantAttributes?: Record<string, string> | null;
+  }[],
+  subject = "Your Order Has Been Placed"
+) => {
+  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+
+  // Generate rows dynamically
+  const rows = items.map(
+    (item) => `
+      <tr>
+        <td style="padding: 8px; border: 1px solid #ddd;">${item.name}${item.sku ? ` (${item.sku})` : ""
+      }</td>
+        <td style="padding: 8px; border: 1px solid #ddd;">${item.variantAttributes
+        ? Object.entries(item.variantAttributes)
+          .map(([key, val]) => `${key}: ${val}`)
+          .join(", ")
+        : "-"
+      }</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.quantity
+      }</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${item.price}</td>
+        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${(
+        item.price * item.quantity
+      ).toFixed(2)}</td>
+      </tr>
+    `
+  );
+
   const mailOptions = {
     from: `<${process.env.USER_EMAIL}>`,
     to,
     subject,
     html: `
-        <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
-            <h2 style="color: #2E7D32; text-align: center;">Order Confirmation ✅</h2>
-            <p style="font-size: 16px; text-align: center;">
-                Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.
-            </p>
-            <p style="font-size: 16px; text-align: center;">
-                We are processing your order and will notify you once it has been shipped.
-            </p>
-            <p style="font-size: 16px; text-align: center;">
-                You can track your order and manage your account by logging into your account.
-            </p>
-            <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-            <p style="font-size: 12px; color: #888; text-align: center;">
-                If you did not place this order or have any concerns, please contact our support team immediately.
-            </p>
-        </div>
-        `
+      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 700px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
+        <h2 style="color: #2E7D32; text-align: center;">Order Confirmation ✅</h2>
+        <p style="font-size: 16px; text-align: center;">
+          Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.
+        </p>
+
+        <h3 style="margin-top: 20px;">Order Summary</h3>
+        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+          <thead>
+            <tr style="background-color: #f0f0f0;">
+              <th style="padding: 8px; border: 1px solid #ddd;">Product</th>
+              <th style="padding: 8px; border: 1px solid #ddd;">Variant</th>
+              <th style="padding: 8px; border: 1px solid #ddd;">Qty</th>
+              <th style="padding: 8px; border: 1px solid #ddd;">Price</th>
+              <th style="padding: 8px; border: 1px solid #ddd;">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.join("")}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4" style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">Total:</td>
+              <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">Rs ${total.toFixed(
+      2
+    )}</td>
+            </tr>
+          </tfoot>
+        </table>
+
+        <p style="margin-top: 20px; font-size: 14px;">
+          We are processing your order and will notify you once it has been shipped.
+        </p>
+
+        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+        <p style="font-size: 12px; color: #888; text-align: center;">
+          If you did not place this order or have any concerns, please contact our support team immediately.
+        </p>
+      </div>
+    `
   };
 
   await transporter.sendMail(mailOptions);
 };
+
 
 
 

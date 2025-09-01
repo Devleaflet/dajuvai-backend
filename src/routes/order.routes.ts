@@ -1905,6 +1905,6 @@ router.get("/customer/history", authMiddleware, orderController.getCustomerOrder
  */
 router.post("/search/merchant-transactionId", authMiddleware, orderController.getOrderDetailByMerchantTransactionId.bind(orderController));
 
-// router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
+router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
 
 export default router;
