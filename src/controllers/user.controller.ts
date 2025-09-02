@@ -436,7 +436,7 @@ export class UserController {
 
                 // Save updated user and send verification email
                 await saveUser(existingUser);
-                await sendVerificationEmail(email, 'Email Verification', verificationToken);
+                // await sendVerificationEmail(email, 'Email Verification', verificationToken);
 
                 res.status(200).json({
                     success: true,
@@ -453,10 +453,11 @@ export class UserController {
                 verificationCode: hashedToken,
                 verificationCodeExpire: expire,
                 role: UserRole.USER,
+                isVerified: true
             });
 
             //  Send email with raw verification code
-            await sendVerificationEmail(email, 'Email Verification', verificationToken);
+            // await sendVerificationEmail(email, 'Email Verification', verificationToken);
 
             //  Generate JWT and set cookie
             const token = jwt.sign(
@@ -801,6 +802,11 @@ export class UserController {
 
             // Attempt to find a user with the provided email
             let user = await findUserByEmail(email);
+
+            if (user.provider === AuthProvider.GOOGLE) {
+                throw new APIError(400, "Google login users cannot change password.");
+            }
+
             let vendor = null;
             let isVendor = false;
 
