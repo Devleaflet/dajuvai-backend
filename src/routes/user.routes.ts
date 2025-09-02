@@ -1724,6 +1724,6 @@ userRouter.patch('/change-email', authMiddleware, validateZod(changeEmailSchema)
 userRouter.post('/verify-email', authMiddleware, validateZod(verifyEmailChangeSchema), userController.verifyEmailChange.bind(userController));
 
 
-userRouter.delete("/:id", isAdminOrStaff, userController.deleteUserHandler);
-
+userRouter.delete("/:id", userController.deleteUserHandler);
+// isAdminOrStaff,
 export default userRouter;

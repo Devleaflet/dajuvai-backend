@@ -147,13 +147,37 @@ export class OrderController {
                 res.status(201).json({ success: true, data: order });
             }
         } catch (error) {
+            // If it's a custom API error
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.log(error)
-                res.status(500).json({ success: false, message: 'Internal server error' });
+                console.error(`[APIError] ${error.status} - ${error.message}`, {
+                    stack: error.stack,
+                    timestamp: new Date().toISOString(),
+                });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message, // safe to send for known API errors
+                });
             }
+
+            // For other unexpected errors
+            console.error(`[UnexpectedError]`, {
+                message: error instanceof Error ? error.message : error,
+                stack: error instanceof Error ? error.stack : undefined,
+                timestamp: new Date().toISOString(),
+            });
+
+            // Optional: send detailed error only in dev environment
+            const isDev = true;
+            res.status(500).json({
+                success: false,
+                message: isDev
+                    ? error instanceof Error
+                        ? error.message
+                        : 'Unknown error'
+                    : 'Internal server error', // generic message in production
+            });
         }
+
     }
 
     /**
