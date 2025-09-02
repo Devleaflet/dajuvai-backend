@@ -62,17 +62,17 @@ export class OrderController {
             console.log("---------user email------------")
             console.log(useremail)
             // send customer email
-            await sendCustomerOrderEmail(
-                useremail,
-                order.id,
-                order.orderItems.map(item => ({
-                    name: item.product.name,
-                    sku: item.variant?.sku || null,
-                    quantity: item.quantity,
-                    price: item.price,
-                    variantAttributes: item.variant?.attributes || null
-                }))
-            )
+            // await sendCustomerOrderEmail(
+            //     useremail,
+            //     order.id,
+            //     order.orderItems.map(item => ({
+            //         name: item.product.name,
+            //         sku: item.variant?.sku || null,
+            //         quantity: item.quantity,
+            //         price: item.price,
+            //         variantAttributes: item.variant?.attributes || null
+            //     }))
+            // )
 
             const orderItems = order.orderItems
 
@@ -117,15 +117,15 @@ export class OrderController {
                 console.log(userexists.address.landmark);
 
 
-                await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
-                    name: userexists.fullName,
-                    phone: userexists.phoneNumber,
-                    email: userexists.email,
-                    city: userexists.address.city,
-                    district: userexists.address.district,
-                    localAddress: userexists.address.localAddress,
-                    landmark: userexists.address.landmark
-                });
+                // await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
+                //     name: userexists.fullName,
+                //     phone: userexists.phoneNumber,
+                //     email: userexists.email,
+                //     city: userexists.address.city,
+                //     district: userexists.address.district,
+                //     localAddress: userexists.address.localAddress,
+                //     landmark: userexists.address.landmark
+                // });
                 // name: string;
                 // phone: string;
                 // email ?: string;
@@ -147,12 +147,34 @@ export class OrderController {
                 res.status(201).json({ success: true, data: order });
             }
         } catch (error) {
+            // If it's a custom API error
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.log(error)
-                res.status(500).json({ success: false, message: 'Internal server error' });
+                console.error(`[APIError] ${error.status} - ${error.message}`, {
+                    stack: error.stack,
+                    timestamp: new Date().toISOString(),
+                });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             }
+
+            // For other unexpected errors
+            console.error(`[UnexpectedError]`, {
+                message: error instanceof Error ? error.message : error,
+                stack: error instanceof Error ? error.stack : undefined,
+                timestamp: new Date().toISOString(),
+            });
+
+            const isDev = false;
+            res.status(500).json({
+                success: false,
+                message: isDev
+                    ? error instanceof Error
+                        ? error.message
+                        : 'Unknown error'
+                    : 'Internal server error',
+            });
         }
     }
 

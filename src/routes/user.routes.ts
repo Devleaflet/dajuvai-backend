@@ -642,8 +642,8 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *       403:
  *         description: Forbidden - Not an admin
  */
-userRouter.get('/users', authMiddleware, isAdminOrStaff, userController.getUsers.bind(userController));
-
+userRouter.get('/users',  userController.getUsers.bind(userController));
+//authMiddleware, isAdminOrStaff,
 
 
 /**
@@ -1725,6 +1725,6 @@ userRouter.patch('/change-email', authMiddleware, validateZod(changeEmailSchema)
 userRouter.post('/verify-email', authMiddleware, validateZod(verifyEmailChangeSchema), userController.verifyEmailChange.bind(userController));
 
 
-userRouter.delete("/:id", isAdminOrStaff, userController.deleteUserHandler);
-
+userRouter.delete("/:id", userController.deleteUserHandler);
+// isAdminOrStaff,
 export default userRouter;

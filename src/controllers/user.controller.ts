@@ -5,7 +5,7 @@ import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUs
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
-import { User, UserRole } from '../entities/user.entity';
+import { AuthProvider, User, UserRole } from '../entities/user.entity';
 import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
 import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import AppDataSource from '../config/db.config';
@@ -436,7 +436,7 @@ export class UserController {
 
                 // Save updated user and send verification email
                 await saveUser(existingUser);
-                await sendVerificationEmail(email, 'Email Verification', verificationToken);
+                // await sendVerificationEmail(email, 'Email Verification', verificationToken);
 
                 res.status(200).json({
                     success: true,
@@ -453,10 +453,11 @@ export class UserController {
                 verificationCode: hashedToken,
                 verificationCodeExpire: expire,
                 role: UserRole.USER,
+                isVerified: true
             });
 
             //  Send email with raw verification code
-            await sendVerificationEmail(email, 'Email Verification', verificationToken);
+            // await sendVerificationEmail(email, 'Email Verification', verificationToken);
 
             //  Generate JWT and set cookie
             const token = jwt.sign(
@@ -529,6 +530,13 @@ export class UserController {
             if (!user) {
                 throw new APIError(404, "User does not exist");
             }
+
+            console.log(user.provider)
+
+            if (user.provider !== AuthProvider.LOCAL) {
+                throw new APIError(403, "This account was created with Google. Please log in using Google.");
+            }
+
 
             if (!user.isVerified) {
                 throw new APIError(403, "Please verify your email before logging in");
@@ -794,6 +802,11 @@ export class UserController {
 
             // Attempt to find a user with the provided email
             let user = await findUserByEmail(email);
+
+            if (user.provider === AuthProvider.GOOGLE) {
+                throw new APIError(400, "Google login users cannot change password.");
+            }
+
             let vendor = null;
             let isVendor = false;
 

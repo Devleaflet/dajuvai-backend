@@ -74,7 +74,6 @@ export const sendVerificationEmail = async (to: string, sub: string, token?: str
   await transporter.sendMail(mailOptions);
 };
 
-
 export const sendCustomerOrderEmail = async (
   to: string,
   orderId: number,
@@ -93,20 +92,17 @@ export const sendCustomerOrderEmail = async (
   const rows = items.map(
     (item) => `
       <tr>
-        <td style="padding: 8px; border: 1px solid #ddd;">${item.name}${item.sku ? ` (${item.sku})` : ""
-      }</td>
-        <td style="padding: 8px; border: 1px solid #ddd;">${item.variantAttributes
-        ? Object.entries(item.variantAttributes)
+        <td style="padding:8px; border:1px solid #ddd;">
+          <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
+          ${item.variantAttributes
+        ? `<br>${Object.entries(item.variantAttributes)
           .map(([key, val]) => `${key}: ${val}`)
-          .join(", ")
-        : "-"
-      }</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.quantity
-      }</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${item.price}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${(
-        item.price * item.quantity
-      ).toFixed(2)}</td>
+          .join(", ")}`
+        : ""}
+        </td>
+        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${item.quantity}</td>
+        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${item.price}</td>
+        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(item.price * item.quantity).toFixed(2)}</td>
       </tr>
     `
   );
@@ -116,50 +112,66 @@ export const sendCustomerOrderEmail = async (
     to,
     subject,
     html: `
-      <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 700px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
-        <h2 style="color: #2E7D32; text-align: center;">Order Confirmation ✅</h2>
-        <p style="font-size: 16px; text-align: center;">
-          Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.
-        </p>
+      <body style="margin:0; padding:0; font-family: Arial, sans-serif; background-color:#f9f9f9;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td align="center">
+              <table width="700" cellpadding="0" cellspacing="0" border="0" style="max-width:95%; background-color:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:20px;">
+                <tr>
+                  <td style="text-align:center;">
+                    <h2 style="color:#2E7D32; margin:0;">Order Confirmation ✅</h2>
+                    <p style="font-size:16px; margin:10px 0;">Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.</p>
+                  </td>
+                </tr>
 
-        <h3 style="margin-top: 20px;">Order Summary</h3>
-        <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
-          <thead>
-            <tr style="background-color: #f0f0f0;">
-              <th style="padding: 8px; border: 1px solid #ddd;">Product</th>
-              <th style="padding: 8px; border: 1px solid #ddd;">Variant</th>
-              <th style="padding: 8px; border: 1px solid #ddd;">Qty</th>
-              <th style="padding: 8px; border: 1px solid #ddd;">Price</th>
-              <th style="padding: 8px; border: 1px solid #ddd;">Subtotal</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.join("")}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="4" style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">Total:</td>
-              <td style="padding: 8px; border: 1px solid #ddd; text-align: right; font-weight: bold;">Rs ${total.toFixed(
-      2
-    )}</td>
-            </tr>
-          </tfoot>
+                <tr>
+                  <td>
+                    <h3 style="margin-top:20px; margin-bottom:10px;">Order Summary</h3>
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+                      <thead>
+                        <tr style="background-color:#f0f0f0;">
+                          <th style="padding:8px; border:1px solid #ddd; text-align:left;">Product</th>
+                          <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
+                          <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
+                          <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        ${rows.join("")}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colspan="3" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
+                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${total.toFixed(2)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding-top:20px; font-size:14px;">
+                    We are processing your order and will notify you once it has been shipped.
+                  </td>
+                </tr>
+
+                <tr>
+                  <td style="padding-top:20px; border-top:1px solid #e0e0e0; font-size:12px; color:#888; text-align:center;">
+                    If you did not place this order or have any concerns, please contact our support team immediately.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
         </table>
-
-        <p style="margin-top: 20px; font-size: 14px;">
-          We are processing your order and will notify you once it has been shipped.
-        </p>
-
-        <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-        <p style="font-size: 12px; color: #888; text-align: center;">
-          If you did not place this order or have any concerns, please contact our support team immediately.
-        </p>
-      </div>
+      </body>
+      </html>
     `
   };
 
   await transporter.sendMail(mailOptions);
 };
+
 
 
 

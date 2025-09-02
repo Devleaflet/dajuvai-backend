@@ -390,14 +390,23 @@ export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: R
 }
 
 export const requireUserRole = async (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (req.user && req.user.role == UserRole.USER) {
-        next();
-    } else {
-        res.status(403).json({
-            success: false,
-            message: "Only customer accounts can perform this action. If you are an admin or vendor, please create a customer account first."
-        })
+    if (req.user) {
+        if (req.user.role !== UserRole.USER) {
+            console.log("this is error")
+            throw new APIError(400, "Only customer accounts can perform this action. .")
+        }
+        console.log("error passed")
+        next()
     }
+    // if (req.user && req.user.role == UserRole.USER) {
+    //     console.log(req.user.role)
+    //     console.log(UserRole.USER)
+    //     next();
+    // }
+    // res.status(403).json({
+    //     success: false,
+    //     message: "Only customer accounts can perform this action. If you are an admin or vendor, please create a customer account first."
+    // })
 }
 /**
  * Authorizes both admin and vendor roles.
