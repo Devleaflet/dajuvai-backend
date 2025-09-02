@@ -5,6 +5,7 @@ import { ExtractJwt, Strategy as JwtStrategy } from "passport-jwt";
 import { AuthProvider, User } from "../entities/user.entity";
 import AppDataSource from "./db.config";
 import jwt from "jsonwebtoken";
+import { APIError } from "../utils/ApiError.utils";
 
 // Initialize User repository to interact with the database
 // This sets up TypeORM to perform CRUD operations on the User entity
@@ -103,7 +104,10 @@ passport.use(
                     });
 
                     if (user) {
-                        // User with this email exists; link Google account to existing user
+                        if (user.provider !== AuthProvider.GOOGLE) {
+                            throw new APIError(400, "This email is registered manually. Please log in using your email and password.");
+                        }
+
                         user.googleId = profile.id;
                         user.isVerified = true;
                         user.provider = AuthProvider.GOOGLE;

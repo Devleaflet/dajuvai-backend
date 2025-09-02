@@ -5,7 +5,7 @@ import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUs
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
-import { User, UserRole } from '../entities/user.entity';
+import { AuthProvider, User, UserRole } from '../entities/user.entity';
 import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
 import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import AppDataSource from '../config/db.config';
@@ -529,6 +529,13 @@ export class UserController {
             if (!user) {
                 throw new APIError(404, "User does not exist");
             }
+
+            console.log(user.provider)
+
+            if (user.provider !== AuthProvider.LOCAL) {
+                throw new APIError(403, "This account was created with Google. Please log in using Google.");
+            }
+
 
             if (!user.isVerified) {
                 throw new APIError(403, "Please verify your email before logging in");
