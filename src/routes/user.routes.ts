@@ -1369,6 +1369,7 @@ userRouter.get('/facebook/callback', passport.authenticate('facebook', { session
     res.redirect('https://dajuvai-frontend-ykrq.vercel.app/google-auth-callback');
 });
 
+
 /**
  * @swagger
  * /api/auth/forgot-password:
