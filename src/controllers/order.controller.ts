@@ -155,7 +155,7 @@ export class OrderController {
                 });
                 res.status(error.status).json({
                     success: false,
-                    message: error.message, // safe to send for known API errors
+                    message: error.message, 
                 });
             }
 
@@ -166,15 +166,14 @@ export class OrderController {
                 timestamp: new Date().toISOString(),
             });
 
-            // Optional: send detailed error only in dev environment
-            const isDev = true;
+            const isDev = false;
             res.status(500).json({
                 success: false,
                 message: isDev
                     ? error instanceof Error
                         ? error.message
                         : 'Unknown error'
-                    : 'Internal server error', // generic message in production
+                    : 'Internal server error', 
             });
         }
 
