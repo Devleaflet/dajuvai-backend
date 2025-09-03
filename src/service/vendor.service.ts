@@ -62,6 +62,7 @@ export class VendorService {
                 email,
                 password,
                 phoneNumber,
+                telePhone,
                 district,
                 businessRegNumber,
                 taxNumber,
@@ -91,6 +92,7 @@ export class VendorService {
                 email,
                 password,
                 phoneNumber,
+                telePhone,
                 district: districtEntity,
                 districtId: districtEntity.id,
                 businessRegNumber,
@@ -170,16 +172,13 @@ export class VendorService {
      * @param updateData - Partial data for vendor update.
      * @returns {Promise<Vendor | null>} Updated vendor or null if vendor does not exist.
      */
-    async updateVendorService(id: number, updateData: IUpdateVendorRequest): Promise<Vendor | null> {
-        // Verify vendor exists before update
-        const vendor = await this.vendorRepository.findOne({ where: { id } });
-        if (!vendor) return null;
-
-        // Merge new data into existing vendor entity
-        this.vendorRepository.merge(vendor, updateData);
-
-        // Save updated vendor back to DB
-        return await this.vendorRepository.save(vendor);
+    async updateVendorService(id: number, updateData: Partial<IUpdateVendorRequest>) {
+        await this.vendorRepository.update(id, updateData)
+        return this.vendorRepository.findOne({
+            where: {
+                id: id
+            }
+        })
     }
 
 

@@ -3,6 +3,7 @@ export interface IVendorSignupRequest {
     email: string;
     password: string;
     phoneNumber: string;
+    telePhone: string;
     district: string; // name of district (we map to entity later)
     businessRegNumber: string;
     taxNumber?: string;
@@ -13,7 +14,7 @@ export interface IVendorSignupRequest {
 
     chequePhoto: string; // single cheque image URL
 
-    // ✅ Flattened bank details (from frontend.bankDetails)
+    // Flattened bank details (from frontend.bankDetails)
     accountName: string;
     bankName: string;
     accountNumber: string;
@@ -46,14 +47,9 @@ export interface IResetPasswordRequest {
     token: string;
 }
 
-export interface IUpdateVendorRequest {
-    id: number;
-    businessName?: string;
-    email?: string;
-    businessAddress?: string;
-    phoneNumber?: string;
-}
-
+export interface IUpdateVendorRequest extends IVendorSignupRequest {
+    id?: number;
+};
 export interface IAddressRequest {
     province?: string;
     city?: string;

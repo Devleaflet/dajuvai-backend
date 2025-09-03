@@ -133,6 +133,7 @@ export class VendorController {
                 email,
                 password,
                 phoneNumber,
+                telePhone,
                 district,
                 businessRegNumber,
                 taxNumber,
@@ -168,6 +169,7 @@ export class VendorController {
                 email,
                 password: hashedPassword,
                 phoneNumber,
+                telePhone,
                 district,
                 businessRegNumber,
                 taxNumber,
@@ -490,36 +492,24 @@ export class VendorController {
      * @returns {Promise<void>} - 200 OK with updated vendor data or appropriate error
      * @access Authenticated Vendor
      */
-    async updateVendor(req: VendorAuthRequest<{ id: string }, {}, IUpdateVendorRequest>, res: Response): Promise<void> {
+    async updateVendor(req: VendorAuthRequest<{ id: string }, {}, Partial<IUpdateVendorRequest>>, res: Response): Promise<void> {
         try {
-            // Validate request body using Zod schema
-            const parsed = updateVendorSchema.safeParse(req.body);
-            if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
-                return;
+            const id = req.params.id;
+
+            const findVendorById = await this.vendorService.findVendorById(Number(id))
+
+            if (!findVendorById) {
+                throw new APIError(404, "Vendor doesnto exists")
             }
 
-            // Validate vendor ID and ensure ID consistency
-            const id = parseInt(req.params.id, 10);
-            if (isNaN(id)) {
-                throw new APIError(400, 'Invalid vendor ID');
-            }
-            if (parsed.data.id !== id) {
-                throw new APIError(400, 'ID in body must match URL parameter');
-            }
+            const data: Partial<IUpdateVendorRequest> = req.body;
 
-            // Update vendor with validated data
-            const updateData: IUpdateVendorRequest = { ...parsed.data, id };
-            const vendor = await this.vendorService.updateVendorService(id, updateData);
-            if (!vendor) {
-                throw new APIError(404, 'Vendor not found');
-            }
-
-            res.status(200).json({
-                success: true,
-                message: 'Vendor updated successfully',
-                data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
-            });
+            const updateVendor = await this.vendorService.updateVendorService(Number(id), data)
+            // res.status(200).json({
+            //     success: true,
+            //     message: 'Vendor updated successfully',
+            //     data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
+            // });
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
