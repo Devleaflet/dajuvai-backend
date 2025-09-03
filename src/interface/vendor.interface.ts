@@ -1,10 +1,12 @@
 export interface IVendorSignupRequest {
+    id?: number;
     businessName: string;
     email: string;
     password: string;
     phoneNumber: string;
     telePhone: string;
     district: string; // name of district (we map to entity later)
+    districtId?: number;
     businessRegNumber: string;
     taxNumber?: string;
     isVerified?: boolean;
@@ -47,9 +49,7 @@ export interface IResetPasswordRequest {
     token: string;
 }
 
-export interface IUpdateVendorRequest extends IVendorSignupRequest {
-    id?: number;
-};
+export interface IUpdateVendorRequest extends IVendorSignupRequest { };
 export interface IAddressRequest {
     province?: string;
     city?: string;

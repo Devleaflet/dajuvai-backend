@@ -5,6 +5,7 @@ import { IVendorSignupRequest, IUpdateVendorRequest } from '../interface/vendor.
 import { Address } from '../entities/address.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from './district.service';
+import { District } from '../entities/district.entity';
 
 /**
  * Service for managing vendor-related operations such as
@@ -173,12 +174,24 @@ export class VendorService {
      * @returns {Promise<Vendor | null>} Updated vendor or null if vendor does not exist.
      */
     async updateVendorService(id: number, updateData: Partial<IUpdateVendorRequest>) {
-        // await this.vendorRepository.update(id, updateData)
-        // return this.vendorRepository.findOne({
-        //     where: {
-        //         id: id
-        //     }
-        // })
+        let district: District;
+        if (updateData.district) {
+            const districtDb = AppDataSource.getRepository(District);
+
+            district = await districtDb.findOne({
+                where: {
+                    id: updateData.districtId
+                }
+            })
+        }
+
+        const updateFinalData = {
+            ...updateData,
+            district: district
+        }
+        const updateDistrict = this.vendorRepository.update(id, updateFinalData)
+
+        return this.vendorRepository.findOne({ where: { id } })
     }
 
 

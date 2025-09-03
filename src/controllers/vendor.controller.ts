@@ -499,17 +499,34 @@ export class VendorController {
             const findVendorById = await this.vendorService.findVendorById(Number(id))
 
             if (!findVendorById) {
-                throw new APIError(404, "Vendor doesnto exists")
+                throw new APIError(404, "Vendor doesnot exists")
             }
 
             const data: Partial<IUpdateVendorRequest> = req.body;
 
-            const updateVendor = await this.vendorService.updateVendorService(Number(id), data)
+            let updateVendorData = { ...data }
+
+            if (data.district) {
+                const districtExists = await this.districtService.findDistrictByName(data.district);
+
+                if (!districtExists) {
+                    throw new APIError(404, "District doesnot exists")
+                }
+
+                updateVendorData = {
+                    ...data,
+                    districtId: districtExists.id
+                }
+            }
+
+            const updateVendor = await this.vendorService.updateVendorService(Number(id), updateVendorData)
+
             res.status(200).json({
                 success: true,
                 message: 'Vendor updated successfully',
-                // data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
+                data: { id: updateVendor.id, businessName: updateVendor.businessName, email: updateVendor.email, phoneNumber: updateVendor.phoneNumber },
             });
+
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
