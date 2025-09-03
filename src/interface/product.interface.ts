@@ -17,6 +17,8 @@ export interface IProductQueryParams {
     dealId?: number;
     sort?: 'all' | 'low-to-high' | 'high-to-low';
     bannerId?: number
+    page: number;
+    limit: number;
 }
 
 export interface IAdminProductQueryParams {

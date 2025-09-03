@@ -7,6 +7,7 @@ import { IAdminProductQueryParams, IProductQueryParams } from '../interface/prod
 import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
 import { ReviewService } from '../service/review.service';
+import config from '../config/env.config';
 
 
 /**
@@ -172,30 +173,39 @@ export class ProductController {
     }
 
 
-    async getAllProducts(req: Request<{}, {}, {}, {}>, res: Response) {
+    async getAllProducts(req: Request, res: Response) {
         try {
-            console.log('Query params:', req.query);
+            console.log("Query params:", req.query);
 
-            // Use query parameters directly for filtering
-            const queryParams = { ...req.query };
+            const { page, limit, ...filters } = req.query;
 
-            // Filter products through service layer
-            const products = await this.productService.filterProducts(queryParams);
-            const product = await this.returnProuctRatings(products);
+            const queryParams = {
+                ...filters,
+                page: Number(page) || 1,
+                limit: Number(limit) || config.pagination.pageLimit,
+            };
+
+            const result = await this.productService.filterProducts(queryParams);
+
+            const productWithRatings = await this.returnProuctRatings(result.data);
 
             return res.status(200).json({
                 success: true,
-                message: "All products retrieved succesfully",
-                data: product
-            })
+                message: "All products retrieved successfully",
+                data: productWithRatings,
+                meta: {
+                    total: result.total,
+                    page: result.page,
+                    limit: result.limit,
+                    totalPages: result.totalPages,
+                },
+            });
         } catch (error) {
-            // Handle API errors with specific status codes
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
-                // Log unexpected errors for debugging
-                console.error('getProducts error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
+                console.error("getProducts error:", error);
+                res.status(500).json({ success: false, message: "Internal Server Error" });
             }
         }
     }
