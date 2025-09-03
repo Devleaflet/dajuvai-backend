@@ -173,12 +173,12 @@ export class VendorService {
      * @returns {Promise<Vendor | null>} Updated vendor or null if vendor does not exist.
      */
     async updateVendorService(id: number, updateData: Partial<IUpdateVendorRequest>) {
-        await this.vendorRepository.update(id, updateData)
-        return this.vendorRepository.findOne({
-            where: {
-                id: id
-            }
-        })
+        // await this.vendorRepository.update(id, updateData)
+        // return this.vendorRepository.findOne({
+        //     where: {
+        //         id: id
+        //     }
+        // })
     }
 
 

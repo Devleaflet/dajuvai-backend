@@ -505,11 +505,11 @@ export class VendorController {
             const data: Partial<IUpdateVendorRequest> = req.body;
 
             const updateVendor = await this.vendorService.updateVendorService(Number(id), data)
-            // res.status(200).json({
-            //     success: true,
-            //     message: 'Vendor updated successfully',
-            //     data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
-            // });
+            res.status(200).json({
+                success: true,
+                message: 'Vendor updated successfully',
+                // data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
+            });
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
