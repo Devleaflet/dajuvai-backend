@@ -166,4 +166,25 @@ export class PaymentService {
         return crypto.createHash('sha256').update(signatureString).digest('hex');
     }
 
+    private esewaSuccess(token:string, orderId:number){
+        try{
+            let object=JSON.parse(Buffer.from(token,"base64").toString("ascii"))
+            if(object.status === "COMPLETE"){
+                //handle payment success here
+            }
+        }catch(err){
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
+    }
+
+    private esewaFailure(orderId:number){
+        try{
+            
+        }catch(err){
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
+    }
+
 }

@@ -178,12 +178,10 @@ export class CartService {
         if (cartItem.variantId) {
             const variant = await this.variantRepository.findOne({ where: { id: cartItem.variantId.toString() } });
             if (!variant) throw new APIError(404, 'Associated variant not found');
-            if (variant.status !== 'AVAILABLE') throw new APIError(400, 'Variant is not available');
         } else {
             const product = await this.productRepository.findOne({ where: { id: cartItem.product.id } });
             if (!product) throw new APIError(404, 'Associated product not found');
             if (product.hasVariants) throw new APIError(400, 'Cart item references a product that requires a variant');
-            if (product.status !== 'AVAILABLE') throw new APIError(400, 'Product is not available');
         }
 
         // Handle decrease or remove

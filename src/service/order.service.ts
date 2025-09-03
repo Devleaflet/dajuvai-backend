@@ -665,6 +665,7 @@ export class OrderService {
                 paymentMethod === PaymentMethod.ESEWA ||
                 paymentMethod === PaymentMethod.KHALIT
             ) {
+                console.log("------------Order saving after payment is initated for online payment-------- ")
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
             } else {
