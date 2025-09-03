@@ -18,6 +18,9 @@ import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
 import { sendOrderStatusEmail } from '../utils/nodemailer.utils';
 import { add } from 'winston';
+import crypto from 'crypto';
+import axios from 'axios';
+import 'dotenv/config';
 
 
 /**
@@ -47,7 +50,9 @@ export class OrderService {
     * Instantiates CartService and PaymentService for related business logic.
     */
     constructor() {
-        // Repository to perform CRUD operations on Order entities
+
+        // Repository to perform CRUD ope
+        // rations on Order entities
         this.orderRepository = AppDataSource.getRepository(Order);
 
         // Repository to manage user addresses related to orders
@@ -567,7 +572,7 @@ export class OrderService {
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
-    ): Promise<{ order: Order; redirectUrl?: string, vendorids: any[], useremail: string }> {
+    ): Promise<{ order: Order; redirectUrl?: string, vendorids: any[], useremail: string, esewaRedirectUrl: string | undefined }> {
         try {
             const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity } = orderData;
 
@@ -641,7 +646,7 @@ export class OrderService {
             console.log(order);
 
             let redirectUrl: string | undefined;
-
+            let esewaRedirectUrl: string | undefined;
             // Handle different payment methods
             if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
                 order = await this.orderRepository.save(order);
@@ -668,17 +673,150 @@ export class OrderService {
                 console.log("------------Order saving after payment is initated for online payment-------- ")
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
+                if(paymentMethod === PaymentMethod.ESEWA){
+
+                    const esewaRedirectUrl = await this.initateEsewaPayment(order);
+                    console.log("Respose of Esewa", esewaRedirectUrl)
+                }
             } else {
                 throw new APIError(400, "Invalid payment method");
             }
 
-            return { order, redirectUrl, vendorids, useremail };
+            return { order, redirectUrl, vendorids, useremail, esewaRedirectUrl };
 
         } catch (error) {
             console.log(error);
             throw error instanceof APIError ? error : new APIError(500, "Failed to create order");
         }
     }
+
+    async esewaSuccess(token:string, orderId:number){
+        try{
+            let object=JSON.parse(Buffer.from(token,"base64").toString("ascii"))
+            console.log("This is the object after decoding", object)
+            if(object.status === "COMPLETE"){
+                const updateOrderId = await this.orderSuccess(orderId, object.transaction_uuid);
+            }
+            return {success:true}
+        }catch(err){
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
+    }
+
+    async esewaFailed(orderId:number){
+        try{
+            const order = await this.orderRepository.findOne({ where: { id: orderId } });
+            if (!order) {
+                throw new APIError(404, "Order not found");
+            }
+
+            // Update order status
+            order.status = OrderStatus.CANCELLED;
+            await this.orderRepository.save(order);
+            return {success:true}
+        }catch(err){
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
+    }
+
+    async orderSuccess(orderId:number, transactionId:string){
+        try{
+            const order = await this.orderRepository.findOne({ where: { id: orderId } });
+            if (!order) {
+                throw new APIError(404, "Order not found");
+            }
+
+            // Update order status and transaction ID
+            order.status = OrderStatus.CONFIRMED;
+            order.paymentStatus = PaymentStatus.PAID;
+            order.mTransactionId = transactionId;
+            await this.orderRepository.save(order);
+
+            return order;
+        }catch(err){
+            console.log(err)
+            throw new APIError(500, "Failed to confirm order");
+        }
+    }
+
+
+    private async initateEsewaPayment(order:Order){
+        console.log("------------Order to Initiate Esewa payment-------------")
+        console.log(order)
+        const transaction_uuid = crypto.randomUUID();
+
+        const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${process.env.ESEWA_MERCHANT}`;
+
+        const esewaSignature = this.generateHmacSha256Hash(data, process.env.SECRET_KEY);
+        
+        let paymentData = {
+            amount: order.totalPrice,
+            failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure/${order?.id}`,
+            product_delivery_charge: "0",
+            product_service_charge: "0",
+            product_code: process.env.ESEWA_MERCHANT,
+            signed_field_names: "total_amount,transaction_uuid,product_code",
+            success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success/${order?.id}`,
+            tax_amount: "0",
+            total_amount: order?.totalPrice,
+            transaction_uuid: transaction_uuid,
+            metadata: {
+                paymentId: order?.id,
+            },
+            signature: esewaSignature
+        };
+        
+
+        try {
+            const paymentResponse = await axios.post(process.env.ESEWA_PAYMENT_URL, null, {
+                params: paymentData,
+            });
+            const reqPayment = JSON.parse(this.safeStringify(paymentResponse));
+            if (reqPayment.status === 200 && reqPayment.request?.res?.responseUrl) {
+                return {
+                    url: reqPayment.request.res.responseUrl
+                };
+            } else {
+                throw new Error('Esewa payment initiation failed');
+            }
+        } catch (error) {
+            console.error('Esewa payment error:', error);
+            throw new APIError(500, 'Esewa payment initiation failed');
+        }
+    }
+
+    private generateHmacSha256Hash(data:string, secret:string){
+        console.log("Generated Hash")
+        console.log("data", data)
+        console.log("Secret", secret)
+        if (!data || !secret) {
+            throw new Error("Both data and secret are required to generate a hash.");
+        }
+
+        // Create HMAC SHA256 hash and encode it in Base64
+        const hash = crypto
+            .createHmac("sha256", secret)
+            .update(data)
+            .digest("base64");
+
+        return hash;
+    }
+
+    private safeStringify(obj:any) {
+        const cache = new Set();
+        const jsonString = JSON.stringify(obj, (key, value) => {
+            if (typeof value === "object" && value !== null) {
+            if (cache.has(value)) {
+                return; // Discard circular reference
+            }
+            cache.add(value);
+            }
+            return value;
+        });
+        return jsonString;
+        }
 
 
     // Separate method for stock validation

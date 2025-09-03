@@ -1907,4 +1907,8 @@ router.post("/search/merchant-transactionId", authMiddleware, orderController.ge
 
 router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
 
+router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderController));
+
+router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderController));
+
 export default router;
