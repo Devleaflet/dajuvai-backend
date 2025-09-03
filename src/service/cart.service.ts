@@ -5,7 +5,7 @@ import { Product } from '../entities/product.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
-import { DiscountType } from '../entities/product.enum';
+import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 
 /**
@@ -79,7 +79,8 @@ export class CartService {
             if (!product.basePrice || product.stock === undefined) {
                 throw new APIError(400, 'Product must have basePrice and stock');
             }
-            if (product.status !== 'AVAILABLE' || product.stock < quantity) {
+
+            if (product.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${product.stock} available`);
             }
 
