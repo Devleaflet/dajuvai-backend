@@ -154,7 +154,10 @@ export class VendorService {
      */
     async getVendorByIdService(id: number): Promise<Vendor | null> {
         // Straightforward ID-based lookup
-        return await this.vendorRepository.findOne({ where: { id } });
+        return await this.vendorRepository.findOne({
+            select: ["id", "businessName", "district", "districtId", "email"],
+            where: { id }
+        });
     }
 
     /**
