@@ -651,6 +651,8 @@ export class OrderService {
                     relations: ["orderItems", "orderItems.product", "orderItems.variant"],
                 });
 
+                console.log(order.orderItems);
+
                 await this.updateStock(order.orderItems);
 
                 // 🔹 Only clear cart if it's not Buy Now
@@ -698,10 +700,11 @@ export class OrderService {
                 }
 
                 if (variant.stock < item.quantity) {
-                    throw new APIError(400,
-                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
-                        `Available: ${variant.stock}, Requested: ${item.quantity}`
-                    );
+
+                    console.log(`Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
+                        `Available: ${variant.stock}, Requested: ${item.quantity}`)
+
+                    throw new APIError(400, "Insufficient stock");
                 }
 
                 continue;
@@ -756,19 +759,21 @@ export class OrderService {
                 // Deduct stock
                 variant.stock -= item.quantity;
 
-                // Update inventory status
-                if (variant.stock <= 0) {
-                    variant.status = InventoryStatus.OUT_OF_STOCK;
-                } else if (variant.stock < 5) {
-                    variant.status = InventoryStatus.LOW_STOCK;
-                } else {
-                    variant.status = InventoryStatus.AVAILABLE;
-                }
+                variant.status = variant.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : variant.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
 
                 await this.variantRepository.save(variant);
 
+                // remove variant from other users cart if stock is zero
+                if (variant.stock <= 0) {
+                    await this.removeItemFromCarts(item.variantId, true)
+                }
+
             }
-            // --- Handle Product Stock ---
+            // --- Handle Product Stock for non variant product---
             else if (item.productId) {
                 const product = await this.productRepository.findOne({
                     where: { id: item.productId },
@@ -789,23 +794,34 @@ export class OrderService {
 
                 // Deduct stock
                 product.stock -= item.quantity;
-
-                // Update inventory status
-                if (product.stock <= 0) {
-                    product.status = InventoryStatus.OUT_OF_STOCK;
-                } else if (product.stock < 5) {
-                    product.status = InventoryStatus.LOW_STOCK;
-                } else {
-                    product.status = InventoryStatus.AVAILABLE;
-                }
+                product.status = product.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : product.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
 
                 await this.productRepository.save(product);
+
+                if (product.stock <= 0) {
+                    await this.removeItemFromCarts(item.productId, false)
+                }
 
             }
             // --- Invalid Order Item ---
             else {
                 throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
             }
+        }
+    }
+
+
+    private async removeItemFromCarts(itemId: string | number, isvariant: boolean) {
+        const cartItemRepo = AppDataSource.getRepository(CartItem);
+
+        if (isvariant) {
+            await cartItemRepo.delete({ variantId: Number(itemId) })
+        } else {
+            await cartItemRepo.delete({ product: { id: Number(itemId) } })
         }
     }
 
