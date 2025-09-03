@@ -83,7 +83,7 @@ export const tokenCleanUp = () => {
  *    - Remove order entity from DB, deleting it permanently.
  * 
  * Purpose:
- * - Remove old pending orders that may be abandoned or not processed.
+* - Remove old pending orders that may be abandoned or not processed.
  * - Keep order data clean and avoid clutter.
  */
 export const orderCleanUp = () => {

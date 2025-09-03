@@ -20,7 +20,7 @@ import { DealService } from './deal.service';
 import { SubcategoryService } from './subcategory.service';
 import { MulterFile } from '../config/multer.config';
 import { Variant } from '../entities/variant.entity';
-
+import config from '../config/env.config';
 
 /**
  * Service class for handling product-related operations.
@@ -316,7 +316,11 @@ export class ProductService {
         });
     }
 
-    async filterProducts(params: IProductQueryParams): Promise<Product[]> {
+    async filterProducts(params: IProductQueryParams) {
+        const { page = 1, limit = config.pagination.pageLimit } = params
+
+        const skip = (page - 1) * limit;
+
         const { brandId, categoryId, subcategoryId, dealId, sort = 'all', bannerId } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
@@ -326,6 +330,9 @@ export class ProductService {
             .leftJoinAndSelect('product.deal', 'deal')
             .leftJoinAndSelect('product.variants', 'variants')
             .where('(product.stock > 0 OR variants.stock > 0)');
+
+        query.skip(skip).take(limit)
+
 
         if (bannerId) {
             const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
@@ -355,7 +362,6 @@ export class ProductService {
             query.andWhere('product.dealId = :dealId', { dealId });
         }
 
-        // Add GROUP BY to avoid Postgres aggregate error
         query.groupBy('product.id')
             .addGroupBy('subcategory.id')
             .addGroupBy('brand.id')
@@ -393,7 +399,11 @@ export class ProductService {
             query.orderBy('product.created_at', 'DESC');
         }
 
-        return await query.getMany();
+        const [data, total] = await query.getManyAndCount();
+
+        return {
+            data, total, page, limit, totalPages: Math.ceil(total / limit)
+        }
     }
 
 

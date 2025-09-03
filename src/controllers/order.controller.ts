@@ -161,7 +161,7 @@ export class OrderController {
                 timestamp: new Date().toISOString(),
             });
 
-            const isDev = false;
+            const isDev = true;
             res.status(500).json({
                 success: false,
                 message: isDev
