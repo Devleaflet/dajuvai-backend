@@ -64,7 +64,9 @@ export class CartService {
                 where: { id: variantId.toString(), productId: productId.toString() },
             });
             if (!variant) throw new APIError(404, 'Variant not found');
-            if (variant.status !== 'AVAILABLE' || variant.stock < quantity) {
+            console.log("---------------Variant------------------")
+            console.log(variant)
+            if (variant.status === 'OUT_OF_STOCK'  || variant.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${variant.stock} available for this variant`);
             }
 

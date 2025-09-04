@@ -645,7 +645,8 @@ export class OrderController {
     async checkAvailablePromocode(req:AuthRequest, res:Response){
         try{
             const {promoCode} = req.body as {promoCode:string};
-            const promo = await this.orderService.checkAvailablePromocode(promoCode);
+            let userId = req.user?.id;
+            const promo = await this.orderService.checkAvailablePromocode(promoCode, userId);
             if(promo){
                 return res.status(200).json({success:true, data:promo})
             }

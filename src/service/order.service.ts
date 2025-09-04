@@ -1,4 +1,4 @@
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { IShippingAddressRequest, IUpdateOrderStatusRequest, IOrderCreateRequest } from '../interface/order.interface';
@@ -282,13 +282,12 @@ export class OrderService {
 
         if (orderData.promoCode) {
             const promo = await this.promoService.findPromoByCode(orderData.promoCode);
-            if (!promo) {
-                throw new APIError(400, 'Invalid or expired promo code');
+            let pastOrderTransaction = await this.orderRepository.find({where:{appliedPromoCode: orderData.promoCode, orderedById:userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED])}})
+
+            if (promo && pastOrderTransaction.length === 0) {
+                discountAmount = (subtotal * promo.discountPercentage) / 100;
+                appliedPromoCode = promo.promoCode;    
             }
-            discountAmount = (subtotal * promo.discountPercentage) / 100;
-            console.log(promo)
-            console.log("Promo applied successfully")
-            appliedPromoCode = promo.promoCode;
         }
 
         const totalPrice = subtotal - discountAmount + shippingFee;
@@ -314,13 +313,19 @@ export class OrderService {
         });
     }
 
+
     
 
-    async checkAvailablePromocode(promoCode: string){
+    async checkAvailablePromocode(promoCode: string, userId:number){
         const promo = await this.promoService.findPromoByCode(promoCode);
         if (!promo){
             return null;
         }
+        let pastOrderTransaction = await this.orderRepository.find({where:{appliedPromoCode: promoCode, orderedById:userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED])}})
+        if(pastOrderTransaction.length > 0){
+            return null;
+        }
+        
         return promo;
     }
 
