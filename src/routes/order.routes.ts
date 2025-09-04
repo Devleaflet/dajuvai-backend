@@ -1911,4 +1911,6 @@ router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderCont
 
 router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderController));
 
+router.post("/check-promo", authMiddleware, orderController.checkAvailablePromocode.bind(orderController));
+
 export default router;

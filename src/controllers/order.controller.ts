@@ -641,4 +641,18 @@ export class OrderController {
             res.status(500).json({ success: false, msg: "Internal server error" })
         }
     }
+
+    async checkAvailablePromocode(req:AuthRequest, res:Response){
+        try{
+            const {promoCode} = req.body as {promoCode:string};
+            const promo = await this.orderService.checkAvailablePromocode(promoCode);
+            if(promo){
+                return res.status(200).json({success:true, data:promo})
+            }
+            return res.status(400).json({success:false, msg:"Promo code not found"})
+        }catch(err){
+            console.log(err)
+            res.status(500).json({ success: false, msg: "Internal server error" })
+        }
+    }
 }

@@ -50,4 +50,12 @@ export class PromoService {
             }
         })
     }
+
+    async findPromoCodeById(promoCodeId: number){
+        return await this.promoRepository.findOne({
+            where: {
+                id: promoCodeId
+            }
+        })
+    }
 }

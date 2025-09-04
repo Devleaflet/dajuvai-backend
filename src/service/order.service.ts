@@ -13,7 +13,7 @@ import { PaymentService } from './payment.service';
 import { District } from '../entities/district.entity';
 import { Product } from '../entities/product.entity';
 import { PromoService } from './promo.service';
-import { InventoryStatus } from '../entities/product.enum';
+import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
 import { sendOrderStatusEmail } from '../utils/nodemailer.utils';
@@ -255,9 +255,26 @@ export class OrderService {
 
         // Calculate subtotal from items
         const subtotal = items.reduce((sum, item) => {
-            const basePrice = item.variant ? item.variant.basePrice : item.product.basePrice;
+            let basePrice = 0;
+            if(item.variant){
+                basePrice  += item.variant.basePrice;
+            }else{
+                if(item.product?.discount && item.product?.discount > 0){
+                    if(item.product?.discountType === DiscountType.PERCENTAGE){
+
+                        basePrice += item.product.basePrice - (item.product.basePrice * (item.product.discount/100));
+                    }else{
+                        basePrice += item.product.basePrice - item.product.discount;
+                    }
+                }else{
+                    basePrice += item.product.basePrice;
+                }
+            }
+            // const basePrice = item.variant ? item.variant.basePrice : item.product.basePrice;
             return sum + (basePrice * item.quantity);
         }, 0);
+        console.log("--------------subtotal------------------");
+        console.log(subtotal);
 
         // apply promo code if provided
         let discountAmount = 0;
@@ -269,6 +286,8 @@ export class OrderService {
                 throw new APIError(400, 'Invalid or expired promo code');
             }
             discountAmount = (subtotal * promo.discountPercentage) / 100;
+            console.log(promo)
+            console.log("Promo applied successfully")
             appliedPromoCode = promo.promoCode;
         }
 
@@ -293,6 +312,16 @@ export class OrderService {
             isBuyNow: Boolean(isBuyNow),
             phoneNumber: orderData.phoneNumber,
         });
+    }
+
+    
+
+    async checkAvailablePromocode(promoCode: string){
+        const promo = await this.promoService.findPromoByCode(promoCode);
+        if (!promo){
+            return null;
+        }
+        return promo;
     }
 
 
