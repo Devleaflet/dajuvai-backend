@@ -42,6 +42,10 @@ export class Order {
     @Column('decimal', { precision: 8, scale: 2 })
     shippingFee: number;
 
+    @Column({ nullable: true })
+    isBuyNow?: boolean
+
+    
     @Column({
         type: "enum",
         enum: PaymentStatus,

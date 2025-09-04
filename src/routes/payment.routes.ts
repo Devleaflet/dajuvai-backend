@@ -5,11 +5,11 @@ import { Router } from 'express';
 import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
+import { CartService } from '../service/cart.service';
 
 
 const paymentRouter = Router();
 const orderDb = AppDataSource.getRepository(Order);
-import { CartService } from "../service/cart.service";
 
 
 const CONFIG = {
@@ -229,6 +229,53 @@ paymentRouter.get('/response', (req: Request, res: Response) => {
     res.redirect(`http://localhost:5174/?MerchantTxnId=${MerchantTxnId}&GatewayTxnId=${GatewayTxnId}`);
 });
 
+https://api.dajuvai.com/api/payments/notification
+// Notification URL (Webhook)   
+paymentRouter.get('/notification', async (req: Request, res: Response) => {
+    try {
+
+        const { MerchantTxnId, GatewayTxnId } = req.query;
+
+        console.log('Payment notification received:', {
+            MerchantTxnId,
+            GatewayTxnId,
+            timestamp: new Date().toISOString(),
+        });
+
+        if (!MerchantTxnId || typeof MerchantTxnId !== 'string') {
+            throw new APIError(400, "Invalid or missing MerchantTxnId")
+        }
+
+        const order = await orderDb.findOne({
+            where: {
+                mTransactionId: MerchantTxnId
+            }
+        })
+        if (!order) {
+            throw new APIError(404, "Order not found")
+        }
+
+        const userId = order.orderedById;
+
+        order.paymentStatus = PaymentStatus.PAID;
+        order.status = OrderStatus.CONFIRMED;
+
+        const cartservice = new CartService();
+        await cartservice.clearCart(userId);
+
+        await orderDb.save(order);
+
+        res.send('received');
+    } catch (error) {
+        // Handle known API errors
+        if (error instanceof APIError) {
+            console.log(error);
+            res.status(error.status).json({ success: false, message: error.message });
+        } else {
+            res.status(500).json({ success: false, message: 'Internal server error' });
+        }
+    }
+});
 
 
 export default paymentRouter;

@@ -243,6 +243,7 @@ export class OrderService {
      */
     private async createOrderEntity(
         userId: number,
+        isBuyNow: boolean,
         user: any,
         items: any[],
         address: Address,
@@ -289,6 +290,7 @@ export class OrderService {
                     : OrderStatus.PENDING,
             shippingAddress: address,
             orderItems,
+            isBuyNow: Boolean(isBuyNow),
             phoneNumber: orderData.phoneNumber,
         });
     }
@@ -642,11 +644,11 @@ export class OrderService {
 
 
             // Create the Order entity (not yet saved in DB)
-            let order = await this.createOrderEntity(userId, user, items, address, shippingFee.shippingFee, orderData);
+            let order = await this.createOrderEntity(userId, isBuyNow, user, items, address, shippingFee.shippingFee, orderData);
             console.log(order);
 
-            let redirectUrl: string | undefined;
-            let esewaRedirectUrl: string | undefined;
+            // let redirectUrl: string | undefined;
+            let esewaRedirectUrl;
             // Handle different payment methods
             if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
                 order = await this.orderRepository.save(order);
@@ -673,16 +675,16 @@ export class OrderService {
                 console.log("------------Order saving after payment is initated for online payment-------- ")
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
-                if(paymentMethod === PaymentMethod.ESEWA){
+                if (paymentMethod === PaymentMethod.ESEWA) {
 
-                    const esewaRedirectUrl = await this.initateEsewaPayment(order);
+                    esewaRedirectUrl = await this.initateEsewaPayment(order);
                     console.log("Respose of Esewa", esewaRedirectUrl)
                 }
             } else {
                 throw new APIError(400, "Invalid payment method");
             }
 
-            return { order, redirectUrl, vendorids, useremail, esewaRedirectUrl };
+            return { order, esewaRedirectUrl, vendorids, useremail };
 
         } catch (error) {
             console.log(error);
@@ -690,22 +692,47 @@ export class OrderService {
         }
     }
 
-    async esewaSuccess(token:string, orderId:number){
-        try{
-            let object=JSON.parse(Buffer.from(token,"base64").toString("ascii"))
+    async esewaSuccess(token: string, orderId: number) {
+        try {
+            let object = JSON.parse(Buffer.from(token, "base64").toString("ascii"))
             console.log("This is the object after decoding", object)
-            if(object.status === "COMPLETE"){
+            if (object.status === "COMPLETE") {
+                // order success
                 const updateOrderId = await this.orderSuccess(orderId, object.transaction_uuid);
+
+                let order = await this.orderRepository.findOne({
+                    where: { id: orderId },
+                    relations: ["orderedBy"]
+                })
+
+                if (!order) {
+                    throw new APIError(404, `Order with ID ${orderId} not found`);
+                }
+                
+                // cart clear
+                if (order && !order.isBuyNow) {
+                    await this.cartService.clearCart(order.orderedById)
+                }
+
+                // payment status changed to PAID
+                order.paymentStatus = PaymentStatus.PAID;
+
+                // order status changes to confirmed
+                order.status = OrderStatus.CONFIRMED;
+
+                // save order details
+                await this.orderRepository.save(order);
+
             }
-            return {success:true}
-        }catch(err){
+            return { success: true }
+        } catch (err) {
             console.log("Error", err)
             throw new APIError(500, 'Esewa payment verification failed');
         }
     }
 
-    async esewaFailed(orderId:number){
-        try{
+    async esewaFailed(orderId: number) {
+        try {
             const order = await this.orderRepository.findOne({ where: { id: orderId } });
             if (!order) {
                 throw new APIError(404, "Order not found");
@@ -714,15 +741,15 @@ export class OrderService {
             // Update order status
             order.status = OrderStatus.CANCELLED;
             await this.orderRepository.save(order);
-            return {success:true}
-        }catch(err){
+            return { success: true }
+        } catch (err) {
             console.log("Error", err)
             throw new APIError(500, 'Esewa payment verification failed');
         }
     }
 
-    async orderSuccess(orderId:number, transactionId:string){
-        try{
+    async orderSuccess(orderId: number, transactionId: string) {
+        try {
             const order = await this.orderRepository.findOne({ where: { id: orderId } });
             if (!order) {
                 throw new APIError(404, "Order not found");
@@ -735,30 +762,37 @@ export class OrderService {
             await this.orderRepository.save(order);
 
             return order;
-        }catch(err){
+        } catch (err) {
             console.log(err)
             throw new APIError(500, "Failed to confirm order");
         }
     }
 
 
-    private async initateEsewaPayment(order:Order){
+    private async initateEsewaPayment(order: Order) {
         console.log("------------Order to Initiate Esewa payment-------------")
         console.log(order)
         const transaction_uuid = crypto.randomUUID();
 
         const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${process.env.ESEWA_MERCHANT}`;
 
+        console.log("-------------Data after order---------------------")
+        console.log(data)
+        console.log("----------------------------------")
+
         const esewaSignature = this.generateHmacSha256Hash(data, process.env.SECRET_KEY);
-        
+
         let paymentData = {
             amount: order.totalPrice,
-            failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure/${order?.id}`,
+            failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure?oid=${order?.id}`,
+            // failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure&oid=${order?.id}`,
             product_delivery_charge: "0",
             product_service_charge: "0",
             product_code: process.env.ESEWA_MERCHANT,
             signed_field_names: "total_amount,transaction_uuid,product_code",
-            success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success/${order?.id}`,
+            success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success?oid=${order?.id}`,
+            // success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success&oid=${order?.id}`,
+            // success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success`,
             tax_amount: "0",
             total_amount: order?.totalPrice,
             transaction_uuid: transaction_uuid,
@@ -767,7 +801,7 @@ export class OrderService {
             },
             signature: esewaSignature
         };
-        
+
 
         try {
             const paymentResponse = await axios.post(process.env.ESEWA_PAYMENT_URL, null, {
@@ -775,6 +809,8 @@ export class OrderService {
             });
             const reqPayment = JSON.parse(this.safeStringify(paymentResponse));
             if (reqPayment.status === 200 && reqPayment.request?.res?.responseUrl) {
+                console.log("---------re payment responseurl ")
+                console.log(reqPayment.request.res.responseUrl)
                 return {
                     url: reqPayment.request.res.responseUrl
                 };
@@ -787,7 +823,7 @@ export class OrderService {
         }
     }
 
-    private generateHmacSha256Hash(data:string, secret:string){
+    private generateHmacSha256Hash(data: string, secret: string) {
         console.log("Generated Hash")
         console.log("data", data)
         console.log("Secret", secret)
@@ -804,19 +840,19 @@ export class OrderService {
         return hash;
     }
 
-    private safeStringify(obj:any) {
+    private safeStringify(obj: any) {
         const cache = new Set();
         const jsonString = JSON.stringify(obj, (key, value) => {
             if (typeof value === "object" && value !== null) {
-            if (cache.has(value)) {
-                return; // Discard circular reference
-            }
-            cache.add(value);
+                if (cache.has(value)) {
+                    return; // Discard circular reference
+                }
+                cache.add(value);
             }
             return value;
         });
         return jsonString;
-        }
+    }
 
 
     // Separate method for stock validation

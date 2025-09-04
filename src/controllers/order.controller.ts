@@ -54,6 +54,9 @@ export class OrderController {
             // Call service to create order and possibly get payment redirect URL
             const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } = await this.orderService.createOrder(req.user.id, data);
 
+            console.log("---------------Esewa redirect------------------")
+            console.log(esewaRedirectUrl)
+
 
             // send customer email
             await sendCustomerOrderEmail(
@@ -97,9 +100,9 @@ export class OrderController {
                 console.log(vendor.email)
 
                 // Send email to this vendor
-                const userexists = await findUserById(userId);
+                // const userexists = await findUserById(userId);
 
-                console.log("--------------User detaisl before sendign dmail to vendor ---------------------")
+                console.log("--------------User details before sending email to vendor ---------------------")
                 console.log(userexists.fullName);
                 console.log(userexists.phoneNumber);
                 console.log(userexists.email);
@@ -120,13 +123,12 @@ export class OrderController {
                 });
             }
 
-            // remove quanity of all the cart of different users if the 
 
-            
 
-            if (redirectUrl) {
+
+            if (esewaRedirectUrl) {
                 // Payment redirection needed
-                res.status(200).json({ success: true, data: order, redirectUrl });
+                res.status(200).json({ success: true, data: order, esewaRedirectUrl });
             } else {
                 // Order created without payment redirect
                 res.status(201).json({ success: true, data: order });
@@ -610,31 +612,31 @@ export class OrderController {
         }
     }
 
-    async esewaPaymentSuccess(req:AuthRequest, res:Response){
-        try{
-            const { token, orderId } = req.body as { token: string, orderId:number };
+    async esewaPaymentSuccess(req: AuthRequest, res: Response) {
+        try {
+            const { token, orderId } = req.body as { token: string, orderId: number };
             const order = await this.orderService.esewaSuccess(token, orderId);
             if (order.success) {
-                return res.status(200).json({success:true, msg:"Payment successful"})
+                return res.status(200).json({ success: true, msg: "Payment successful" })
             }
-            return res.status(400).json({success:false, msg:"Payment failed"})
+            return res.status(400).json({ success: false, msg: "Payment failed" })
 
-        }catch(err){
+        } catch (err) {
             console.log(err)
             res.status(500).json({ success: false, msg: "Internal server error" })
         }
     }
 
-    async esewaPaymentFailed(req:AuthRequest, res:Response){
-        try{
-            const {orderId} = req.body as {orderId:number};
+    async esewaPaymentFailed(req: AuthRequest, res: Response) {
+        try {
+            const { orderId } = req.body as { orderId: number };
             const order = await this.orderService.esewaFailed(orderId);
             if (order.success) {
-                return res.status(200).json({success:true, msg:"Payment failed"})
+                return res.status(200).json({ success: true, msg: "Payment failed" })
             }
-            return res.status(400).json({success:false, msg:"Payment not found"})
+            return res.status(400).json({ success: false, msg: "Payment not found" })
 
-        }catch(err){
+        } catch (err) {
             console.log(err)
             res.status(500).json({ success: false, msg: "Internal server error" })
         }
