@@ -140,4 +140,10 @@ adminDashboardRouter.get("/stats", authMiddleware, isAdminOrStaff, adminDashboar
  */
 adminDashboardRouter.get("/revenue", authMiddleware, isAdminOrStaff, adminDashboardController.getRevenueChart.bind(adminDashboardController));
 
+adminDashboardRouter.get("/vendors-sales-amount", authMiddleware, isAdmin ,adminDashboardController.getVendorsSalesAmount.bind(adminDashboardController));
+
+adminDashboardRouter.get("/top-products", authMiddleware, isAdmin ,adminDashboardController.getTopProducts.bind(adminDashboardController));
+
+adminDashboardRouter.get("/todays-sales", authMiddleware, isAdmin ,adminDashboardController.getTodaysSales.bind(adminDashboardController));
+
 export default adminDashboardRouter;

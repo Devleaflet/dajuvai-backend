@@ -2,6 +2,7 @@ import { Response } from 'express';
 import { APIError } from '../utils/ApiError.utils';
 import { AdminDashBoardService } from '../service/admin.dashboard.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
+import { start } from 'repl';
 
 /**
  * @class AdminDashboardController
@@ -72,5 +73,66 @@ export class AdminDashboardController {
 
         // Send chart data in response
         res.status(200).json(chartData);
+    }
+
+    async getVendorsSalesAmount(req: AuthRequest, res:Response){
+        let {startDate, endDate, page} = req.query as {startDate?: string, endDate?: string, page?: number};
+        if(!page || page < 1) page = 1;
+        try{
+            const data = await this.adminDashboardService.getVendorsSalesAmount(startDate, endDate, page);
+            res.status(200).json({success:true, data});
+        }catch(error){
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                // Otherwise, respond with a generic 500 error
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching vendors sales amount',
+                    error: error.message
+                });
+            }
+    
+        }   
+    }
+
+    async getTopProducts(req: AuthRequest, res:Response){
+        try{
+            let {startDate, endDate, page} = req.query as {startDate?: string, endDate?: string, page?: number};
+
+            if(!page || page < 1) page = 1;
+            const data = await this.adminDashboardService.getTopProducts(startDate, endDate, page);
+            res.status(200).json({success:true, data});
+        }catch(error){
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                // Otherwise, respond with a generic 500 error
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching top products',
+                    error: error.message
+                });
+            }
+    
+        }
+    }
+
+    async getTodaysSales(req: AuthRequest, res:Response){
+        try{
+            const data = await this.adminDashboardService.getTodayTotalSales();
+            res.status(200).json({success:true, data});
+        }catch(error){
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                // Otherwise, respond with a generic 500 error
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching today\'s sales',
+                    error: error.message
+                });
+            }
+        }
     }
 }

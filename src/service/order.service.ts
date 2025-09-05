@@ -21,6 +21,7 @@ import { add } from 'winston';
 import crypto from 'crypto';
 import axios from 'axios';
 import 'dotenv/config';
+import { PromoType } from '../entities/promo.entity';
 
 
 /**
@@ -213,10 +214,20 @@ export class OrderService {
      */
     private createOrderItems(items: any[]): OrderItem[] {
         return items.map(item => {
-            const price = item.variant
-                ? item.variant.basePrice
-                : item.product.basePrice;
-
+            let price;
+            if (item.variant) {
+                price = item.variant.basePrice;
+            } else {
+                if (item.product?.discount && item.product?.discount > 0) {
+                    if (item.product?.discountType === DiscountType.PERCENTAGE) {
+                        price = item.product.basePrice - (item.product.basePrice * (item.product.discount / 100));
+                    } else {
+                        price = item.product.basePrice - item.product.discount;
+                    }
+                } else {
+                    price = item.product.basePrice;
+                }
+            }
             return this.orderItemRepository.create({
                 productId: item.product.id,
                 quantity: item.quantity,
@@ -284,8 +295,12 @@ export class OrderService {
             const promo = await this.promoService.findPromoByCode(orderData.promoCode);
             let pastOrderTransaction = await this.orderRepository.find({where:{appliedPromoCode: orderData.promoCode, orderedById:userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED])}})
 
-            if (promo && pastOrderTransaction.length === 0) {
-                discountAmount = (subtotal * promo.discountPercentage) / 100;
+            if (promo && promo.isValid && pastOrderTransaction.length === 0) {
+                if(promo.applyOn === PromoType.LINE_TOTAL){
+                    discountAmount = (subtotal * promo.discountPercentage) / 100;
+                }else{
+                    discountAmount = (shippingFee * promo.discountPercentage) / 100;
+                }
                 appliedPromoCode = promo.promoCode;    
             }
         }

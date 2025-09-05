@@ -67,4 +67,45 @@ export class VendorDashboardController {
             }
         }
     }
+
+    async vendorSalesReport(req: VendorAuthRequest, res: Response): Promise<void> {
+        try {
+            const vendor = req.vendor;
+            if (!vendor || !vendor.id) {
+                throw new APIError(401, 'Unauthorized');
+            }
+
+            const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+            const report = await this.dashboardService.getTotalSales(7, startDate, endDate);
+            res.status(200).json(report);
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+    async getLowStockProducts(req: VendorAuthRequest, res: Response): Promise<void> {
+        try {
+            const vendor = req.vendor;
+            if (!vendor || !vendor.id) {
+                throw new APIError(401, 'Unauthorized');
+            }
+
+            let { page } = req.query as { page?: number };
+            if (!page || page < 1) page = 1;
+
+            const lowStockProducts = await this.dashboardService.getLowStockProducts(vendor.id, page);
+            res.status(200).json(lowStockProducts);
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
 }
