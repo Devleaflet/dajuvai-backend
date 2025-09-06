@@ -16,12 +16,13 @@ import { PromoService } from './promo.service';
 import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
-import { sendOrderStatusEmail } from '../utils/nodemailer.utils';
+import { sendCustomerOrderEmail, sendOrderStatusEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
 import { add } from 'winston';
 import crypto from 'crypto';
 import axios from 'axios';
 import 'dotenv/config';
 import { PromoType } from '../entities/promo.entity';
+import { VendorService } from './vendor.service';
 
 
 /**
@@ -43,6 +44,7 @@ export class OrderService {
     private productRepository: Repository<Product>;
     private promoService: PromoService;
     private variantRepository: Repository<Variant>;
+    private vendorService: VendorService;
 
 
     /**
@@ -82,6 +84,8 @@ export class OrderService {
         this.promoService = new PromoService();
 
         this.variantRepository = AppDataSource.getTreeRepository(Variant);
+
+        this.vendorService = new VendorService();
     }
 
     /**
@@ -267,17 +271,17 @@ export class OrderService {
         // Calculate subtotal from items
         const subtotal = items.reduce((sum, item) => {
             let basePrice = 0;
-            if(item.variant){
-                basePrice  += item.variant.basePrice;
-            }else{
-                if(item.product?.discount && item.product?.discount > 0){
-                    if(item.product?.discountType === DiscountType.PERCENTAGE){
+            if (item.variant) {
+                basePrice += item.variant.basePrice;
+            } else {
+                if (item.product?.discount && item.product?.discount > 0) {
+                    if (item.product?.discountType === DiscountType.PERCENTAGE) {
 
-                        basePrice += item.product.basePrice - (item.product.basePrice * (item.product.discount/100));
-                    }else{
+                        basePrice += item.product.basePrice - (item.product.basePrice * (item.product.discount / 100));
+                    } else {
                         basePrice += item.product.basePrice - item.product.discount;
                     }
-                }else{
+                } else {
                     basePrice += item.product.basePrice;
                 }
             }
@@ -293,15 +297,15 @@ export class OrderService {
 
         if (orderData.promoCode) {
             const promo = await this.promoService.findPromoByCode(orderData.promoCode);
-            let pastOrderTransaction = await this.orderRepository.find({where:{appliedPromoCode: orderData.promoCode, orderedById:userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED])}})
+            let pastOrderTransaction = await this.orderRepository.find({ where: { appliedPromoCode: orderData.promoCode, orderedById: userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]) } })
 
             if (promo && promo.isValid && pastOrderTransaction.length === 0) {
-                if(promo.applyOn === PromoType.LINE_TOTAL){
+                if (promo.applyOn === PromoType.LINE_TOTAL) {
                     discountAmount = (subtotal * promo.discountPercentage) / 100;
-                }else{
+                } else {
                     discountAmount = (shippingFee * promo.discountPercentage) / 100;
                 }
-                appliedPromoCode = promo.promoCode;    
+                appliedPromoCode = promo.promoCode;
             }
         }
 
@@ -329,18 +333,19 @@ export class OrderService {
     }
 
 
-    
 
-    async checkAvailablePromocode(promoCode: string, userId:number){
+
+    async checkAvailablePromocode(promoCode: string, userId: number) {
         const promo = await this.promoService.findPromoByCode(promoCode);
-        if (!promo){
+        console.log(promo)
+        if (!promo) {
             return null;
         }
-        let pastOrderTransaction = await this.orderRepository.find({where:{appliedPromoCode: promoCode, orderedById:userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED])}})
-        if(pastOrderTransaction.length > 0){
+        let pastOrderTransaction = await this.orderRepository.find({ where: { appliedPromoCode: promoCode, orderedById: userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]) } })
+        if (pastOrderTransaction.length > 0) {
             return null;
         }
-        
+
         return promo;
     }
 
@@ -719,7 +724,7 @@ export class OrderService {
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
                 paymentMethod === PaymentMethod.ESEWA ||
-                paymentMethod === PaymentMethod.KHALIT
+                paymentMethod === PaymentMethod.NPX
             ) {
                 console.log("------------Order saving after payment is initated for online payment-------- ")
                 // Save order first before initiating online payment
@@ -751,29 +756,68 @@ export class OrderService {
 
                 let order = await this.orderRepository.findOne({
                     where: { id: orderId },
-                    relations: ["orderedBy"]
-                })
+                    relations: ["orderedBy", "orderItems", "orderItems.product", "orderItems.variant"],
+                });
+
 
                 if (!order) {
                     throw new APIError(404, `Order with ID ${orderId} not found`);
                 }
-                
+
                 // cart clear
                 if (order && !order.isBuyNow) {
                     await this.cartService.clearCart(order.orderedById)
                 }
 
-                // payment status changed to PAID
-                order.paymentStatus = PaymentStatus.PAID;
-
-                // order status changes to confirmed
-                order.status = OrderStatus.CONFIRMED;
-
                 // save order details
                 await this.orderRepository.save(order);
 
+                // send email to customer and vendors
+                await sendCustomerOrderEmail(
+                    order.orderedBy.email,
+                    order.id,
+                    order.orderItems.map((item) => ({
+                        name: item?.product?.name,
+                        sku: item.variant?.sku || null,
+                        quantity: item.quantity,
+                        price: item.price,
+                        variantAttributes: item.variant?.attributes || null,
+                    }))
+                );
+
+                // send vendor email
+                const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))]
+
+                for (const vendoId of vendorIds) {
+                    const itemsForVendor = order.orderItems
+                        .filter((item) => item.vendorId === vendoId)
+                        .map((item) => ({
+                            name: item?.product?.name,
+                            sku: item?.variant?.sku,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null
+                        }))
+
+                    if (itemsForVendor.length === 0) continue;
+
+                    const vendor = await this.vendorService.findVendorById(vendoId);
+
+                    await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
+                        name: order.orderedBy.fullName,
+                        phone: order.orderedBy.phoneNumber,
+                        email: order.orderedBy.email,
+                        city: order.orderedBy.address.city,
+                        district: order.orderedBy.address.district,
+                        localAddress: order.orderedBy.address.localAddress,
+                        landmark: order.orderedBy.address.landmark
+                    })
+
+                }
             }
+
             return { success: true }
+
         } catch (err) {
             console.log("Error", err)
             throw new APIError(500, 'Esewa payment verification failed');

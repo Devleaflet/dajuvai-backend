@@ -10,20 +10,22 @@ export const vendorSignupSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8).max(25),
     phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/),
-    telePhone: z.string(),
+    telePhone: z.string().optional(),
     district: z.string().min(1),
+
+    
     businessRegNumber: z.string().min(1, 'Business registration number is required'),
     taxNumber: z.string().optional(),
     taxDocuments: z.array(z.string().url()).min(1),
     citizenshipDocuments: z.array(z.string().url()).optional(),
     chequePhoto: z.string().url().min(1),
-    bankDetails: z.object({
-        accountName: z.string().min(1),
-        bankName: z.string().min(1),
-        accountNumber: z.string().min(1),
-        bankBranch: z.string().min(1),
-        bankCode: z.string().optional(),
-    }),
+
+    // bank detalil
+    accountName: z.string().min(1),
+    bankName: z.string().min(1),
+    accountNumber: z.string().min(1),
+    bankBranch: z.string().min(1),
+    bankCode: z.string().optional(),
 });
 
 

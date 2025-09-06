@@ -162,6 +162,12 @@ export class SubcategoryService {
         });
     }
 
+    async handleGetSubcategoryById(id: number) {
+        return this.subcategoryRepository.findOne({
+            where: { id },
+        })
+    }
+
     /**
      * Updates an existing subcategory by an admin user, optionally replacing its image.
      * @param id - Subcategory ID

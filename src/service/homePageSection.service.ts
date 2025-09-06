@@ -110,14 +110,25 @@ export class HomePageSectionService {
      * @access Public/Admin
      */
     async getAllHomePageSections(includeInactive: boolean = false) {
-        const whereCondition = includeInactive ? undefined : { isActive: true };
+        const query = this.homepageSectionRepository
+            .createQueryBuilder("section")
+            .leftJoinAndSelect("section.products", "product")
+            .leftJoinAndSelect("product.variants", "variant");
 
-        return await this.homepageSectionRepository.find({
-            where: whereCondition,
-            relations: ['products', 'products.variants'],
-            order: { id: 'ASC' }
+        if (!includeInactive) {
+            query.where("section.isActive = :isActive", { isActive: true });
+        }
+
+        // filter products by status
+        query.andWhere("product.status IN (:...statuses)", {
+            statuses: ["AVAILABLE", "LOW_STOCK"],
         });
+
+        query.orderBy("section.id", "ASC");
+
+        return await query.getMany();
     }
+
 
     /**
      * Retrieves a homepage section by its ID.

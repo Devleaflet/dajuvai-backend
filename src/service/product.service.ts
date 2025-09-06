@@ -326,7 +326,14 @@ export class ProductService {
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.subcategory', 'subcategory')
             .leftJoinAndSelect('product.brand', 'brand')
-            .leftJoinAndSelect('product.vendor', 'vendor')
+            .leftJoin('product.vendor', 'vendor')
+            .addSelect([
+                'vendor.id',
+                'vendor.businessName',
+                'vendor.districtId',
+                'vendor.createdAt',
+                'vendor.updatedAt'
+            ])
             .leftJoinAndSelect('product.deal', 'deal')
             .leftJoinAndSelect('product.variants', 'variants')
             .where('(product.stock > 0 OR variants.stock > 0)');

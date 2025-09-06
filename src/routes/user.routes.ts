@@ -151,12 +151,12 @@ userRouter.post("/admin/signup", userController.adminSignup.bind(userController)
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 example: securePassword123
+ *                 example: Password123!@#
  *               confirmPassword:
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 example: securePassword123
+ *                 example: Password123!@#
  *     responses:
  *       201:
  *         description: Staff user registered successfully
@@ -681,9 +681,9 @@ userRouter.get('/users',  userController.getUsers.bind(userController));
  *                 description: User role (optional)
  *           example:
  *             username: "johndoe"
- *             email: "john.doe@example.com"
- *             password: "securepassword123"
- *             confirmPassword: "securepassword123"
+ *             email: "admin@gmail.com"
+ *             password: "Password123!@#"
+ *             confirmPassword: "Password123!@#"
  *     responses:
  *       201:
  *         description: User created successfully
@@ -733,7 +733,7 @@ userRouter.post('/signup', validateZod(signupSchema), userController.signup.bind
  *                 format: email
  *                 description: Email address to send verification token to
  *           example:
- *             email: "john.doe@example.com"
+ *             email: "admin@gmail.com"
  *     responses:
  *       200:
  *         description: Verification email sent successfully
@@ -781,7 +781,7 @@ userRouter.post('/verify/resend', authRateLimiter, validateZod(verificationToken
  *                 type: string
  *                 description: Email verification token
  *           example:
- *             email: "john.doe@example.com"
+ *             email: "admin@gmail.com"
  *             token: "123456"
  *     responses:
  *       200:
@@ -831,8 +831,8 @@ userRouter.post('/verify', validateZod(verifyTokenSchema), userController.verify
  *                 format: password
  *                 description: User password
  *           example:
- *             email: "john.doe@example.com"
- *             password: "securepassword123"
+ *             email: "admin@gmail.com"
+ *             password: "Password123!@#"
  *     responses:
  *       200:
  *         description: Login successful
@@ -868,7 +868,7 @@ userRouter.post('/verify', validateZod(verifyTokenSchema), userController.verify
  *               user:
  *                 id: 1
  *                 username: "johndoe"
- *                 email: "john.doe@example.com"
+ *                 email: "admin@gmail.com"
  *                 role: "user"
  *                 isVerified: true
  *       400:
@@ -1390,7 +1390,7 @@ userRouter.get('/facebook/callback', passport.authenticate('facebook', { session
  *                 format: email
  *                 description: Email address to send password reset token to
  *           example:
- *             email: "john.doe@example.com"
+ *             email: "admin@gmail.com"
  *     responses:
  *       200:
  *         description: Password reset email sent successfully
@@ -1443,8 +1443,8 @@ userRouter.post('/forgot-password', authRateLimiter, validateZod(verificationTok
  *                 type: string
  *                 description: Password reset token
  *           example:
- *             newPass: "newSecurePassword123"
- *             confirmPass: "newSecurePassword123"
+ *             newPass: "newPassword123!@#"
+ *             confirmPass: "newPassword123!@#"
  *             token: "123456"
  *     responses:
  *       200:
@@ -1523,7 +1523,7 @@ userRouter.post('/reset-password', authRateLimiter, validateZod(resetPasswordSch
  *             example:
  *               id: 1
  *               username: "johndoe"
- *               email: "john.doe@example.com"
+ *               email: "admin@gmail.com"
  *               role: "user"
  *               isVerified: true
  *               products: []
@@ -1601,7 +1601,7 @@ userRouter.get('/users/:id',  userController.getUserById.bind(userController));
  *               user:
  *                 id: 1
  *                 username: "johndoe_updated"
- *                 email: "john.doe@example.com"
+ *                 email: "admin@gmail.com"
  *                 role: "customer"
  *       400:
  *         description: Invalid input data

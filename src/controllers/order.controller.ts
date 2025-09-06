@@ -3,13 +3,12 @@ import { OrderService } from '../service/order.service';
 import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
 import { APIError } from '../utils/ApiError.utils';
-import { User, UserRole } from '../entities/user.entity';
+import { UserRole } from '../entities/user.entity';
 import { findUserByEmail, findUserById, getUserByIdService } from '../service/user.service';
 import { sendCustomerOrderEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
 import { VendorService } from '../service/vendor.service';
-import { copyFileSync } from 'fs';
-import { add } from 'winston';
 import { PaymentService } from '../service/payment.service';
+import { PaymentMethod } from '../entities/order.entity';
 
 
 /**
@@ -58,73 +57,76 @@ export class OrderController {
             console.log(esewaRedirectUrl)
 
 
-            // send customer email
-            await sendCustomerOrderEmail(
-                useremail,
-                order.id,
-                order.orderItems.map(item => ({
-                    name: item?.product?.name,
-                    sku: item.variant?.sku || null,
-                    quantity: item.quantity,
-                    price: item.price,
-                    variantAttributes: item.variant?.attributes || null
-                }))
-            )
+            // send email to vendor and customer only when payment method is COD
+            if (order.paymentMethod == PaymentMethod.CASH_ON_DELIVERY) {
+                const userDistrict = order.shippingAddress?.district || null;
 
-            const orderItems = order.orderItems
-
-
-            // send vendor email 
-            for (const vendorId of vendorids) {
-
-                // Filter items that belong to this vendor
-                console.log("----------Vendor ids-------------")
-                console.log(vendorId)
-                const itemsForVendor = orderItems
-                    .filter(item => item.vendorId === vendorId)
-                    .map(item => ({
+                // send customer email
+                await sendCustomerOrderEmail(
+                    useremail,
+                    order.id,
+                    order.orderItems.map(item => ({
                         name: item?.product?.name,
                         sku: item.variant?.sku || null,
                         quantity: item.quantity,
                         price: item.price,
-                        variantAttributes: item.variant?.attributes || null
-                    }));
+                        variantAttributes: item.variant?.attributes || null,
+                        vendorDistrict: item.vendor?.district?.name || null
+                    })),
+                    userDistrict
+                )
+
+                const orderItems = order.orderItems
 
 
-                if (itemsForVendor.length === 0) continue;
+                // send vendor email 
+                for (const vendorId of vendorids) {
 
-                // findVendorByEmail
-                const vendor = await this.vendorService.findVendorById(vendorId)
-
-                console.log("----------Vendor email-------------")
-                console.log(vendor.email)
-
-                // Send email to this vendor
-                // const userexists = await findUserById(userId);
-
-                console.log("--------------User details before sending email to vendor ---------------------")
-                console.log(userexists.fullName);
-                console.log(userexists.phoneNumber);
-                console.log(userexists.email);
-                console.log(userexists.address.city);
-                console.log(userexists.address.district);
-                console.log(userexists.address.localAddress);
-                console.log(userexists.address.landmark);
+                    // Filter items that belong to this vendor
+                    console.log("----------Vendor ids-------------")
+                    console.log(vendorId)
+                    const itemsForVendor = orderItems
+                        .filter(item => item.vendorId === vendorId)
+                        .map(item => ({
+                            name: item?.product?.name,
+                            sku: item.variant?.sku || null,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null
+                        }));
 
 
-                await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
-                    name: userexists.fullName,
-                    phone: userexists.phoneNumber,
-                    email: userexists.email,
-                    city: userexists.address.city,
-                    district: userexists.address.district,
-                    localAddress: userexists.address.localAddress,
-                    landmark: userexists.address.landmark
-                });
+                    if (itemsForVendor.length === 0) continue;
+
+                    // findVendorByEmail
+                    const vendor = await this.vendorService.findVendorById(vendorId)
+
+                    console.log("----------Vendor email-------------")
+                    console.log(vendor.email)
+
+                    // Send email to this vendor
+
+                    console.log("--------------User details before sending email to vendor ---------------------")
+                    console.log(userexists.fullName);
+                    console.log(userexists.phoneNumber);
+                    console.log(userexists.email);
+                    console.log(userexists.address.city);
+                    console.log(userexists.address.district);
+                    console.log(userexists.address.localAddress);
+                    console.log(userexists.address.landmark);
+
+
+                    await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
+                        name: userexists.fullName,
+                        phone: userexists.phoneNumber,
+                        email: userexists.email,
+                        city: userexists.address.city,
+                        district: userexists.address.district,
+                        localAddress: userexists.address.localAddress,
+                        landmark: userexists.address.landmark
+                    });
+                }
             }
-
-
-
 
             if (esewaRedirectUrl) {
                 // Payment redirection needed
@@ -642,16 +644,16 @@ export class OrderController {
         }
     }
 
-    async checkAvailablePromocode(req:AuthRequest, res:Response){
-        try{
-            const {promoCode} = req.body as {promoCode:string};
+    async checkAvailablePromocode(req: AuthRequest, res: Response) {
+        try {
+            const { promoCode } = req.body as { promoCode: string };
             let userId = req.user?.id;
             const promo = await this.orderService.checkAvailablePromocode(promoCode, userId);
-            if(promo){
-                return res.status(200).json({success:true, data:promo})
+            if (promo) {
+                return res.status(200).json({ success: true, data: promo })
             }
-            return res.status(400).json({success:false, msg:"Promo code not found"})
-        }catch(err){
+            return res.status(400).json({ success: false, msg: "Promo code not found" })
+        } catch (err) {
             console.log(err)
             res.status(500).json({ success: false, msg: "Internal server error" })
         }

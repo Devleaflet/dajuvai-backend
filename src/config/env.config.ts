@@ -4,7 +4,7 @@ dotenv.config();
 
 const config = {
     pagination: {
-        pageLimit: parseInt(process.env.PAGE_LIMIT || "10", 10), 
+        pageLimit: parseInt(process.env.PAGE_LIMIT || "20", 20),
     },
 };
 

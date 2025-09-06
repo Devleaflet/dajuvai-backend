@@ -21,7 +21,8 @@ export enum PaymentMethod {
     ONLINE_PAYMENT = "ONLINE_PAYMENT",
     CASH_ON_DELIVERY = "CASH_ON_DELIVERY",
     KHALIT = "KHALTI",
-    ESEWA = "ESEWA"
+    ESEWA = "ESEWA",
+    NPX = "NPX"
 }
 
 @Entity('orders')

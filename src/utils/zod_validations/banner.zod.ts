@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { BannerType, BannerStatus } from '../../entities/banner.entity';
+import { BannerType, BannerStatus, ProductSource } from '../../entities/banner.entity';
 
 const baseBannerSchema = z.object({
     // Banner name is required, max length 100 characters
@@ -14,31 +14,138 @@ const baseBannerSchema = z.object({
             errorMap: () => ({ message: 'Invalid banner type' }),
         }),
 
-    // Banner status must be one of the defined BannerStatus enum values
-    status: z
-        .enum([BannerStatus.ACTIVE, BannerStatus.EXPIRED, BannerStatus.SCHEDULED], {
-            errorMap: () => ({ message: 'Invalid banner status' }),
-        }),
-
-    // Start date must be a valid ISO 8601 datetime string
+    // Start date must be a valid ISO 8601 datetime string and must be >= today
     startDate: z
         .string()
-        .datetime({ message: 'Invalid start date, use ISO 8601 format (e.g., 2025-06-10T00:00:00Z)' }),
+        .datetime({ message: 'Invalid start date, use ISO 8601 format (e.g., 2025-06-10T00:00:00Z)' })
+        .refine(date => new Date(date) >= new Date(new Date().setHours(0, 0, 0, 0)), {
+            message: 'Start date must be today or in the future',
+        }),
 
     // End date must be a valid ISO 8601 datetime string
     endDate: z
         .string()
         .datetime({ message: 'Invalid end date, use ISO 8601 format (e.g., 2025-06-20T23:59:59Z)' }),
+
+    // Product source selection
+    productSource: z
+        .enum([ProductSource.MANUAL, ProductSource.CATEGORY, ProductSource.SUBCATEGORY, ProductSource.DEAL, ProductSource.EXTERNAL], {
+            errorMap: () => ({ message: 'Invalid product source' }),
+        }),
+
+    // For manual product selection
+    selectedProducts: z
+        .array(z.number())
+        .optional()
+        .nullable(),
+
+    // For category selection
+    selectedCategoryId: z
+        .number()
+        .optional()
+        .nullable(),
+
+    // For subcategory selection
+    selectedSubcategoryId: z
+        .number()
+        .optional()
+        .nullable(),
+
+    // For deal selection
+    selectedDealId: z
+        .number()
+        .optional()
+        .nullable(),
+
+    // For external link
+    externalLink: z
+        .string()
+        .url('Must be a valid URL')
+        .optional()
+        .nullable(),
+
+    // desktop size image 
+    desktopImage: z
+        .string()
+        .optional()
+        .nullable(),
+
+    // mobile size image
+    mobileImage: z
+        .string()
+        .optional()
+        .nullable(),
 });
 
-// Create schema with refinement to ensure endDate is after or equal to startDate
-export const createBannerSchema = baseBannerSchema.refine(
-    (data) => new Date(data.startDate) <= new Date(data.endDate),
-    {
-        message: 'End date must be after start date',
-        path: ['endDate'],
-    }
-);
+// Create schema with refinements for validation rules
+export const createBannerSchema = baseBannerSchema
+    .refine(
+        (data) => new Date(data.startDate) <= new Date(data.endDate),
+        {
+            message: 'End date must be after or equal to start date',
+            path: ['endDate'],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.productSource === ProductSource.MANUAL) {
+                return data.selectedProducts && data.selectedProducts.length > 0;
+            }
+            return true;
+        },
+        {
+            message: 'At least one product must be selected for manual product source',
+            path: ['selectedProducts'],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.productSource === ProductSource.CATEGORY) {
+                return !!data.selectedCategoryId;
+            }
+            return true;
+        },
+        {
+            message: 'Category must be selected for category product source',
+            path: ['selectedCategoryId'],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.productSource === ProductSource.SUBCATEGORY) {
+                return !!data.selectedCategoryId && !!data.selectedSubcategoryId;
+            }
+            return true;
+        },
+        {
+            message: 'Both category and subcategory must be selected for subcategory product source',
+            path: ['selectedSubcategoryId'],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.productSource === ProductSource.DEAL) {
+                return !!data.selectedDealId;
+            }
+            return true;
+        },
+        {
+            message: 'Deal must be selected for deal product source',
+            path: ['selectedDealId'],
+        }
+    )
+    .refine(
+        (data) => {
+            if (data.productSource === ProductSource.EXTERNAL) {
+                return !!data.externalLink;
+            }
+            return true;
+        },
+        {
+            message: 'External link must be provided for external product source',
+            path: ['externalLink'],
+        }
+    );
 
 // Update schema: all fields are optional for partial updates
 export const updateBannerSchema = baseBannerSchema.partial();

@@ -175,6 +175,7 @@ const orderController = new OrderController();
 router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
 //authMiddleware,
 
+
 /**
  * @swagger
  * /api/order:

@@ -140,7 +140,11 @@ export class VendorController {
                 taxDocuments,
                 citizenshipDocuments,
                 chequePhoto,
-                bankDetails,
+                accountName,
+                bankBranch,
+                bankCode,
+                accountNumber,
+                bankName
             } = parsed.data;
 
             const verificationToken = TokenUtils.generateToken();
@@ -176,11 +180,11 @@ export class VendorController {
                 taxDocuments, // array
                 citizenshipDocuments, // optional array
                 chequePhoto,
-                accountName: bankDetails.accountName,
-                bankName: bankDetails.bankName,
-                accountNumber: bankDetails.accountNumber,
-                bankBranch: bankDetails.bankBranch,
-                bankCode: bankDetails.bankCode,
+                accountName: accountName,
+                bankName: bankName,
+                accountNumber: accountNumber,
+                bankBranch: bankBranch,
+                bankCode: bankCode,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
             });
@@ -494,6 +498,7 @@ export class VendorController {
      */
     async updateVendor(req: VendorAuthRequest<{ id: string }, {}, Partial<IUpdateVendorRequest>>, res: Response): Promise<void> {
         try {
+            console.log("req body: ", req.body)
             const id = req.params.id;
 
             const findVendorById = await this.vendorService.findVendorById(Number(id))
@@ -521,10 +526,20 @@ export class VendorController {
 
             const updateVendor = await this.vendorService.updateVendorService(Number(id), updateVendorData)
 
+            console.log("------Updated vendor details-----------")
+            console.log(updateVendor)
+
             res.status(200).json({
                 success: true,
                 message: 'Vendor updated successfully',
-                data: { id: updateVendor.id, businessName: updateVendor.businessName, email: updateVendor.email, phoneNumber: updateVendor.phoneNumber },
+                data: {
+                    id: updateVendor.id,
+                    businessName: updateVendor.businessName,
+                    email: updateVendor.email,
+                    phoneNumber: updateVendor.phoneNumber,
+                    telephone: updateVendor.telePhone,
+                    district: updateVendor.district
+                },
             });
 
         } catch (error) {

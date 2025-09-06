@@ -156,7 +156,7 @@ export class CategoryService {
      * @access Public
      */
     async getCategories(): Promise<Category[]> {
-        return this.categoryRepository.find({ relations: ['subcategories', 'createdBy'] });
+        return this.categoryRepository.find({ relations: ['subcategories'] });
     }
 
     /**
@@ -169,7 +169,7 @@ export class CategoryService {
     async getCategoryById(id: number): Promise<Category | null> {
         return this.categoryRepository.findOne({
             where: { id },
-            relations: ['subcategories', 'createdBy'],
+            relations: ['subcategories'],
         });
     }
 

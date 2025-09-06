@@ -83,14 +83,23 @@ export const sendCustomerOrderEmail = async (
     quantity: number;
     price: number;
     variantAttributes?: Record<string, string> | null;
+    vendorDistrict?: string | null;
   }[],
+  userDistrict?: string | null,
   subject = "Your Order Has Been Placed"
 ) => {
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  // Generate rows dynamically
-  const rows = items.map(
-    (item) => `
+  // Generate table rows dynamically with delivery estimate
+  const rows = items.map((item) => {
+    let deliveryEstimate = '3-5 days'; 
+    if (userDistrict && item.vendorDistrict) {
+      if (userDistrict === item.vendorDistrict) {
+        deliveryEstimate = '2-3 days';
+      }
+    }
+
+    return `
       <tr>
         <td style="padding:8px; border:1px solid #ddd;">
           <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
@@ -103,9 +112,10 @@ export const sendCustomerOrderEmail = async (
         <td style="padding:8px; border:1px solid #ddd; text-align:center;">${item.quantity}</td>
         <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${item.price}</td>
         <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(item.price * item.quantity).toFixed(2)}</td>
+        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${deliveryEstimate}</td>
       </tr>
-    `
-  );
+    `;
+  });
 
   const mailOptions = {
     from: `<${process.env.USER_EMAIL}>`,
@@ -134,14 +144,15 @@ export const sendCustomerOrderEmail = async (
                           <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
                           <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
                           <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
+                          <th style="padding:8px; border:1px solid #ddd; text-align:center;">Delivery</th>
                         </tr>
                       </thead>
                       <tbody>
-                        ${rows.join("")}
+                        ${rows.join('')}
                       </tbody>
                       <tfoot>
                         <tr>
-                          <td colspan="3" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
+                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
                           <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${total.toFixed(2)}</td>
                         </tr>
                       </tfoot>
@@ -165,14 +176,11 @@ export const sendCustomerOrderEmail = async (
           </tr>
         </table>
       </body>
-      </html>
     `
   };
 
   await transporter.sendMail(mailOptions);
 };
-
-
 
 
 
