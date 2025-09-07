@@ -23,6 +23,7 @@ import axios from 'axios';
 import 'dotenv/config';
 import { PromoType } from '../entities/promo.entity';
 import { VendorService } from './vendor.service';
+import { Vendor } from '../entities/vendor.entity';
 
 
 /**
@@ -750,71 +751,16 @@ export class OrderService {
         try {
             let object = JSON.parse(Buffer.from(token, "base64").toString("ascii"))
             console.log("This is the object after decoding", object)
-            if (object.status === "COMPLETE") {
-                // order success
-                const updateOrderId = await this.orderSuccess(orderId, object.transaction_uuid);
 
-                let order = await this.orderRepository.findOne({
-                    where: { id: orderId },
-                    relations: ["orderedBy", "orderItems", "orderItems.product", "orderItems.variant"],
-                });
-
-
-                if (!order) {
-                    throw new APIError(404, `Order with ID ${orderId} not found`);
-                }
-
-                // cart clear
-                if (order && !order.isBuyNow) {
-                    await this.cartService.clearCart(order.orderedById)
-                }
-
-                // save order details
-                await this.orderRepository.save(order);
-
-                // send email to customer and vendors
-                await sendCustomerOrderEmail(
-                    order.orderedBy.email,
-                    order.id,
-                    order.orderItems.map((item) => ({
-                        name: item?.product?.name,
-                        sku: item.variant?.sku || null,
-                        quantity: item.quantity,
-                        price: item.price,
-                        variantAttributes: item.variant?.attributes || null,
-                    }))
-                );
-
-                // send vendor email
-                const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))]
-
-                for (const vendoId of vendorIds) {
-                    const itemsForVendor = order.orderItems
-                        .filter((item) => item.vendorId === vendoId)
-                        .map((item) => ({
-                            name: item?.product?.name,
-                            sku: item?.variant?.sku,
-                            quantity: item.quantity,
-                            price: item.price,
-                            variantAttributes: item.variant?.attributes || null
-                        }))
-
-                    if (itemsForVendor.length === 0) continue;
-
-                    const vendor = await this.vendorService.findVendorById(vendoId);
-
-                    await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
-                        name: order.orderedBy.fullName,
-                        phone: order.orderedBy.phoneNumber,
-                        email: order.orderedBy.email,
-                        city: order.orderedBy.address.city,
-                        district: order.orderedBy.address.district,
-                        localAddress: order.orderedBy.address.localAddress,
-                        landmark: order.orderedBy.address.landmark
-                    })
-
-                }
+            if (object.status !== "COMPLETE") {
+                throw new APIError(400, "Payment not completed");
             }
+
+            // order success
+            await this.orderSuccess(orderId, object.transaction_uuid);
+
+            // Send emails to customer and vendors
+            await this.sendOrderEmails(orderId);
 
             return { success: true }
 
@@ -823,6 +769,150 @@ export class OrderService {
             throw new APIError(500, 'Esewa payment verification failed');
         }
     }
+
+    // let order = await this.orderRepository.findOne({
+    //             where: { id: orderId },
+    //             relations: ["orderedBy", "orderItems", "orderItems.product", "orderItems.variant"],
+    //         });
+
+
+    //         if (!order) {
+    //             throw new APIError(404, `Order with ID ${orderId} not found`);
+    //         }
+
+    //         // cart clear
+    //         if (order && !order.isBuyNow) {
+    //             await this.cartService.clearCart(order.orderedById)
+    //         }
+
+    //         // save order details
+    //         await this.orderRepository.save(order);
+
+    //         // send email to customer and vendors
+    //         await sendCustomerOrderEmail(
+    //             order.orderedBy.email,
+    //             order.id,
+    //             order.orderItems.map((item) => ({
+    //                 name: item?.product?.name,
+    //                 sku: item.variant?.sku || null,
+    //                 quantity: item.quantity,
+    //                 price: item.price,
+    //                 variantAttributes: item.variant?.attributes || null,
+    //             }))
+    //         );
+
+    //         // send vendor email
+    //         const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))]
+
+    //         for (const vendoId of vendorIds) {
+    //             const itemsForVendor = order.orderItems
+    //                 .filter((item) => item.vendorId === vendoId)
+    //                 .map((item) => ({
+    //                     name: item?.product?.name,
+    //                     sku: item?.variant?.sku,
+    //                     quantity: item.quantity,
+    //                     price: item.price,
+    //                     variantAttributes: item.variant?.attributes || null
+    //                 }))
+
+    //             if (itemsForVendor.length === 0) continue;
+
+    //             const vendor = await this.vendorService.findVendorById(vendoId);
+
+    //             await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
+    //                 name: order.orderedBy.fullName,
+    //                 phone: order.orderedBy.phoneNumber,
+    //                 email: order.orderedBy.email,
+    //                 city: order.orderedBy.address.city,
+    //                 district: order.orderedBy.address.district,
+    //                 localAddress: order.orderedBy.address.localAddress,
+    //                 landmark: order.orderedBy.address.landmark
+    //             })
+
+    //         }
+
+    async sendOrderEmails(orderId: number) {
+        // Fetch the order with all relations
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: ["orderedBy", "orderedBy.address", "orderItems", "orderItems.product", "orderItems.variant"],
+        });
+
+        if (!order) {
+            throw new APIError(404, `Order with ID ${orderId} not found`);
+        }
+
+        const user = order.orderedBy;
+
+        // Clear cart if not "Buy Now"
+        if (!order.isBuyNow) {
+            await this.cartService.clearCart(user.id);
+        }
+
+        // Extract unique vendor IDs
+        const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))];
+
+        // Fetch vendor details including district
+        const vendorRepository = AppDataSource.getRepository(Vendor);
+
+        const vendors = await vendorRepository.find({
+            where: { id: In(vendorIds) },
+            relations: ["district"],
+        });
+
+        // Send customer email
+        await sendCustomerOrderEmail(
+            user.email,
+            order.id,
+            order.orderItems.map((item) => {
+                const vendor = vendors.find((v) => v.id === item.vendorId);
+                return {
+                    name: item.product.name,
+                    sku: item.variant?.sku || null,
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantAttributes: item.variant?.attributes || null,
+                    vendorDistrict: vendor?.district?.name || null,
+                };
+            }),
+            user.address.district || null
+        );
+
+        // Send emails to vendors
+        for (const vendorId of vendorIds) {
+            const vendor = vendors.find((v) => v.id === vendorId);
+            if (!vendor) continue;
+
+            const itemsForVendor = order.orderItems
+                .filter((item) => item.vendorId === vendorId)
+                .map((item) => ({
+                    name: item.product.name,
+                    sku: item.variant?.sku || null,
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantAttributes: item.variant?.attributes || null,
+                }));
+
+            if (itemsForVendor.length === 0) continue;
+
+            await sendVendorOrderEmail(
+                vendor.email,
+                order.paymentMethod,
+                order.id,
+                itemsForVendor,
+                {
+                    name: user.fullName,
+                    phone: user.phoneNumber,
+                    email: user.email,
+                    city: user.address.city,
+                    district: user.address.district,
+                    localAddress: user.address.localAddress,
+                    landmark: user.address.landmark,
+                }
+            );
+        }
+    }
+
 
     async esewaFailed(orderId: number) {
         try {
