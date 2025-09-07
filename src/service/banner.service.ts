@@ -323,6 +323,7 @@ export class BannerService {
             relations: [
                 "createdBy",
                 "selectedProducts",
+                "selectedProducts.variants",
                 "selectedProducts.subcategory",
                 "selectedProducts.subcategory.category",
                 "selectedCategory",
