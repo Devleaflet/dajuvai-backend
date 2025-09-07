@@ -9,6 +9,9 @@ import { sendCustomerOrderEmail, sendVendorOrderEmail } from '../utils/nodemaile
 import { VendorService } from '../service/vendor.service';
 import { PaymentService } from '../service/payment.service';
 import { PaymentMethod } from '../entities/order.entity';
+import AppDataSource from '../config/db.config';
+import { Vendor } from '../entities/vendor.entity';
+import { In, Repository } from 'typeorm';
 
 
 /**
@@ -19,11 +22,13 @@ export class OrderController {
     private orderService: OrderService;
     private vendorService: VendorService;
     private paymentService: PaymentService;
+    private vendorRepository: Repository<Vendor>;
 
     constructor() {
         this.paymentService = new PaymentService();
         this.orderService = new OrderService();
         this.vendorService = new VendorService();
+        this.vendorRepository = AppDataSource.getRepository(Vendor);
     }
 
     /**
@@ -36,77 +41,93 @@ export class OrderController {
     async createOrder(req: AuthRequest<{}, {}, IOrderCreateRequest>, res: Response): Promise<void> {
         try {
             if (!req.user) {
-                throw new APIError(401, 'User not authenticated');
+                throw new APIError(401, "User not authenticated");
             }
 
             const userId = req.user.id;
-
             const userexists = await findUserById(userId);
 
             if (!userexists) {
-                throw new APIError(404, "User doesnot exists")
+                throw new APIError(404, "User doesnot exists");
             }
 
             const data = req.body;
-            // const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(20, req.body);
 
-            // Call service to create order and possibly get payment redirect URL
-            const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } = await this.orderService.createOrder(req.user.id, data);
+            // Call service to create order
+            const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
+                await this.orderService.createOrder(req.user.id, data);
 
-            console.log("---------------Esewa redirect------------------")
-            console.log(esewaRedirectUrl)
-
+            console.log("---------------Esewa redirect------------------");
+            console.log(esewaRedirectUrl);
+            console.log(order.orderItems);
 
             // send email to vendor and customer only when payment method is COD
             if (order.paymentMethod == PaymentMethod.CASH_ON_DELIVERY) {
-                const userDistrict = order.shippingAddress?.district || null;
+                const userDistrict = userexists.address.district || null;
 
+                console.log("-------User district-------------");
+                console.log(userDistrict);
+
+                // extract vendor ids
+                const vendorIds = order.orderItems.map((item) => item.vendorId);
+                console.log("Vendor IDs:", vendorIds);
+
+                // remove duplicates
+                const uniqueVendorIds = [...new Set(vendorIds)];
+
+                // fetch vendors
+                const vendors = await this.vendorRepository.find({
+                    where: { id: In(uniqueVendorIds) },
+                    relations: ["district"], 
+                });
                 // send customer email
                 await sendCustomerOrderEmail(
                     useremail,
                     order.id,
-                    order.orderItems.map(item => ({
-                        name: item?.product?.name,
-                        sku: item.variant?.sku || null,
-                        quantity: item.quantity,
-                        price: item.price,
-                        variantAttributes: item.variant?.attributes || null,
-                        vendorDistrict: item.vendor?.district?.name || null
-                    })),
-                    userDistrict
-                )
-
-                const orderItems = order.orderItems
-
-
-                // send vendor email 
-                for (const vendorId of vendorids) {
-
-                    // Filter items that belong to this vendor
-                    console.log("----------Vendor ids-------------")
-                    console.log(vendorId)
-                    const itemsForVendor = orderItems
-                        .filter(item => item.vendorId === vendorId)
-                        .map(item => ({
+                    order.orderItems.map((item) => {
+                        const vendor = vendors.find((v) => v.id === item.vendorId);
+                        return {
                             name: item?.product?.name,
                             sku: item.variant?.sku || null,
                             quantity: item.quantity,
                             price: item.price,
-                            variantAttributes: item.variant?.attributes || null
-                        }));
+                            variantAttributes: item.variant?.attributes || null,
+                            vendorDistrict: vendor?.district?.name || null,
+                        };
+                    }),
+                    userDistrict
+                );
 
+                const orderItems = order.orderItems;
+
+                // send vendor email
+                for (const vendorId of vendorids) {
+                    // Filter items that belong to this vendor
+                    console.log("----------Vendor ids-------------");
+                    console.log(vendorId);
+
+                    const itemsForVendor = orderItems
+                        .filter((item) => item.vendorId === vendorId)
+                        .map((item) => ({
+                            name: item?.product?.name,
+                            sku: item.variant?.sku || null,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null,
+                        }));
 
                     if (itemsForVendor.length === 0) continue;
 
                     // findVendorByEmail
-                    const vendor = await this.vendorService.findVendorById(vendorId)
+                    const vendor = await this.vendorService.findVendorById(vendorId);
 
-                    console.log("----------Vendor email-------------")
-                    console.log(vendor.email)
+                    console.log("----------Vendor email-------------");
+                    console.log(vendor.email);
 
                     // Send email to this vendor
-
-                    console.log("--------------User details before sending email to vendor ---------------------")
+                    console.log(
+                        "--------------User details before sending email to vendor ---------------------"
+                    );
                     console.log(userexists.fullName);
                     console.log(userexists.phoneNumber);
                     console.log(userexists.email);
@@ -115,16 +136,21 @@ export class OrderController {
                     console.log(userexists.address.localAddress);
                     console.log(userexists.address.landmark);
 
-
-                    await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
-                        name: userexists.fullName,
-                        phone: userexists.phoneNumber,
-                        email: userexists.email,
-                        city: userexists.address.city,
-                        district: userexists.address.district,
-                        localAddress: userexists.address.localAddress,
-                        landmark: userexists.address.landmark
-                    });
+                    await sendVendorOrderEmail(
+                        vendor.email,
+                        order.paymentMethod,
+                        order.id,
+                        itemsForVendor,
+                        {
+                            name: userexists.fullName,
+                            phone: userexists.phoneNumber,
+                            email: userexists.email,
+                            city: userexists.address.city,
+                            district: userexists.address.district,
+                            localAddress: userexists.address.localAddress,
+                            landmark: userexists.address.landmark,
+                        }
+                    );
                 }
             }
 
@@ -146,6 +172,7 @@ export class OrderController {
                     success: false,
                     message: error.message,
                 });
+                return;
             }
 
             // For other unexpected errors
@@ -158,14 +185,12 @@ export class OrderController {
             const isDev = true;
             res.status(500).json({
                 success: false,
-                message: isDev
-                    ? error instanceof Error
-                        ? error.message
-                        : 'Unknown error'
-                    : 'Internal server error',
+                message:
+                    isDev && error instanceof Error ? error.message : "Internal server error",
             });
         }
     }
+
 
     /**
      * @desc Handle successful payment notification for an order
