@@ -157,45 +157,95 @@ export class BannerService {
         dto: UpdateBannerInput,
         adminId?: number
     ): Promise<Banner> {
+        console.log('[BannerService.updateBanner] start', { id, dto, adminId });
+
         const banner = await this.bannerRepository.findOne({ where: { id } });
+        console.log('[BannerService.updateBanner] found banner:', banner);
+
         if (!banner) {
+            console.error('[BannerService.updateBanner] Banner not found for id:', id);
             throw new APIError(404, 'Banner not found');
         }
 
-        // handle productSource updates
-        switch (dto.productSource) {
-            case ProductSource.MANUAL:
-                const products = await Promise.all(
-                    dto.selectedProducts.map(async (id) => {
-                        const productService = new ProductService(AppDataSource)
-                        const product = await productService.getProductDetailsById(id);
-                        if (!product) {
-                            throw new APIError(400, `Product with ID ${id} does not exist`);
-                        }
-                        return product;
-                    })
-                );
-                banner.selectedProducts = products;
-                break;
+        // Update productSource first
+        if (dto.productSource) {
+            console.log('[BannerService.updateBanner] productSource provided:', dto.productSource);
+            banner.productSource = dto.productSource; // <-- Fix: update productSource in DB
 
-            case ProductSource.CATEGORY:
-                banner.selectedCategory = await this.categoryService.getCategoryById(dto.selectedCategoryId);
-                break;
+            switch (dto.productSource) {
+                case ProductSource.MANUAL: {
+                    console.log('[BannerService.updateBanner] MANUAL selectedProducts:', dto.selectedProducts);
+                    if (!Array.isArray(dto.selectedProducts)) {
+                        console.error('[BannerService.updateBanner] selectedProducts is not an array', dto.selectedProducts);
+                        throw new APIError(400, 'selectedProducts must be an array');
+                    }
 
-            case ProductSource.SUBCATEGORY:
-                banner.selectedSubcategory = await this.subcategoryService.handleGetSubcategoryById(dto.selectedSubcategoryId);
-                break;
+                    const productService = new ProductService(AppDataSource);
+                    const products = await Promise.all(
+                        dto.selectedProducts.map(async (productId) => {
+                            console.log(`[BannerService.updateBanner] fetching product id=${productId}`);
+                            const product = await productService.getProductDetailsById(productId);
+                            if (!product) {
+                                console.error(`[BannerService.updateBanner] product not found id=${productId}`);
+                                throw new APIError(400, `Product with ID ${productId} does not exist`);
+                            }
+                            console.log(`[BannerService.updateBanner] found product id=${productId} name=${product.name}`);
+                            return product;
+                        })
+                    );
+                    banner.selectedProducts = products;
+                    console.log('[BannerService.updateBanner] banner.selectedProducts set, count=', products.length);
+                    break;
+                }
 
-            case ProductSource.DEAL:
-                banner.selectedDeal = await this.dealService.getDealById(dto.selectedDealId);
-                break;
+                case ProductSource.CATEGORY: {
+                    console.log('[BannerService.updateBanner] CATEGORY -> selectedCategoryId:', dto.selectedCategoryId);
+                    const category = await this.categoryService.getCategoryById(dto.selectedCategoryId);
+                    banner.selectedCategory = category;
+                    console.log('[BannerService.updateBanner] banner.selectedCategory set:', category?.id ?? null);
+                    break;
+                }
 
-            case ProductSource.EXTERNAL:
-                banner.externalLink = dto.externalLink;
-                break;
+                case ProductSource.SUBCATEGORY: {
+                    console.log('[BannerService.updateBanner] SUBCATEGORY -> selectedSubcategoryId:', dto.selectedSubcategoryId);
+                    const subcat = await this.subcategoryService.handleGetSubcategoryById(dto.selectedSubcategoryId);
+                    banner.selectedSubcategory = subcat;
+                    console.log('[BannerService.updateBanner] banner.selectedSubcategory set:', subcat?.id ?? null);
+                    break;
+                }
+
+                case ProductSource.DEAL: {
+                    console.log('[BannerService.updateBanner] DEAL -> selectedDealId:', dto.selectedDealId);
+                    const deal = await this.dealService.getDealById(dto.selectedDealId);
+                    banner.selectedDeal = deal;
+                    console.log('[BannerService.updateBanner] banner.selectedDeal set:', deal?.id ?? null);
+                    break;
+                }
+
+                case ProductSource.EXTERNAL: {
+                    console.log('[BannerService.updateBanner] EXTERNAL -> externalLink:', dto.externalLink);
+                    banner.externalLink = dto.externalLink;
+                    break;
+                }
+
+                default:
+                    console.log('[BannerService.updateBanner] unhandled productSource:', dto.productSource);
+            }
+        } else {
+            console.log('[BannerService.updateBanner] No productSource in request body; proceeding with base updates only.');
         }
 
-        // update base fields
+        // update base fields with debug logs showing previous vs new
+        const before = {
+            name: banner.name,
+            desktopImage: banner.desktopImage,
+            mobileImage: banner.mobileImage,
+            type: banner.type,
+            startDate: banner.startDate,
+            endDate: banner.endDate,
+        };
+        console.log('[BannerService.updateBanner] before update:', before);
+
         banner.name = dto.name ?? banner.name;
         banner.desktopImage = dto.desktopImage ?? banner.desktopImage;
         banner.mobileImage = dto.mobileImage ?? banner.mobileImage;
@@ -203,13 +253,30 @@ export class BannerService {
         banner.startDate = dto.startDate ? new Date(dto.startDate) : banner.startDate;
         banner.endDate = dto.endDate ? new Date(dto.endDate) : banner.endDate;
 
+        const after = {
+            name: banner.name,
+            desktopImage: banner.desktopImage,
+            mobileImage: banner.mobileImage,
+            type: banner.type,
+            startDate: banner.startDate,
+            endDate: banner.endDate,
+        };
+        console.log('[BannerService.updateBanner] after update:', after);
+
         // update status 
         banner.status = this.determineStatus(banner.startDate, banner.endDate);
+        console.log('[BannerService.updateBanner] computed status:', banner.status);
 
         banner.createdById = adminId || banner.createdById;
+        console.log('[BannerService.updateBanner] createdById set to:', banner.createdById);
 
-        return await this.bannerRepository.save(banner);
+        console.log('[BannerService.updateBanner] saving banner...');
+        const savedBanner = await this.bannerRepository.save(banner);
+        console.log('[BannerService.updateBanner] savedBanner:', savedBanner);
+
+        return savedBanner;
     }
+
 
 
 

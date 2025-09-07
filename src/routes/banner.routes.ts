@@ -135,10 +135,6 @@ router.patch(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
-	upload.fields([
-		{ name: "desktopImage", maxCount: 1 },
-		{ name: "mobileImage", maxCount: 1 },
-	]),
 	validateZod(updateBannerSchema),
 	bannerController.updateBanner.bind(bannerController)
 );

@@ -216,61 +216,78 @@ export class BannerController {
             const { id } = req.params;
             const bannerData = req.body;
 
+            console.log('[updateBanner] id:', id);
+            console.log('[updateBanner] bannerData:', bannerData);
+            console.log('[updateBanner] userId:', req.user.id);
+
             // check if banner exists
             const existingBanner = await this.bannerService.getBannerById(Number(id));
+            console.log('[updateBanner] existingBanner:', existingBanner);
             if (!existingBanner) {
                 throw new APIError(404, 'Banner not found');
             }
 
             // validate productSource 
             if (bannerData.productSource) {
+                console.log('[updateBanner] productSource provided:', bannerData.productSource);
                 switch (bannerData.productSource) {
                     case ProductSource.MANUAL:
+                        console.log('[updateBanner] MANUAL -> selectedProducts:', bannerData.selectedProducts);
                         if (!bannerData.selectedProducts?.length) {
                             throw new APIError(400, 'At least one product is required for manual product source');
                         }
                         break;
 
                     case ProductSource.CATEGORY:
+                        console.log('[updateBanner] CATEGORY -> selectedCategoryId:', bannerData.selectedCategoryId);
                         if (!bannerData.selectedCategoryId) {
                             throw new APIError(400, 'Category ID required for category product source');
                         }
                         break;
 
                     case ProductSource.SUBCATEGORY:
+                        console.log('[updateBanner] SUBCATEGORY -> selectedSubcategoryId:', bannerData.selectedSubcategoryId);
                         if (!bannerData.selectedSubcategoryId) {
                             throw new APIError(400, 'Subcategory ID required for subcategory product source');
                         }
                         break;
 
                     case ProductSource.DEAL:
+                        console.log('[updateBanner] DEAL -> selectedDealId:', bannerData.selectedDealId);
                         if (!bannerData.selectedDealId) {
                             throw new APIError(400, 'Deal ID required for deal product source');
                         }
                         break;
 
                     case ProductSource.EXTERNAL:
+                        console.log('[updateBanner] EXTERNAL -> externalLink:', bannerData.externalLink);
                         if (!bannerData.externalLink) {
                             throw new APIError(400, 'External link required for external product source');
                         }
                         break;
 
                     default:
+                        console.log('[updateBanner] Invalid product source:', bannerData.productSource);
                         throw new APIError(400, 'Invalid product source type');
                 }
+            } else {
+                console.log('[updateBanner] No productSource in request body; proceeding with base updates only.');
             }
 
-            // call service
+            console.log('[updateBanner] calling bannerService.updateBanner...');
             const banner = await this.bannerService.updateBanner(
                 Number(id),
                 bannerData,
                 req.user.id
             );
 
+            console.log('[updateBanner] banner updated successfully:', banner);
+
             res.status(200).json({ success: true, data: banner });
 
         } catch (error) {
             if (error instanceof APIError) {
+                console.error('[updateBanner][APIError] ', { status: error.status, message: error.message, stack: error.stack });
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
                 console.error('Update banner error:', error);
@@ -278,7 +295,6 @@ export class BannerController {
             }
         }
     }
-
 
 
     /**
