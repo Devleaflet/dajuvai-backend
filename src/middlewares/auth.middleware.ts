@@ -2,12 +2,14 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { User, UserRole } from '../entities/user.entity';
 import AppDataSource from '../config/db.config';
-import { ZodError, ZodSchema } from 'zod';
+import { string, ZodError, ZodSchema } from 'zod';
 import { Vendor } from '../entities/vendor.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { ProductService } from '../service/product.service';
 import { Product } from '../entities/product.entity';
 import { parse } from 'path';
+import { OrderItem } from '../entities/orderItems.entity';
+import { Review } from '../entities/reviews.entity';
 
 
 /**
@@ -474,4 +476,103 @@ export const validateZod = (
             next(new APIError(500, 'Unexpected validation middleware error'));
         }
     };
+};
+
+export const canReviewProduct = async (req: AuthRequest<{}, {}, { productId: string }, {}>, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const userId = req.user?.id;
+
+        const productId = parseInt(req.body.productId, 10)
+
+        if (!userId) {
+            res.status(401).json({ success: false, message: "Authentication required" });
+            return;
+        }
+
+        if (isNaN(productId)) {
+            res.status(400).json({ success: false, message: "Invalid product ID" });
+            return;
+        }
+
+        const orderItemRepo = AppDataSource.getRepository(OrderItem);
+
+        // check if user has DELIVERED order containing this product
+        const purchasedItem = await orderItemRepo
+            .createQueryBuilder("orderItem")
+            .innerJoinAndSelect("orderItem.order", "order")
+            .where("order.orderedById = :userId", { userId })
+            .andWhere("order.status = :status", { status: "CONFIRMED" })
+            .andWhere("orderItem.productId = :productId", { productId })
+            .getOne()
+
+        if (!purchasedItem) {
+            res.status(403).json({
+                success: false,
+                message: "You can only review products you have purchased."
+            });
+            return;
+        }
+
+        // check if user has already reviewed this  product
+        const reviewRepo = AppDataSource.getRepository(Review);
+
+        const existingReview = await reviewRepo.findOne({
+            where: { userId, productId },
+        });
+
+        if (existingReview) {
+            res.status(400).json({
+                success: false,
+                message: "You have already reviewed this product",
+            });
+            return;
+        }
+
+        next();
+
+    } catch (error) {
+        console.log("Can review product middleware error: ", error)
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
+}
+
+
+export const canDeleteReview = async (req: CombinedAuthRequest<{ id: string }>, res: Response, next: NextFunction): Promise<void> => {
+    try {
+        const reviewId = parseInt(req.params.id, 10);
+        if (isNaN(reviewId)) {
+            res.status(400).json({ success: false, message: "Invalid review ID" });
+            return;
+        }
+
+        const reviewRepo = AppDataSource.getRepository(Review);
+        const review = await reviewRepo.findOne({
+            where: { id: reviewId },
+            relations: ["product"],
+        });
+
+        if (!review) {
+            res.status(404).json({ success: false, message: "Review not found" });
+            return;
+        }
+
+        const userId = req.user?.id;
+        const vendorId = req.vendor?.id;
+
+        const isReviewOwner = userId === review.userId;
+        const isProductOwner = vendorId !== undefined && review.product.vendorId === vendorId;
+
+        if (!isReviewOwner && !isProductOwner) {
+            res.status(403).json({
+                success: false,
+                message: "You are not authorized to delete this review",
+            });
+            return;
+        }
+
+        next();
+    } catch (err) {
+        console.error("Delete review middleware error:", err);
+        res.status(500).json({ success: false, message: "Internal server error" });
+    }
 };

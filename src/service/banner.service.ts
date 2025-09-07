@@ -299,6 +299,7 @@ export class BannerService {
             relations: [
                 "createdBy",
                 "selectedProducts",
+                "selectedProducts.variants",
                 "selectedCategory",
                 "selectedSubcategory"
             ]
@@ -313,9 +314,9 @@ export class BannerService {
 
 
     /**
-     * Fetch all banners including the creator of each banner.
+     * Fetch all banners.
      *
-     * @returns {Promise<Banner[]>} - List of all banners with creator relation
+     * @returns {Promise<Banner[]>} - List of all banners 
      * @access Admin
      */
     async getAllBanners(): Promise<Banner[]> {
@@ -325,9 +326,10 @@ export class BannerService {
                 "selectedProducts",
                 "selectedProducts.variants",
                 "selectedProducts.subcategory",
-                "selectedProducts.subcategory.category",
+                "selectedProducts.subcategory.category", 
                 "selectedCategory",
                 "selectedSubcategory",
+                "selectedSubcategory.category", 
             ],
             select: {
                 id: true,
@@ -347,6 +349,15 @@ export class BannerService {
                     email: true,
                     phoneNumber: true,
                     role: true,
+                },
+                selectedSubcategory: {
+                    id: true,
+                    name: true,
+                    image: true,
+                    category: {   
+                        id: true,
+                        name: true,
+                    },
                 },
             },
         });

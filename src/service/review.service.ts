@@ -1,7 +1,7 @@
 import { Repository } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import AppDataSource from '../config/db.config';
-import { CreateReviewInput } from '../utils/zod_validations/review.zod';
+import { CreateReviewInput, UpdateReviewInput } from '../utils/zod_validations/review.zod';
 import { APIError } from '../utils/ApiError.utils';
 import { Review } from '../entities/reviews.entity';
 
@@ -124,6 +124,18 @@ export class ReviewService {
             avg: Math.round(avg * 10) / 10,
             count,
         };
+    }
+
+    async updateReview(id: number, data: UpdateReviewInput) {
+        await this.reviewRepository.update(id, data)
+    }
+
+    async findReviewById(id: number): Promise<Review | null> {
+        return await this.reviewRepository.findOneBy({ id });
+    }
+
+    async deleteReview(id: number) {
+        return await this.reviewRepository.delete(id)
     }
 
 }
