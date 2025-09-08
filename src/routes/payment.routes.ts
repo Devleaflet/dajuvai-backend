@@ -53,8 +53,8 @@ paymentRouter.get('/payment-instruments', async (_req: Request, res: Response) =
                 'Content-Type': 'application/json'
             },
         });
-        res.json("hello")
-      // res.json(response.data);
+        
+      res.json(response.data);
     } catch (error: any) {
         console.error('Error getting payment instruments:', error.response?.data || error.message);
         res.status(500).json({ error: 'Failed to get payment instruments' });
