@@ -19,7 +19,7 @@ const CONFIG = {
     API_PASSWORD: 'D@jubhai#765',
     SECRET_KEY: 'key_OmqGpQ1',
     BASE_URL: 'https://apisandbox.nepalpayment.com',
-    GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com/payment/index',
+    GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com/',
 };
 
 // Generate HMAC SHA512 Signature
