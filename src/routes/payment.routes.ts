@@ -19,7 +19,7 @@ const CONFIG = {
     API_PASSWORD: 'W#8rXp2!kL9z@Vm',
     SECRET_KEY: 'gT7$yMn#45v!QbA',
     BASE_URL: 'https://apigateway.nepalpayment.com',
-    GATEWAY_URL: 'https://gateway.nepalpayment.com/payment/index',
+    GATEWAY_URL: 'https://gateway.nepalpayment.com/',
 };
 
 
