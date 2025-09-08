@@ -17,7 +17,7 @@ const CONFIG = {
     MERCHANT_NAME: 'dajubhai',
     API_USERNAME: 'dajuvaiapi',
     API_PASSWORD: 'D@jubhai#765',
-    SECRET_KEY: 'gT7$yMn#45v!QbA',
+    SECRET_KEY: 'key_OmqGpQ1',
     BASE_URL: 'https://apisandbox.nepalpayment.com',
     GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com/payment/index',
 };
