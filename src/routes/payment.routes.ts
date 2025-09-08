@@ -13,10 +13,10 @@ const orderDb = AppDataSource.getRepository(Order);
 
 
 const CONFIG = {
-    MERCHANT_ID: '545',
-    MERCHANT_NAME: 'dajuvaiapi',
+    MERCHANT_ID: '7468',
+    MERCHANT_NAME: 'dajubhai',
     API_USERNAME: 'dajuvaiapi',
-    API_PASSWORD: 'W#8rXp2!kL9z@Vm',
+    API_PASSWORD: 'D@jubhai#765',
     SECRET_KEY: 'gT7$yMn#45v!QbA',
     BASE_URL: 'https://apisandbox.nepalpayment.com',
     GATEWAY_URL: 'https://gatewaysandbox.nepalpayment.com/payment/index',
