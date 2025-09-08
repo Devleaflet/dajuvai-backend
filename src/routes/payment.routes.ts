@@ -50,10 +50,11 @@ paymentRouter.get('/payment-instruments', async (_req: Request, res: Response) =
         const response = await axios.post(`${CONFIG.BASE_URL}/GetPaymentInstrumentDetails`, requestData, {
             headers: {
                 Authorization: getAuthHeader(),
-                'Content-Type': 'application/json',
+                'Content-Type': 'application/json'
             },
         });
-        res.json(response.data);
+        res.json("hello")
+      // res.json(response.data);
     } catch (error: any) {
         console.error('Error getting payment instruments:', error.response?.data || error.message);
         res.status(500).json({ error: 'Failed to get payment instruments' });
