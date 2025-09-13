@@ -3,8 +3,14 @@ import { HomePageSectionService } from '../service/homePageSection.service';
 import { APIError } from '../utils/ApiError.utils';
 import { ReviewService } from '../service/review.service';
 import { ProductController } from './product.controller';
-import { DataSource } from 'typeorm';
+import { DataSource, TreeRepositoryNotSupportedError } from 'typeorm';
 import AppDataSource from '../config/db.config';
+import { ICreateHomepageSectionInput } from '../interface/homepage.interface';
+import { ProductSource } from '../entities/banner.entity';
+import { ProductService } from '../service/product.service';
+import { CategoryService } from '../service/category.service';
+import { SubcategoryService } from '../service/subcategory.service';
+import { DealService } from '../service/deal.service';
 
 /**
  * @class HomePageSectionController
@@ -14,6 +20,10 @@ export class HomePageSectionController {
     private homePageSectionService: HomePageSectionService;
     private reviewService: ReviewService
     private productController: ProductController;
+    private productService: ProductService;
+    private categoryService: CategoryService;
+    private subcategoryService: SubcategoryService;
+    private dealService: DealService;
 
     /**
      * @constructor
@@ -23,6 +33,10 @@ export class HomePageSectionController {
         this.homePageSectionService = new HomePageSectionService();
         this.reviewService = new ReviewService();
         this.productController = new ProductController(AppDataSource)
+        this.productService = new ProductService(AppDataSource)
+        this.categoryService = new CategoryService()
+        this.subcategoryService = new SubcategoryService();
+        this.dealService = new DealService();
     }
 
     /**
@@ -35,33 +49,91 @@ export class HomePageSectionController {
      * @returns {Promise<void>} Responds with created section data.
      * @access Admin and staff 
      */
-    createHomePageSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    createHomePageSection = async (req: Request<{}, {}, ICreateHomepageSectionInput, {}>, res: Response, next: NextFunction): Promise<void> => {
         try {
-            // Extract and validate request body
-            const { title, isActive = true, productIds } = req.body;
 
-            if (!title || !productIds || !Array.isArray(productIds) || productIds.length === 0) {
-                throw new APIError(400, 'Title and productIds array are required');
+            console.log("📩 Incoming create home page request:", { body: req.body });
+
+            const data: ICreateHomepageSectionInput = req.body;
+
+            const existingSection = await this.homePageSectionService.checkByTitle(data.title);
+
+            if (existingSection) {
+                throw new APIError(404, "Section with this title already exists")
             }
 
-            // Check for duplicate section title
-            if (await this.homePageSectionService.checkByTitle(title)) {
-                throw new APIError(409, `home page section with the name ${title} already exists`);
+            switch (data.productSource) {
+                case ProductSource.MANUAL:
+                    for (const id of data.productIds) {
+                        const productExists = await this.productService.getProductDetailsById(id)
+
+                        if (!productExists) {
+                            throw new APIError(404, "Product does nto exists")
+                        }
+                    }
+
+                    console.log("create home catalog")
+                    const homepageManual = await this.homePageSectionService.createHomePageSection(data)
+
+                    res.status(201).json({
+                        success: true,
+                        homepage: homepageManual
+                    })
+
+                    break;
+
+                case ProductSource.CATEGORY:
+                    const categoryExists = await this.categoryService.getCategoryById(data.selectedCategoryId);
+
+                    if (!categoryExists) {
+                        throw new APIError(404, "Selected category doesnot exists")
+                    }
+
+                    const homepagecategory = await this.homePageSectionService.createHomePageSection(data)
+
+                    res.status(201).json({
+                        success: true,
+                        homepage: homepagecategory
+                    })
+
+                    break;
+
+                case ProductSource.SUBCATEGORY:
+                    const subcategoryExists = await this.subcategoryService.handleGetSubcategoryById(data.selectedSubcategoryId)
+
+                    if (!subcategoryExists) {
+                        throw new APIError(404, "Selected sucategory does not exists")
+                    }
+
+                    const homepagesubcategory = await this.homePageSectionService.createHomePageSection(data);
+
+                    res.status(201).json({
+                        success: true,
+                        homepage: homepagesubcategory
+                    })
+
+                    break;
+
+                case ProductSource.DEAL:
+                    const dealExists = await this.dealService.handleGetDealById(data.selectedDealId);
+
+                    if (!dealExists) {
+                        throw new APIError(404, "selected deal doesnot exists")
+                    }
+
+                    const homepagedeal = await this.homePageSectionService.createHomePageSection(data);
+
+                    res.status(201).json({
+                        success: true,
+                        homepage: homepagedeal
+                    })
+
+                    break;
+
+                default:
+                    console.warn("⚠️ Invalid product source type received:", data.productSource);
+                    throw new APIError(400, "Invalid product source type");
             }
-
-            // Create section via service
-            const section = await this.homePageSectionService.createHomePageSection({
-                title,
-                isActive,
-                productIds
-            });
-
-            // Send success response
-            res.status(201).json({
-                success: true,
-                message: 'Home page section created successfully',
-                data: section
-            });
         } catch (error) {
             // Handle known API errors
             if (error instanceof APIError) {

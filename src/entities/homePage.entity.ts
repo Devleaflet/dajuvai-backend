@@ -1,5 +1,10 @@
-import { Column, Entity, JoinTable, ManyToMany, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, JoinColumn, JoinTable, ManyToMany, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { Product } from "./product.entity";
+import { ProductSource } from "./banner.entity";
+import { Category } from "./category.entity";
+import { Subcategory } from "./subcategory.entity";
+import { Deal } from "./deal.entity";
+
 
 @Entity('homepage_section')
 export class HomePageSection {
@@ -12,7 +17,27 @@ export class HomePageSection {
     @Column({ default: true })
     isActive: boolean;
 
-    @ManyToMany(() => Product) // one product can be in multiple section like bet of oils , latest arrivals
-    @JoinTable()
+    @Column({ type: "enum", enum: ProductSource })
+    productSource: ProductSource
+
+    @ManyToMany(() => Product)
+    @JoinTable({
+        name: 'homepage_section_products',
+        joinColumn: { name: 'sectionId', referencedColumnName: 'id' },
+        inverseJoinColumn: { name: 'productId', referencedColumnName: 'id' }
+    })
     products: Product[];
+
+    @ManyToOne(() => Category, { nullable: true })
+    @JoinColumn({ name: 'selectedCategoryId' })
+    selectedCategory: Category;
+
+    @ManyToOne(() => Subcategory, { nullable: true })
+    @JoinColumn({ name: 'selectedSubcategoryId' })
+    selectedSubcategory: Subcategory;
+
+    @ManyToOne(() => Deal, { nullable: true })
+    @JoinColumn({ name: 'selectedDealId' })
+    selectedDeal: Deal;
+
 }
