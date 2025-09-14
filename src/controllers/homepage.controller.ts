@@ -159,21 +159,32 @@ export class HomePageSectionController {
     updateHomePageSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
         try {
             // Extract and validate section ID
+            console.log("Update catalog body: ", req.body);
             const { id } = req.params;
             if (!id || isNaN(Number(id))) {
                 throw new APIError(400, 'Valid section ID is required');
             }
 
             // Extract request body
-            const { title, isActive, productIds } = req.body;
+            const { title, isActive, productIds, productSource, selectedCategoryId, selectedSubcategoryId, selectedDealId } = req.body;
 
-            // Update section via service
-            const section = await this.homePageSectionService.updateHomePageSection({
+            const updatePayload = {
                 sectionId: Number(id),
                 title,
                 isActive,
-                productIds
-            });
+                productIds,
+                productSource,
+                selectedCategoryId,
+                selectedSubcategoryId,
+                selectedDealId
+            };
+
+            console.log("➡️ Update request data: ", updatePayload);
+
+            // Update section via service
+            const section = await this.homePageSectionService.updateHomePageSection(updatePayload);
+
+            console.log("✅ Section returned from service: ", section);
 
             // Send success response
             res.status(200).json({
@@ -187,11 +198,12 @@ export class HomePageSectionController {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
                 // Log unexpected errors
-                console.error('Update homepage section error:', error);
+                console.error('❌ Update homepage section error:', error);
                 res.status(500).json({ success: false, message: 'Internal server error' });
             }
         }
     };
+
 
     /**
      * @method getAllHomePageSections

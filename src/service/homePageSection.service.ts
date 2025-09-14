@@ -106,74 +106,145 @@ export class HomePageSectionService {
      * @access Admin
      */
     async updateHomePageSection(data: IUpdateHomePageSectionInput) {
-        const { sectionId, title, isActive, productSource, productIds, selectedCategoryId, selectedSubcategoryId, selectedDealId } = data;
+        const {
+            sectionId,
+            title,
+            isActive,
+            productSource,
+            productIds,
+            selectedCategoryId,
+            selectedSubcategoryId,
+            selectedDealId,
+        } = data;
+
+        console.log("➡️ Update request data:", data);
 
         const section = await this.homepageSectionRepository.findOne({
             where: { id: sectionId },
-            relations: ["products", "selectedCategory", "selectedSubcategory", "selectedDeal"]
+            relations: ["products", "selectedCategory", "selectedSubcategory", "selectedDeal"],
         });
 
-        if (!section) throw new APIError(404, "Homepage section not found");
-
-        if (title) section.title = title;
-        if (isActive !== undefined) section.isActive = isActive;
-        if (productSource) section.productSource = productSource;
-
-        switch (productSource) {
-            case ProductSource.MANUAL:
-                if (!productIds || productIds.length === 0) {
-                    throw new APIError(400, "At least one product must be selected for manual source");
-                }
-                const products = await this.productRepository.findBy({ id: In(productIds) });
-                if (products.length !== productIds.length) {
-                    throw new APIError(404, "Some product IDs are invalid");
-                }
-                section.products = products;
-                section.selectedCategory = null;
-                section.selectedSubcategory = null;
-                section.selectedDeal = null;
-                break;
-
-            case ProductSource.CATEGORY:
-                if (!selectedCategoryId) throw new APIError(400, "Category is required");
-                const category = await this.categoryService.getCategoryById(selectedCategoryId)
-                if (!category) throw new APIError(404, "Selected category does not exist");
-                section.selectedCategory = category;
-                section.products = [];
-                section.selectedSubcategory = null;
-                section.selectedDeal = null;
-                break;
-
-            case ProductSource.SUBCATEGORY:
-                if (!selectedCategoryId || !selectedSubcategoryId) {
-                    throw new APIError(400, "Both category and subcategory are required");
-                }
-                const subcategory = await this.subcategoyrRepo.findOne({
-                    where: { id: selectedSubcategoryId, category: { id: selectedCategoryId } },
-                    relations: ["category"]
-                });
-                if (!subcategory) throw new APIError(404, "Selected subcategory does not exist or does not belong to category");
-                section.selectedCategory = subcategory.category;
-                section.selectedSubcategory = subcategory;
-                section.products = [];
-                section.selectedDeal = null;
-                break;
-
-            case ProductSource.DEAL:
-                if (!selectedDealId) throw new APIError(400, "Deal is required");
-                const deal = await this.dealService.getDealById(selectedDealId);
-                if (!deal) throw new APIError(404, "Selected deal does not exist");
-                section.selectedDeal = deal;
-                section.products = [];
-                section.selectedCategory = null;
-                section.selectedSubcategory = null;
-                break;
-
-            default:
-                throw new APIError(400, "Invalid product source");
+        if (!section) {
+            console.error(`❌ Section ${sectionId} not found`);
+            throw new APIError(404, "Homepage section not found");
         }
 
-        return await this.homepageSectionRepository.save(section);
+        console.log("✅ Found section before update:", {
+            id: section.id,
+            title: section.title,
+            productSource: section.productSource,
+            selectedCategory: section.selectedCategory?.id,
+            selectedSubcategory: section.selectedSubcategory?.id,
+            selectedDeal: section.selectedDeal?.id,
+            products: section.products?.map((p) => p.id),
+        });
+
+        // update simple fields
+        if (title) {
+            console.log(`✏️ Updating title: '${section.title}' → '${title}'`);
+            section.title = title;
+        }
+        if (isActive !== undefined) {
+            console.log(`✏️ Updating isActive: '${section.isActive}' → '${isActive}'`);
+            section.isActive = isActive;
+        }
+
+        if (productSource !== undefined && productSource !== null) {
+            console.log(`🔄 Updating productSource: '${section.productSource}' → '${productSource}'`);
+            section.productSource = productSource;
+
+            switch (productSource) {
+                case ProductSource.MANUAL: {
+                    console.log("📦 Updating MANUAL products:", productIds);
+                    if (!productIds || productIds.length === 0) {
+                        throw new APIError(400, "At least one product must be selected for manual source");
+                    }
+                    const products = await this.productRepository.findBy({ id: In(productIds) });
+                    console.log("🔎 Found products:", products.map((p) => p.id));
+                    if (products.length !== productIds.length) {
+                        throw new APIError(404, "Some product IDs are invalid");
+                    }
+                    section.products = products;
+                    section.selectedCategory = null;
+                    section.selectedSubcategory = null;
+                    section.selectedDeal = null;
+                    break;
+                }
+
+                case ProductSource.CATEGORY: {
+                    console.log("📂 Updating CATEGORY with categoryId:", selectedCategoryId);
+                    if (!selectedCategoryId) throw new APIError(400, "Category is required");
+                    const category = await this.categoryService.getCategoryById(selectedCategoryId);
+                    console.log("🔎 Found category:", category?.id);
+                    if (!category) throw new APIError(404, "Selected category does not exist");
+                    section.selectedCategory = category;
+                    section.products = [];
+                    section.selectedSubcategory = null;
+                    section.selectedDeal = null;
+                    break;
+                }
+
+                case ProductSource.SUBCATEGORY: {
+                    console.log("📂 Updating SUBCATEGORY with categoryId:", selectedCategoryId, "subcategoryId:", selectedSubcategoryId);
+                    if (!selectedCategoryId || !selectedSubcategoryId) {
+                        throw new APIError(400, "Both category and subcategory are required");
+                    }
+                    const subcategory = await this.subcategoyrRepo.findOne({
+                        where: { id: selectedSubcategoryId, category: { id: selectedCategoryId } },
+                        relations: ["category"],
+                    });
+                    console.log("🔎 Found subcategory:", subcategory?.id, " (belongs to category:", subcategory?.category?.id, ")");
+                    if (!subcategory) throw new APIError(404, "Selected subcategory does not exist or does not belong to category");
+                    section.selectedCategory = subcategory.category;
+                    section.selectedSubcategory = subcategory;
+                    section.products = [];
+                    section.selectedDeal = null;
+                    break;
+                }
+
+                case ProductSource.DEAL: {
+                    console.log("💰 Updating DEAL with dealId:", selectedDealId);
+                    if (!selectedDealId) throw new APIError(400, "Deal is required");
+                    const deal = await this.dealService.getDealById(selectedDealId);
+                    console.log("🔎 Found deal:", deal?.id);
+                    if (!deal) throw new APIError(404, "Selected deal does not exist");
+                    section.selectedDeal = deal;
+                    section.products = [];
+                    section.selectedCategory = null;
+                    section.selectedSubcategory = null;
+                    break;
+                }
+
+                default: {
+                    console.error("❌ Invalid productSource received:", productSource);
+                    throw new APIError(400, "Invalid product source");
+                }
+            }
+        }
+
+        console.log("✅ Section after update (before save):", {
+            id: section.id,
+            title: section.title,
+            productSource: section.productSource,
+            selectedCategory: section.selectedCategory?.id,
+            selectedSubcategory: section.selectedSubcategory?.id,
+            selectedDeal: section.selectedDeal?.id,
+            products: section.products?.map((p) => p.id),
+        });
+
+        const saved = await this.homepageSectionRepository.save(section);
+
+        console.log("💾 Saved section:", {
+            id: saved.id,
+            title: saved.title,
+            productSource: saved.productSource,
+            selectedCategory: saved.selectedCategory?.id,
+            selectedSubcategory: saved.selectedSubcategory?.id,
+            selectedDeal: saved.selectedDeal?.id,
+            products: saved.products?.map((p) => p.id),
+        });
+
+        return saved;
     }
 
 

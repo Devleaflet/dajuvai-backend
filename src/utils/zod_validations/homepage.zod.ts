@@ -135,11 +135,7 @@ export const createHomePageSectionSchema = baseHomePageSectionSchema
         }
     );
 
-export const updateHomePageSectionSchema = baseHomePageSectionSchema
-    .partial()
-    .extend({
-        sectionId: z.number({ required_error: "Section ID is required" }),
-    });
+export const updateHomePageSectionSchema = baseHomePageSectionSchema.partial()
 
 
 export type CreateHomePageSectionInput = z.infer<typeof createHomePageSectionSchema>;
