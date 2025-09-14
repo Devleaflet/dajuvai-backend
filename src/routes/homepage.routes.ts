@@ -110,8 +110,8 @@ const homePageSectionController = new HomePageSectionController();
  */
 router.post(
     "/",
-    // authMiddleware,
-    // isAdminOrStaff,
+    authMiddleware,
+    isAdminOrStaff,
     validateZod(createHomePageSectionSchema),
     homePageSectionController.createHomePageSection.bind(homePageSectionController)
 );

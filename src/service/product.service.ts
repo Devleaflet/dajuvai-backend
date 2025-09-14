@@ -147,6 +147,8 @@ export class ProductService {
             }
         }
 
+        const finalPrice = this.calculateFinalPrice(Number(basePrice), Number(discount), discountType)
+
         // Create product
         const product = this.productRepository.create({
             name,
@@ -158,6 +160,7 @@ export class ProductService {
             stock: isVariantProduct ? null : parseInt(stock || '0'),
             subcategoryId,
             vendorId,
+            finalPrice,
             brandId: data.brandId ? parseInt(data.brandId) : null,
             dealId: dealId ? parseInt(dealId) : null,
             bannerId: bannerId ? parseInt(bannerId) : null,
@@ -174,14 +177,15 @@ export class ProductService {
                     const newVariant = this.variantRepository.create({
                         sku: variant.sku,
                         basePrice: parseFloat(variant.basePrice),
-                        discount: parseFloat(variant.discount || '0'),
-                        discountType: variant.discountType || DiscountType.PERCENTAGE,
+                        discount: product.discount || 0,
+                        discountType: product.discountType || DiscountType.PERCENTAGE,
                         attributes: variant.attributes,
                         variantImages: variant.variantImages || [],
                         stock: parseInt(variant.stock),
                         status: variant.status || InventoryStatus.AVAILABLE,
                         productId: savedProduct.id.toString(),
-                        product: savedProduct
+                        product: savedProduct,
+                        finalPrice: this.calculateFinalPrice(Number(variant.basePrice), Number(variant.discount), variant.discountType)
                     });
 
                     return this.variantRepository.save(newVariant);
@@ -194,7 +198,20 @@ export class ProductService {
         return savedProduct;
     }
 
+    // util function to calculate final price after discount 
+    private calculateFinalPrice(basePrice: number, discount: number, discountType: DiscountType) {
+        if (!basePrice || basePrice <= 0) {
+            return 0
+        }
 
+        if (discountType === DiscountType.FLAT) {
+            return Math.max(0, basePrice - discount)
+        }
+
+        if (discountType === DiscountType.PERCENTAGE) {
+            return Math.max(0, basePrice - (basePrice * discount) / 100);
+        }
+    }
 
     async updateProduct(
         authId: number,

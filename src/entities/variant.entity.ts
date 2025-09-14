@@ -13,6 +13,9 @@ export class Variant {
     @Column({ type: 'decimal', precision: 8, scale: 2 })
     basePrice: number;
 
+    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
+    finalPrice: number; 
+
     @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
     discount: number;
 
