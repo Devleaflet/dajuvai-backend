@@ -103,7 +103,9 @@ adminDashboardRouter.get("/stats", authMiddleware, isAdminOrStaff, adminDashboar
  * /api/admin/dashboard/revenue:
  *   get:
  *     summary: Get daily revenue chart data for admin dashboard
- *     description: Returns daily revenue (totalPrice + shippingFee) for the last N days (default 7). Filter by query param `days`.
+ *     description: |
+ *       Returns daily revenue (**totalPrice + shippingFee**) for the last N days.  
+ *       If no orders exist on a particular day, that day will still be included in the response with `0` revenue.
  *     tags: [Admin Dashboard]
  *     security:
  *       - bearerAuth: []
@@ -116,10 +118,10 @@ adminDashboardRouter.get("/stats", authMiddleware, isAdminOrStaff, adminDashboar
  *           minimum: 1
  *           example: 30
  *         required: false
- *         description: Number of days to fetch revenue data for (e.g., 7 or 30)
+ *         description: Number of days to fetch revenue data for (e.g., 7 or 30).
  *     responses:
  *       200:
- *         description: Returns an array of objects with daily revenue
+ *         description: Returns an array of objects with daily revenue data
  *         content:
  *           application/json:
  *             schema:
@@ -129,9 +131,11 @@ adminDashboardRouter.get("/stats", authMiddleware, isAdminOrStaff, adminDashboar
  *                 properties:
  *                   date:
  *                     type: string
- *                     example: "12 Jun"
+ *                     description: Date label (formatted as `DD Mon`)
+ *                     example: "12 Sep"
  *                   revenue:
  *                     type: number
+ *                     description: Total revenue for that day (totalPrice + shippingFee, or 0 if no orders)
  *                     example: 12345.67
  *       401:
  *         description: Unauthorized - Admin access required
@@ -139,6 +143,7 @@ adminDashboardRouter.get("/stats", authMiddleware, isAdminOrStaff, adminDashboar
  *         description: Internal server error when fetching revenue data
  */
 adminDashboardRouter.get("/revenue", authMiddleware, isAdminOrStaff, adminDashboardController.getRevenueChart.bind(adminDashboardController));
+
 
 /**
  * @swagger

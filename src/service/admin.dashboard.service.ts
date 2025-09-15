@@ -168,22 +168,30 @@ export class AdminDashBoardService {
    */
   async getRevenueChart(days: number = 7): Promise<Array<{ date: string, revenue: string }>> {
     try {
-      const data = await this.orderRepository.query(`
-                SELECT 
-                    TO_CHAR("createdAt", 'DD Mon') AS date,
-                    SUM("totalPrice" + "shippingFee") AS revenue
-                FROM orders
-                WHERE "paymentStatus" = 'PAID'
-                AND "createdAt" >= NOW() - INTERVAL '${days} days'
-                GROUP BY date
-                ORDER BY MIN("createdAt") ASC;
-            `);
+      const data = await this.orderRepository.query(
+        `
+      SELECT 
+          TO_CHAR(d::date, 'DD Mon') AS date,
+          COALESCE(SUM(o."totalPrice" + o."shippingFee"), 0) AS revenue
+      FROM generate_series(
+          CURRENT_DATE - INTERVAL '${days - 1} days',
+          CURRENT_DATE,
+          '1 day'
+      ) d
+      LEFT JOIN orders o
+        ON DATE(o."createdAt") = d::date
+       AND o."paymentStatus" = 'PAID'
+      GROUP BY d
+      ORDER BY d ASC;
+      `
+      );
 
       return data;
     } catch (error) {
       throw new APIError(500, 'Failed to fetch daily revenue: ' + error.message);
     }
   }
+
 
   async getVendorsSalesAmount1(startDate?: string, endDate?: string) {
     try {

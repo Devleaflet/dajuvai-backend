@@ -13,13 +13,6 @@ export enum OrderStatus {
     DELIVERED = 'DELIVERED',
 }
 
-export enum PaymentStatus {
-    PENDING = 'PENDING',
-    COMPLETED = 'COMPLETED',
-    FAILED = 'FAILED',
-    CASH_ON_DELIVERY = 'CASH_ON_DELIVERY',
-}
-
 @Entity('order_items')
 export class OrderItem {
     @PrimaryGeneratedColumn()
