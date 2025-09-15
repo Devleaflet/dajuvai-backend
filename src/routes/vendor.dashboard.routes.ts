@@ -138,8 +138,178 @@ vendorDashBoardRouter.get("/stats", vendorAuthMiddleware, vendorDashboardControl
  */
 vendorDashBoardRouter.get("/orders", vendorAuthMiddleware, isVendor, vendorDashboardController.getVendorOrderDetails.bind(vendorDashboardController));
 
+
+/**
+ * @swagger
+ * /api/vendor/dashboard/total-sales:
+ *   get:
+ *     summary: Get vendor's total sales
+ *     description: |
+ *       Fetch the total sales amount for the authenticated vendor.  
+ *       - Supports optional date range filters (`startDate`, `endDate`).  
+ *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
+ *     tags:
+ *       - Vendor Dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date filter (inclusive).
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date filter (inclusive).
+ *     responses:
+ *       200:
+ *         description: Total sales retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 vendorId:
+ *                   type: integer
+ *                   example: 7
+ *                 totalSales:
+ *                   type: number
+ *                   format: float
+ *                   example: 12500.75
+ *       401:
+ *         description: Unauthorized (vendor not authenticated)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
+ *       403:
+ *         description: Forbidden (user is not a vendor)
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ */
 vendorDashBoardRouter.get("/total-sales", vendorAuthMiddleware, isVendor, vendorDashboardController.vendorSalesReport.bind(vendorDashboardController));
 
+
+/**
+ * @swagger
+ * /api/vendor/dashboard/low-stock:
+ *   get:
+ *     summary: Get vendor's low stock products
+ *     description: |
+ *       Fetch a paginated list of products belonging to the authenticated vendor that are in **LOW_STOCK** or **OUT_OF_STOCK** status.  
+ *       - Supports pagination via `page`.  
+ *       - Considers both product-level and variant-level stock.  
+ *     tags:
+ *       - Vendor Dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema:
+ *           type: integer
+ *           default: 1
+ *         required: false
+ *         description: Page number for pagination.
+ *     responses:
+ *       200:
+ *         description: Low stock products retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 currentPage:
+ *                   type: integer
+ *                   example: 1
+ *                 totalPage:
+ *                   type: integer
+ *                   example: 3
+ *                 totalData:
+ *                   type: integer
+ *                   example: 12
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       productId:
+ *                         type: integer
+ *                         example: 42
+ *                       productName:
+ *                         type: string
+ *                         example: "Wireless Mouse"
+ *                       vendorId:
+ *                         type: integer
+ *                         example: 7
+ *                       vendorName:
+ *                         type: string
+ *                         example: "Tech Supplies Co."
+ *                       stock:
+ *                         type: integer
+ *                         example: 3
+ *                       status:
+ *                         type: string
+ *                         example: "LOW_STOCK"
+ *                       variantStatus:
+ *                         type: string
+ *                         example: "LOW_STOCK"
+ *       401:
+ *         description: Unauthorized (vendor not authenticated)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
+ *       403:
+ *         description: Forbidden (user is not a vendor)
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ */
 vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDashboardController.getLowStockProducts.bind(vendorDashboardController));
 
 export default vendorDashBoardRouter;
