@@ -147,7 +147,7 @@ export class VendorDashBoardService {
     }
 
     async getLowStockProducts(vendorId: number, page: number) {
-        const pageSize = config.pagination.pageLimit;
+        const pageSize = 5;
         const productsRepo = AppDataSource.getRepository(Product);
 
         // Base query

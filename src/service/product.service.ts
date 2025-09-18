@@ -98,6 +98,11 @@ export class ProductService {
         return product;
     }
 
+    private determineOrderStatus(stock: number) {
+        if (stock <= 0) return InventoryStatus.OUT_OF_STOCK;
+        if (stock < 5) return InventoryStatus.LOW_STOCK;
+        return InventoryStatus.AVAILABLE;
+    }
 
 
     async createProduct(
@@ -112,7 +117,7 @@ export class ProductService {
             basePrice,
             discount,
             discountType,
-            status,
+            status, // need to remove this from frontend
             stock,
             dealId,
             bannerId,
@@ -156,7 +161,7 @@ export class ProductService {
             basePrice: isVariantProduct ? null : parseFloat(basePrice || '0'),
             discount: parseFloat(discount || '0'),
             discountType: discountType || DiscountType.PERCENTAGE,
-            status: status || InventoryStatus.AVAILABLE,
+            status: this.determineOrderStatus(Number(stock)),
             stock: isVariantProduct ? null : parseInt(stock || '0'),
             subcategoryId,
             vendorId,
@@ -261,7 +266,7 @@ export class ProductService {
         product.basePrice = hasVariantsBool ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
         product.discount = discount !== undefined ? parseFloat(discount.toString()) : product.discount;
         product.discountType = discountType ?? product.discountType;
-        product.status = status ?? product.status;
+        product.status = this.determineOrderStatus(Number(stock));
         product.stock = hasVariantsBool ? null : (stock !== undefined ? parseInt(stock.toString()) : product.stock);
         product.subcategoryId = subcategoryId;
         product.dealId = dealId !== undefined ? parseInt(dealId.toString()) : product.dealId;
@@ -296,7 +301,7 @@ export class ProductService {
                         existingVariant.attributes = variant.attributes;
                         existingVariant.variantImages = variant.variantImages || existingVariant.variantImages;
                         existingVariant.stock = parseInt(variant.stock.toString());
-                        existingVariant.status = variant.status || InventoryStatus.AVAILABLE;
+                        existingVariant.status = this.determineOrderStatus(Number(variant.stock));
                         return this.variantRepository.save(existingVariant);
                     } else {
                         // Create new variant
@@ -308,7 +313,7 @@ export class ProductService {
                             attributes: variant.attributes,
                             variantImages: variant.variantImages || [],
                             stock: parseInt(variant.stock.toString()),
-                            status: variant.status || InventoryStatus.AVAILABLE,
+                            status: this.determineOrderStatus(Number(variant.stock)),
                             productId: productId.toString(),
                             product
                         });

@@ -325,7 +325,7 @@ export class OrderService {
             status:
                 orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
                     ? OrderStatus.CONFIRMED
-                    : OrderStatus.PENDING,
+                    : OrderStatus.CONFIRMED,
             shippingAddress: address,
             orderItems,
             isBuyNow: Boolean(isBuyNow),
@@ -543,88 +543,6 @@ export class OrderService {
         console.log(updatedUser);
     }
 
-
-
-    // async createOrder(
-    //     userId: number,
-    //     orderData: IOrderCreateRequest
-    // ): Promise<{ order: Order; redirectUrl?: string }> {
-    //     try {
-    //         const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity = 1 } = orderData;
-
-    //         console.log("-----------------Order data-------------------")
-    //         console.log(orderData);
-
-    //         await this.updateUserDetail(userId, fullName, phoneNumber);
-
-    //         console.log(shippingAddress);
-
-    //         // Fetch user, cart, and shipping district in parallel
-    //         const [user, cart, _district] = await Promise.all([
-    //             this.getUser(userId),
-    //             this.getCart(userId),
-    //             this.getDistrict(shippingAddress.district),
-    //         ]);
-
-    //         console.log("----------------cart-------------------")
-    //         console.log(cart.items)
-
-    //         let items: any[];
-
-    //         // Check stock before creating the order
-    //         await this.validateStock(cart.items);
-
-    //         // Either fetch user's existing address or create a new one based on input
-    //         const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
-
-    //         // Calculate total shipping fee based on cart items and destination address
-    //         const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
-
-    //         // Create the Order entity (not yet saved in DB)
-    //         let order = await this.createOrderEntity(userId, user, cart, address, shippingFee, orderData);
-    //         console.log(order);
-
-    //         let redirectUrl: string | undefined;
-
-    //         // Handle different payment methods
-    //         if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
-    //             // Save order directly for COD
-    //             order = await this.orderRepository.save(order);
-
-    //             // Reload the order with relations
-    //             order = await this.orderRepository.findOne({
-    //                 where: { id: order.id },
-    //                 relations: ["orderItems", "orderItems.product", "orderItems.variant"],
-    //             });
-
-    //             console.log("----------------Order console-----------------------")
-    //             console.log(order)
-
-    //             // Update stock after successful order creation
-    //             await this.updateStock(order.orderItems);
-    //             await this.cartService.clearCart(userId);
-
-    //         } else if (
-    //             paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
-    //             paymentMethod === PaymentMethod.ESEWA ||
-    //             paymentMethod === PaymentMethod.KHALIT
-    //         ) {
-    //             // Save order first before initiating online payment
-    //             order = await this.orderRepository.save(order);
-    //             console.log(order);
-    //         } else {
-    //             // Invalid payment method fallback
-    //             throw new APIError(400, 'Invalid payment method');
-    //         }
-
-    //         return { order, redirectUrl };
-
-    //     } catch (error) {
-    //         // Wrap unexpected errors in a generic 500 API error
-    //         console.log(error)
-    //         throw error instanceof APIError ? error : new APIError(500, 'Failed to create order');
-    //     }
-    // }
 
     async createOrder(
         userId: number,
@@ -1090,6 +1008,62 @@ export class OrderService {
 
         }
     }
+    private async restoreStock(orderItems: any[]): Promise<void> {
+        for (const item of orderItems) {
+            // --- Handle Variant Stock ---
+            if (item.variantId) {
+                const variant = await this.variantRepository.findOne({
+                    where: { id: item.variantId },
+                    relations: ["product"],
+                });
+
+                if (!variant) {
+                    throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+                }
+
+                // Restore stock instead of deducting
+                variant.stock += item.quantity;
+
+                // Update status
+                variant.status = variant.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : variant.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
+
+                await this.variantRepository.save(variant);
+
+            }
+            // --- Handle Product Stock for non-variant product ---
+            else if (item.productId) {
+                const product = await this.productRepository.findOne({
+                    where: { id: item.productId },
+                });
+
+                if (!product) {
+                    throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                }
+
+                // Restore stock
+                product.stock += item.quantity;
+
+                // Update status
+                product.status = product.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : product.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
+
+                await this.productRepository.save(product);
+
+            }
+            // --- Invalid Order Item ---
+            else {
+                throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+            }
+        }
+    }
+
 
     // Separate method for stock updates
     private async updateStock(orderItems: any[]): Promise<void> {
@@ -1185,15 +1159,7 @@ export class OrderService {
 
 
 
-    /**
-     * Verify payment for an order and update its status accordingly.
-     *
-     * @param {number} orderId - ID of the order to verify.
-     * @param {string} transactionId - Transaction ID returned by the payment gateway.
-     * @param {any} responseData - Full response payload received from the payment gateway.
-     * @returns {Promise<Order>} - Returns the updated order after verification.
-     * @access Public (called via payment success webhook or redirect handler)
-     */
+
     async verifyPayment(orderId: number, transactionId: string, responseData: any): Promise<Order> {
         // Fetch order by ID and transaction ID, including all required relations
         const order = await this.orderRepository.findOne({
@@ -1219,12 +1185,13 @@ export class OrderService {
             responseData
         );
 
-        // Update payment and order status based on verification result
-        order.paymentStatus = isSuccessful ? PaymentStatus.PAID : PaymentStatus.UNPAID;
-        order.status = isSuccessful ? OrderStatus.CONFIRMED : OrderStatus.PENDING;
-
-        // Store full payment gateway response for auditing/debugging
-        // order.gatewayResponse = JSON.stringify(responseData);
+        if (isSuccessful) {
+            order.paymentStatus = PaymentStatus.PAID;
+            order.status = OrderStatus.CONFIRMED;
+        } else {
+            order.paymentStatus = PaymentStatus.UNPAID;
+            order.status = OrderStatus.CANCELLED;
+        }
 
         // Save updated order info
         await this.orderRepository.save(order);
@@ -1251,18 +1218,24 @@ export class OrderService {
      * @access Public (called when a user cancels payment)
      */
     async handlePaymentCancel(orderId: number): Promise<void> {
-        // Find the order by ID
-        const order = await this.orderRepository.findOne({ where: { id: orderId } });
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: ['orderItems', 'orderItems.product', 'orderItems.variant'],
+        });
 
-        // If order does not exist, throw 404
         if (!order) {
             throw new APIError(404, 'Order not found');
         }
 
-        // Mark the order's payment status as UNPAID due to cancellation
+        // Restore stock
+        await this.restoreStock(order.orderItems);
+
+        // Mark payment as UNPAID
         order.paymentStatus = PaymentStatus.UNPAID;
 
-        // Save updated status to database
+        // Optionally, update order status to CANCELLED
+        order.status = OrderStatus.CANCELLED;
+
         await this.orderRepository.save(order);
     }
 
@@ -1338,9 +1311,6 @@ export class OrderService {
     async getCustomerOrders(): Promise<Order[]> {
         return this.orderRepository.find({
             relations: ['orderedBy', 'orderItems', 'shippingAddress', 'orderItems.product', 'orderItems.variant'],
-            where: {
-                status: Not(OrderStatus.PENDING)
-            },
             order: { createdAt: "desc" }
         })
     };
@@ -1403,7 +1373,8 @@ export class OrderService {
             where: {
                 id: orderId,
                 orderedById: userId,
-                status: OrderStatus.PENDING,
+                status: OrderStatus.CONFIRMED,
+                paymentStatus: PaymentStatus.UNPAID
             },
             relations: ['orderedBy'],
         });
@@ -1490,7 +1461,7 @@ export class OrderService {
     async getOrderDetails(orderId: number): Promise<Order> {
         // Find the order by ID with all related entities loaded
         const order = await this.orderRepository.findOne({
-            where: { id: orderId, status: Not(OrderStatus.PENDING) },
+            where: { id: orderId },
             relations: [
                 'orderedBy',
                 'shippingAddress',
@@ -1521,11 +1492,19 @@ export class OrderService {
      * @throws {APIError} - Throws 404 if order not found, 400 if invalid status provided.
      * @access Admin or authorized users
      */
-    async updateOrderStatus(orderId: number, status: IUpdateOrderStatusRequest['status']): Promise<Order> {
-        // Retrieve the order with related entities by orderId
+    async updateOrderStatus(
+        orderId: number,
+        status: IUpdateOrderStatusRequest['status']
+    ): Promise<Order> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
-            relations: ['orderedBy', 'shippingAddress', 'orderItems', 'orderItems.product', 'orderItems.vendor'],
+            relations: [
+                'orderedBy',
+                'shippingAddress',
+                'orderItems',
+                'orderItems.product',
+                'orderItems.vendor',
+            ],
         });
 
         if (!order) {
@@ -1533,29 +1512,35 @@ export class OrderService {
         }
 
         const validTransition: Record<OrderStatus, OrderStatus[]> = {
-            [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-            [OrderStatus.CONFIRMED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
-            [OrderStatus.DELIVERED]: [OrderStatus.CANCELLED],
-            [OrderStatus.CANCELLED]: []
+            [OrderStatus.CONFIRMED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED, OrderStatus.DELAYED],
+            [OrderStatus.DELAYED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
+            [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+            [OrderStatus.DELIVERED]: [OrderStatus.RETURNED],
+            [OrderStatus.RETURNED]: [],
+            [OrderStatus.CANCELLED]: [],
         };
 
+
         if (order.status !== status && !validTransition[order.status].includes(status)) {
-            throw new APIError(400, `Invalid status transition from ${order.status} to ${status}`);
+            throw new APIError(
+                400,
+                `Invalid status transition from ${order.status} to ${status}`
+            );
         }
 
-        // Update status
         order.status = status;
 
-        if (status === OrderStatus.DELIVERED && order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
-            if (order.paymentStatus !== PaymentStatus.PAID) {
-                order.paymentStatus = PaymentStatus.PAID;
-            }
+        // Handle COD payment update on delivery
+        if (
+            status === OrderStatus.DELIVERED &&
+            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
+            order.paymentStatus !== PaymentStatus.PAID
+        ) {
+            order.paymentStatus = PaymentStatus.PAID;
         }
 
-        // Save updated order
         await this.orderRepository.save(order);
 
-        // Send notification email to user
         if (order.orderedBy?.email) {
             await sendOrderStatusEmail(order.orderedBy.email, order.id, order.status);
         }
@@ -1597,7 +1582,6 @@ export class OrderService {
             .leftJoinAndSelect('orderItems.vendor', 'vendor') // Include vendor info for order items
             .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('orderItems.vendorId = :vendorId', { vendorId }) // Filter by vendorId
-            .andWhere('order.status != :status', { status: OrderStatus.PENDING })
             .orderBy('order.createdAt', 'DESC')
             .getMany(); // Get all matching orders
     }
@@ -1624,7 +1608,6 @@ export class OrderService {
             .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('order.id = :orderId', { orderId }) // Filter by order ID
             .andWhere('orderItems.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status != :status', { status: OrderStatus.PENDING }) // Filter order items by vendor ID
             .getOne();
 
         // Throw error if no such order exists or vendor is not authorized to view it
@@ -1650,7 +1633,7 @@ export class OrderService {
         // Find all orders where orderedById matches the userId
         // Include relations: orderItems, the products within those items, and shipping address
         const orders = await this.orderRepository.find({
-            where: { orderedById: userId, status: Not(OrderStatus.PENDING) },
+            where: { orderedById: userId },
             relations: [
                 'orderItems',
                 'orderItems.product',

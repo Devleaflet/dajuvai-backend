@@ -5,10 +5,12 @@ import { OrderItem } from "./orderItems.entity";
 
 
 export enum OrderStatus {
-    PENDING = "PENDING",
     CONFIRMED = "CONFIRMED",
+    DELAYED = "DELAYED",
+    SHIPPED = "SHIPPED",
+    DELIVERED = "DELIVERED",
     CANCELLED = "CANCELLED",
-    DELIVERED = "DELIVERED"
+    RETURNED = "RETURNED"
 }
 
 export enum PaymentStatus {
@@ -46,7 +48,7 @@ export class Order {
     @Column({ nullable: true })
     isBuyNow?: boolean
 
-    
+
     @Column({
         type: "enum",
         enum: PaymentStatus,
@@ -63,7 +65,7 @@ export class Order {
     @Column({
         type: "enum",
         enum: OrderStatus,
-        default: OrderStatus.PENDING
+        default: OrderStatus.CONFIRMED
     })
     status: OrderStatus;
 

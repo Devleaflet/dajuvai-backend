@@ -103,11 +103,7 @@ export class AdminDashBoardService {
    * @access Admin
    */
   private async getTotalOrders(): Promise<number> {
-    return this.orderRepository.count({
-      where: {
-        status: Not(OrderStatus.PENDING)
-      }
-    });
+    return this.orderRepository.count({});
   }
 
   /**
