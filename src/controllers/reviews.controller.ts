@@ -93,6 +93,12 @@ export class ReviewController {
 
             const reviewExists = await this.reviewService.findReviewById(Number(reviewId))
 
+            console.log("-------------Review-----------------")
+            console.log(reviewExists)
+            console.log(reviewExists.userId)
+            console.log(req.user)
+
+
             if (!reviewExists) {
                 throw new APIError(404, "Reveiw does not exists")
             }

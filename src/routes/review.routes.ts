@@ -136,8 +136,8 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  */
 router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewController));
 
-router.patch("/:id", validateZod(updateReviewSchema, "body"), reviewController.updateProductReview.bind(reviewController))
+router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), reviewController.updateProductReview.bind(reviewController))
 
-router.delete("/:id", canDeleteReview, reviewController.deleteReview.bind(reviewController));
+router.delete("/:id", authMiddleware, canDeleteReview, reviewController.deleteReview.bind(reviewController));
 
 export default router;

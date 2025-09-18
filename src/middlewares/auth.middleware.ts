@@ -536,7 +536,8 @@ export const canReviewProduct = async (req: AuthRequest<{}, {}, { productId: str
     }
 }
 
-
+// Review author (user) → can delete their own review.
+// Product vendor → can delete any review on their product.
 export const canDeleteReview = async (req: CombinedAuthRequest<{ id: string }>, res: Response, next: NextFunction): Promise<void> => {
     try {
         const reviewId = parseInt(req.params.id, 10);
