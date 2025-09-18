@@ -1518,6 +1518,7 @@ export class OrderService {
             [OrderStatus.DELIVERED]: [OrderStatus.RETURNED],
             [OrderStatus.RETURNED]: [],
             [OrderStatus.CANCELLED]: [],
+            [OrderStatus.PENDING]: [],
         };
 
 
