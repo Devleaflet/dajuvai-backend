@@ -435,9 +435,8 @@ export class ProductService {
         }
     }
 
-
     async getAdminProducts(params: IAdminProductQueryParams): Promise<{ products: Product[]; total: number }> {
-        const { page = 1, limit = 7, sort = 'createdAt' } = params;
+        const { page = 1, limit = 7, sort = 'createdAt', filter } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
@@ -447,21 +446,43 @@ export class ProductService {
                 'product.name',
                 'product.basePrice',
                 'product.stock',
+                'product.productImages',
                 'product.created_at',
                 'vendor.id',
-                'vendor.name',
+                'vendor.businessName',
                 'variants.id',
                 'variants.sku',
                 'variants.basePrice',
                 'variants.stock',
                 'variants.status',
+                'variants.variantImages',
             ]);
 
-        // Sorting
-        if (sort === 'name') {
-            query.orderBy('product.name', 'ASC');
-        } else {
-            query.orderBy('product.created_at', 'DESC');
+        //  Filtering
+        if (filter === 'out_of_stock') {
+            query.andWhere('(product.stock = 0 OR variants.stock = 0)');
+        }
+
+        //   Sorting
+        switch (sort) {
+            case 'name':
+                query.orderBy('product.name', 'ASC');
+                break;
+            case 'oldest':
+                query.orderBy('product.created_at', 'ASC');
+                break;
+            case 'newest':
+                query.orderBy('product.created_at', 'DESC');
+                break;
+            case 'price_low_high':
+                query.orderBy('product.basePrice', 'ASC');
+                break;
+            case 'price_high_low':
+                query.orderBy('product.basePrice', 'DESC');
+                break;
+            default:
+                query.orderBy('product.created_at', 'DESC'); 
+                break;
         }
 
         // Pagination

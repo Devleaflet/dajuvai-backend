@@ -19,12 +19,18 @@ export interface IProductQueryParams {
     bannerId?: number
     page: number;
     limit: number;
+    isAdmin?: boolean;
 }
 
 export interface IAdminProductQueryParams {
     page?: number;
     limit?: number;
-    sort?: 'createdAt' | 'name';
+
+    // Sorting options
+    sort?: 'createdAt' | 'name' | 'oldest' | 'newest' | 'price_low_high' | 'price_high_low';
+
+    // Filtering options
+    filter?: 'out_of_stock';
 }
 
 export interface IVendorProductQueryParams {

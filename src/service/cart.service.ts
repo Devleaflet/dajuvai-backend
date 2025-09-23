@@ -76,7 +76,7 @@ export class CartService {
         } else {
             // Handle non-variant product
             if (product.hasVariants) {
-                throw new APIError(400, 'Variant required for this product');
+                throw new APIError(400, 'Please select a variant before proceeding.');
             }
             if (!product.basePrice || product.stock === undefined) {
                 throw new APIError(400, 'Product must have basePrice and stock');

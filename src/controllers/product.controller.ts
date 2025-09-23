@@ -379,8 +379,6 @@ export class ProductController {
         }
     }
 
-
-
     /**
      * @method getAdminProducts
      * @route GET /admin/products
@@ -392,15 +390,22 @@ export class ProductController {
      */
     async getAdminProducts(req: AuthRequest<{}, {}, {}, IAdminProductQueryParams>, res: Response) {
         try {
+            console.log("----------Req params--------------")
+            console.log(req.params);
+
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);
 
+            console.log(products)
+
             res.status(200).json({ success: true, data: { products, total } });
         } catch (error) {
+            console.log(error)
             // Handle API errors with specific status codes
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
+                console.log(error)
                 // Handle unexpected errors with generic 500 response
                 res.status(500).json({ success: false, message: 'Internal server error' });
             }

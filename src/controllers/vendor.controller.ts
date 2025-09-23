@@ -487,6 +487,31 @@ export class VendorController {
     }
 
 
+    async authVendor(req: VendorAuthRequest, res: Response) {
+        try {
+            const vendor = req.vendor;
+
+            const getVendor = await this.vendorService.findVendorById(vendor.id);
+
+            if (!getVendor) {
+                throw new APIError(404, "Vendor doesnot exists")
+            }
+
+            res.status(200).json({
+                success: true,
+                vendor: getVendor
+            })
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                throw new APIError(503, 'Vendor service temporarily unavailable');
+            }
+        }
+    }
+
+
     /**
      * PUT /api/vendor/:id
      * Updates vendor profile data such as business name, phone number, etc.

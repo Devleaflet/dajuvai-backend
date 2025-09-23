@@ -2,6 +2,7 @@ import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { uploadMiddleware } from "../config/multer.config";
+import { authMiddleware, isAdminOrStaff } from "../middlewares/auth.middleware";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
@@ -200,6 +201,8 @@ productRouter.delete("/:id", productController.deleteProductById.bind(productCon
  */
 productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
 
+productRouter.get("/admin/products",  productController.getAdminProducts.bind(productController))
+//authMiddleware, isAdminOrStaff,
 export default productRouter;
 
 
