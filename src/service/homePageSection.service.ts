@@ -256,28 +256,66 @@ export class HomePageSectionService {
      * @access Public/Admin
      */
     async getAllHomePageSections(includeInactive: boolean = false) {
-        const query = this.homepageSectionRepository
-            .createQueryBuilder("section")
-            .leftJoinAndSelect("section.products", "manualProduct")
-            .leftJoinAndSelect("manualProduct.variants", "variant")
-            .leftJoinAndSelect("section.selectedCategory", "category")
-            .leftJoinAndSelect("section.selectedSubcategory", "subcategory")
-            .leftJoinAndSelect("section.selectedDeal", "deal");
+        const sections = await this.homepageSectionRepository.find({
+            where: includeInactive ? {} : { isActive: true },
+            relations: [
+                'products',
+                'products.variants',
+                'selectedCategory',
+                'selectedSubcategory',
+                'selectedDeal',
+            ],
+            order: { id: 'ASC' },
+        });
 
-        if (!includeInactive) {
-            query.where("section.isActive = :isActive", { isActive: true });
-        }
+        const homepageSections = await Promise.all(
+            sections.map(async (section) => {
+                let products: Product[] = [];
 
-        // Only apply product status filter when productSource is manual
-        query.andWhere(
-            `(section.productSource != 'manual' OR manualProduct.status IN (:...statuses))`,
-            { statuses: ["AVAILABLE", "LOW_STOCK"] }
+                switch (section.productSource) {
+                    case ProductSource.DEAL:
+                        if (section.selectedDeal?.id) {
+                            products = await this.productRepository.find({
+                                where: { dealId: section.selectedDeal.id },
+                                relations: ['variants'],
+                            });
+                        }
+                        break;
+
+                    case ProductSource.CATEGORY:
+                        if (section.selectedCategory?.id) {
+                            products = await this.productRepository
+                                .createQueryBuilder('product')
+                                .leftJoinAndSelect('product.variants', 'variants')
+                                .leftJoin('product.subcategory', 'subcategory')
+                                .leftJoin('subcategory.category', 'category')
+                                .where('category.id = :id', { id: section.selectedCategory.id })
+                                .getMany();
+                        }
+                        break;
+
+                    case ProductSource.SUBCATEGORY:
+                        if (section.selectedSubcategory?.id) {
+                            products = await this.productRepository.find({
+                                where: { subcategoryId: section.selectedSubcategory.id },
+                                relations: ['variants'],
+                            });
+                        }
+                        break;
+
+                    case ProductSource.MANUAL:
+                    default:
+                        products = section.products || [];
+                        break;
+                }
+
+                return { ...section, products };
+            })
         );
 
-        query.orderBy("section.id", "ASC");
-
-        return await query.getMany();
+        return homepageSections;
     }
+
 
 
 
@@ -292,15 +330,47 @@ export class HomePageSectionService {
     async getHomePageSectionById(sectionId: number) {
         const section = await this.homepageSectionRepository.findOne({
             where: { id: sectionId },
-            relations: ['products', 'products.variants']
+            relations: ['products', 'products.variants'],
         });
 
+        console.log(section)
         if (!section) {
             throw new APIError(404, "Home page section not found");
         }
 
-        return section;
+        let products: Product[] = [];
+
+        switch (section.productSource) {
+            case ProductSource.DEAL:
+                products = await this.productRepository.find({
+                    where: { dealId: section.selectedDeal?.id },
+                    relations: ['variants'],
+                });
+                break;
+
+            case ProductSource.CATEGORY:
+                products = await this.productRepository.find({
+                    where: { subcategory: { category: { id: section.selectedCategory?.id } } },
+                    relations: ['variants'],
+                });
+                break;
+
+            case ProductSource.SUBCATEGORY:
+                products = await this.productRepository.find({
+                    where: { subcategoryId: section.selectedSubcategory?.id },
+                    relations: ['variants'],
+                });
+                break;
+
+            case ProductSource.MANUAL:
+            default:
+                products = section.products;
+                break;
+        }
+
+        return { ...section, products };
     }
+
 
     /**
      * Deletes a homepage section by its ID.
