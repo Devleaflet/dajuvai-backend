@@ -201,6 +201,8 @@ productRouter.delete("/:id", productController.deleteProductById.bind(productCon
  */
 productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
 
+
+// /api/product/admin/products
 productRouter.get("/admin/products", authMiddleware, isAdminOrStaff, productController.getAdminProducts.bind(productController))
 
 export default productRouter;

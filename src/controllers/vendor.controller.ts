@@ -497,12 +497,16 @@ export class VendorController {
                 throw new APIError(404, "Vendor doesnot exists")
             }
 
+            console.log("----------Vendor------------")
+            console.log(getVendor)
+
             res.status(200).json({
                 success: true,
                 vendor: getVendor
             })
 
         } catch (error) {
+            console.log(error)
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
@@ -523,7 +527,7 @@ export class VendorController {
      */
     async updateVendor(req: VendorAuthRequest<{ id: string }, {}, Partial<IUpdateVendorRequest>>, res: Response): Promise<void> {
         try {
-            console.log("req body: ", req.body)
+            console.log("--------update vendor req body---------: ", req.body)
             const id = req.params.id;
 
             const findVendorById = await this.vendorService.findVendorById(Number(id))

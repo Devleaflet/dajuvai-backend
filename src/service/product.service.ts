@@ -437,7 +437,9 @@ export class ProductService {
         }
     }
 
-    async getAdminProducts(params: IAdminProductQueryParams): Promise<{ products: Product[]; total: number }> {
+    async getAdminProducts(
+        params: IAdminProductQueryParams
+    ): Promise<{ products: Product[]; total: number; page: number; limit: number }> {
         const { page = 1, limit = 7, sort = 'createdAt', filter } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
@@ -460,12 +462,10 @@ export class ProductService {
                 'variants.variantImages',
             ]);
 
-        //  Filtering
         if (filter === 'out_of_stock') {
             query.andWhere('(product.stock = 0 OR variants.stock = 0)');
         }
 
-        //   Sorting
         switch (sort) {
             case 'name':
                 query.orderBy('product.name', 'ASC');
@@ -487,13 +487,12 @@ export class ProductService {
                 break;
         }
 
-        // Pagination
         const skip = (page - 1) * limit;
         query.skip(skip).take(limit);
 
         const [products, total] = await query.getManyAndCount();
 
-        return { products, total };
+        return { products, total, page, limit };
     }
 
 
