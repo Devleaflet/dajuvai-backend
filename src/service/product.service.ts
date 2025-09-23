@@ -347,6 +347,7 @@ export class ProductService {
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.subcategory', 'subcategory')
+            .leftJoinAndSelect('subcategory.category', 'category')
             .leftJoinAndSelect('product.brand', 'brand')
             .leftJoin('product.vendor', 'vendor')
             .addSelect([
@@ -393,6 +394,7 @@ export class ProductService {
 
         query.groupBy('product.id')
             .addGroupBy('subcategory.id')
+            .addGroupBy('category.id')
             .addGroupBy('brand.id')
             .addGroupBy('vendor.id')
             .addGroupBy('deal.id')
@@ -481,7 +483,7 @@ export class ProductService {
                 query.orderBy('product.basePrice', 'DESC');
                 break;
             default:
-                query.orderBy('product.created_at', 'DESC'); 
+                query.orderBy('product.created_at', 'DESC');
                 break;
         }
 
