@@ -11,6 +11,9 @@ import { UserRole } from '../entities/user.entity';
 const userRouter = Router();
 const userController = new UserController();
 
+const frontendUrl = 'https://dajuvai.com';
+
+
 // Rate limiter for sensitive endpoints
 const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
@@ -642,7 +645,7 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *       403:
  *         description: Forbidden - Not an admin
  */
-userRouter.get('/users',  userController.getUsers.bind(userController));
+userRouter.get('/users', userController.getUsers.bind(userController));
 //authMiddleware, isAdminOrStaff,
 
 
@@ -1007,16 +1010,32 @@ userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'pr
 //     // console.log('[Google Callback] Cookie set, redirecting to https://dajuvai.com/google-auth-callback');
 //     // res.redirect('https://dajuvai.com/google-auth-callback');
 // });
-userRouter.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: "/api/auth/login?error=google_auth_failed" }), (req: any, res: Response) => {
-    const { user, token } = req.user;
-    res.cookie('token', token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        maxAge: 2 * 60 * 60 * 1000,
-        sameSite: 'none'
-    });
-    res.redirect(`https://dajuvai.com/google-auth-callback?token=${token}`);
-});
+userRouter.get('/google/callback',
+    passport.authenticate('google', {
+        session: false,
+        failureRedirect: `${frontendUrl}/auth/google/callback?error=authentication_failed`
+    }),
+    (req: any, res: Response) => {
+        try {
+            const { user, token } = req.user;
+
+            // Set secure cookie
+            res.cookie('token', token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                maxAge: 2 * 60 * 60 * 1000, // 2 hours
+                sameSite: 'none'
+            });
+
+            // Redirect to frontend callback with token
+            res.redirect(`${frontendUrl}/auth/google/callback?token=${token}`);
+
+        } catch (error) {
+            console.error('Google OAuth callback error:', error);
+            res.redirect(`${frontendUrl}/auth/google/callback?error=server_error`);
+        }
+    }
+);
 
 /**
  * Updated Google OAuth callback with extensive debugging
@@ -1534,7 +1553,7 @@ userRouter.post('/reset-password', authRateLimiter, validateZod(resetPasswordSch
  *       404:
  *         description: User not found
  */
-userRouter.get('/users/:id',  userController.getUserById.bind(userController));
+userRouter.get('/users/:id', userController.getUserById.bind(userController));
 
 /**
  * @swagger

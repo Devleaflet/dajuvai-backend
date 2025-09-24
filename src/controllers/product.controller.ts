@@ -359,25 +359,39 @@ export class ProductController {
 
     async deleteProductById(req: Request<{ id: string }>, res: Response) {
         try {
+            console.log("[deleteProductById] Request params:", req.params);
+
             const id = Number(req.params.id);
+            console.log("[deleteProductById] Parsed product ID:", id);
 
-            console.log(id);
+            if (isNaN(id)) {
+                console.warn("[deleteProductById] Invalid product ID");
+                return res.status(400).json({
+                    success: false,
+                    msg: "Invalid product ID"
+                });
+            }
 
+            console.log("[deleteProductById] Calling productService.deleteProductById...");
             const deleteProduct = await this.productService.deleteProductById(id);
+            console.log("[deleteProductById] deleteProduct result:", deleteProduct);
 
             res.status(200).json({
                 success: true,
                 msg: "Product deleted successfully"
-            })
-
+            });
+            console.log("[deleteProductById] Response sent successfully");
         } catch (error) {
+            console.error("[deleteProductById] Error caught:", error);
+
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, msg: error.message })
+                res.status(error.status).json({ success: false, msg: error.message });
             } else {
-                res.status(500).json({ success: false, msg: "Internal server error" })
+                res.status(500).json({ success: false, msg: "Internal server error" });
             }
         }
     }
+
 
     /**
      * @method getAdminProducts
@@ -390,6 +404,7 @@ export class ProductController {
      */
     async getAdminProducts(req: AuthRequest<{}, {}, {}, IAdminProductQueryParams>, res: Response) {
         try {
+            console.log("----------------------Admin product api hit--------------------")
             console.log("----------Req params--------------")
             console.log(req.params);
 

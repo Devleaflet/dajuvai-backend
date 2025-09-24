@@ -2,7 +2,7 @@ import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { uploadMiddleware } from "../config/multer.config";
-import { authMiddleware, isAdminOrStaff } from "../middlewares/auth.middleware";
+import { authMiddleware, combinedAuthMiddleware, isAdminOrStaff, isAdminOrVendor } from "../middlewares/auth.middleware";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
@@ -133,7 +133,8 @@ const productController = new ProductController(AppDataSource);
  */
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
-productRouter.delete("/:id", productController.deleteProductById.bind(productController));
+// /api/product/:id
+productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productController.deleteProductById.bind(productController));
 
 /**
  * @swagger
