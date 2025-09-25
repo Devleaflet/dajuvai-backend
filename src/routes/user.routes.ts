@@ -1019,6 +1019,10 @@ userRouter.get('/google/callback',
         try {
             const { user, token } = req.user;
 
+            if (!user) {
+                console.error('Google OAuth failed - no user')
+                return res.redirect(`${frontendUrl}/auth/google/callback?error=authentication_failed`);
+            }   
             // Set secure cookie
             res.cookie('token', token, {
                 httpOnly: true,
