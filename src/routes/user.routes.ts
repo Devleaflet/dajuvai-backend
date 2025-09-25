@@ -1013,7 +1013,7 @@ userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'pr
 userRouter.get('/google/callback',
     passport.authenticate('google', {
         session: false,
-        failureRedirect: `${frontendUrl}/auth/google/callback?error=authentication_failed`
+        failureRedirect: `${frontendUrl}/auth/google/callback?error=authentication_error`
     }),
     (req: any, res: Response) => {
         try {
@@ -1021,8 +1021,8 @@ userRouter.get('/google/callback',
 
             if (!user) {
                 console.error('Google OAuth failed - no user')
-                return res.redirect(`${frontendUrl}/auth/google/callback?error=authentication_failed`);
-            }   
+                return res.redirect(`${frontendUrl}/auth/google/callback?error=authentication_error`);
+            }
             // Set secure cookie
             res.cookie('token', token, {
                 httpOnly: true,
@@ -1036,7 +1036,7 @@ userRouter.get('/google/callback',
 
         } catch (error) {
             console.error('Google OAuth callback error:', error);
-            res.redirect(`${frontendUrl}/auth/google/callback?error=server_error`);
+            res.redirect(`${frontendUrl}/auth/google/callback?error=authentication_error`);
         }
     }
 );
