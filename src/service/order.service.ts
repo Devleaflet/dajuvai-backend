@@ -1,4 +1,4 @@
-import { Not, Repository } from 'typeorm';
+import { In, Not, Repository } from 'typeorm';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { IShippingAddressRequest, IUpdateOrderStatusRequest, IOrderCreateRequest } from '../interface/order.interface';
@@ -13,11 +13,17 @@ import { PaymentService } from './payment.service';
 import { District } from '../entities/district.entity';
 import { Product } from '../entities/product.entity';
 import { PromoService } from './promo.service';
-import { InventoryStatus } from '../entities/product.enum';
+import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
-import { sendOrderStatusEmail } from '../utils/nodemailer.utils';
+import { sendCustomerOrderEmail, sendOrderStatusEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
 import { add } from 'winston';
+import crypto from 'crypto';
+import axios from 'axios';
+import 'dotenv/config';
+import { PromoType } from '../entities/promo.entity';
+import { VendorService } from './vendor.service';
+import { Vendor } from '../entities/vendor.entity';
 
 
 /**
@@ -39,6 +45,7 @@ export class OrderService {
     private productRepository: Repository<Product>;
     private promoService: PromoService;
     private variantRepository: Repository<Variant>;
+    private vendorService: VendorService;
 
 
     /**
@@ -47,7 +54,9 @@ export class OrderService {
     * Instantiates CartService and PaymentService for related business logic.
     */
     constructor() {
-        // Repository to perform CRUD operations on Order entities
+
+        // Repository to perform CRUD ope
+        // rations on Order entities
         this.orderRepository = AppDataSource.getRepository(Order);
 
         // Repository to manage user addresses related to orders
@@ -76,6 +85,8 @@ export class OrderService {
         this.promoService = new PromoService();
 
         this.variantRepository = AppDataSource.getTreeRepository(Variant);
+
+        this.vendorService = new VendorService();
     }
 
     /**
@@ -208,10 +219,20 @@ export class OrderService {
      */
     private createOrderItems(items: any[]): OrderItem[] {
         return items.map(item => {
-            const price = item.variant
-                ? item.variant.basePrice
-                : item.product.basePrice;
-
+            let price;
+            if (item.variant) {
+                price = item.variant.basePrice;
+            } else {
+                if (item.product?.discount && item.product?.discount > 0) {
+                    if (item.product?.discountType === DiscountType.PERCENTAGE) {
+                        price = item.product.basePrice - (item.product.basePrice * (item.product.discount / 100));
+                    } else {
+                        price = item.product.basePrice - item.product.discount;
+                    }
+                } else {
+                    price = item.product.basePrice;
+                }
+            }
             return this.orderItemRepository.create({
                 productId: item.product.id,
                 quantity: item.quantity,
@@ -238,6 +259,7 @@ export class OrderService {
      */
     private async createOrderEntity(
         userId: number,
+        isBuyNow: boolean,
         user: any,
         items: any[],
         address: Address,
@@ -249,9 +271,26 @@ export class OrderService {
 
         // Calculate subtotal from items
         const subtotal = items.reduce((sum, item) => {
-            const basePrice = item.variant ? item.variant.basePrice : item.product.basePrice;
+            let basePrice = 0;
+            if (item.variant) {
+                basePrice += item.variant.basePrice;
+            } else {
+                if (item.product?.discount && item.product?.discount > 0) {
+                    if (item.product?.discountType === DiscountType.PERCENTAGE) {
+
+                        basePrice += item.product.basePrice - (item.product.basePrice * (item.product.discount / 100));
+                    } else {
+                        basePrice += item.product.basePrice - item.product.discount;
+                    }
+                } else {
+                    basePrice += item.product.basePrice;
+                }
+            }
+            // const basePrice = item.variant ? item.variant.basePrice : item.product.basePrice;
             return sum + (basePrice * item.quantity);
         }, 0);
+        console.log("--------------subtotal------------------");
+        console.log(subtotal);
 
         // apply promo code if provided
         let discountAmount = 0;
@@ -259,11 +298,16 @@ export class OrderService {
 
         if (orderData.promoCode) {
             const promo = await this.promoService.findPromoByCode(orderData.promoCode);
-            if (!promo) {
-                throw new APIError(400, 'Invalid or expired promo code');
+            let pastOrderTransaction = await this.orderRepository.find({ where: { appliedPromoCode: orderData.promoCode, orderedById: userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]) } })
+
+            if (promo && promo.isValid && pastOrderTransaction.length === 0) {
+                if (promo.applyOn === PromoType.LINE_TOTAL) {
+                    discountAmount = (subtotal * promo.discountPercentage) / 100;
+                } else {
+                    discountAmount = (shippingFee * promo.discountPercentage) / 100;
+                }
+                appliedPromoCode = promo.promoCode;
             }
-            discountAmount = (subtotal * promo.discountPercentage) / 100;
-            appliedPromoCode = promo.promoCode;
         }
 
         const totalPrice = subtotal - discountAmount + shippingFee;
@@ -281,11 +325,29 @@ export class OrderService {
             status:
                 orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
                     ? OrderStatus.CONFIRMED
-                    : OrderStatus.PENDING,
+                    : OrderStatus.CONFIRMED,
             shippingAddress: address,
             orderItems,
+            isBuyNow: Boolean(isBuyNow),
             phoneNumber: orderData.phoneNumber,
         });
+    }
+
+
+
+
+    async checkAvailablePromocode(promoCode: string, userId: number) {
+        const promo = await this.promoService.findPromoByCode(promoCode);
+        console.log(promo)
+        if (!promo) {
+            return null;
+        }
+        let pastOrderTransaction = await this.orderRepository.find({ where: { appliedPromoCode: promoCode, orderedById: userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]) } })
+        if (pastOrderTransaction.length > 0) {
+            return null;
+        }
+
+        return promo;
     }
 
 
@@ -482,92 +544,10 @@ export class OrderService {
     }
 
 
-
-    // async createOrder(
-    //     userId: number,
-    //     orderData: IOrderCreateRequest
-    // ): Promise<{ order: Order; redirectUrl?: string }> {
-    //     try {
-    //         const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity = 1 } = orderData;
-
-    //         console.log("-----------------Order data-------------------")
-    //         console.log(orderData);
-
-    //         await this.updateUserDetail(userId, fullName, phoneNumber);
-
-    //         console.log(shippingAddress);
-
-    //         // Fetch user, cart, and shipping district in parallel
-    //         const [user, cart, _district] = await Promise.all([
-    //             this.getUser(userId),
-    //             this.getCart(userId),
-    //             this.getDistrict(shippingAddress.district),
-    //         ]);
-
-    //         console.log("----------------cart-------------------")
-    //         console.log(cart.items)
-
-    //         let items: any[];
-
-    //         // Check stock before creating the order
-    //         await this.validateStock(cart.items);
-
-    //         // Either fetch user's existing address or create a new one based on input
-    //         const address = await this.getOrCreateAddress(userId, shippingAddress, phoneNumber, user);
-
-    //         // Calculate total shipping fee based on cart items and destination address
-    //         const shippingFee = await this.calculateShippingFee(address, userId, cart.items);
-
-    //         // Create the Order entity (not yet saved in DB)
-    //         let order = await this.createOrderEntity(userId, user, cart, address, shippingFee, orderData);
-    //         console.log(order);
-
-    //         let redirectUrl: string | undefined;
-
-    //         // Handle different payment methods
-    //         if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
-    //             // Save order directly for COD
-    //             order = await this.orderRepository.save(order);
-
-    //             // Reload the order with relations
-    //             order = await this.orderRepository.findOne({
-    //                 where: { id: order.id },
-    //                 relations: ["orderItems", "orderItems.product", "orderItems.variant"],
-    //             });
-
-    //             console.log("----------------Order console-----------------------")
-    //             console.log(order)
-
-    //             // Update stock after successful order creation
-    //             await this.updateStock(order.orderItems);
-    //             await this.cartService.clearCart(userId);
-
-    //         } else if (
-    //             paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
-    //             paymentMethod === PaymentMethod.ESEWA ||
-    //             paymentMethod === PaymentMethod.KHALIT
-    //         ) {
-    //             // Save order first before initiating online payment
-    //             order = await this.orderRepository.save(order);
-    //             console.log(order);
-    //         } else {
-    //             // Invalid payment method fallback
-    //             throw new APIError(400, 'Invalid payment method');
-    //         }
-
-    //         return { order, redirectUrl };
-
-    //     } catch (error) {
-    //         // Wrap unexpected errors in a generic 500 API error
-    //         console.log(error)
-    //         throw error instanceof APIError ? error : new APIError(500, 'Failed to create order');
-    //     }
-    // }
-
     async createOrder(
         userId: number,
         orderData: IOrderCreateRequest
-    ): Promise<{ order: Order; redirectUrl?: string, vendorids: any[], useremail: string }> {
+    ): Promise<{ order: Order; redirectUrl?: string, vendorids: any[], useremail: string, esewaRedirectUrl: string | undefined }> {
         try {
             const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity } = orderData;
 
@@ -637,11 +617,11 @@ export class OrderService {
 
 
             // Create the Order entity (not yet saved in DB)
-            let order = await this.createOrderEntity(userId, user, items, address, shippingFee.shippingFee, orderData);
+            let order = await this.createOrderEntity(userId, isBuyNow, user, items, address, shippingFee.shippingFee, orderData);
             console.log(order);
 
-            let redirectUrl: string | undefined;
-
+            // let redirectUrl: string | undefined;
+            let esewaRedirectUrl;
             // Handle different payment methods
             if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
                 order = await this.orderRepository.save(order);
@@ -650,6 +630,8 @@ export class OrderService {
                     where: { id: order.id },
                     relations: ["orderItems", "orderItems.product", "orderItems.variant"],
                 });
+
+                console.log(order.orderItems);
 
                 await this.updateStock(order.orderItems);
 
@@ -661,20 +643,316 @@ export class OrderService {
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
                 paymentMethod === PaymentMethod.ESEWA ||
-                paymentMethod === PaymentMethod.KHALIT
+                paymentMethod === PaymentMethod.NPX
             ) {
+                console.log("------------Order saving after payment is initated for online payment-------- ")
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
+                if (paymentMethod === PaymentMethod.ESEWA) {
+
+                    esewaRedirectUrl = await this.initateEsewaPayment(order);
+                    console.log("Respose of Esewa", esewaRedirectUrl)
+                }
             } else {
                 throw new APIError(400, "Invalid payment method");
             }
 
-            return { order, redirectUrl, vendorids, useremail };
+            return { order, esewaRedirectUrl, vendorids, useremail };
 
         } catch (error) {
             console.log(error);
             throw error instanceof APIError ? error : new APIError(500, "Failed to create order");
         }
+    }
+
+    async esewaSuccess(token: string, orderId: number) {
+        try {
+            let object = JSON.parse(Buffer.from(token, "base64").toString("ascii"))
+            console.log("This is the object after decoding", object)
+
+            if (object.status !== "COMPLETE") {
+                throw new APIError(400, "Payment not completed");
+            }
+
+            // order success
+            await this.orderSuccess(orderId, object.transaction_uuid);
+
+            // Send emails to customer and vendors
+            await this.sendOrderEmails(orderId);
+
+            return { success: true }
+
+        } catch (err) {
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
+    }
+
+    // let order = await this.orderRepository.findOne({
+    //             where: { id: orderId },
+    //             relations: ["orderedBy", "orderItems", "orderItems.product", "orderItems.variant"],
+    //         });
+
+
+    //         if (!order) {
+    //             throw new APIError(404, `Order with ID ${orderId} not found`);
+    //         }
+
+    //         // cart clear
+    //         if (order && !order.isBuyNow) {
+    //             await this.cartService.clearCart(order.orderedById)
+    //         }
+
+    //         // save order details
+    //         await this.orderRepository.save(order);
+
+    //         // send email to customer and vendors
+    //         await sendCustomerOrderEmail(
+    //             order.orderedBy.email,
+    //             order.id,
+    //             order.orderItems.map((item) => ({
+    //                 name: item?.product?.name,
+    //                 sku: item.variant?.sku || null,
+    //                 quantity: item.quantity,
+    //                 price: item.price,
+    //                 variantAttributes: item.variant?.attributes || null,
+    //             }))
+    //         );
+
+    //         // send vendor email
+    //         const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))]
+
+    //         for (const vendoId of vendorIds) {
+    //             const itemsForVendor = order.orderItems
+    //                 .filter((item) => item.vendorId === vendoId)
+    //                 .map((item) => ({
+    //                     name: item?.product?.name,
+    //                     sku: item?.variant?.sku,
+    //                     quantity: item.quantity,
+    //                     price: item.price,
+    //                     variantAttributes: item.variant?.attributes || null
+    //                 }))
+
+    //             if (itemsForVendor.length === 0) continue;
+
+    //             const vendor = await this.vendorService.findVendorById(vendoId);
+
+    //             await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
+    //                 name: order.orderedBy.fullName,
+    //                 phone: order.orderedBy.phoneNumber,
+    //                 email: order.orderedBy.email,
+    //                 city: order.orderedBy.address.city,
+    //                 district: order.orderedBy.address.district,
+    //                 localAddress: order.orderedBy.address.localAddress,
+    //                 landmark: order.orderedBy.address.landmark
+    //             })
+
+    //         }
+
+    async sendOrderEmails(orderId: number) {
+        // Fetch the order with all relations
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: ["orderedBy", "orderedBy.address", "orderItems", "orderItems.product", "orderItems.variant"],
+        });
+
+        if (!order) {
+            throw new APIError(404, `Order with ID ${orderId} not found`);
+        }
+
+        const user = order.orderedBy;
+
+        // Clear cart if not "Buy Now"
+        if (!order.isBuyNow) {
+            await this.cartService.clearCart(user.id);
+        }
+
+        // Extract unique vendor IDs
+        const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))];
+
+        // Fetch vendor details including district
+        const vendorRepository = AppDataSource.getRepository(Vendor);
+
+        const vendors = await vendorRepository.find({
+            where: { id: In(vendorIds) },
+            relations: ["district"],
+        });
+
+        // Send customer email
+        await sendCustomerOrderEmail(
+            user.email,
+            order.id,
+            order.orderItems.map((item) => {
+                const vendor = vendors.find((v) => v.id === item.vendorId);
+                return {
+                    name: item.product.name,
+                    sku: item.variant?.sku || null,
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantAttributes: item.variant?.attributes || null,
+                    vendorDistrict: vendor?.district?.name || null,
+                };
+            }),
+            user.address.district || null
+        );
+
+        // Send emails to vendors
+        for (const vendorId of vendorIds) {
+            const vendor = vendors.find((v) => v.id === vendorId);
+            if (!vendor) continue;
+
+            const itemsForVendor = order.orderItems
+                .filter((item) => item.vendorId === vendorId)
+                .map((item) => ({
+                    name: item.product.name,
+                    sku: item.variant?.sku || null,
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantAttributes: item.variant?.attributes || null,
+                }));
+
+            if (itemsForVendor.length === 0) continue;
+
+            await sendVendorOrderEmail(
+                vendor.email,
+                order.paymentMethod,
+                order.id,
+                itemsForVendor,
+                {
+                    name: user.fullName,
+                    phone: user.phoneNumber,
+                    email: user.email,
+                    city: user.address.city,
+                    district: user.address.district,
+                    localAddress: user.address.localAddress,
+                    landmark: user.address.landmark,
+                }
+            );
+        }
+    }
+
+
+    async esewaFailed(orderId: number) {
+        try {
+            const order = await this.orderRepository.findOne({ where: { id: orderId } });
+            if (!order) {
+                throw new APIError(404, "Order not found");
+            }
+
+            // Update order status
+            order.status = OrderStatus.CANCELLED;
+            await this.orderRepository.save(order);
+            return { success: true }
+        } catch (err) {
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
+    }
+
+    async orderSuccess(orderId: number, transactionId: string) {
+        try {
+            const order = await this.orderRepository.findOne({ where: { id: orderId } });
+            if (!order) {
+                throw new APIError(404, "Order not found");
+            }
+
+            // Update order status and transaction ID
+            order.status = OrderStatus.CONFIRMED;
+            order.paymentStatus = PaymentStatus.PAID;
+            order.mTransactionId = transactionId;
+            await this.orderRepository.save(order);
+
+            return order;
+        } catch (err) {
+            console.log(err)
+            throw new APIError(500, "Failed to confirm order");
+        }
+    }
+
+
+    private async initateEsewaPayment(order: Order) {
+        console.log("------------Order to Initiate Esewa payment-------------")
+        console.log(order)
+        const transaction_uuid = crypto.randomUUID();
+
+        const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${process.env.ESEWA_MERCHANT}`;
+
+        console.log("-------------Data after order---------------------")
+        console.log(data)
+        console.log("----------------------------------")
+
+        const esewaSignature = this.generateHmacSha256Hash(data, process.env.SECRET_KEY);
+
+        let paymentData = {
+            amount: order.totalPrice,
+            failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure?oid=${order?.id}`,
+            // failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure&oid=${order?.id}`,
+            product_delivery_charge: "0",
+            product_service_charge: "0",
+            product_code: process.env.ESEWA_MERCHANT,
+            signed_field_names: "total_amount,transaction_uuid,product_code",
+            success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success?oid=${order?.id}`,
+            // success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success&oid=${order?.id}`,
+            // success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success`,
+            tax_amount: "0",
+            total_amount: order?.totalPrice,
+            transaction_uuid: transaction_uuid,
+            metadata: {
+                paymentId: order?.id,
+            },
+            signature: esewaSignature
+        };
+
+
+        try {
+            const paymentResponse = await axios.post(process.env.ESEWA_PAYMENT_URL, null, {
+                params: paymentData,
+            });
+            const reqPayment = JSON.parse(this.safeStringify(paymentResponse));
+            if (reqPayment.status === 200 && reqPayment.request?.res?.responseUrl) {
+                console.log("---------re payment responseurl ")
+                console.log(reqPayment.request.res.responseUrl)
+                return {
+                    url: reqPayment.request.res.responseUrl
+                };
+            } else {
+                throw new Error('Esewa payment initiation failed');
+            }
+        } catch (error) {
+            console.error('Esewa payment error:', error);
+            throw new APIError(500, 'Esewa payment initiation failed');
+        }
+    }
+
+    private generateHmacSha256Hash(data: string, secret: string) {
+        console.log("Generated Hash")
+        console.log("data", data)
+        console.log("Secret", secret)
+        if (!data || !secret) {
+            throw new Error("Both data and secret are required to generate a hash.");
+        }
+
+        // Create HMAC SHA256 hash and encode it in Base64
+        const hash = crypto
+            .createHmac("sha256", secret)
+            .update(data)
+            .digest("base64");
+
+        return hash;
+    }
+
+    private safeStringify(obj: any) {
+        const cache = new Set();
+        const jsonString = JSON.stringify(obj, (key, value) => {
+            if (typeof value === "object" && value !== null) {
+                if (cache.has(value)) {
+                    return; // Discard circular reference
+                }
+                cache.add(value);
+            }
+            return value;
+        });
+        return jsonString;
     }
 
 
@@ -698,10 +976,11 @@ export class OrderService {
                 }
 
                 if (variant.stock < item.quantity) {
-                    throw new APIError(400,
-                        `Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
-                        `Available: ${variant.stock}, Requested: ${item.quantity}`
-                    );
+
+                    console.log(`Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
+                        `Available: ${variant.stock}, Requested: ${item.quantity}`)
+
+                    throw new APIError(400, "Insufficient stock");
                 }
 
                 continue;
@@ -729,6 +1008,62 @@ export class OrderService {
 
         }
     }
+    private async restoreStock(orderItems: any[]): Promise<void> {
+        for (const item of orderItems) {
+            // --- Handle Variant Stock ---
+            if (item.variantId) {
+                const variant = await this.variantRepository.findOne({
+                    where: { id: item.variantId },
+                    relations: ["product"],
+                });
+
+                if (!variant) {
+                    throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+                }
+
+                // Restore stock instead of deducting
+                variant.stock += item.quantity;
+
+                // Update status
+                variant.status = variant.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : variant.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
+
+                await this.variantRepository.save(variant);
+
+            }
+            // --- Handle Product Stock for non-variant product ---
+            else if (item.productId) {
+                const product = await this.productRepository.findOne({
+                    where: { id: item.productId },
+                });
+
+                if (!product) {
+                    throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                }
+
+                // Restore stock
+                product.stock += item.quantity;
+
+                // Update status
+                product.status = product.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : product.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
+
+                await this.productRepository.save(product);
+
+            }
+            // --- Invalid Order Item ---
+            else {
+                throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+            }
+        }
+    }
+
 
     // Separate method for stock updates
     private async updateStock(orderItems: any[]): Promise<void> {
@@ -756,19 +1091,21 @@ export class OrderService {
                 // Deduct stock
                 variant.stock -= item.quantity;
 
-                // Update inventory status
-                if (variant.stock <= 0) {
-                    variant.status = InventoryStatus.OUT_OF_STOCK;
-                } else if (variant.stock < 5) {
-                    variant.status = InventoryStatus.LOW_STOCK;
-                } else {
-                    variant.status = InventoryStatus.AVAILABLE;
-                }
+                variant.status = variant.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : variant.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
 
                 await this.variantRepository.save(variant);
 
+                // remove variant from other users cart if stock is zero
+                if (variant.stock <= 0) {
+                    await this.removeItemFromCarts(item.variantId, true)
+                }
+
             }
-            // --- Handle Product Stock ---
+            // --- Handle Product Stock for non variant product---
             else if (item.productId) {
                 const product = await this.productRepository.findOne({
                     where: { id: item.productId },
@@ -789,17 +1126,17 @@ export class OrderService {
 
                 // Deduct stock
                 product.stock -= item.quantity;
-
-                // Update inventory status
-                if (product.stock <= 0) {
-                    product.status = InventoryStatus.OUT_OF_STOCK;
-                } else if (product.stock < 5) {
-                    product.status = InventoryStatus.LOW_STOCK;
-                } else {
-                    product.status = InventoryStatus.AVAILABLE;
-                }
+                product.status = product.stock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : product.stock < 5
+                        ? InventoryStatus.LOW_STOCK
+                        : InventoryStatus.AVAILABLE;
 
                 await this.productRepository.save(product);
+
+                if (product.stock <= 0) {
+                    await this.removeItemFromCarts(item.productId, false)
+                }
 
             }
             // --- Invalid Order Item ---
@@ -810,16 +1147,19 @@ export class OrderService {
     }
 
 
+    private async removeItemFromCarts(itemId: string | number, isvariant: boolean) {
+        const cartItemRepo = AppDataSource.getRepository(CartItem);
 
-    /**
-     * Verify payment for an order and update its status accordingly.
-     *
-     * @param {number} orderId - ID of the order to verify.
-     * @param {string} transactionId - Transaction ID returned by the payment gateway.
-     * @param {any} responseData - Full response payload received from the payment gateway.
-     * @returns {Promise<Order>} - Returns the updated order after verification.
-     * @access Public (called via payment success webhook or redirect handler)
-     */
+        if (isvariant) {
+            await cartItemRepo.delete({ variantId: Number(itemId) })
+        } else {
+            await cartItemRepo.delete({ product: { id: Number(itemId) } })
+        }
+    }
+
+
+
+
     async verifyPayment(orderId: number, transactionId: string, responseData: any): Promise<Order> {
         // Fetch order by ID and transaction ID, including all required relations
         const order = await this.orderRepository.findOne({
@@ -845,12 +1185,13 @@ export class OrderService {
             responseData
         );
 
-        // Update payment and order status based on verification result
-        order.paymentStatus = isSuccessful ? PaymentStatus.PAID : PaymentStatus.UNPAID;
-        order.status = isSuccessful ? OrderStatus.CONFIRMED : OrderStatus.PENDING;
-
-        // Store full payment gateway response for auditing/debugging
-        // order.gatewayResponse = JSON.stringify(responseData);
+        if (isSuccessful) {
+            order.paymentStatus = PaymentStatus.PAID;
+            order.status = OrderStatus.CONFIRMED;
+        } else {
+            order.paymentStatus = PaymentStatus.UNPAID;
+            order.status = OrderStatus.CANCELLED;
+        }
 
         // Save updated order info
         await this.orderRepository.save(order);
@@ -877,18 +1218,24 @@ export class OrderService {
      * @access Public (called when a user cancels payment)
      */
     async handlePaymentCancel(orderId: number): Promise<void> {
-        // Find the order by ID
-        const order = await this.orderRepository.findOne({ where: { id: orderId } });
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: ['orderItems', 'orderItems.product', 'orderItems.variant'],
+        });
 
-        // If order does not exist, throw 404
         if (!order) {
             throw new APIError(404, 'Order not found');
         }
 
-        // Mark the order's payment status as UNPAID due to cancellation
+        // Restore stock
+        await this.restoreStock(order.orderItems);
+
+        // Mark payment as UNPAID
         order.paymentStatus = PaymentStatus.UNPAID;
 
-        // Save updated status to database
+        // Optionally, update order status to CANCELLED
+        order.status = OrderStatus.CANCELLED;
+
         await this.orderRepository.save(order);
     }
 
@@ -964,9 +1311,6 @@ export class OrderService {
     async getCustomerOrders(): Promise<Order[]> {
         return this.orderRepository.find({
             relations: ['orderedBy', 'orderItems', 'shippingAddress', 'orderItems.product', 'orderItems.variant'],
-            where: {
-                status: Not(OrderStatus.PENDING)
-            },
             order: { createdAt: "desc" }
         })
     };
@@ -1029,7 +1373,8 @@ export class OrderService {
             where: {
                 id: orderId,
                 orderedById: userId,
-                status: OrderStatus.PENDING,
+                status: OrderStatus.CONFIRMED,
+                paymentStatus: PaymentStatus.UNPAID
             },
             relations: ['orderedBy'],
         });
@@ -1116,7 +1461,7 @@ export class OrderService {
     async getOrderDetails(orderId: number): Promise<Order> {
         // Find the order by ID with all related entities loaded
         const order = await this.orderRepository.findOne({
-            where: { id: orderId, status: Not(OrderStatus.PENDING) },
+            where: { id: orderId },
             relations: [
                 'orderedBy',
                 'shippingAddress',
@@ -1147,11 +1492,19 @@ export class OrderService {
      * @throws {APIError} - Throws 404 if order not found, 400 if invalid status provided.
      * @access Admin or authorized users
      */
-    async updateOrderStatus(orderId: number, status: IUpdateOrderStatusRequest['status']): Promise<Order> {
-        // Retrieve the order with related entities by orderId
+    async updateOrderStatus(
+        orderId: number,
+        status: IUpdateOrderStatusRequest['status']
+    ): Promise<Order> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
-            relations: ['orderedBy', 'shippingAddress', 'orderItems', 'orderItems.product', 'orderItems.vendor'],
+            relations: [
+                'orderedBy',
+                'shippingAddress',
+                'orderItems',
+                'orderItems.product',
+                'orderItems.vendor',
+            ],
         });
 
         if (!order) {
@@ -1159,29 +1512,36 @@ export class OrderService {
         }
 
         const validTransition: Record<OrderStatus, OrderStatus[]> = {
-            [OrderStatus.PENDING]: [OrderStatus.CONFIRMED, OrderStatus.CANCELLED],
-            [OrderStatus.CONFIRMED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
-            [OrderStatus.DELIVERED]: [OrderStatus.CANCELLED],
-            [OrderStatus.CANCELLED]: []
+            [OrderStatus.CONFIRMED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED, OrderStatus.DELAYED],
+            [OrderStatus.DELAYED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
+            [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+            [OrderStatus.DELIVERED]: [OrderStatus.RETURNED],
+            [OrderStatus.RETURNED]: [],
+            [OrderStatus.CANCELLED]: [],
+            [OrderStatus.PENDING]: [],
         };
 
+
         if (order.status !== status && !validTransition[order.status].includes(status)) {
-            throw new APIError(400, `Invalid status transition from ${order.status} to ${status}`);
+            throw new APIError(
+                400,
+                `Invalid status transition from ${order.status} to ${status}`
+            );
         }
 
-        // Update status
         order.status = status;
 
-        if (status === OrderStatus.DELIVERED && order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
-            if (order.paymentStatus !== PaymentStatus.PAID) {
-                order.paymentStatus = PaymentStatus.PAID;
-            }
+        // Handle COD payment update on delivery
+        if (
+            status === OrderStatus.DELIVERED &&
+            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
+            order.paymentStatus !== PaymentStatus.PAID
+        ) {
+            order.paymentStatus = PaymentStatus.PAID;
         }
 
-        // Save updated order
         await this.orderRepository.save(order);
 
-        // Send notification email to user
         if (order.orderedBy?.email) {
             await sendOrderStatusEmail(order.orderedBy.email, order.id, order.status);
         }
@@ -1223,7 +1583,6 @@ export class OrderService {
             .leftJoinAndSelect('orderItems.vendor', 'vendor') // Include vendor info for order items
             .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('orderItems.vendorId = :vendorId', { vendorId }) // Filter by vendorId
-            .andWhere('order.status != :status', { status: OrderStatus.PENDING })
             .orderBy('order.createdAt', 'DESC')
             .getMany(); // Get all matching orders
     }
@@ -1250,7 +1609,6 @@ export class OrderService {
             .leftJoinAndSelect('orderItems.variant', 'variant')
             .where('order.id = :orderId', { orderId }) // Filter by order ID
             .andWhere('orderItems.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status != :status', { status: OrderStatus.PENDING }) // Filter order items by vendor ID
             .getOne();
 
         // Throw error if no such order exists or vendor is not authorized to view it
@@ -1276,7 +1634,7 @@ export class OrderService {
         // Find all orders where orderedById matches the userId
         // Include relations: orderItems, the products within those items, and shipping address
         const orders = await this.orderRepository.find({
-            where: { orderedById: userId, status: Not(OrderStatus.PENDING) },
+            where: { orderedById: userId },
             relations: [
                 'orderItems',
                 'orderItems.product',

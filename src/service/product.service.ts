@@ -20,7 +20,7 @@ import { DealService } from './deal.service';
 import { SubcategoryService } from './subcategory.service';
 import { MulterFile } from '../config/multer.config';
 import { Variant } from '../entities/variant.entity';
-
+import config from '../config/env.config';
 
 /**
  * Service class for handling product-related operations.
@@ -67,8 +67,7 @@ export class ProductService {
         this.subcategoryService = new SubcategoryService();
         this.bannerService = new BannerService();
         this.dealService = new DealService();
-        this.variantRepository = this.dataSource.getRepository(Variant)
-
+        this.variantRepository = this.dataSource.getRepository(Variant)        
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
             api_key: process.env.CLOUDINARY_API_KEY,
@@ -98,6 +97,11 @@ export class ProductService {
         return product;
     }
 
+    private determineOrderStatus(stock: number) {
+        if (stock <= 0) return InventoryStatus.OUT_OF_STOCK;
+        if (stock < 5) return InventoryStatus.LOW_STOCK;
+        return InventoryStatus.AVAILABLE;
+    }
 
 
     async createProduct(
@@ -112,7 +116,7 @@ export class ProductService {
             basePrice,
             discount,
             discountType,
-            status,
+            status, // need to remove this from frontend
             stock,
             dealId,
             bannerId,
@@ -147,6 +151,8 @@ export class ProductService {
             }
         }
 
+        const finalPrice = this.calculateFinalPrice(Number(basePrice), Number(discount), discountType)
+
         // Create product
         const product = this.productRepository.create({
             name,
@@ -154,10 +160,11 @@ export class ProductService {
             basePrice: isVariantProduct ? null : parseFloat(basePrice || '0'),
             discount: parseFloat(discount || '0'),
             discountType: discountType || DiscountType.PERCENTAGE,
-            status: status || InventoryStatus.AVAILABLE,
+            status: this.determineOrderStatus(Number(stock)),
             stock: isVariantProduct ? null : parseInt(stock || '0'),
             subcategoryId,
             vendorId,
+            finalPrice,
             brandId: data.brandId ? parseInt(data.brandId) : null,
             dealId: dealId ? parseInt(dealId) : null,
             bannerId: bannerId ? parseInt(bannerId) : null,
@@ -174,14 +181,15 @@ export class ProductService {
                     const newVariant = this.variantRepository.create({
                         sku: variant.sku,
                         basePrice: parseFloat(variant.basePrice),
-                        discount: parseFloat(variant.discount || '0'),
-                        discountType: variant.discountType || DiscountType.PERCENTAGE,
+                        discount: product.discount || 0,
+                        discountType: product.discountType || DiscountType.PERCENTAGE,
                         attributes: variant.attributes,
                         variantImages: variant.variantImages || [],
                         stock: parseInt(variant.stock),
                         status: variant.status || InventoryStatus.AVAILABLE,
                         productId: savedProduct.id.toString(),
-                        product: savedProduct
+                        product: savedProduct,
+                        finalPrice: this.calculateFinalPrice(Number(variant.basePrice), Number(variant.discount), variant.discountType)
                     });
 
                     return this.variantRepository.save(newVariant);
@@ -194,7 +202,20 @@ export class ProductService {
         return savedProduct;
     }
 
+    // util function to calculate final price after discount 
+    private calculateFinalPrice(basePrice: number, discount: number, discountType: DiscountType) {
+        if (!basePrice || basePrice <= 0) {
+            return 0
+        }
 
+        if (discountType === DiscountType.FLAT) {
+            return Math.max(0, basePrice - discount)
+        }
+
+        if (discountType === DiscountType.PERCENTAGE) {
+            return Math.max(0, basePrice - (basePrice * discount) / 100);
+        }
+    }
 
     async updateProduct(
         authId: number,
@@ -244,7 +265,7 @@ export class ProductService {
         product.basePrice = hasVariantsBool ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
         product.discount = discount !== undefined ? parseFloat(discount.toString()) : product.discount;
         product.discountType = discountType ?? product.discountType;
-        product.status = status ?? product.status;
+        product.status = this.determineOrderStatus(Number(stock));
         product.stock = hasVariantsBool ? null : (stock !== undefined ? parseInt(stock.toString()) : product.stock);
         product.subcategoryId = subcategoryId;
         product.dealId = dealId !== undefined ? parseInt(dealId.toString()) : product.dealId;
@@ -279,7 +300,7 @@ export class ProductService {
                         existingVariant.attributes = variant.attributes;
                         existingVariant.variantImages = variant.variantImages || existingVariant.variantImages;
                         existingVariant.stock = parseInt(variant.stock.toString());
-                        existingVariant.status = variant.status || InventoryStatus.AVAILABLE;
+                        existingVariant.status = this.determineOrderStatus(Number(variant.stock));
                         return this.variantRepository.save(existingVariant);
                     } else {
                         // Create new variant
@@ -291,7 +312,7 @@ export class ProductService {
                             attributes: variant.attributes,
                             variantImages: variant.variantImages || [],
                             stock: parseInt(variant.stock.toString()),
-                            status: variant.status || InventoryStatus.AVAILABLE,
+                            status: this.determineOrderStatus(Number(variant.stock)),
                             productId: productId.toString(),
                             product
                         });
@@ -316,16 +337,31 @@ export class ProductService {
         });
     }
 
-    async filterProducts(params: IProductQueryParams): Promise<Product[]> {
+    async filterProducts(params: IProductQueryParams) {
+        const { page = 1, limit = config.pagination.pageLimit } = params
+
+        const skip = (page - 1) * limit;
+
         const { brandId, categoryId, subcategoryId, dealId, sort = 'all', bannerId } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.subcategory', 'subcategory')
+            .leftJoinAndSelect('subcategory.category', 'category')
             .leftJoinAndSelect('product.brand', 'brand')
-            .leftJoinAndSelect('product.vendor', 'vendor')
+            .leftJoin('product.vendor', 'vendor')
+            .addSelect([
+                'vendor.id',
+                'vendor.businessName',
+                'vendor.districtId',
+                'vendor.createdAt',
+                'vendor.updatedAt'
+            ])
             .leftJoinAndSelect('product.deal', 'deal')
             .leftJoinAndSelect('product.variants', 'variants')
             .where('(product.stock > 0 OR variants.stock > 0)');
+
+        query.skip(skip).take(limit)
+
 
         if (bannerId) {
             const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
@@ -355,9 +391,9 @@ export class ProductService {
             query.andWhere('product.dealId = :dealId', { dealId });
         }
 
-        // Add GROUP BY to avoid Postgres aggregate error
         query.groupBy('product.id')
             .addGroupBy('subcategory.id')
+            .addGroupBy('category.id')
             .addGroupBy('brand.id')
             .addGroupBy('vendor.id')
             .addGroupBy('deal.id')
@@ -393,12 +429,17 @@ export class ProductService {
             query.orderBy('product.created_at', 'DESC');
         }
 
-        return await query.getMany();
+        const [data, total] = await query.getManyAndCount();
+
+        return {
+            data, total, page, limit, totalPages: Math.ceil(total / limit)
+        }
     }
 
-
-    async getAdminProducts(params: IAdminProductQueryParams): Promise<{ products: Product[]; total: number }> {
-        const { page = 1, limit = 7, sort = 'createdAt' } = params;
+    async getAdminProducts(
+        params: IAdminProductQueryParams
+    ): Promise<{ products: Product[]; total: number; page: number; limit: number }> {
+        const { page = 1, limit = 7, sort = 'createdAt', filter } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
@@ -408,30 +449,49 @@ export class ProductService {
                 'product.name',
                 'product.basePrice',
                 'product.stock',
+                'product.productImages',
                 'product.created_at',
                 'vendor.id',
-                'vendor.name',
+                'vendor.businessName',
                 'variants.id',
                 'variants.sku',
                 'variants.basePrice',
                 'variants.stock',
                 'variants.status',
+                'variants.variantImages',
             ]);
 
-        // Sorting
-        if (sort === 'name') {
-            query.orderBy('product.name', 'ASC');
-        } else {
-            query.orderBy('product.created_at', 'DESC');
+        if (filter === 'out_of_stock') {
+            query.andWhere('(product.stock = 0 OR variants.stock = 0)');
         }
 
-        // Pagination
+        switch (sort) {
+            case 'name':
+                query.orderBy('product.name', 'ASC');
+                break;
+            case 'oldest':
+                query.orderBy('product.created_at', 'ASC');
+                break;
+            case 'newest':
+                query.orderBy('product.created_at', 'DESC');
+                break;
+            case 'price_low_high':
+                query.orderBy('product.basePrice', 'ASC');
+                break;
+            case 'price_high_low':
+                query.orderBy('product.basePrice', 'DESC');
+                break;
+            default:
+                query.orderBy('product.created_at', 'DESC');
+                break;
+        }
+
         const skip = (page - 1) * limit;
         query.skip(skip).take(limit);
 
         const [products, total] = await query.getManyAndCount();
 
-        return { products, total };
+        return { products, total, page, limit };
     }
 
 

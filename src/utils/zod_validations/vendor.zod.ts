@@ -10,19 +10,22 @@ export const vendorSignupSchema = z.object({
     email: z.string().email(),
     password: z.string().min(8).max(25),
     phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/),
+    telePhone: z.string().optional(),
     district: z.string().min(1),
+
+    
     businessRegNumber: z.string().min(1, 'Business registration number is required'),
     taxNumber: z.string().optional(),
     taxDocuments: z.array(z.string().url()).min(1),
     citizenshipDocuments: z.array(z.string().url()).optional(),
     chequePhoto: z.string().url().min(1),
-    bankDetails: z.object({
-        accountName: z.string().min(1),
-        bankName: z.string().min(1),
-        accountNumber: z.string().min(1),
-        bankBranch: z.string().min(1),
-        bankCode: z.string().optional(),
-    }),
+
+    // bank detalil
+    accountName: z.string().min(1),
+    bankName: z.string().min(1),
+    accountNumber: z.string().min(1),
+    bankBranch: z.string().min(1),
+    bankCode: z.string().optional(),
 });
 
 
@@ -76,18 +79,5 @@ export const resetPasswordSchema = z.object({
  * Schema to update vendor info.
  * Fields optional except for id which must be a positive integer.
  */
-export const updateVendorSchema = z.object({
-    id: z.number().int().positive('ID must be a positive integer'),
-    businessName: z.string()
-        .min(3, 'Business name must be at least 3 characters long')
-        .max(100, 'Business name must not exceed 100 characters')
-        .optional(),
-    email: z.string().email('Invalid email format').optional(),
-    businessAddress: z.string()
-        .min(10, 'Business address must be at least 10 characters long')
-        .max(500, 'Business address must not exceed 500 characters')
-        .optional(),
-    phoneNumber: z.string()
-        .regex(/^\+?[1-9]\d{1,14}$/, 'Invalid phone number format')
-        .optional(),
-});
+export const updateVendorSchema = vendorSignupSchema.partial();
+

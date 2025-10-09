@@ -2,7 +2,6 @@ import { Router } from "express";
 import { BannerController } from "../controllers/banner.controller";
 import {
 	authMiddleware,
-	isAdmin,
 	isAdminOrStaff,
 	validateZod,
 } from "../middlewares/auth.middleware";
@@ -72,10 +71,6 @@ router.post(
 	"/",
 	authMiddleware,
 	isAdminOrStaff,
-	upload.fields([
-		{ name: "desktopImage", maxCount: 1 },
-		{ name: "mobileImage", maxCount: 1 },
-	]),
 	validateZod(createBannerSchema),
 	bannerController.createBanner.bind(bannerController)
 );
@@ -140,10 +135,6 @@ router.patch(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
-	upload.fields([
-		{ name: "desktopImage", maxCount: 1 },
-		{ name: "mobileImage", maxCount: 1 },
-	]),
 	validateZod(updateBannerSchema),
 	bannerController.updateBanner.bind(bannerController)
 );

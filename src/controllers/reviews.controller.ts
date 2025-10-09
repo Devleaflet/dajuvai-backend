@@ -3,6 +3,7 @@ import { APIError } from '../utils/ApiError.utils';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { ReviewService } from '../service/review.service';
 import { ICreateReviewRequest } from '../interface/review.interface';
+import { UpdateReviewInput } from '../utils/zod_validations/review.zod';
 
 /**
  * @class ReviewController
@@ -81,6 +82,95 @@ export class ReviewController {
                 // Handle unexpected errors with generic 500 response
                 res.status(500).json({ success: false, message: 'Internal server error' });
             }
+        }
+    }
+
+    async updateProductReview(req: AuthRequest<{ id: string }, {}, Partial<UpdateReviewInput>, {}>, res: Response) {
+        try {
+            const reviewId = req.params.id;
+
+            const data = req.body;
+
+            const reviewExists = await this.reviewService.findReviewById(Number(reviewId))
+
+            console.log("-------------Review-----------------")
+            console.log(reviewExists)
+            console.log(reviewExists.userId)
+            console.log(req.user)
+
+
+            if (!reviewExists) {
+                throw new APIError(404, "Reveiw does not exists")
+            }
+
+            const userId = req.user?.id;
+
+            if (reviewExists.userId !== userId) {
+                throw new APIError(403, "You can only edit your own reviews")
+            }
+
+            const updateReview = await this.reviewService.updateReview(Number(reviewId), data)
+
+            res.status(200).json({
+                success: true,
+                msg: "review updated succesfully",
+                data: updateReview
+            })
+
+
+        } catch (err) {
+            console.error(err);
+
+            if (err instanceof APIError) {
+                return res.status(err.status || 400).json({
+                    success: false,
+                    message: err.message || "Something went wrong",
+                });
+            }
+
+            // fallback for other errors
+            res.status(err.status || 500).json({
+                success: false,
+                message: err.message || "Internal Server Error",
+            });
+        }
+    }
+
+
+    async deleteReview(req: AuthRequest<{ id: string }, {}, {}, {}>, res: Response) {
+        try {
+            const reviewId = req.params.id;
+
+            const reviewExists = await this.reviewService.findReviewById(Number(reviewId))
+
+            if (!reviewExists) {
+                throw new APIError(404, "Reveiw does not exists")
+            }
+
+            const deleteReview = await this.reviewService.deleteReview(Number(reviewId))
+
+
+            res.status(200).json({
+                success: true,
+                msg: "Review deleted successfully"
+            })
+
+
+        } catch (err) {
+            console.error(err);
+
+            if (err instanceof APIError) {
+                return res.status(err.status || 400).json({
+                    success: false,
+                    message: err.message || "Something went wrong",
+                });
+            }
+
+            // fallback for other errors
+            res.status(err.status || 500).json({
+                success: false,
+                message: err.message || "Internal Server Error",
+            });
         }
     }
 }

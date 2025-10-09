@@ -133,13 +133,18 @@ export class VendorController {
                 email,
                 password,
                 phoneNumber,
+                telePhone,
                 district,
                 businessRegNumber,
                 taxNumber,
                 taxDocuments,
                 citizenshipDocuments,
                 chequePhoto,
-                bankDetails,
+                accountName,
+                bankBranch,
+                bankCode,
+                accountNumber,
+                bankName
             } = parsed.data;
 
             const verificationToken = TokenUtils.generateToken();
@@ -168,17 +173,18 @@ export class VendorController {
                 email,
                 password: hashedPassword,
                 phoneNumber,
+                telePhone,
                 district,
                 businessRegNumber,
                 taxNumber,
                 taxDocuments, // array
                 citizenshipDocuments, // optional array
                 chequePhoto,
-                accountName: bankDetails.accountName,
-                bankName: bankDetails.bankName,
-                accountNumber: bankDetails.accountNumber,
-                bankBranch: bankDetails.bankBranch,
-                bankCode: bankDetails.bankCode,
+                accountName: accountName,
+                bankName: bankName,
+                accountNumber: accountNumber,
+                bankBranch: bankBranch,
+                bankCode: bankCode,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
             });
@@ -481,6 +487,35 @@ export class VendorController {
     }
 
 
+    async authVendor(req: VendorAuthRequest, res: Response) {
+        try {
+            const vendor = req.vendor;
+
+            const getVendor = await this.vendorService.findVendorById(vendor.id);
+
+            if (!getVendor) {
+                throw new APIError(404, "Vendor doesnot exists")
+            }
+
+            console.log("----------Vendor------------")
+            console.log(getVendor)
+
+            res.status(200).json({
+                success: true,
+                vendor: getVendor
+            })
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                throw new APIError(503, 'Vendor service temporarily unavailable');
+            }
+        }
+    }
+
+
     /**
      * PUT /api/vendor/:id
      * Updates vendor profile data such as business name, phone number, etc.
@@ -490,36 +525,52 @@ export class VendorController {
      * @returns {Promise<void>} - 200 OK with updated vendor data or appropriate error
      * @access Authenticated Vendor
      */
-    async updateVendor(req: VendorAuthRequest<{ id: string }, {}, IUpdateVendorRequest>, res: Response): Promise<void> {
+    async updateVendor(req: VendorAuthRequest<{ id: string }, {}, Partial<IUpdateVendorRequest>>, res: Response): Promise<void> {
         try {
-            // Validate request body using Zod schema
-            const parsed = updateVendorSchema.safeParse(req.body);
-            if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
-                return;
+            console.log("--------update vendor req body---------: ", req.body)
+            const id = req.params.id;
+
+            const findVendorById = await this.vendorService.findVendorById(Number(id))
+
+            if (!findVendorById) {
+                throw new APIError(404, "Vendor doesnot exists")
             }
 
-            // Validate vendor ID and ensure ID consistency
-            const id = parseInt(req.params.id, 10);
-            if (isNaN(id)) {
-                throw new APIError(400, 'Invalid vendor ID');
-            }
-            if (parsed.data.id !== id) {
-                throw new APIError(400, 'ID in body must match URL parameter');
+            const data: Partial<IUpdateVendorRequest> = req.body;
+
+            let updateVendorData = { ...data }
+
+            if (data.district) {
+                const districtExists = await this.districtService.findDistrictByName(data.district);
+
+                if (!districtExists) {
+                    throw new APIError(404, "District doesnot exists")
+                }
+
+                updateVendorData = {
+                    ...data,
+                    districtId: districtExists.id
+                }
             }
 
-            // Update vendor with validated data
-            const updateData: IUpdateVendorRequest = { ...parsed.data, id };
-            const vendor = await this.vendorService.updateVendorService(id, updateData);
-            if (!vendor) {
-                throw new APIError(404, 'Vendor not found');
-            }
+            const updateVendor = await this.vendorService.updateVendorService(Number(id), updateVendorData)
+
+            console.log("------Updated vendor details-----------")
+            console.log(updateVendor)
 
             res.status(200).json({
                 success: true,
                 message: 'Vendor updated successfully',
-                data: { id: vendor.id, businessName: vendor.businessName, email: vendor.email, phoneNumber: vendor.phoneNumber },
+                data: {
+                    id: updateVendor.id,
+                    businessName: updateVendor.businessName,
+                    email: updateVendor.email,
+                    phoneNumber: updateVendor.phoneNumber,
+                    telephone: updateVendor.telePhone,
+                    district: updateVendor.district
+                },
             });
+
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });

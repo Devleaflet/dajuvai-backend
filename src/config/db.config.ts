@@ -38,7 +38,7 @@ const AppDataSource = new DataSource({
   type: "postgres",
   url: process.env.DATABASE_URL,
   synchronize: true,
-  logging: true,
+  logging: false,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
     Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory],
   migrations: [],

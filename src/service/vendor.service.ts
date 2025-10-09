@@ -5,6 +5,7 @@ import { IVendorSignupRequest, IUpdateVendorRequest } from '../interface/vendor.
 import { Address } from '../entities/address.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from './district.service';
+import { District } from '../entities/district.entity';
 
 /**
  * Service for managing vendor-related operations such as
@@ -62,6 +63,7 @@ export class VendorService {
                 email,
                 password,
                 phoneNumber,
+                telePhone,
                 district,
                 businessRegNumber,
                 taxNumber,
@@ -91,6 +93,7 @@ export class VendorService {
                 email,
                 password,
                 phoneNumber,
+                telePhone,
                 district: districtEntity,
                 districtId: districtEntity.id,
                 businessRegNumber,
@@ -151,7 +154,10 @@ export class VendorService {
      */
     async getVendorByIdService(id: number): Promise<Vendor | null> {
         // Straightforward ID-based lookup
-        return await this.vendorRepository.findOne({ where: { id } });
+        return await this.vendorRepository.findOne({
+            select: ["id", "businessName", "district", "districtId", "email", "phoneNumber", "telePhone"],
+            where: { id }
+        });
     }
 
     /**
@@ -170,16 +176,25 @@ export class VendorService {
      * @param updateData - Partial data for vendor update.
      * @returns {Promise<Vendor | null>} Updated vendor or null if vendor does not exist.
      */
-    async updateVendorService(id: number, updateData: IUpdateVendorRequest): Promise<Vendor | null> {
-        // Verify vendor exists before update
-        const vendor = await this.vendorRepository.findOne({ where: { id } });
-        if (!vendor) return null;
+    async updateVendorService(id: number, updateData: Partial<IUpdateVendorRequest>) {
+        let district: District;
+        if (updateData.district) {
+            const districtDb = AppDataSource.getRepository(District);
 
-        // Merge new data into existing vendor entity
-        this.vendorRepository.merge(vendor, updateData);
+            district = await districtDb.findOne({
+                where: {
+                    id: updateData.districtId
+                }
+            })
+        }
 
-        // Save updated vendor back to DB
-        return await this.vendorRepository.save(vendor);
+        const updateFinalData = {
+            ...updateData,
+            district: district
+        }
+        const updateDistrict = this.vendorRepository.update(id, updateFinalData)
+
+        return this.vendorRepository.findOne({ where: { id } })
     }
 
 

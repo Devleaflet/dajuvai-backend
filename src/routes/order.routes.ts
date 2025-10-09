@@ -175,6 +175,7 @@ const orderController = new OrderController();
 router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
 //authMiddleware,
 
+
 /**
  * @swagger
  * /api/order:
@@ -1906,5 +1907,11 @@ router.get("/customer/history", authMiddleware, orderController.getCustomerOrder
 router.post("/search/merchant-transactionId", authMiddleware, orderController.getOrderDetailByMerchantTransactionId.bind(orderController));
 
 router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
+
+router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderController));
+
+router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderController));
+
+router.post("/check-promo", authMiddleware, orderController.checkAvailablePromocode.bind(orderController));
 
 export default router;

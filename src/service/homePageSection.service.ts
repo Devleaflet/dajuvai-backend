@@ -4,6 +4,12 @@ import { Product } from "../entities/product.entity";
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import { ICreateHomepageSectionInput, IUpdateHomePageSectionInput } from "../interface/homepage.interface";
+import { ProductSource } from "../entities/banner.entity";
+import { CategoryService } from "./category.service";
+import { SubcategoryService } from "./subcategory.service";
+import { DealService } from "./deal.service";
+import { AuthProvider } from "../entities/user.entity";
+import { Subcategory } from "../entities/subcategory.entity";
 
 /**
  * Service to manage homepage sections including create, update, delete,
@@ -14,6 +20,10 @@ import { ICreateHomepageSectionInput, IUpdateHomePageSectionInput } from "../int
 export class HomePageSectionService {
     private homepageSectionRepository: Repository<HomePageSection>;
     private productRepository: Repository<Product>;
+    private categoryService: CategoryService;
+    private subcategoryService: SubcategoryService;
+    private dealService: DealService;
+    private subcategoyrRepo: Repository<Subcategory>;
 
     /**
      * Initializes repositories for HomePageSection and Product entities.
@@ -21,6 +31,10 @@ export class HomePageSectionService {
     constructor() {
         this.homepageSectionRepository = AppDataSource.getRepository(HomePageSection);
         this.productRepository = AppDataSource.getRepository(Product);
+        this.categoryService = new CategoryService()
+        this.subcategoryService = new SubcategoryService();
+        this.dealService = new DealService();
+        this.subcategoyrRepo = AppDataSource.getRepository(Subcategory);
     }
 
     /**
@@ -32,27 +46,53 @@ export class HomePageSectionService {
      * @access Admin
      */
     async createHomePageSection(data: ICreateHomepageSectionInput) {
-        const { title, isActive, productIds } = data;
-
-        if (!title) throw new APIError(400, 'Title is required');
-
-        // Check if title already exists
-        const existingSection = await this.homepageSectionRepository.findOne({ where: { title } });
-        if (existingSection) {
-            throw new APIError(409, 'Section with this title already exists');
-        }
-
-        // Validate product IDs
-        const products = await this.productRepository.findBy({ id: In(productIds) });
-        if (products.length !== productIds.length) {
-            throw new APIError(404, 'Some product IDs are invalid');
-        }
+        const { title, isActive, productIds, productSource, selectedCategoryId, selectedDealId, selectedSubcategoryId } = data;
 
         const section = this.homepageSectionRepository.create({
             title,
-            isActive,
-            products,
-        });
+            productSource,
+            isActive
+        })
+
+        switch (productSource) {
+            case ProductSource.MANUAL:
+
+                const products = await this.productRepository.findBy({ id: In(productIds) })
+                if (products.length !== productIds.length) {
+                    throw new APIError(404, "Some product IDs are invalid");
+                }
+
+                section.products = products
+                break;
+
+
+            case ProductSource.CATEGORY:
+
+                const category = await this.categoryService.getCategoryById(selectedCategoryId);
+
+                section.selectedCategory = category
+
+                break;
+
+            case ProductSource.SUBCATEGORY:
+
+                const subcategory = await this.subcategoryService.handleGetSubcategoryById(selectedSubcategoryId);
+
+                section.selectedSubcategory = subcategory;
+
+                break;
+
+            case ProductSource.DEAL:
+
+                const deal = await this.dealService.handleGetDealById(selectedDealId);
+
+                section.selectedDeal = deal;
+
+                break;
+
+            default:
+                throw new APIError(400, "Invalid product source")
+        }
 
         return await this.homepageSectionRepository.save(section);
     }
@@ -66,41 +106,147 @@ export class HomePageSectionService {
      * @access Admin
      */
     async updateHomePageSection(data: IUpdateHomePageSectionInput) {
-        const { sectionId, title, isActive, productIds } = data;
+        const {
+            sectionId,
+            title,
+            isActive,
+            productSource,
+            productIds,
+            selectedCategoryId,
+            selectedSubcategoryId,
+            selectedDealId,
+        } = data;
+
+        console.log("➡️ Update request data:", data);
 
         const section = await this.homepageSectionRepository.findOne({
             where: { id: sectionId },
-            relations: ['products']
+            relations: ["products", "selectedCategory", "selectedSubcategory", "selectedDeal"],
         });
 
         if (!section) {
-            throw new APIError(404, "Home page section not found");
+            console.error(`❌ Section ${sectionId} not found`);
+            throw new APIError(404, "Homepage section not found");
         }
 
-        // Check for title conflict
-        if (title && title !== section.title) {
-            const existingSection = await this.homepageSectionRepository.findOne({ where: { title } });
-            if (existingSection) {
-                throw new APIError(409, 'Section with this title already exists');
-            }
+        console.log("✅ Found section before update:", {
+            id: section.id,
+            title: section.title,
+            productSource: section.productSource,
+            selectedCategory: section.selectedCategory?.id,
+            selectedSubcategory: section.selectedSubcategory?.id,
+            selectedDeal: section.selectedDeal?.id,
+            products: section.products?.map((p) => p.id),
+        });
+
+        // update simple fields
+        if (title) {
+            console.log(`✏️ Updating title: '${section.title}' → '${title}'`);
             section.title = title;
         }
-
         if (isActive !== undefined) {
+            console.log(`✏️ Updating isActive: '${section.isActive}' → '${isActive}'`);
             section.isActive = isActive;
         }
 
-        // Update associated products if provided
-        if (productIds && productIds.length > 0) {
-            const products = await this.productRepository.findBy({ id: In(productIds) });
-            if (products.length !== productIds.length) {
-                throw new APIError(404, 'Some product IDs are invalid');
+        if (productSource !== undefined && productSource !== null) {
+            console.log(`🔄 Updating productSource: '${section.productSource}' → '${productSource}'`);
+            section.productSource = productSource;
+
+            switch (productSource) {
+                case ProductSource.MANUAL: {
+                    console.log("📦 Updating MANUAL products:", productIds);
+                    if (!productIds || productIds.length === 0) {
+                        throw new APIError(400, "At least one product must be selected for manual source");
+                    }
+                    const products = await this.productRepository.findBy({ id: In(productIds) });
+                    console.log("🔎 Found products:", products.map((p) => p.id));
+                    if (products.length !== productIds.length) {
+                        throw new APIError(404, "Some product IDs are invalid");
+                    }
+                    section.products = products;
+                    section.selectedCategory = null;
+                    section.selectedSubcategory = null;
+                    section.selectedDeal = null;
+                    break;
+                }
+
+                case ProductSource.CATEGORY: {
+                    console.log("📂 Updating CATEGORY with categoryId:", selectedCategoryId);
+                    if (!selectedCategoryId) throw new APIError(400, "Category is required");
+                    const category = await this.categoryService.getCategoryById(selectedCategoryId);
+                    console.log("🔎 Found category:", category?.id);
+                    if (!category) throw new APIError(404, "Selected category does not exist");
+                    section.selectedCategory = category;
+                    section.products = [];
+                    section.selectedSubcategory = null;
+                    section.selectedDeal = null;
+                    break;
+                }
+
+                case ProductSource.SUBCATEGORY: {
+                    console.log("📂 Updating SUBCATEGORY with categoryId:", selectedCategoryId, "subcategoryId:", selectedSubcategoryId);
+                    if (!selectedCategoryId || !selectedSubcategoryId) {
+                        throw new APIError(400, "Both category and subcategory are required");
+                    }
+                    const subcategory = await this.subcategoyrRepo.findOne({
+                        where: { id: selectedSubcategoryId, category: { id: selectedCategoryId } },
+                        relations: ["category"],
+                    });
+                    console.log("🔎 Found subcategory:", subcategory?.id, " (belongs to category:", subcategory?.category?.id, ")");
+                    if (!subcategory) throw new APIError(404, "Selected subcategory does not exist or does not belong to category");
+                    section.selectedCategory = subcategory.category;
+                    section.selectedSubcategory = subcategory;
+                    section.products = [];
+                    section.selectedDeal = null;
+                    break;
+                }
+
+                case ProductSource.DEAL: {
+                    console.log("💰 Updating DEAL with dealId:", selectedDealId);
+                    if (!selectedDealId) throw new APIError(400, "Deal is required");
+                    const deal = await this.dealService.getDealById(selectedDealId);
+                    console.log("🔎 Found deal:", deal?.id);
+                    if (!deal) throw new APIError(404, "Selected deal does not exist");
+                    section.selectedDeal = deal;
+                    section.products = [];
+                    section.selectedCategory = null;
+                    section.selectedSubcategory = null;
+                    break;
+                }
+
+                default: {
+                    console.error("❌ Invalid productSource received:", productSource);
+                    throw new APIError(400, "Invalid product source");
+                }
             }
-            section.products = products;
         }
 
-        return await this.homepageSectionRepository.save(section);
+        console.log("✅ Section after update (before save):", {
+            id: section.id,
+            title: section.title,
+            productSource: section.productSource,
+            selectedCategory: section.selectedCategory?.id,
+            selectedSubcategory: section.selectedSubcategory?.id,
+            selectedDeal: section.selectedDeal?.id,
+            products: section.products?.map((p) => p.id),
+        });
+
+        const saved = await this.homepageSectionRepository.save(section);
+
+        console.log("💾 Saved section:", {
+            id: saved.id,
+            title: saved.title,
+            productSource: saved.productSource,
+            selectedCategory: saved.selectedCategory?.id,
+            selectedSubcategory: saved.selectedSubcategory?.id,
+            selectedDeal: saved.selectedDeal?.id,
+            products: saved.products?.map((p) => p.id),
+        });
+
+        return saved;
     }
+
 
     /**
      * Retrieves all homepage sections, optionally including inactive ones.
@@ -110,14 +256,68 @@ export class HomePageSectionService {
      * @access Public/Admin
      */
     async getAllHomePageSections(includeInactive: boolean = false) {
-        const whereCondition = includeInactive ? undefined : { isActive: true };
-
-        return await this.homepageSectionRepository.find({
-            where: whereCondition,
-            relations: ['products', 'products.variants'],
-            order: { id: 'ASC' }
+        const sections = await this.homepageSectionRepository.find({
+            where: includeInactive ? {} : { isActive: true },
+            relations: [
+                'products',
+                'products.variants',
+                'selectedCategory',
+                'selectedSubcategory',
+                'selectedDeal',
+            ],
+            order: { id: 'ASC' },
         });
+
+        const homepageSections = await Promise.all(
+            sections.map(async (section) => {
+                let products: Product[] = [];
+
+                switch (section.productSource) {
+                    case ProductSource.DEAL:
+                        if (section.selectedDeal?.id) {
+                            products = await this.productRepository.find({
+                                where: { dealId: section.selectedDeal.id },
+                                relations: ['variants'],
+                            });
+                        }
+                        break;
+
+                    case ProductSource.CATEGORY:
+                        if (section.selectedCategory?.id) {
+                            products = await this.productRepository
+                                .createQueryBuilder('product')
+                                .leftJoinAndSelect('product.variants', 'variants')
+                                .leftJoin('product.subcategory', 'subcategory')
+                                .leftJoin('subcategory.category', 'category')
+                                .where('category.id = :id', { id: section.selectedCategory.id })
+                                .getMany();
+                        }
+                        break;
+
+                    case ProductSource.SUBCATEGORY:
+                        if (section.selectedSubcategory?.id) {
+                            products = await this.productRepository.find({
+                                where: { subcategoryId: section.selectedSubcategory.id },
+                                relations: ['variants'],
+                            });
+                        }
+                        break;
+
+                    case ProductSource.MANUAL:
+                    default:
+                        products = section.products || [];
+                        break;
+                }
+
+                return { ...section, products };
+            })
+        );
+
+        return homepageSections;
     }
+
+
+
 
     /**
      * Retrieves a homepage section by its ID.
@@ -130,15 +330,47 @@ export class HomePageSectionService {
     async getHomePageSectionById(sectionId: number) {
         const section = await this.homepageSectionRepository.findOne({
             where: { id: sectionId },
-            relations: ['products', 'products.variants']
+            relations: ['products', 'products.variants'],
         });
 
+        console.log(section)
         if (!section) {
             throw new APIError(404, "Home page section not found");
         }
 
-        return section;
+        let products: Product[] = [];
+
+        switch (section.productSource) {
+            case ProductSource.DEAL:
+                products = await this.productRepository.find({
+                    where: { dealId: section.selectedDeal?.id },
+                    relations: ['variants'],
+                });
+                break;
+
+            case ProductSource.CATEGORY:
+                products = await this.productRepository.find({
+                    where: { subcategory: { category: { id: section.selectedCategory?.id } } },
+                    relations: ['variants'],
+                });
+                break;
+
+            case ProductSource.SUBCATEGORY:
+                products = await this.productRepository.find({
+                    where: { subcategoryId: section.selectedSubcategory?.id },
+                    relations: ['variants'],
+                });
+                break;
+
+            case ProductSource.MANUAL:
+            default:
+                products = section.products;
+                break;
+        }
+
+        return { ...section, products };
     }
+
 
     /**
      * Deletes a homepage section by its ID.

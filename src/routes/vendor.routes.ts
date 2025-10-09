@@ -436,6 +436,9 @@ router.get('/:vendorId/products', productController.getProductsByVendorId.bind(p
  */
 router.get('/:id', vendorController.getVendorById.bind(vendorController));
 
+// /api/vendors/auth/vendor
+router.get('/auth/vendor', vendorAuthMiddleware, isVendor, vendorController.authVendor.bind(vendorController));
+
 /**
  * @swagger
  * /api/vendors/signup:

@@ -2,6 +2,7 @@ import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { uploadMiddleware } from "../config/multer.config";
+import { authMiddleware, combinedAuthMiddleware, isAdminOrStaff, isAdminOrVendor } from "../middlewares/auth.middleware";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
@@ -132,7 +133,8 @@ const productController = new ProductController(AppDataSource);
  */
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
-productRouter.delete("/:id", productController.deleteProductById.bind(productController));
+// /api/product/:id
+productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productController.deleteProductById.bind(productController));
 
 /**
  * @swagger
@@ -199,6 +201,10 @@ productRouter.delete("/:id", productController.deleteProductById.bind(productCon
  *                   example: Image upload failed
  */
 productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
+
+
+// /api/product/admin/products
+productRouter.get("/admin/products", authMiddleware, isAdminOrStaff, productController.getAdminProducts.bind(productController))
 
 export default productRouter;
 

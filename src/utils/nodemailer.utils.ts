@@ -83,28 +83,97 @@ export const sendCustomerOrderEmail = async (
     quantity: number;
     price: number;
     variantAttributes?: Record<string, string> | null;
+    vendorDistrict?: string | null;
+    vendorName?: string | null; // optional if you want vendor name
   }[],
+  userDistrict?: string | null,
   subject = "Your Order Has Been Placed"
 ) => {
   const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
-  // Generate rows dynamically
-  const rows = items.map(
-    (item) => `
-      <tr>
-        <td style="padding:8px; border:1px solid #ddd;">
-          <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
-          ${item.variantAttributes
-        ? `<br>${Object.entries(item.variantAttributes)
-          .map(([key, val]) => `${key}: ${val}`)
-          .join(", ")}`
-        : ""}
-        </td>
-        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${item.quantity}</td>
-        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${item.price}</td>
-        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(item.price * item.quantity).toFixed(2)}</td>
-      </tr>
-    `
+  // Group items by vendorDistrict
+  const groupedByVendor: Record<string, typeof items> = {};
+  for (const item of items) {
+    const vendorKey = item.vendorDistrict || "Unknown District";
+    if (!groupedByVendor[vendorKey]) {
+      groupedByVendor[vendorKey] = [];
+    }
+    groupedByVendor[vendorKey].push(item);
+  }
+
+  // Generate vendor sections
+  const vendorSections = Object.entries(groupedByVendor).map(
+    ([vendorDistrict, vendorItems]) => {
+      const rows = vendorItems.map((item) => {
+        console.log("Comparing districts ->", {
+          userDistrict,
+          vendorDistrict: item.vendorDistrict,
+        });
+
+        let deliveryEstimate = "3-5 days";
+        if (userDistrict && item.vendorDistrict) {
+          if (
+            userDistrict.trim().toLowerCase() ===
+            item.vendorDistrict.trim().toLowerCase()
+          ) {
+            deliveryEstimate = "2-3 days";
+          }
+        }
+
+        return `
+          <tr>
+            <td style="padding:8px; border:1px solid #ddd;">
+              <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
+              ${item.variantAttributes
+            ? `<br>${Object.entries(item.variantAttributes)
+              .map(([key, val]) => `${key}: ${val}`)
+              .join(", ")}`
+            : ""
+          }
+            </td>
+            <td style="padding:8px; border:1px solid #ddd; text-align:center;">${item.quantity
+          }</td>
+            <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${item.price
+          }</td>
+            <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(
+            item.price * item.quantity
+          ).toFixed(2)}</td>
+            <td style="padding:8px; border:1px solid #ddd; text-align:center;">${deliveryEstimate}</td>
+          </tr>
+        `;
+      });
+
+      const vendorSubtotal = vendorItems.reduce(
+        (sum, i) => sum + i.price * i.quantity,
+        0
+      );
+
+      return `
+        <h4 style="margin-top:20px;">Vendor District: ${vendorDistrict}</h4>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:20px;">
+          <thead>
+            <tr style="background-color:#f0f0f0;">
+              <th style="padding:8px; border:1px solid #ddd; text-align:left;">Product</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
+              <th style="padding:8px; border:1px solid #ddd; text-align:center;">Delivery</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.join("")}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Vendor Subtotal:</td>
+              <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${vendorSubtotal.toFixed(
+        2
+      )}</td>
+            </tr>
+          </tfoot>
+        </table>
+      `;
+    }
   );
 
   const mailOptions = {
@@ -120,28 +189,20 @@ export const sendCustomerOrderEmail = async (
                 <tr>
                   <td style="text-align:center;">
                     <h2 style="color:#2E7D32; margin:0;">Order Confirmation ✅</h2>
-                    <p style="font-size:16px; margin:10px 0;">Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.</p>
+                    <p style="font-size:16px; margin:10px 0;">
+                      Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.
+                    </p>
                   </td>
                 </tr>
 
                 <tr>
                   <td>
                     <h3 style="margin-top:20px; margin-bottom:10px;">Order Summary</h3>
+                    ${vendorSections.join("")}
                     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
-                      <thead>
-                        <tr style="background-color:#f0f0f0;">
-                          <th style="padding:8px; border:1px solid #ddd; text-align:left;">Product</th>
-                          <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
-                          <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
-                          <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        ${rows.join("")}
-                      </tbody>
                       <tfoot>
                         <tr>
-                          <td colspan="3" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
+                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
                           <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${total.toFixed(2)}</td>
                         </tr>
                       </tfoot>
@@ -165,15 +226,11 @@ export const sendCustomerOrderEmail = async (
           </tr>
         </table>
       </body>
-      </html>
-    `
+    `,
   };
 
   await transporter.sendMail(mailOptions);
 };
-
-
-
 
 
 interface VendorOrderItem {

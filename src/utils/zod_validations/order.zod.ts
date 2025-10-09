@@ -29,7 +29,7 @@ const OrderStatusEnum = z.enum([
 /**
  * Enum schema for supported payment methods.
  */
-const PaymentMethodEnum = z.enum(['ONLINE_PAYMENT', 'CASH_ON_DELIVERY', "KHALTI", "ESEWA"]);
+const PaymentMethodEnum = z.enum(['ONLINE_PAYMENT', 'CASH_ON_DELIVERY', "KHALTI", "ESEWA", "NPX"]);
 
 /**
  * Shipping address validation schema.

@@ -7,8 +7,6 @@ import { createCategorySchema, updateCategorySchema } from '../utils/zod_validat
 import { SubcategoryController } from '../controllers/subcategory.controller';
 import { CategoryController } from '../controllers/category.controller';
 import { createSubCategorySchema, updateSubcategorySchema } from '../utils/zod_validations/subcategory.zod';
-import { ProductUpdateSchema } from '../utils/zod_validations/product.zod';
-import { DataSource } from 'typeorm';
 import AppDataSource from '../config/db.config';
 
 const router = Router();

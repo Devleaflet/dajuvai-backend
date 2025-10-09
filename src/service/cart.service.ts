@@ -5,7 +5,7 @@ import { Product } from '../entities/product.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
-import { DiscountType } from '../entities/product.enum';
+import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 
 /**
@@ -64,7 +64,9 @@ export class CartService {
                 where: { id: variantId.toString(), productId: productId.toString() },
             });
             if (!variant) throw new APIError(404, 'Variant not found');
-            if (variant.status !== 'AVAILABLE' || variant.stock < quantity) {
+            console.log("---------------Variant------------------")
+            console.log(variant)
+            if (variant.status === 'OUT_OF_STOCK'  || variant.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${variant.stock} available for this variant`);
             }
 
@@ -74,12 +76,13 @@ export class CartService {
         } else {
             // Handle non-variant product
             if (product.hasVariants) {
-                throw new APIError(400, 'Variant required for this product');
+                throw new APIError(400, 'Please select a variant before proceeding.');
             }
             if (!product.basePrice || product.stock === undefined) {
                 throw new APIError(400, 'Product must have basePrice and stock');
             }
-            if (product.status !== 'AVAILABLE' || product.stock < quantity) {
+
+            if (product.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${product.stock} available`);
             }
 
@@ -177,12 +180,10 @@ export class CartService {
         if (cartItem.variantId) {
             const variant = await this.variantRepository.findOne({ where: { id: cartItem.variantId.toString() } });
             if (!variant) throw new APIError(404, 'Associated variant not found');
-            if (variant.status !== 'AVAILABLE') throw new APIError(400, 'Variant is not available');
         } else {
             const product = await this.productRepository.findOne({ where: { id: cartItem.product.id } });
             if (!product) throw new APIError(404, 'Associated product not found');
             if (product.hasVariants) throw new APIError(400, 'Cart item references a product that requires a variant');
-            if (product.status !== 'AVAILABLE') throw new APIError(400, 'Product is not available');
         }
 
         // Handle decrease or remove

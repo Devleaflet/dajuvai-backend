@@ -13,19 +13,12 @@ export enum OrderStatus {
     DELIVERED = 'DELIVERED',
 }
 
-export enum PaymentStatus {
-    PENDING = 'PENDING',
-    COMPLETED = 'COMPLETED',
-    FAILED = 'FAILED',
-    CASH_ON_DELIVERY = 'CASH_ON_DELIVERY',
-}
-
 @Entity('order_items')
 export class OrderItem {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @ManyToOne(() => Product, (product) => product.orderItems, { onDelete: "CASCADE"})
+    @ManyToOne(() => Product, (product) => product.orderItems, { onDelete: "CASCADE" })
     @JoinColumn({ name: 'productId' })
     product: Product;
 

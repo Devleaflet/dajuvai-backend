@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { User } from "../entities/user.entity";
 import { LessThan, Not } from "typeorm";
 import AppDataSource from "../config/db.config";
-import { OrderStatus, Order } from '../entities/order.entity';
+import { OrderStatus, Order, PaymentStatus } from '../entities/order.entity';
 import { Vendor } from "../entities/vendor.entity";
 
 const userDB = AppDataSource.getRepository(User);
@@ -83,7 +83,7 @@ export const tokenCleanUp = () => {
  *    - Remove order entity from DB, deleting it permanently.
  * 
  * Purpose:
- * - Remove old pending orders that may be abandoned or not processed.
+* - Remove old pending orders that may be abandoned or not processed.
  * - Keep order data clean and avoid clutter.
  */
 export const orderCleanUp = () => {
@@ -95,7 +95,8 @@ export const orderCleanUp = () => {
             // Find all PENDING orders created more than 24 hours ago
             const pendingOrders = await orderDB.find({
                 where: {
-                    status: OrderStatus.PENDING,
+                    status: OrderStatus.CONFIRMED,
+                    paymentStatus:PaymentStatus.UNPAID,
                     createdAt: LessThan(thresholdDate),
                 },
                 relations: ['orderItems'], // Include related order items if needed for cascade

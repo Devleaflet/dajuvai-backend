@@ -13,6 +13,9 @@ export class Variant {
     @Column({ type: 'decimal', precision: 8, scale: 2 })
     basePrice: number;
 
+    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
+    finalPrice: number; 
+
     @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
     discount: number;
 
@@ -22,7 +25,7 @@ export class Variant {
     @Column({ type: 'jsonb', nullable: true })
     attributes: { [key: string]: string };
 
-    @Column({ type: 'text', array: true, default: '{}' })
+    @Column({ type: 'text', array: true })
     variantImages: string[];
 
     @Column({ type: 'integer' })

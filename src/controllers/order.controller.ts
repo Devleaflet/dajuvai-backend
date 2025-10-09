@@ -3,12 +3,15 @@ import { OrderService } from '../service/order.service';
 import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
 import { APIError } from '../utils/ApiError.utils';
-import { User, UserRole } from '../entities/user.entity';
+import { UserRole } from '../entities/user.entity';
 import { findUserByEmail, findUserById, getUserByIdService } from '../service/user.service';
 import { sendCustomerOrderEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
 import { VendorService } from '../service/vendor.service';
-import { copyFileSync } from 'fs';
-import { add } from 'winston';
+import { PaymentService } from '../service/payment.service';
+import { PaymentMethod } from '../entities/order.entity';
+import AppDataSource from '../config/db.config';
+import { Vendor } from '../entities/vendor.entity';
+import { In, Repository } from 'typeorm';
 
 
 /**
@@ -18,10 +21,14 @@ import { add } from 'winston';
 export class OrderController {
     private orderService: OrderService;
     private vendorService: VendorService;
+    private paymentService: PaymentService;
+    private vendorRepository: Repository<Vendor>;
 
     constructor() {
+        this.paymentService = new PaymentService();
         this.orderService = new OrderService();
         this.vendorService = new VendorService();
+        this.vendorRepository = AppDataSource.getRepository(Vendor);
     }
 
     /**
@@ -34,114 +41,122 @@ export class OrderController {
     async createOrder(req: AuthRequest<{}, {}, IOrderCreateRequest>, res: Response): Promise<void> {
         try {
             if (!req.user) {
-                throw new APIError(401, 'User not authenticated');
+                throw new APIError(401, "User not authenticated");
             }
 
-            console.log("------------Logged in user details ---------------")
-            console.log(req.user)
-
             const userId = req.user.id;
-
             const userexists = await findUserById(userId);
 
             if (!userexists) {
-                throw new APIError(404, "User doesnot exists")
+                throw new APIError(404, "User doesnot exists");
             }
 
             const data = req.body;
-            console.log("----------------data--------------------")
-            console.log(data)
-            // const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(20, req.body);
 
-            // Call service to create order and possibly get payment redirect URL
-            const { order, redirectUrl, vendorids, useremail } = await this.orderService.createOrder(req.user.id, data);
+            // Call service to create order
+            const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
+                await this.orderService.createOrder(req.user.id, data);
 
-            console.log("------------Order-----------------")
-            console.log(order)
+            console.log("---------------Esewa redirect------------------");
+            console.log(esewaRedirectUrl);
+            console.log(order.orderItems);
 
-            console.log("---------user email------------")
-            console.log(useremail)
-            // send customer email
-            // await sendCustomerOrderEmail(
-            //     useremail,
-            //     order.id,
-            //     order.orderItems.map(item => ({
-            //         name: item.product.name,
-            //         sku: item.variant?.sku || null,
-            //         quantity: item.quantity,
-            //         price: item.price,
-            //         variantAttributes: item.variant?.attributes || null
-            //     }))
-            // )
+            // send email to vendor and customer only when payment method is COD
+            if (order.paymentMethod == PaymentMethod.CASH_ON_DELIVERY) {
+                const userDistrict = userexists.address.district || null;
 
-            const orderItems = order.orderItems
+                console.log("-------User district-------------");
+                console.log(userDistrict);
 
-            console.log("--------------Order items----------------")
-            console.log(orderItems);
+                // extract vendor ids
+                const vendorIds = order.orderItems.map((item) => item.vendorId);
+                console.log("Vendor IDs:", vendorIds);
 
-            // send vendor email 
-            for (const vendorId of vendorids) {
+                // remove duplicates
+                const uniqueVendorIds = [...new Set(vendorIds)];
 
-                // Filter items that belong to this vendor
-                console.log("----------Vendor ids-------------")
-                console.log(vendorId)
-                const itemsForVendor = orderItems
-                    .filter(item => item.vendorId === vendorId)
-                    .map(item => ({
-                        name: item.product.name,
-                        sku: item.variant?.sku || null,
-                        quantity: item.quantity,
-                        price: item.price,
-                        variantAttributes: item.variant?.attributes || null
-                    }));
+                // fetch vendors
+                const vendors = await this.vendorRepository.find({
+                    where: { id: In(uniqueVendorIds) },
+                    relations: ["district"], 
+                });
+                // send customer email
+                await sendCustomerOrderEmail(
+                    useremail,
+                    order.id,
+                    order.orderItems.map((item) => {
+                        const vendor = vendors.find((v) => v.id === item.vendorId);
+                        return {
+                            name: item?.product?.name,
+                            sku: item.variant?.sku || null,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null,
+                            vendorDistrict: vendor?.district?.name || null,
+                        };
+                    }),
+                    userDistrict
+                );
 
+                const orderItems = order.orderItems;
 
-                if (itemsForVendor.length === 0) continue;
+                // send vendor email
+                for (const vendorId of vendorids) {
+                    // Filter items that belong to this vendor
+                    console.log("----------Vendor ids-------------");
+                    console.log(vendorId);
 
-                // findVendorByEmail
-                const vendor = await this.vendorService.findVendorById(vendorId)
+                    const itemsForVendor = orderItems
+                        .filter((item) => item.vendorId === vendorId)
+                        .map((item) => ({
+                            name: item?.product?.name,
+                            sku: item.variant?.sku || null,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null,
+                        }));
 
-                console.log("----------Vendor email-------------")
-                console.log(vendor.email)
+                    if (itemsForVendor.length === 0) continue;
 
-                // Send email to this vendor
-                const userexists = await findUserById(userId);
+                    // findVendorByEmail
+                    const vendor = await this.vendorService.findVendorById(vendorId);
 
-                console.log("--------------User detaisl before sendign dmail to vendor ---------------------")
-                console.log(userexists.fullName);
-                console.log(userexists.phoneNumber);
-                console.log(userexists.email);
-                console.log(userexists.address.city);
-                console.log(userexists.address.district);
-                console.log(userexists.address.localAddress);
-                console.log(userexists.address.landmark);
+                    console.log("----------Vendor email-------------");
+                    console.log(vendor.email);
 
+                    // Send email to this vendor
+                    console.log(
+                        "--------------User details before sending email to vendor ---------------------"
+                    );
+                    console.log(userexists.fullName);
+                    console.log(userexists.phoneNumber);
+                    console.log(userexists.email);
+                    console.log(userexists.address.city);
+                    console.log(userexists.address.district);
+                    console.log(userexists.address.localAddress);
+                    console.log(userexists.address.landmark);
 
-                // await sendVendorOrderEmail(vendor.email, order.paymentMethod, order.id, itemsForVendor, {
-                //     name: userexists.fullName,
-                //     phone: userexists.phoneNumber,
-                //     email: userexists.email,
-                //     city: userexists.address.city,
-                //     district: userexists.address.district,
-                //     localAddress: userexists.address.localAddress,
-                //     landmark: userexists.address.landmark
-                // });
-                // name: string;
-                // phone: string;
-                // email ?: string;
-                // city ?: string;
-                // district ?: string;
-                // localAddress ?: string;
-                // landmark ?: string;
+                    await sendVendorOrderEmail(
+                        vendor.email,
+                        order.paymentMethod,
+                        order.id,
+                        itemsForVendor,
+                        {
+                            name: userexists.fullName,
+                            phone: userexists.phoneNumber,
+                            email: userexists.email,
+                            city: userexists.address.city,
+                            district: userexists.address.district,
+                            localAddress: userexists.address.localAddress,
+                            landmark: userexists.address.landmark,
+                        }
+                    );
+                }
             }
 
-            console.log("---------------Req body ----------------------")
-            console.log(req.body)
-            console.log(order);
-
-            if (redirectUrl) {
+            if (esewaRedirectUrl) {
                 // Payment redirection needed
-                res.status(200).json({ success: true, data: order, redirectUrl });
+                res.status(200).json({ success: true, data: order, esewaRedirectUrl });
             } else {
                 // Order created without payment redirect
                 res.status(201).json({ success: true, data: order });
@@ -157,6 +172,7 @@ export class OrderController {
                     success: false,
                     message: error.message,
                 });
+                return;
             }
 
             // For other unexpected errors
@@ -166,17 +182,15 @@ export class OrderController {
                 timestamp: new Date().toISOString(),
             });
 
-            const isDev = false;
+            const isDev = true;
             res.status(500).json({
                 success: false,
-                message: isDev
-                    ? error instanceof Error
-                        ? error.message
-                        : 'Unknown error'
-                    : 'Internal server error',
+                message:
+                    isDev && error instanceof Error ? error.message : "Internal server error",
             });
         }
     }
+
 
     /**
      * @desc Handle successful payment notification for an order
@@ -622,6 +636,51 @@ export class OrderController {
                 console.log(error)
                 res.status(500).json({ success: false, msg: "Internal server error" })
             }
+        }
+    }
+
+    async esewaPaymentSuccess(req: AuthRequest, res: Response) {
+        try {
+            const { token, orderId } = req.body as { token: string, orderId: number };
+            const order = await this.orderService.esewaSuccess(token, orderId);
+            if (order.success) {
+                return res.status(200).json({ success: true, msg: "Payment successful" })
+            }
+            return res.status(400).json({ success: false, msg: "Payment failed" })
+
+        } catch (err) {
+            console.log(err)
+            res.status(500).json({ success: false, msg: "Internal server error" })
+        }
+    }
+
+    async esewaPaymentFailed(req: AuthRequest, res: Response) {
+        try {
+            const { orderId } = req.body as { orderId: number };
+            const order = await this.orderService.esewaFailed(orderId);
+            if (order.success) {
+                return res.status(200).json({ success: true, msg: "Payment failed" })
+            }
+            return res.status(400).json({ success: false, msg: "Payment not found" })
+
+        } catch (err) {
+            console.log(err)
+            res.status(500).json({ success: false, msg: "Internal server error" })
+        }
+    }
+
+    async checkAvailablePromocode(req: AuthRequest, res: Response) {
+        try {
+            const { promoCode } = req.body as { promoCode: string };
+            let userId = req.user?.id;
+            const promo = await this.orderService.checkAvailablePromocode(promoCode, userId);
+            if (promo) {
+                return res.status(200).json({ success: true, data: promo })
+            }
+            return res.status(400).json({ success: false, msg: "Promo code not found" })
+        } catch (err) {
+            console.log(err)
+            res.status(500).json({ success: false, msg: "Internal server error" })
         }
     }
 }

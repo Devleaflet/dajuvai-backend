@@ -20,6 +20,9 @@ export class Vendor {
     @Column()
     phoneNumber: string;
 
+    @Column({ nullable: true })
+    telePhone: string;
+
     @ManyToOne(() => District, district => district.vendors, { eager: true })
     @JoinColumn({ name: 'districtId' })
     district: District;

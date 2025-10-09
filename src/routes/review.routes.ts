@@ -1,6 +1,6 @@
 import { Router } from 'express';
-import { authMiddleware, validateZod } from '../middlewares/auth.middleware';
-import { createReviewSchema } from '../utils/zod_validations/review.zod';
+import { authMiddleware, canDeleteReview, canReviewProduct, validateZod } from '../middlewares/auth.middleware';
+import { createReviewSchema, updateReviewSchema } from '../utils/zod_validations/review.zod';
 import { ReviewController } from '../controllers/reviews.controller';
 
 const router = Router();
@@ -11,7 +11,7 @@ const reviewController = new ReviewController();
  * /api/reviews:
  *   post:
  *     summary: Create a new review for a product
- *     description: Allows an authenticated user to create a review for a product.
+ *     description:  Allows an authenticated user to create a review for a product they have purchased, user can only review a product once
  *     tags: [Reviews]
  *     security:
  *       - bearerAuth: []
@@ -78,7 +78,7 @@ const reviewController = new ReviewController();
  *         description: Internal server error
  */
 
-router.post('/', authMiddleware, validateZod(createReviewSchema), reviewController.createReview.bind(reviewController));
+router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProduct, reviewController.createReview.bind(reviewController));
 
 /**
  * @swagger
@@ -135,5 +135,9 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), reviewControll
  *         description: Internal server error
  */
 router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewController));
+
+router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), reviewController.updateProductReview.bind(reviewController))
+
+router.delete("/:id", authMiddleware, canDeleteReview, reviewController.deleteReview.bind(reviewController));
 
 export default router;

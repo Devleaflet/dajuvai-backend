@@ -12,11 +12,11 @@ export class WishlistItem {
     @JoinColumn({ name: 'wishlist_id' })
     wishlist: Wishlist;
 
-    @ManyToOne(() => Product, { onDelete: 'SET NULL' })
+    @ManyToOne(() => Product, { onDelete: 'CASCADE' })
     @JoinColumn({ name: 'product_id' })
     product: Product;
 
-    @ManyToOne(() => Variant, { nullable: true })
+    @ManyToOne(() => Variant, { nullable: true, onDelete:"CASCADE" })
     @JoinColumn({ name: 'variantId' })
     variant?: Variant;
 

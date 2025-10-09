@@ -436,7 +436,7 @@ export class UserController {
 
                 // Save updated user and send verification email
                 await saveUser(existingUser);
-                // await sendVerificationEmail(email, 'Email Verification', verificationToken);
+                await sendVerificationEmail(email, 'Email Verification', verificationToken);
 
                 res.status(200).json({
                     success: true,

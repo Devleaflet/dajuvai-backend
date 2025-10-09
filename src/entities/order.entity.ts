@@ -5,10 +5,13 @@ import { OrderItem } from "./orderItems.entity";
 
 
 export enum OrderStatus {
-    PENDING = "PENDING",
     CONFIRMED = "CONFIRMED",
+    PENDING = "PENDING",
+    DELAYED = "DELAYED",
+    SHIPPED = "SHIPPED",
+    DELIVERED = "DELIVERED",
     CANCELLED = "CANCELLED",
-    DELIVERED = "DELIVERED"
+    RETURNED = "RETURNED"
 }
 
 export enum PaymentStatus {
@@ -21,7 +24,8 @@ export enum PaymentMethod {
     ONLINE_PAYMENT = "ONLINE_PAYMENT",
     CASH_ON_DELIVERY = "CASH_ON_DELIVERY",
     KHALIT = "KHALTI",
-    ESEWA = "ESEWA"
+    ESEWA = "ESEWA",
+    NPX = "NPX"
 }
 
 @Entity('orders')
@@ -42,6 +46,10 @@ export class Order {
     @Column('decimal', { precision: 8, scale: 2 })
     shippingFee: number;
 
+    @Column({ nullable: true })
+    isBuyNow?: boolean
+
+
     @Column({
         type: "enum",
         enum: PaymentStatus,
@@ -58,7 +66,7 @@ export class Order {
     @Column({
         type: "enum",
         enum: OrderStatus,
-        default: OrderStatus.PENDING
+        default: OrderStatus.CONFIRMED
     })
     status: OrderStatus;
 

@@ -4,6 +4,7 @@ import crypto from 'crypto';
 import { Order, PaymentMethod } from '../entities/order.entity';
 
 export class PaymentService {
+    
     // Base URL for the Nepal Payment Gateway sandbox environment
     private baseUrl = 'https://merchantsandbox.nepalpayment.com/api/merchant/v2';
 
@@ -120,7 +121,7 @@ export class PaymentService {
             orderId,
             status: responseData.status,
             amount: responseData.amount,
-            // Use the timestamp from response or current time if missing
+            // Use the timestamp from response or current time 
             timestamp: responseData.timestamp || new Date().toISOString(),
         };
 
@@ -164,6 +165,17 @@ export class PaymentService {
 
         // Generate SHA-256 hash of the signature string and return it as a hex digest
         return crypto.createHash('sha256').update(signatureString).digest('hex');
+    }
+
+    
+
+    async esewaFailure(orderId:number){
+        try{
+            
+        }catch(err){
+            console.log("Error", err)
+            throw new APIError(500, 'Esewa payment verification failed');
+        }
     }
 
 }
