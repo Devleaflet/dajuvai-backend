@@ -372,7 +372,6 @@ adminDashboardRouter.get("/vendors-sales-amount", authMiddleware, isAdminOrStaff
  */
 adminDashboardRouter.get("/top-products", authMiddleware, isAdminOrStaff, adminDashboardController.getTopProducts.bind(adminDashboardController));
 
-
 /**
  * @swagger
  * /api/admin/dashboard/todays-sales:
