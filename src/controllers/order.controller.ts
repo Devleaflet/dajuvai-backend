@@ -12,6 +12,7 @@ import { PaymentMethod } from '../entities/order.entity';
 import AppDataSource from '../config/db.config';
 import { Vendor } from '../entities/vendor.entity';
 import { In, Repository } from 'typeorm';
+import { NotificationService } from '../service/notification.service';
 
 
 /**
@@ -23,12 +24,14 @@ export class OrderController {
     private vendorService: VendorService;
     private paymentService: PaymentService;
     private vendorRepository: Repository<Vendor>;
+    private notificationService: NotificationService;
 
     constructor() {
         this.paymentService = new PaymentService();
         this.orderService = new OrderService();
         this.vendorService = new VendorService();
         this.vendorRepository = AppDataSource.getRepository(Vendor);
+        this.notificationService = new NotificationService()
     }
 
     /**
@@ -57,6 +60,9 @@ export class OrderController {
             const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
                 await this.orderService.createOrder(req.user.id, data);
 
+            // send notification 
+            await this.notificationService.notifyOrderPlaced(order);
+
             console.log("---------------Esewa redirect------------------");
             console.log(esewaRedirectUrl);
             console.log(order.orderItems);
@@ -78,7 +84,7 @@ export class OrderController {
                 // fetch vendors
                 const vendors = await this.vendorRepository.find({
                     where: { id: In(uniqueVendorIds) },
-                    relations: ["district"], 
+                    relations: ["district"],
                 });
                 // send customer email
                 await sendCustomerOrderEmail(
@@ -417,6 +423,12 @@ export class OrderController {
             const { status } = req.body as IUpdateOrderStatusRequest;
 
             const updatedOrder = await this.orderService.updateOrderStatus(orderId, status);
+
+
+            // send notification
+            await this.notificationService.notifyOrderStatusUpdated(updatedOrder);
+
+        
             res.status(200).json({ success: true, data: updatedOrder });
         } catch (error) {
             if (error instanceof APIError) {
