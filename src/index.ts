@@ -123,3 +123,14 @@ AppDataSource.initialize()
         // Log any errors during DB connection setup
         console.error("Error during Data Source initialization", error);
     });
+
+
+
+    // token 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJkYWp1dmFpMTA2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc2MDUzNTE4OCwiZXhwIjoxNzYwNTQyMzg4fQ.0RqyT7ByuCQnXE9Uc6IRO7WLbQxcHEnwnYcAtmVHO_A
+
+    // admin 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJkYWp1dmFpMTA2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc2MDUzNTUyNiwiZXhwIjoxNzYwNTQyNzI2fQ.SbHSSETqwPlN16zV6fW1HD2p_uBfOORht5fn8SyEO-0
+
+    // vendor token 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MiwiZW1haWwiOiJzZ3MwMjAwOTFAZ21haWwuY29tIiwiYnVzaW5lc3NOYW1lIjoiR1MgU3VwcG9ydHMiLCJpYXQiOjE3NjA1MzUzMTEsImV4cCI6MTc2MDU0MjUxMX0._A1EoDAM0zCYgv_TpEhQ7jLcsHH8pm2NrbAgTyET_HY

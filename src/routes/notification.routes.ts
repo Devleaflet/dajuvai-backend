@@ -14,7 +14,7 @@ const controller = new NotificationController();
 
 /**
  * @swagger
- * /notifications:
+ * /api/notification:
  *   get:
  *     summary: Get all notifications for the authenticated user or vendor
  *     tags: [Notifications]
@@ -69,7 +69,7 @@ notificationRoutes.get("/", combinedAuthMiddleware, controller.getNotificationCo
 
 /**
  * @swagger
- * /notifications/{id}:
+ * /api/notification/{id}:
  *   get:
  *     summary: Get notification details by ID
  *     tags: [Notifications]
@@ -124,7 +124,7 @@ notificationRoutes.get("/:id", controller.getNotificationByIdController.bind(con
 
 /**
  * @swagger
- * /notifications/{id}:
+ * /api/notification/{id}:
  *   patch:
  *     summary: Mark a notification as read
  *     tags: [Notifications]

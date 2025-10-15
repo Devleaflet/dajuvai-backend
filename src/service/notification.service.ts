@@ -9,6 +9,7 @@ import { User, UserRole } from "../entities/user.entity";
 export class NotificationService {
     private notificationRepo = AppDataSource.getRepository(Notification);
     private vendorRepo = AppDataSource.getRepository(Vendor);
+    private orderRepo = AppDataSource.getRepository(Order);
 
 
     async getNotifications(authEntity: User | Vendor): Promise<Notification[]> {
@@ -52,16 +53,24 @@ export class NotificationService {
 
 
     async notifyOrderPlaced(order: Order): Promise<void> {
+        console.log("____________Order---------------")
+        console.log(order)
         const notifications: Notification[] = [];
+
+        const orders = this.orderRepo.findOne({
+            where: { id: order.id },
+            relations: ["orderedBy"]
+        })
+        const fullName = (await orders).orderedBy.fullName
 
         // Notify Admin
         const adminNotification = this.notificationRepo.create({
             title: "New Order Placed",
-            message: `Order #${order.id} has been placed by ${order.orderedBy.fullName}`,
+            message: `Order #${order.id} has been placed by ${fullName}`,
             type: NotificationType.ORDER_PLACED,
             target: NotificationTarget.ADMIN,
             orderId: order.id,
-            createdById: order.orderedBy.id,
+            createdById: (await orders).orderedBy.id,
             // link: `/admin/orders/${order.id}`,
         });
         notifications.push(adminNotification);
@@ -82,7 +91,7 @@ export class NotificationService {
                     target: NotificationTarget.VENDOR,
                     vendorId: vendor.id,
                     orderId: order.id,
-                    createdById: order.orderedBy.id,
+                    createdById: (await orders).orderedBy.id,
                 })
             );
         }
