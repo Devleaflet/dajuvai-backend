@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { OrderService } from '../service/order.service';
 import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
 import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
@@ -261,10 +261,6 @@ export class OrderController {
      */
     async getCustomerOrders(req: AuthRequest, res: Response): Promise<void> {
         try {
-            // if (!req.user) {
-            //     throw new APIError(401, 'User not authenticated');
-            // }
-            // Fetch customer orders from service
             const orders = await this.orderService.getCustomerOrders();
             res.status(200).json({ success: true, data: orders });
         } catch (error) {
@@ -319,6 +315,30 @@ export class OrderController {
             }
 
             throw new APIError(403, 'Forbidden: You do not have access to this order');
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+    async getOrderById(req: Request<{ id: string }>, res: Response) {
+        try {
+            const id = Number(req.params.id);
+
+            const order = await this.orderService.getOrderById(id)
+
+            if (!order) {
+                throw new APIError(404, "Order not  found")
+            }
+
+            res.status(200).json({
+                success: true,
+                data: order
+            })
+            
         } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
@@ -428,7 +448,7 @@ export class OrderController {
             // send notification
             await this.notificationService.notifyOrderStatusUpdated(updatedOrder);
 
-        
+
             res.status(200).json({ success: true, data: updatedOrder });
         } catch (error) {
             if (error instanceof APIError) {

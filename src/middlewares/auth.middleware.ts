@@ -97,7 +97,7 @@ export const combinedAuthMiddleware = async (
     try {
         const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret') as { id: number; email: string; businessName?: string; role?: string;[key: string]: any };
 
-        console.log('Decoded token:', decoded);
+        // //('Decoded token:', decoded);
 
         // Check if token is for a vendor (has businessName)
         if (decoded.businessName) {
@@ -142,7 +142,7 @@ export const combinedAuthMiddleware = async (
 export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response, next: NextFunction): Promise<void> => {
     const vendorToken = req.cookies.vendorToken || req.headers.authorization?.split(' ')[1];
 
-    console.log("request reached vendor auth middleware")
+    // //("request reached vendor auth middleware")
     if (!vendorToken) {
         throw new APIError(401, 'Authentication token is missing');
     }
@@ -158,7 +158,7 @@ export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response
         if (!vendor) {
             throw new APIError(401, 'Vendor not found');
         }
-        console.log("Vendor details: ", vendor)
+        //("Vendor details: ", vendor)
         req.vendor = vendor;
         next();
     } catch (error) {
@@ -200,7 +200,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
             res.status(401).json({ success: false, message: 'User not found. Please log in again.' });
             return;
         }
-        console.log("admin detail:", user)
+        //("admin detail:", user)
         req.user = user;
         next();
     } catch (error) {
@@ -275,14 +275,14 @@ export const isVendorAccountOwnerOrAdminOrStaff = async (
     const loggedInUser = req.vendor || req.user;
 
     if (!loggedInUser) {
-        console.log('No logged-in user or vendor found:', { user: req.user, vendor: req.vendor });
+        //('No logged-in user or vendor found:', { user: req.user, vendor: req.vendor });
         res.status(401).json({ success: false, msg: "Authentication required" });
         return;
     }
 
     const productId = parseInt(req.params.id, 10);
     if (isNaN(productId)) {
-        console.log('Invalid product ID:', req.params.id);
+        //('Invalid product ID:', req.params.id);
         res.status(400).json({ success: false, message: 'Invalid product ID parameter' });
         return;
     }
@@ -300,13 +300,13 @@ export const isVendorAccountOwnerOrAdminOrStaff = async (
                 },
             });
 
-            console.log(`Product details : ${product}`)
+            //(`Product details : ${product}`)
 
             if (product) {
                 isVendorProductOwner = true;
-                console.log('Vendor owns product:', { productId, vendorId: req.vendor.id });
+                //('Vendor owns product:', { productId, vendorId: req.vendor.id });
             } else {
-                console.log('Product not found or not owned by vendor:', { productId, vendorId: req.vendor.id });
+                //('Product not found or not owned by vendor:', { productId, vendorId: req.vendor.id });
             }
         } catch (error) {
             console.error("Error fetching product for ownership check:", error);
@@ -314,14 +314,14 @@ export const isVendorAccountOwnerOrAdminOrStaff = async (
             return;
         }
     } else {
-        console.log('No vendor in request, checking user role:', { userRole: req.user?.role });
+        //('No vendor in request, checking user role:', { userRole: req.user?.role });
     }
 
     if (isVendorProductOwner || isAdminOrStaff) {
-        console.log('Authorization granted:', { isVendorProductOwner, isAdminOrStaff });
+        //('Authorization granted:', { isVendorProductOwner, isAdminOrStaff });
         next();
     } else {
-        console.log('Authorization denied:', { isVendorProductOwner, isAdminOrStaff });
+        //('Authorization denied:', { isVendorProductOwner, isAdminOrStaff });
         res.status(403).json({ success: false, message: "Not authorized to perform this action" });
     }
 };
@@ -335,9 +335,9 @@ export const isVendorAccountOwnerOrAdminOrStaff = async (
  */
 
 export const isAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
-    console.log("req reached is admin middleware")
+    //("req reached is admin middleware")
     if (req.user && req.user.role === UserRole.ADMIN) {
-        console.log(req.user);
+        //(req.user);
         next();
     } else {
         res.status(403).json({ success: false, message: 'Admin access required' });
@@ -353,7 +353,7 @@ export const isAdmin = (req: AuthRequest, res: Response, next: NextFunction) => 
 
 export const isVendor = async (req: VendorAuthRequest, res: Response, next: NextFunction) => {
     if (req.vendor) {
-        console.log(req.vendor)
+        //(req.vendor)
         next();
     } else {
         res.status(403).json({ success: false, message: 'Vendor access required' });
@@ -394,21 +394,12 @@ export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: R
 export const requireUserRole = async (req: AuthRequest, res: Response, next: NextFunction) => {
     if (req.user) {
         if (req.user.role !== UserRole.USER) {
-            console.log("this is error")
+            //("this is error")
             throw new APIError(400, "Only customer accounts can perform this action. .")
         }
-        console.log("error passed")
+        //("error passed")
         next()
     }
-    // if (req.user && req.user.role == UserRole.USER) {
-    //     console.log(req.user.role)
-    //     console.log(UserRole.USER)
-    //     next();
-    // }
-    // res.status(403).json({
-    //     success: false,
-    //     message: "Only customer accounts can perform this action. If you are an admin or vendor, please create a customer account first."
-    // })
 }
 /**
  * Authorizes both admin and vendor roles.
@@ -531,7 +522,7 @@ export const canReviewProduct = async (req: AuthRequest<{}, {}, { productId: str
         next();
 
     } catch (error) {
-        console.log("Can review product middleware error: ", error)
+        //("Can review product middleware error: ", error)
         res.status(500).json({ success: false, message: "Internal server error" });
     }
 }

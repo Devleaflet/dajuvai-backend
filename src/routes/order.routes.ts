@@ -173,7 +173,6 @@ const orderController = new OrderController();
  */
 
 router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
-//authMiddleware,
 
 
 /**
@@ -292,7 +291,6 @@ router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(or
  */
 
 router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getCustomerOrders.bind(orderController)));
-
 
 /**
  * @swagger
@@ -705,6 +703,176 @@ router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.b
  *                   example: "Internal server error"
  */
 router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.getCustomerOrderDetails.bind(orderController)));
+
+/**
+ * @swagger
+ * /api/order/customer/order/{id}:
+ *   get:
+ *     summary: Get order details by order ID 
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - name: orderId
+ *         in: path
+ *         required: true
+ *         description: ID of the order to retrieve
+ *         schema:
+ *           type: integer
+ *           example: 123
+ *     responses:
+ *       200:
+ *         description: Order details fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 123
+ *                     totalPrice:
+ *                       type: number
+ *                       example: 2499.50
+ *                     shippingFee:
+ *                       type: number
+ *                       example: 200
+ *                     status:
+ *                       type: string
+ *                       example: "PENDING"
+ *                     paymentStatus:
+ *                       type: string
+ *                       example: "PENDING"
+ *                     paymentMethod:
+ *                       type: string
+ *                       example: "ESEWA"
+ *                     shippingAddress:
+ *                       type: object
+ *                       properties:
+ *                         city:
+ *                           type: string
+ *                           example: "Kathmandu"
+ *                         district:
+ *                           type: string
+ *                           example: "Lalitpur"
+ *                         streetAddress:
+ *                           type: string
+ *                           example: "Jhamsikhel"
+ *                         province:
+ *                           type: string
+ *                           example: "Bagmati"
+ *                     orderedBy:
+ *                       type: object
+ *                       properties:
+ *                         id:
+ *                           type: integer
+ *                           example: 10
+ *                         name:
+ *                           type: string
+ *                           example: "Aarav Shrestha"
+ *                         email:
+ *                           type: string
+ *                           example: "aarav@example.com"
+ *                     orderItems:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           productId:
+ *                             type: integer
+ *                             example: 88
+ *                           quantity:
+ *                             type: integer
+ *                             example: 3
+ *                           price:
+ *                             type: number
+ *                             example: 799.83
+ *                           vendorId:
+ *                             type: integer
+ *                             example: 5
+ *                           product:
+ *                             type: object
+ *                             properties:
+ *                               name:
+ *                                 type: string
+ *                                 example: "Organic Mustard Oil"
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: 899.99
+ *       400:
+ *         description: Invalid order ID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid order ID"
+ *       401:
+ *         description: Unauthorized - User not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "User not authenticated"
+ *       403:
+ *         description: Forbidden - Not allowed to access this order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Forbidden: You do not have access to this order"
+ *       404:
+ *         description: Order not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Order not found"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ */
+router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind(orderController)));
 
 
 // /**
