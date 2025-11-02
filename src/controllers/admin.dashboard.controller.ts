@@ -4,6 +4,7 @@ import { AdminDashBoardService } from '../service/admin.dashboard.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { LoginInput } from '../utils/zod_validations/user.zod';
 import { truncateSync } from 'fs';
+import { InstanceChecker } from 'typeorm';
 
 /**
  * @class AdminDashboardController
@@ -131,6 +132,28 @@ export class AdminDashboardController {
                 res.status(500).json({
                     success: false,
                     message: 'Error fetching today\'s sales',
+                    error: error.message
+                });
+            }
+        }
+    }
+
+    // product , order, orderitem , variants, category , subcateg
+
+    async getRevenueByCategory(req: AuthRequest<{}, {}, {}, { startDate: string, endDate: string }>, res: Response) {
+        try {
+            const { startDate, endDate } = req.query;
+            const data = await this.adminDashboardService.getRevenueByCategory(startDate, endDate);
+            res.status(200).json({ success: true, data });
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
                     error: error.message
                 });
             }

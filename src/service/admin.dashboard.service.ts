@@ -436,4 +436,30 @@ export class AdminDashBoardService {
             variants: lowStockVariants,
         };
     }
+
+
+
+
+    async getRevenueByCategory(startDate?: string, endDate?: string) {
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder('oi')
+            .select('c.name', 'category')
+            .addSelect('sc.name', 'subcategory')
+            .addSelect('SUM(oi.price * oi.quantity)', 'revenue')
+            .innerJoin('oi.order', 'o')
+            .innerJoin('oi.product', 'p')
+            .leftJoin('p.subcategory', 'sc')
+            .leftJoin('sc.category', 'c')
+            .where('o.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
+            .groupBy('c.name')
+            .addGroupBy('sc.name')
+            .orderBy('revenue', 'DESC');
+
+        if (startDate && endDate) {
+            qb.andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate });
+        }
+
+        return qb.getRawMany();
+    }
+
 }

@@ -426,4 +426,82 @@ adminDashboardRouter.get("/top-products", authMiddleware, isAdminOrStaff, adminD
  */
 adminDashboardRouter.get("/todays-sales", authMiddleware, isAdminOrStaff, adminDashboardController.getTodaysSales.bind(adminDashboardController));
 
+
+/**
+ * @swagger
+ *  /api/admin/dashboard/analytics/revenue-by-category:
+ *   get:
+ *     summary: Get revenue by category
+ *     description: Returns total revenue grouped by category and subcategory. Only orders with paymentStatus "PAID" are included. Optional date filtering is supported.
+ *     tags:
+ *       - Revenue
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date for filtering orders (ISO 8601 format, e.g., 2025-09-01T00:00:00Z)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date for filtering orders (ISO 8601 format, e.g., 2025-09-30T23:59:59Z)
+ *     responses:
+ *       200:
+ *         description: Revenue by category fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       category:
+ *                         type: string
+ *                         example: "Women's Fashion"
+ *                       subcategory:
+ *                         type: string
+ *                         example: "Women's Sunglasses"
+ *                       revenue:
+ *                         type: string
+ *                         example: "900.00"
+ *       400:
+ *         description: Invalid request parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid date range"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Something went wrong"
+ */
+adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardController.getRevenueByCategory.bind(adminDashboardController));
+//authMiddleware, isAdmin, 
 export default adminDashboardRouter;
