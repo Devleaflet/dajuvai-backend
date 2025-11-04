@@ -47,7 +47,8 @@ export class AdminDashBoardService {
         totalCustomers: number;
         totalVendors: number;
         totalProducts: number;
-        totalDeliveredRevenue: number
+        totalDeliveredRevenue: number;
+        totalShippingRevenue: number;
     }> {
         try {
             const [
@@ -57,6 +58,7 @@ export class AdminDashBoardService {
                 totalVendors,
                 totalProducts,
                 totalDeliveredRevenue,
+                totalShippingRevenue
             ] = await Promise.all([
                 this.getTotalSales(),
                 this.getTotalOrders(),
@@ -64,6 +66,7 @@ export class AdminDashBoardService {
                 this.getTotalVendors(),
                 this.getTotalProducts(),
                 this.getTotalDeliveredRevenue(),
+                this.getTotalShippingRevenue(),
             ]);
 
             return {
@@ -73,6 +76,7 @@ export class AdminDashBoardService {
                 totalVendors,
                 totalProducts,
                 totalDeliveredRevenue,
+                totalShippingRevenue
             };
         } catch (error) {
             throw new APIError(500, 'Failed to fetch dashboard statistics: ' + error.message);
@@ -444,7 +448,6 @@ export class AdminDashBoardService {
         const qb = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder('oi')
             .select('c.name', 'category')
-            .addSelect('sc.name', 'subcategory')
             .addSelect('SUM(oi.price * oi.quantity)', 'revenue')
             .innerJoin('oi.order', 'o')
             .innerJoin('oi.product', 'p')
@@ -452,7 +455,6 @@ export class AdminDashBoardService {
             .leftJoin('sc.category', 'c')
             .where('o.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
             .groupBy('c.name')
-            .addGroupBy('sc.name')
             .orderBy('revenue', 'DESC');
 
         if (startDate && endDate) {
@@ -460,6 +462,67 @@ export class AdminDashBoardService {
         }
 
         return qb.getRawMany();
+    }
+
+    async getRevenueBySubcategory(startDate?: string, endDate?: string) {
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder("oi")
+            .select("sc.name", "subcategory")
+            .addSelect("SUM(oi.price * oi.quantity)", "revenue")
+            .innerJoin("oi.order", "o")
+            .innerJoin("oi.product", "p")
+            .leftJoin("p.subcategory", "sc")
+            .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .groupBy("sc.name")
+            .orderBy("revenue", "DESC");
+
+        if (startDate && endDate) {
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        }
+
+        return await qb.getRawMany();
+
+    }
+
+
+
+    async getRevenueByVendor(startDate?: string, endDate?: string) {
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder('oi')
+            .select('v.id', 'vendorId')
+            .addSelect('v.businessName', 'vendorName')
+            .addSelect('SUM(oi.price * oi.quantity)', 'revenue')
+            .innerJoin('oi.order', 'o')
+            .innerJoin('oi.product', 'p')
+            .innerJoin('p.vendor', 'v')
+            .where('o.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
+            .groupBy('v.id')
+            .addGroupBy('v.businessName')
+            .orderBy('revenue', 'DESC');
+
+        if (startDate && endDate) {
+            qb.andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate });
+        }
+
+        return await qb.getRawMany();
+    }
+
+
+
+    async getTotalShippingRevenue(startDate?: string, endDate?: string) {
+        const qb = AppDataSource.getRepository(Order)
+            .createQueryBuilder('o')
+            .select('SUM(o.shippingFee)', 'totalShippingRevenue')
+            .where('o.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' });
+
+        if (startDate && endDate) {
+            qb.andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate });
+        }
+
+        const result = await qb.getRawOne();
+
+        console.log(result)
+        return parseFloat(result.totalShippingRevenue || 0);
     }
 
 }

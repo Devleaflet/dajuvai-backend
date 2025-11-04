@@ -39,6 +39,8 @@ export class AdminDashboardController {
             // Fetch stats from the service layer
             const stats = await this.adminDashboardService.getDashboardStats();
 
+            console.log(stats)
+
             // Send success response with data
             res.status(200).json({ success: true, data: stats });
         } catch (error) {
@@ -145,6 +147,68 @@ export class AdminDashboardController {
             const { startDate, endDate } = req.query;
             const data = await this.adminDashboardService.getRevenueByCategory(startDate, endDate);
             res.status(200).json({ success: true, data });
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+
+    async getRevenueBySubCategory(req: AuthRequest<{}, {}, {}, { startDate: string, endDate: string }>, res: Response) {
+        try {
+            const { startDate, endDate } = req.query;
+            const data = await this.adminDashboardService.getRevenueBySubcategory(startDate, endDate);
+            res.status(200).json({ success: true, data });
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+
+
+
+    async getRevenueByVendor(req: AuthRequest, res: Response) {
+        try {
+            const data = await this.adminDashboardService.getRevenueByVendor();
+            res.status(200).json({
+                success: true,
+                data
+            })
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+    async getTotalShippingRevenue(req: AuthRequest<{}, {}, {}, { startDate: string, endDate: string }>, res: Response) {
+        try {
+            const { startDate, endDate } = req.query;
+            const data = await this.adminDashboardService.getTotalShippingRevenue(startDate, endDate);
+            res.status(200).json({ data });
 
         } catch (error) {
             console.log(error)

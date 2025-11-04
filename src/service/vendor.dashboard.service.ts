@@ -189,4 +189,37 @@ export class VendorDashBoardService {
             data,
         };
     }
+
+
+    async getTopProductsByVendor(vendorId: number, limit = 5, startDate?: string, endDate?: string) {
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder("oi")
+            .select("p.id", "productId")
+            .addSelect("p.name", "productName")
+            .addSelect("SUM(oi.quantity)", "totalquantity")
+            .addSelect("SUM(oi.price * oi.quantity)", "totalSales")
+            .innerJoin("oi.product", "p")
+            .innerJoin("oi.order", "o")
+            .where("oi.vendorId = :vendorId", { vendorId })
+            .andWhere("o.paymentStatus = :status", { status: "PAID" });
+
+        if (startDate && endDate) {
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        }
+
+        qb.groupBy("p.id")
+            .addGroupBy("p.name")
+            .orderBy("totalquantity", "DESC")
+            .limit(limit);
+
+        const rawResult = await qb.getRawMany();
+        const result = rawResult.map(r => ({
+            productId: r.productId,
+            productName: r.productName,
+            totalquantity: Number(r.totalquantity),
+            totalSales: Number(r.totalSales),
+        }));
+
+        return result;
+    }
 }

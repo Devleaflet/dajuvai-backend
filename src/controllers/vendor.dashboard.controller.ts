@@ -4,6 +4,7 @@ import { VendorDashBoardService } from "../service/vendor.dashboard.service"
 import { APIError } from "../utils/ApiError.utils";
 import { Response } from 'express';
 
+
 /**
  * Controller for vendor dashboard related endpoints.
  */
@@ -108,4 +109,28 @@ export class VendorDashboardController {
             }
         }
     }
+
+
+    async getTopSellingProduct(req: VendorAuthRequest, res: Response): Promise<void> {
+        try {
+            const vendor = req.vendor;
+            if (!vendor || !vendor.id) {
+                throw new APIError(401, 'Unauthorized');
+            }
+
+            const topSellingProduct = await this.dashboardService.getTopProductsByVendor(vendor.id);
+            res.status(200).json(topSellingProduct);
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
+
+
+
+
 }
