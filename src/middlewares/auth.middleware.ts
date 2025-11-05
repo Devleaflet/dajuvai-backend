@@ -141,11 +141,15 @@ export const combinedAuthMiddleware = async (
  */
 export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response, next: NextFunction): Promise<void> => {
     const vendorToken = req.cookies.vendorToken || req.headers.authorization?.split(' ')[1];
+    console.log("-------------Vendor token------------")
+    console.log(vendorToken)
 
     // //("request reached vendor auth middleware")
     if (!vendorToken) {
         throw new APIError(401, 'Authentication token is missing');
     }
+
+    console.log("Authorization Header: ", req.headers.authorization);
 
     try {
         const decoded = jwt.verify(vendorToken, process.env.JWT_SECRET || 'your_jwt_secret') as {
