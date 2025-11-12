@@ -320,7 +320,7 @@ paymentRouter.get('/notification', async (req: Request, res: Response) => {
             case 'FAILED':
             case 'CANCELLED':
                 order.paymentStatus = PaymentStatus.UNPAID;
-                order.status = OrderStatus.DELAYED; // Or OrderStatus.CANCELLED if you prefer
+                order.status = OrderStatus.CANCELLED; 
                 console.log(`Order ${order.id} marked as UNPAID due to ${Status}`);
                 break;
 
