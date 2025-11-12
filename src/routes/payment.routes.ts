@@ -236,55 +236,113 @@ paymentRouter.get('/response', (req: Request, res: Response) => {
     res.redirect(`http://localhost:5174/?MerchantTxnId=${MerchantTxnId}&GatewayTxnId=${GatewayTxnId}`);
 });
 
-https://api.dajuvai.com/api/payments/notification
+// https://api.dajuvai.com/api/payments/notification
 // Notification URL (Webhook)   
+// paymentRouter.get('/notification', async (req: Request, res: Response) => {
+//     try {
+
+//         const { MerchantTxnId, GatewayTxnId, Status } = req.query;
+
+//         console.log(req.query);
+
+//         console.log('Payment notification received:', {
+//             MerchantTxnId,
+//             GatewayTxnId,
+//             timestamp: new Date().toISOString(),
+//         });
+
+//         if (!MerchantTxnId || typeof MerchantTxnId !== 'string') {
+//             throw new APIError(400, "Invalid or missing MerchantTxnId")
+//         }
+
+//         const order = await orderDb.findOne({
+//             where: {
+//                 mTransactionId: MerchantTxnId
+//             }
+//         })
+//         if (!order) {
+//             throw new APIError(404, "Order not found")
+//         }
+
+//         const userId = order.orderedById;
+
+//         order.paymentStatus = PaymentStatus.UNPAID;
+//         order.status = OrderStatus.DELAYED;
+
+//         const cartservice = new CartService();
+//         await cartservice.clearCart(userId);
+
+//         await orderDb.save(order);
+
+//         res.send('received');
+//     } catch (error) {
+//         // Handle known API errors
+//         if (error instanceof APIError) {
+//             console.log(error);
+//             res.status(error.status).json({ success: false, message: error.message });
+//         } else {
+//             res.status(500).json({ success: false, message: 'Internal server error' });
+//         }
+//     }
+// });
+
 paymentRouter.get('/notification', async (req: Request, res: Response) => {
     try {
-
         const { MerchantTxnId, GatewayTxnId, Status } = req.query;
 
-        console.log(req.query);
-
-        console.log('Payment notification received:', {
-            MerchantTxnId,
-            GatewayTxnId,
-            timestamp: new Date().toISOString(),
-        });
+        console.log('NPX Payment notification received:', req.query);
+        console.log('Timestamp:', new Date().toISOString());
 
         if (!MerchantTxnId || typeof MerchantTxnId !== 'string') {
-            throw new APIError(400, "Invalid or missing MerchantTxnId")
+            throw new APIError(400, "Invalid or missing MerchantTxnId");
         }
 
         const order = await orderDb.findOne({
-            where: {
-                mTransactionId: MerchantTxnId
-            }
-        })
+            where: { mTransactionId: MerchantTxnId }
+        });
+
         if (!order) {
-            throw new APIError(404, "Order not found")
+            throw new APIError(404, "Order not found");
         }
 
         const userId = order.orderedById;
+        const cartService = new CartService();
 
-        order.paymentStatus = PaymentStatus.PAID;
-        order.status = OrderStatus.DELAYED;
+        // Handle payment status
+        switch ((Status as string).toUpperCase()) {
+            case 'SUCCESS':
+                order.paymentStatus = PaymentStatus.PAID;
+                order.status = OrderStatus.CONFIRMED;
+                await cartService.clearCart(userId); // Clear cart after successful payment
+                console.log(`Order ${order.id} marked as PAID`);
+                break;
 
-        const cartservice = new CartService();
-        await cartservice.clearCart(userId);
+            case 'FAILED':
+            case 'CANCELLED':
+                order.paymentStatus = PaymentStatus.UNPAID;
+                order.status = OrderStatus.DELAYED; // Or OrderStatus.CANCELLED if you prefer
+                console.log(`Order ${order.id} marked as UNPAID due to ${Status}`);
+                break;
+
+            default:
+                console.log(`Order ${order.id} received unknown status: ${Status}`);
+                break;
+        }
 
         await orderDb.save(order);
 
         res.send('received');
     } catch (error) {
-        // Handle known API errors
         if (error instanceof APIError) {
             console.log(error);
             res.status(error.status).json({ success: false, message: error.message });
         } else {
+            console.error('Internal server error in /notification:', error);
             res.status(500).json({ success: false, message: 'Internal server error' });
         }
     }
 });
+
 
 
 export default paymentRouter;
