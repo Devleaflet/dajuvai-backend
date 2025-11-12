@@ -67,7 +67,7 @@ export class ProductService {
         this.subcategoryService = new SubcategoryService();
         this.bannerService = new BannerService();
         this.dealService = new DealService();
-        this.variantRepository = this.dataSource.getRepository(Variant)        
+        this.variantRepository = this.dataSource.getRepository(Variant)
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
             api_key: process.env.CLOUDINARY_API_KEY,
@@ -338,7 +338,7 @@ export class ProductService {
     }
 
     async filterProducts(params: IProductQueryParams) {
-        const { page = 1, limit = config.pagination.pageLimit } = params
+        const { page, limit } = params
 
         const skip = (page - 1) * limit;
 

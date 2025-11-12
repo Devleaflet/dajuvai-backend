@@ -182,7 +182,7 @@ export class ProductController {
             const queryParams = {
                 ...filters,
                 page: Number(page) || 1,
-                limit: Number(limit) || config.pagination.pageLimit,
+                limit: Number(limit) || 40,
             };
 
             const result = await this.productService.filterProducts(queryParams);
