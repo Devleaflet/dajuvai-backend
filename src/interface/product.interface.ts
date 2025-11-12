@@ -20,6 +20,7 @@ export interface IProductQueryParams {
     page: number;
     limit: number;
     isAdmin?: boolean;
+    search?: string;
 }
 
 export interface IAdminProductQueryParams {
