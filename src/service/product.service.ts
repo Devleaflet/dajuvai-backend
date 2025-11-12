@@ -366,7 +366,6 @@ export class ProductService {
             .leftJoinAndSelect('product.variants', 'variants')
             .where('(product.stock > 0 OR variants.stock > 0)');
 
-        // ──────── Filters (unchanged) ────────
         if (bannerId) {
             const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
             if (!banner) throw new APIError(404, 'Banner does not exist');
@@ -400,7 +399,6 @@ export class ProductService {
             );
         }
 
-        // ──────── GROUP BY (required because we select variants) ────────
         qb.groupBy('product.id')
             .addGroupBy('subcategory.id')
             .addGroupBy('category.id')
@@ -409,7 +407,6 @@ export class ProductService {
             .addGroupBy('deal.id')
             .addGroupBy('variants.id');
 
-        // ──────── SORTING – ONE SELECT + orderBy(alias) ────────
         if (sort === 'low-to-high') {
             qb.addSelect(
                 `
@@ -464,7 +461,6 @@ export class ProductService {
             qb.orderBy('product.created_at', 'DESC');
         }
 
-        // ──────── Pagination ────────
         qb.skip(skip).take(limit);
 
         const [data, total] = await qb.getManyAndCount();
