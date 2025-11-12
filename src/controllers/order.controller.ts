@@ -55,6 +55,9 @@ export class OrderController {
             }
 
             const data = req.body;
+            console.log("_________Order__________")
+            console.log(data)
+            console.log("_________Order__________")
 
             // Call service to create order
             const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
@@ -634,6 +637,9 @@ export class OrderController {
             if (!orders) {
                 throw new APIError(404, "Order not found");
             }
+
+            console.log("--------merchant-transactionId----------------")
+            console.log(orders)
 
             const userId = orders.orderedById;
 

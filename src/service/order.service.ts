@@ -325,7 +325,7 @@ export class OrderService {
             status:
                 orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
                     ? OrderStatus.CONFIRMED
-                    : OrderStatus.CONFIRMED,
+                    : OrderStatus.PENDING,
             shippingAddress: address,
             orderItems,
             isBuyNow: Boolean(isBuyNow),
@@ -1218,6 +1218,7 @@ export class OrderService {
      * @access Public (called when a user cancels payment)
      */
     async handlePaymentCancel(orderId: number): Promise<void> {
+        console.log("payment cancel")
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: ['orderItems', 'orderItems.product', 'orderItems.variant'],
@@ -1348,7 +1349,7 @@ export class OrderService {
 
         return order;
     }
-    
+
     async getOrderById(orderId: number): Promise<Order> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
