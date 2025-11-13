@@ -368,7 +368,7 @@ export const sendOrderStatusEmail = async (
         <h2 style="color: #1976d2; text-align: center;">Order Update 📦</h2>
         
         <p style="font-size: 16px; text-align: center;">
-          The status of your order <strong>#${orderId}</strong> has been updated.
+          The status of your order <strong>#${orderId}</strong> has been updated to:.
         </p>
         
         <div style="text-align: center; margin: 20px 0;">
@@ -381,13 +381,6 @@ export const sendOrderStatusEmail = async (
           You can track your order in your account for more details.
         </p>
         
-        <div style="text-align: center; margin-top: 20px;">
-          <a href="${process.env.FRONTEND_URL}/orders/${orderId}" 
-             style="display: inline-block; padding: 10px 18px; border-radius: 6px; background-color: #388e3c; color: white; text-decoration: none; font-weight: bold;">
-            View Order
-          </a>
-        </div>
-        
         <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
         
         <p style="font-size: 12px; color: #888; text-align: center;">
@@ -399,3 +392,16 @@ export const sendOrderStatusEmail = async (
 
   await transporter.sendMail(mailOptions);
 };
+
+
+
+export const userOrderCancelledEmail = (userName: string, orderId: number) => `
+  <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
+    <h2 style="color: #e63946;">Order Cancelled</h2>
+    <p>Hi <strong>${userName}</strong>,</p>
+    <p>Your order <strong>#${orderId}</strong> has been automatically cancelled because the payment wasn’t completed within 15 minutes.</p>
+    <p>If this was a mistake, please place your order again.</p>
+    <br/>
+    <p>Best regards,<br/><strong>Your Shop Team</strong></p>
+  </div>
+`;

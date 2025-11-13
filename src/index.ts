@@ -28,7 +28,7 @@ import adminDashboardRouter from "./routes/admin.dashboard.routes";
 import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
 
 // Utils for scheduled background tasks
-import { orderCleanUp, tokenCleanUp } from "./utils/cronjob.utils";
+import { orderCleanUp, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
@@ -113,6 +113,7 @@ AppDataSource.initialize()
         // Start background cron jobs for token and order cleanup
         tokenCleanUp();
         orderCleanUp();
+        startOrderCleanupJob();
 
         // Start Express server
         app.listen(port, () => {
