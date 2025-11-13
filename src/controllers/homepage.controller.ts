@@ -263,6 +263,7 @@ export class HomePageSectionController {
         }
     };
 
+
     /**
       * @method getHomePageSectionById
       * @route GET /api/homepage-sections/:id
