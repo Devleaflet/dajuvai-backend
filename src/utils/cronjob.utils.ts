@@ -124,11 +124,11 @@ export const orderCleanUp = () => {
 
 // set order status to cancelled if the payment is dealyed formore than 15 minutes incase of esewa and nps 
 export const startOrderCleanupJob = () => {
-    cron.schedule("*/1 * * * *", async () => {
+    cron.schedule("*/5 * * * *", async () => {
         console.log("⏰ [CRON] Checking for unpaid online orders...");
 
         try {
-            const fifteenMinutesAgo = new Date(Date.now() - 1 * 60 * 1000);
+            const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
             console.log(
                 `🕒 [CRON] Cancelling orders created before: ${fifteenMinutesAgo.toISOString()}`
             );
