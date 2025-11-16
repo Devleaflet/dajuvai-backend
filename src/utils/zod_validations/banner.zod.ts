@@ -14,13 +14,10 @@ const baseBannerSchema = z.object({
             errorMap: () => ({ message: 'Invalid banner type' }),
         }),
 
-    // Start date must be a valid ISO 8601 datetime string and must be >= today
+
     startDate: z
         .string()
-        .datetime({ message: 'Invalid start date, use ISO 8601 format (e.g., 2025-06-10T00:00:00Z)' })
-        .refine(date => new Date(date) >= new Date(new Date().setHours(0, 0, 0, 0)), {
-            message: 'Start date must be today or in the future',
-        }),
+        .datetime({ message: 'Invalid start date, use ISO 8601 format (e.g., 2025-06-10T00:00:00Z)' }),
 
     // End date must be a valid ISO 8601 datetime string
     endDate: z
@@ -79,6 +76,13 @@ const baseBannerSchema = z.object({
 
 // Create schema with refinements for validation rules
 export const createBannerSchema = baseBannerSchema
+    .refine(
+        (data) => new Date(data.startDate) >= new Date(new Date().setHours(0, 0, 0, 0)),
+        {
+            message: 'Start date must be today or in the future',
+            path: ['startDate'],
+        }
+    )
     .refine(
         (data) => new Date(data.startDate) <= new Date(data.endDate),
         {

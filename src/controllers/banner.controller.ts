@@ -10,6 +10,7 @@ import { SubcategoryService } from '../service/subcategory.service';
 import { DealService } from '../service/deal.service';
 import { Deal } from '../entities/deal.entity';
 import AppDataSource from '../config/db.config';
+import { throwDeprecation } from 'process';
 
 /**
  * @class BannerController
@@ -223,9 +224,32 @@ export class BannerController {
             // check if banner exists
             const existingBanner = await this.bannerService.getBannerById(Number(id));
             console.log('[updateBanner] existingBanner:', existingBanner);
+
+
             if (!existingBanner) {
                 throw new APIError(404, 'Banner not found');
             }
+
+            const newStartDate = new Date(req.body.startDate);
+            newStartDate.setHours(0, 0, 0, 0)
+
+            const today = new Date();
+
+            today.setHours(0, 0, 0, 0);
+
+
+            const existingStartDate = new Date(existingBanner.startDate);
+            existingStartDate.setHours(0, 0, 0, 0)
+
+            console.log(existingStartDate)
+            console.log(newStartDate)
+
+            if (newStartDate.getTime() !== existingStartDate.getTime()) {
+                if (newStartDate < today) {
+                    throw new APIError(400, "Start date must be today or in the future")
+                }
+            }
+
 
             // validate productSource 
             if (bannerData.productSource) {
