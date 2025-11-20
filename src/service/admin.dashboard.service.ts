@@ -130,7 +130,12 @@ export class AdminDashBoardService {
      * @access Admin
      */
     private async getTotalVendors(): Promise<number> {
-        return this.vendorRepository.count();
+        return this.vendorRepository.count({
+            where: {
+                isVerified: true,
+                isApproved: true
+            }
+        });
     }
 
     /**
