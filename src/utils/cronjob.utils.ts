@@ -6,10 +6,12 @@ import { OrderStatus, Order, PaymentStatus, PaymentMethod } from '../entities/or
 import { sendOrderStatusEmail } from "./nodemailer.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { NotificationService } from "../service/notification.service";
+import { Vendor } from "../entities/vendor.entity";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
 const orderItemRepo = AppDataSource.getRepository(OrderItem);
+const vendorRepo = AppDataSource.getRepository(Vendor);
 
 
 /**
@@ -220,3 +222,24 @@ export const startOrderCleanupJob = () => {
         }
     });
 };
+
+
+
+// un verified vendor  clean up
+export const removeUnverifiedVendors = () => {
+    // run every 12 hrs 
+    cron.schedule("0 0,12 * * *", async () => {
+        try {
+            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const result = await vendorRepo.delete({
+                isVerified: false,
+                createdAt: LessThan(twentyFourHoursAgo),
+            });
+
+            console.log(`Removed ${result.affected} unverified vendors.`);
+            
+        } catch (error) {
+            console.log(error)
+        }
+    })
+}

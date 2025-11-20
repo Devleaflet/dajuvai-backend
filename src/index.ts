@@ -28,7 +28,7 @@ import adminDashboardRouter from "./routes/admin.dashboard.routes";
 import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
 
 // Utils for scheduled background tasks
-import { orderCleanUp, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
+import { orderCleanUp, removeUnverifiedVendors, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
@@ -114,6 +114,7 @@ AppDataSource.initialize()
         tokenCleanUp();
         orderCleanUp();
         startOrderCleanupJob();
+        removeUnverifiedVendors()
 
         // Start Express server
         app.listen(port, () => {
