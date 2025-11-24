@@ -18,9 +18,7 @@ import { CategoryService } from './category.service';
 import { BannerService } from './banner.service';
 import { DealService } from './deal.service';
 import { SubcategoryService } from './subcategory.service';
-import { MulterFile } from '../config/multer.config';
 import { Variant } from '../entities/variant.entity';
-import config from '../config/env.config';
 
 /**
  * Service class for handling product-related operations.
@@ -112,7 +110,8 @@ export class ProductService {
     ): Promise<Product> {
         const {
             name,
-            description,
+            miniDescription,
+            longDescription,
             basePrice,
             discount,
             discountType,
@@ -156,7 +155,8 @@ export class ProductService {
         // Create product
         const product = this.productRepository.create({
             name,
-            description,
+            miniDescription,
+            longDescription,
             basePrice: isVariantProduct ? null : parseFloat(basePrice || '0'),
             discount: parseFloat(discount || '0'),
             discountType: discountType || DiscountType.PERCENTAGE,
@@ -227,7 +227,8 @@ export class ProductService {
     ): Promise<Product> {
         const {
             name,
-            description,
+            miniDescription,
+            longDescription,
             basePrice,
             discount,
             discountType,
@@ -240,6 +241,9 @@ export class ProductService {
             brandId,
             productImages
         } = data;
+
+        console.log(miniDescription)
+        console.log(longDescription)
 
         const whereClause = isAdmin ? { id: productId } : { id: productId, vendor: { id: authId } };
         const product = await this.productRepository.findOne({ where: whereClause, relations: ['variants'] });
@@ -261,7 +265,8 @@ export class ProductService {
 
         // Update product fields
         product.name = name ?? product.name;
-        product.description = description ?? product.description;
+        product.miniDescription = miniDescription ?? product.miniDescription;
+        product.longDescription = longDescription ?? product.longDescription;
         product.basePrice = hasVariantsBool ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
         product.discount = discount !== undefined ? parseFloat(discount.toString()) : product.discount;
         product.discountType = discountType ?? product.discountType;

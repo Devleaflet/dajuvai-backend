@@ -18,7 +18,10 @@ export class Product {
     name: string;
 
     @Column({ nullable: true })
-    description?: string;
+    miniDescription?: string;
+
+    @Column({ nullable: true })
+    longDescription?: string;
 
     // Only used if hasVariants = false
     @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
