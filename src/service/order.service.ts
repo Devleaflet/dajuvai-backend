@@ -325,7 +325,7 @@ export class OrderService {
             status:
                 orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
                     ? OrderStatus.CONFIRMED
-                    : OrderStatus.CONFIRMED,
+                    : OrderStatus.PENDING,
             shippingAddress: address,
             orderItems,
             isBuyNow: Boolean(isBuyNow),
@@ -1218,6 +1218,7 @@ export class OrderService {
      * @access Public (called when a user cancels payment)
      */
     async handlePaymentCancel(orderId: number): Promise<void> {
+        console.log("payment cancel")
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: ['orderItems', 'orderItems.product', 'orderItems.variant'],
@@ -1348,6 +1349,84 @@ export class OrderService {
 
         return order;
     }
+
+    async getOrderById(orderId: number): Promise<Order> {
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                'orderedBy',
+                'shippingAddress',
+                'orderItems',
+                'orderItems.product',
+                'orderItems.vendor',
+            ],
+            select: {
+                id: true,
+                totalPrice: true,
+                shippingFee: true,
+                status: true,
+                paymentStatus: true,
+                paymentMethod: true,
+                createdAt: true,
+
+                orderedBy: {
+                    id: true,
+                    fullName: true,
+                    email: true,
+                    phoneNumber: true,
+                },
+
+                shippingAddress: {
+                    id: true,
+                    province: true,
+                    district: true,
+                    city: true,
+                    localAddress: true,
+                    landmark: true,
+                },
+
+                orderItems: {
+                    id: true,
+                    quantity: true,
+                    price: true,
+
+                    product: {
+                        id: true,
+                        name: true,
+                        productImages: true,
+                    },
+
+                    vendor: {
+                        id: true,
+                        businessName: true,
+                    },
+
+                    variant: {
+                        id: true,
+                        sku: true,
+                        basePrice: true,
+                        finalPrice: true,
+                        discount: true,
+                        discountType: true,
+                        attributes: true,
+                        variantImages: true,
+                        stock: true,
+                        status: true,
+                    },
+                }
+            },
+        })
+        // Handle case when order does not exist
+        if (!order) {
+            throw new APIError(404, 'Order not found');
+        }
+
+        return order;
+    }
+
+
+
+
 
 
 

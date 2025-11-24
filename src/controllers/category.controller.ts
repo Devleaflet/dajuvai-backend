@@ -61,7 +61,7 @@ export class CategoryController {
             // Create category via service
             const category = await this.categoryService.createCategory(parsed.data, user.id, file);
             // Log created category for debugging
-            console.log(category);
+            //(category);
             res.status(201).json({ success: true, data: category });
         } catch (error) {
             // Handle known API errors

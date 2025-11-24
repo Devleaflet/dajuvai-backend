@@ -255,6 +255,68 @@ export class HomePageSectionService {
      * @returns {Promise<HomePageSection[]>} - List of homepage sections with associated products
      * @access Public/Admin
      */
+    // async getAllHomePageSections(includeInactive: boolean = false) {
+    //     const sections = await this.homepageSectionRepository.find({
+    //         where: includeInactive ? {} : { isActive: true },
+    //         relations: [
+    //             'products',
+    //             'products.variants',
+    //             'selectedCategory',
+    //             'selectedSubcategory',
+    //             'selectedDeal',
+    //         ],
+    //         order: { id: 'ASC' },
+    //     });
+
+    //     const homepageSections = await Promise.all(
+    //         sections.map(async (section) => {
+    //             let products: Product[] = [];
+
+    //             switch (section.productSource) {
+    //                 case ProductSource.DEAL:
+    //                     if (section.selectedDeal?.id) {
+    //                         products = await this.productRepository.find({
+    //                             where: { dealId: section.selectedDeal.id },
+    //                             relations: ['variants'],
+    //                         });
+    //                     }
+    //                     break;
+
+    //                 case ProductSource.CATEGORY:
+    //                     if (section.selectedCategory?.id) {
+    //                         products = await this.productRepository
+    //                             .createQueryBuilder('product')
+    //                             .leftJoinAndSelect('product.variants', 'variants')
+    //                             .leftJoin('product.subcategory', 'subcategory')
+    //                             .leftJoin('subcategory.category', 'category')
+    //                             .where('category.id = :id', { id: section.selectedCategory.id })
+    //                             .getMany();
+    //                     }
+    //                     break;
+
+    //                 case ProductSource.SUBCATEGORY:
+    //                     if (section.selectedSubcategory?.id) {
+    //                         products = await this.productRepository.find({
+    //                             where: { subcategoryId: section.selectedSubcategory.id },
+    //                             relations: ['variants'],
+    //                         });
+    //                     }
+    //                     break;
+
+    //                 case ProductSource.MANUAL:
+    //                 default:
+    //                     products = section.products || [];
+    //                     break;
+    //             }
+
+    //             return { ...section, products };
+    //         })
+    //     );
+
+    //     return homepageSections;
+    // }
+
+
     async getAllHomePageSections(includeInactive: boolean = false) {
         const sections = await this.homepageSectionRepository.find({
             where: includeInactive ? {} : { isActive: true },
@@ -272,13 +334,23 @@ export class HomePageSectionService {
             sections.map(async (section) => {
                 let products: Product[] = [];
 
+                const inStockCondition = `
+                (
+                    (product.hasVariants = false AND product.stock > 0)
+                    OR
+                    (product.hasVariants = true AND variants.stock > 0)
+                )
+            `;
+
                 switch (section.productSource) {
                     case ProductSource.DEAL:
                         if (section.selectedDeal?.id) {
-                            products = await this.productRepository.find({
-                                where: { dealId: section.selectedDeal.id },
-                                relations: ['variants'],
-                            });
+                            products = await this.productRepository
+                                .createQueryBuilder('product')
+                                .leftJoinAndSelect('product.variants', 'variants')
+                                .where('product.dealId = :dealId', { dealId: section.selectedDeal.id })
+                                .andWhere(inStockCondition)
+                                .getMany();
                         }
                         break;
 
@@ -290,22 +362,31 @@ export class HomePageSectionService {
                                 .leftJoin('product.subcategory', 'subcategory')
                                 .leftJoin('subcategory.category', 'category')
                                 .where('category.id = :id', { id: section.selectedCategory.id })
+                                .andWhere(inStockCondition)
                                 .getMany();
                         }
                         break;
 
                     case ProductSource.SUBCATEGORY:
                         if (section.selectedSubcategory?.id) {
-                            products = await this.productRepository.find({
-                                where: { subcategoryId: section.selectedSubcategory.id },
-                                relations: ['variants'],
-                            });
+                            products = await this.productRepository
+                                .createQueryBuilder('product')
+                                .leftJoinAndSelect('product.variants', 'variants')
+                                .where('product.subcategoryId = :id', { id: section.selectedSubcategory.id })
+                                .andWhere(inStockCondition)
+                                .getMany();
                         }
                         break;
 
                     case ProductSource.MANUAL:
                     default:
-                        products = section.products || [];
+                        // Filter manually selected products in-memory
+                        products = (section.products || []).filter(
+                            (p) =>
+                            (p.hasVariants
+                                ? p.variants?.some((v) => v.stock > 0)
+                                : p.stock > 0)
+                        );
                         break;
                 }
 

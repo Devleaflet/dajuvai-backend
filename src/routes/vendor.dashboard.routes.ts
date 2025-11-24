@@ -312,4 +312,11 @@ vendorDashBoardRouter.get("/total-sales", vendorAuthMiddleware, isVendor, vendor
  */
 vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDashboardController.getLowStockProducts.bind(vendorDashboardController));
 
+vendorDashBoardRouter.get("/analytics/top-selling-products", vendorAuthMiddleware, vendorDashboardController.getTopSellingProduct.bind(vendorDashboardController));
+
+vendorDashBoardRouter.get("/analytics/revenue-by-category", vendorAuthMiddleware, vendorDashboardController.getRevenueByCategoryForVendor.bind(vendorDashboardController));
+
+vendorDashBoardRouter.get("/analytics/revenue-by-sub-category", vendorAuthMiddleware, vendorDashboardController.getRevenueBySubcategoryForVendor.bind(vendorDashboardController));
+
+
 export default vendorDashBoardRouter;

@@ -28,12 +28,13 @@ import adminDashboardRouter from "./routes/admin.dashboard.routes";
 import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
 
 // Utils for scheduled background tasks
-import { orderCleanUp, tokenCleanUp } from "./utils/cronjob.utils";
+import { orderCleanUp, removeUnverifiedVendors, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
 import homecategoryRoutes from "./routes/home.category.routes";
 import { errorHandler } from "./utils/errorHandler";
+import notificationRoutes from "./routes/notification.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, 'uploads');
@@ -97,6 +98,7 @@ app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
 app.use("/api/image", imageRouter);
 app.use("/api/home/category/section", homecategoryRoutes);
+app.use("/api/notification", notificationRoutes);
 
 app.use(errorHandler as unknown as express.ErrorRequestHandler);
 
@@ -111,6 +113,8 @@ AppDataSource.initialize()
         // Start background cron jobs for token and order cleanup
         tokenCleanUp();
         orderCleanUp();
+        startOrderCleanupJob();
+        removeUnverifiedVendors()
 
         // Start Express server
         app.listen(port, () => {
@@ -121,3 +125,14 @@ AppDataSource.initialize()
         // Log any errors during DB connection setup
         console.error("Error during Data Source initialization", error);
     });
+
+
+
+    // token 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJkYWp1dmFpMTA2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc2MDUzNTE4OCwiZXhwIjoxNzYwNTQyMzg4fQ.0RqyT7ByuCQnXE9Uc6IRO7WLbQxcHEnwnYcAtmVHO_A
+
+    // admin 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJkYWp1dmFpMTA2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc2MDUzNTUyNiwiZXhwIjoxNzYwNTQyNzI2fQ.SbHSSETqwPlN16zV6fW1HD2p_uBfOORht5fn8SyEO-0
+
+    // vendor token 
+    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MiwiZW1haWwiOiJzZ3MwMjAwOTFAZ21haWwuY29tIiwiYnVzaW5lc3NOYW1lIjoiR1MgU3VwcG9ydHMiLCJpYXQiOjE3NjA1MzUzMTEsImV4cCI6MTc2MDU0MjUxMX0._A1EoDAM0zCYgv_TpEhQ7jLcsHH8pm2NrbAgTyET_HY

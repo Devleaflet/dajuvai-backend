@@ -42,8 +42,8 @@ export class CartController {
                 throw new APIError(401, 'Unauthorized');
             }
 
-            console.log("-----------------Body------------------------")
-            console.log(req.body)
+            //("-----------------Body------------------------")
+            //(req.body)
 
             // Extract and validate input
             const { productId, quantity, variantId } = req.body;
@@ -95,8 +95,8 @@ export class CartController {
                 throw new APIError(401, 'Unauthorized');
             }
 
-            console.log("---------------------Decrease nonly -------------------")
-            console.log(req.body.decreaseOnly);
+            //("---------------------Decrease nonly -------------------")
+            //(req.body.decreaseOnly);
 
             // Extract and validate cart item ID
             const { cartItemId } = req.body;

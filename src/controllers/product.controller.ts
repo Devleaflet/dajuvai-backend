@@ -8,6 +8,7 @@ import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
 import { ReviewService } from '../service/review.service';
 import config from '../config/env.config';
+import { string } from 'zod';
 
 
 /**
@@ -179,10 +180,10 @@ export class ProductController {
 
             const { page, limit, ...filters } = req.query;
 
-            const queryParams = {
+            const queryParams: IProductQueryParams = {
                 ...filters,
                 page: Number(page) || 1,
-                limit: Number(limit) || config.pagination.pageLimit,
+                limit: Number(limit) || 40,
             };
 
             const result = await this.productService.filterProducts(queryParams);

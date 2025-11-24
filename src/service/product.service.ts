@@ -67,7 +67,7 @@ export class ProductService {
         this.subcategoryService = new SubcategoryService();
         this.bannerService = new BannerService();
         this.dealService = new DealService();
-        this.variantRepository = this.dataSource.getRepository(Variant)        
+        this.variantRepository = this.dataSource.getRepository(Variant)
         cloudinary.config({
             cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
             api_key: process.env.CLOUDINARY_API_KEY,
@@ -338,13 +338,19 @@ export class ProductService {
     }
 
     async filterProducts(params: IProductQueryParams) {
-        const { page = 1, limit = config.pagination.pageLimit } = params
-
+        const { page, limit, search } = params;
         const skip = (page - 1) * limit;
+        const {
+            brandId,
+            categoryId,
+            subcategoryId,
+            dealId,
+            sort = 'all',
+            bannerId,
+        } = params;
 
-        const { brandId, categoryId, subcategoryId, dealId, sort = 'all', bannerId } = params;
-
-        const query = this.productRepository.createQueryBuilder('product')
+        const qb = this.productRepository
+            .createQueryBuilder('product')
             .leftJoinAndSelect('product.subcategory', 'subcategory')
             .leftJoinAndSelect('subcategory.category', 'category')
             .leftJoinAndSelect('product.brand', 'brand')
@@ -354,44 +360,46 @@ export class ProductService {
                 'vendor.businessName',
                 'vendor.districtId',
                 'vendor.createdAt',
-                'vendor.updatedAt'
+                'vendor.updatedAt',
             ])
             .leftJoinAndSelect('product.deal', 'deal')
             .leftJoinAndSelect('product.variants', 'variants')
             .where('(product.stock > 0 OR variants.stock > 0)');
 
-        query.skip(skip).take(limit)
-
-
         if (bannerId) {
             const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
-            if (!banner) throw new APIError(404, "Banner does not exist");
-            query.andWhere('product.bannerId = :bannerId', { bannerId });
+            if (!banner) throw new APIError(404, 'Banner does not exist');
+            qb.andWhere('product.bannerId = :bannerId', { bannerId });
         }
-
         if (subcategoryId) {
-            const subcategory = await this.subcategoryRepository.findOne({ where: { id: subcategoryId } });
-            if (!subcategory) throw new APIError(404, 'Subcategory does not exist');
-            query.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
+            const sub = await this.subcategoryRepository.findOne({ where: { id: subcategoryId } });
+            if (!sub) throw new APIError(404, 'Subcategory does not exist');
+            qb.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
         } else if (categoryId) {
-            const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
-            if (!category) throw new APIError(404, 'Category does not exist');
-            query.andWhere('subcategory.categoryId = :categoryId', { categoryId });
+            const cat = await this.categoryRepository.findOne({ where: { id: categoryId } });
+            if (!cat) throw new APIError(404, 'Category does not exist');
+            qb.andWhere('subcategory.categoryId = :categoryId', { categoryId });
         }
-
         if (brandId) {
             const brand = await this.brandRepository.findOne({ where: { id: brandId } });
             if (!brand) throw new APIError(404, 'Brand does not exist');
-            query.andWhere('product.brandId = :brandId', { brandId });
+            qb.andWhere('product.brandId = :brandId', { brandId });
         }
-
         if (dealId) {
             const deal = await this.dealRepository.findOne({ where: { id: dealId } });
             if (!deal) throw new APIError(404, 'Deal does not exist');
-            query.andWhere('product.dealId = :dealId', { dealId });
+            qb.andWhere('product.dealId = :dealId', { dealId });
         }
 
-        query.groupBy('product.id')
+        if (search) {
+            const searchPattern = `%${search}%`;
+            qb.andWhere(
+                '(LOWER(product.name) ILIKE :searchPattern )',
+                { searchPattern }
+            );
+        }
+
+        qb.groupBy('product.id')
             .addGroupBy('subcategory.id')
             .addGroupBy('category.id')
             .addGroupBy('brand.id')
@@ -400,40 +408,70 @@ export class ProductService {
             .addGroupBy('variants.id');
 
         if (sort === 'low-to-high') {
-            query.addOrderBy(`
-            LEAST(
-                product.basePrice - CASE 
-                    WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
-                    ELSE product.discount 
-                END,
-                COALESCE(MIN(variants.basePrice - CASE 
-                    WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
-                    ELSE variants.discount
-                END), product.basePrice)
+            qb.addSelect(
+                `
+      LEAST(
+        "product"."basePrice" - CASE
+          WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+          ELSE "product"."discount"
+        END,
+        COALESCE(
+          MIN(
+            "variants"."basePrice" - CASE
+              WHEN "variants"."discountType" = 'PERCENTAGE' THEN "variants"."basePrice" * "variants"."discount" / 100.0
+              ELSE "variants"."discount"
+            END
+          ),
+          "product"."basePrice" - CASE
+            WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+            ELSE "product"."discount"
+          END
+        )
+      )
+      `,
+                'price'
             )
-        `, 'ASC');
+                .orderBy('price', 'ASC');
         } else if (sort === 'high-to-low') {
-            query.addOrderBy(`
-            GREATEST(
-                product.basePrice - CASE 
-                    WHEN product.discountType = 'PERCENTAGE' THEN product.basePrice * product.discount / 100 
-                    ELSE product.discount 
-                END,
-                COALESCE(MAX(variants.basePrice - CASE 
-                    WHEN variants.discountType = 'PERCENTAGE' THEN variants.basePrice * variants.discount / 100
-                    ELSE variants.discount
-                END), product.basePrice)
+            qb.addSelect(
+                `
+      GREATEST(
+        "product"."basePrice" - CASE
+          WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+          ELSE "product"."discount"
+        END,
+        COALESCE(
+          MAX(
+            "variants"."basePrice" - CASE
+              WHEN "variants"."discountType" = 'PERCENTAGE' THEN "variants"."basePrice" * "variants"."discount" / 100.0
+              ELSE "variants"."discount"
+            END
+          ),
+          "product"."basePrice" - CASE
+            WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+            ELSE "product"."discount"
+          END
+        )
+      )
+      `,
+                'price'
             )
-        `, 'DESC');
+                .orderBy('price', 'DESC');
         } else {
-            query.orderBy('product.created_at', 'DESC');
+            qb.orderBy('product.created_at', 'DESC');
         }
 
-        const [data, total] = await query.getManyAndCount();
+        qb.skip(skip).take(limit);
+
+        const [data, total] = await qb.getManyAndCount();
 
         return {
-            data, total, page, limit, totalPages: Math.ceil(total / limit)
-        }
+            data,
+            total,
+            page: Number(page),
+            limit: Number(limit),
+            totalPages: Math.ceil(total / Number(limit)),
+        };
     }
 
     async getAdminProducts(

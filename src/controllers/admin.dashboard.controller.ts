@@ -1,8 +1,10 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import { APIError } from '../utils/ApiError.utils';
 import { AdminDashBoardService } from '../service/admin.dashboard.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
-import { start } from 'repl';
+import { LoginInput } from '../utils/zod_validations/user.zod';
+import { truncateSync } from 'fs';
+import { InstanceChecker } from 'typeorm';
 
 /**
  * @class AdminDashboardController
@@ -36,6 +38,8 @@ export class AdminDashboardController {
         try {
             // Fetch stats from the service layer
             const stats = await this.adminDashboardService.getDashboardStats();
+
+            console.log(stats)
 
             // Send success response with data
             res.status(200).json({ success: true, data: stats });
@@ -75,13 +79,13 @@ export class AdminDashboardController {
         res.status(200).json(chartData);
     }
 
-    async getVendorsSalesAmount(req: AuthRequest, res:Response){
-        let {startDate, endDate, page} = req.query as {startDate?: string, endDate?: string, page?: number};
-        if(!page || page < 1) page = 1;
-        try{
+    async getVendorsSalesAmount(req: AuthRequest, res: Response) {
+        let { startDate, endDate, page } = req.query as { startDate?: string, endDate?: string, page?: number };
+        if (!page || page < 1) page = 1;
+        try {
             const data = await this.adminDashboardService.getVendorsSalesAmount(startDate, endDate, page);
-            res.status(200).json({success:true, data});
-        }catch(error){
+            res.status(200).json({ success: true, data });
+        } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
@@ -92,18 +96,18 @@ export class AdminDashboardController {
                     error: error.message
                 });
             }
-    
-        }   
+
+        }
     }
 
-    async getTopProducts(req: AuthRequest, res:Response){
-        try{
-            let {startDate, endDate, page} = req.query as {startDate?: string, endDate?: string, page?: number};
+    async getTopProducts(req: AuthRequest, res: Response) {
+        try {
+            let { startDate, endDate, page } = req.query as { startDate?: string, endDate?: string, page?: number };
 
-            if(!page || page < 1) page = 1;
+            if (!page || page < 1) page = 1;
             const data = await this.adminDashboardService.getTopProducts(startDate, endDate, page);
-            res.status(200).json({success:true, data});
-        }catch(error){
+            res.status(200).json({ success: true, data });
+        } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
@@ -114,15 +118,15 @@ export class AdminDashboardController {
                     error: error.message
                 });
             }
-    
+
         }
     }
 
-    async getTodaysSales(req: AuthRequest, res:Response){
-        try{
+    async getTodaysSales(req: AuthRequest, res: Response) {
+        try {
             const data = await this.adminDashboardService.getTodayTotalSales();
-            res.status(200).json({success:true, data});
-        }catch(error){
+            res.status(200).json({ success: true, data });
+        } catch (error) {
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {
@@ -135,4 +139,89 @@ export class AdminDashboardController {
             }
         }
     }
+
+    // product , order, orderitem , variants, category , subcateg
+
+    async getRevenueByCategory(req: AuthRequest<{}, {}, {}, { startDate: string, endDate: string }>, res: Response) {
+        try {
+            const { startDate, endDate } = req.query;
+            const data = await this.adminDashboardService.getRevenueByCategory(startDate, endDate);
+            res.status(200).json({ success: true, data });
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+
+    async getRevenueBySubCategory(req: AuthRequest<{}, {}, {}, { startDate: string, endDate: string }>, res: Response) {
+        try {
+            const { startDate, endDate } = req.query;
+            const data = await this.adminDashboardService.getRevenueBySubcategory(startDate, endDate);
+            res.status(200).json({ success: true, data });
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+
+
+
+    async getRevenueByVendor(req: AuthRequest, res: Response) {
+        try {
+            const data = await this.adminDashboardService.getRevenueByVendor();
+            res.status(200).json({
+                success: true,
+                data
+            })
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+    async getTotalShippingRevenue(req: AuthRequest<{}, {}, {}, { startDate: string, endDate: string }>, res: Response) {
+        try {
+            const { startDate, endDate } = req.query;
+            const data = await this.adminDashboardService.getTotalShippingRevenue(startDate, endDate);
+            res.status(200).json({ data });
+
+        } catch (error) {
+            console.log(error)
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching data',
+                    error: error.message
+                });
+            }
+        }
+    }
+
 }

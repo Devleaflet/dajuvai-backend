@@ -24,6 +24,7 @@ import { HomePageSection } from "../entities/homePage.entity";
 import { Promo } from "../entities/promo.entity";
 import { Variant } from "../entities/variant.entity";
 import { HomeCategory } from "../entities/home.category";
+import { Notification } from "../entities/notification.entity";
 
 
 
@@ -40,7 +41,7 @@ const AppDataSource = new DataSource({
   synchronize: true,
   logging: false,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-    Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory],
+    Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification],
   migrations: [],
   ssl: false,
   // ssl: {

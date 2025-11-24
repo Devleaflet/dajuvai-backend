@@ -3,13 +3,14 @@ import { CreateBannerInput, UpdateBannerInput } from '../utils/zod_validations/b
 import { APIError } from '../utils/ApiError.utils';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { BannerService } from '../service/banner.service';
-import { ProductSource } from '../entities/banner.entity';
+import { BannerType, ProductSource } from '../entities/banner.entity';
 import { ProductService } from '../service/product.service';
 import { CategoryService } from '../service/category.service';
 import { SubcategoryService } from '../service/subcategory.service';
 import { DealService } from '../service/deal.service';
 import { Deal } from '../entities/deal.entity';
 import AppDataSource from '../config/db.config';
+import { throwDeprecation } from 'process';
 
 /**
  * @class BannerController
@@ -223,9 +224,32 @@ export class BannerController {
             // check if banner exists
             const existingBanner = await this.bannerService.getBannerById(Number(id));
             console.log('[updateBanner] existingBanner:', existingBanner);
+
+
             if (!existingBanner) {
                 throw new APIError(404, 'Banner not found');
             }
+
+            const newStartDate = new Date(req.body.startDate);
+            newStartDate.setHours(0, 0, 0, 0)
+
+            const today = new Date();
+
+            today.setHours(0, 0, 0, 0);
+
+
+            const existingStartDate = new Date(existingBanner.startDate);
+            existingStartDate.setHours(0, 0, 0, 0)
+
+            console.log(existingStartDate)
+            console.log(newStartDate)
+
+            if (newStartDate.getTime() !== existingStartDate.getTime()) {
+                if (newStartDate < today) {
+                    throw new APIError(400, "Start date must be today or in the future")
+                }
+            }
+
 
             // validate productSource 
             if (bannerData.productSource) {
@@ -337,10 +361,12 @@ export class BannerController {
      * @throws {APIError} 500 on internal server error
      * @access Public
      */
-    async getAllBanners(req: Request, res: Response): Promise<void> {
+    async getAllBanners(req: Request<{}, {}, {}, { type: BannerType }>, res: Response): Promise<void> {
         try {
             // Fetch all banners via service
-            const banners = await this.bannerService.getAllBanners();
+            const banners = await this.bannerService.getAllBanners(req.query.type);
+
+            console.log(banners)
 
             // Send success response
             res.status(200).json({ success: true, data: banners });

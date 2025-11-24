@@ -40,7 +40,7 @@ export class VendorDashBoardService {
             .innerJoin('orderItem.order', 'order')
             .select('SUM(orderItem.price * orderItem.quantity)', 'totalSales')
             .where('orderItem.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status != :status', { status: OrderStatus.PENDING })
+            .andWhere('order.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
             .getRawOne();
 
         const totalSales = Number(totalSalesRaw.totalSales) || 0;
@@ -53,24 +53,12 @@ export class VendorDashBoardService {
             .andWhere('order.status = :status', { status: OrderStatus.PENDING })
             .getCount();
 
-        // Calculate total revenue from delivered orders by summing price * quantity
-        // Only include order items where the associated order status is DELIVERED
-        const revenue_raw = await this.orderItemRepository
-            .createQueryBuilder('orderItem')
-            .leftJoin('orderItem.order', 'order')
-            .select('SUM(orderItem.price * orderItem.quantity)', 'totalDeliveredRevenue')
-            .where('orderItem.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.DELIVERED })
-            .getRawOne();
-
-        const totalRevenue = Number(revenue_raw.totalDeliveredRevenue) || 0;
         // Return all stats in one object
         return {
             totalProducts,
             totalOrders,
             totalSales,
             totalPendingOrders,
-            revenue: totalRevenue
         };
     }
 
@@ -189,4 +177,97 @@ export class VendorDashBoardService {
             data,
         };
     }
+
+
+    async getTopProductsByVendor(vendorId: number, limit = 5, startDate?: string, endDate?: string) {
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder("oi")
+            .select("p.id", "productId")
+            .addSelect("p.name", "productName")
+            .addSelect("SUM(oi.quantity)", "totalquantity")
+            .addSelect("SUM(oi.price * oi.quantity)", "totalSales")
+            .innerJoin("oi.product", "p")
+            .innerJoin("oi.order", "o")
+            .where("oi.vendorId = :vendorId", { vendorId })
+            .andWhere("o.paymentStatus = :status", { status: "PAID" });
+
+        if (startDate && endDate) {
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        }
+
+        qb.groupBy("p.id")
+            .addGroupBy("p.name")
+            .orderBy("totalquantity", "DESC")
+            .limit(limit);
+
+        const rawResult = await qb.getRawMany();
+        const result = rawResult.map(r => ({
+            productId: r.productId,
+            productName: r.productName,
+            totalquantity: Number(r.totalquantity),
+            totalSales: Number(r.totalSales),
+        }));
+
+        return result;
+    }
+
+
+
+    async getRevenueBySubcategoryForVendor(vendorId: number, filterParams: { startDate?: string, endDate?: string }) {
+
+        const { startDate, endDate } = filterParams;
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder("oi")
+            .select("sc.name", "subcategory")
+            .addSelect("SUM(oi.price * oi.quantity)", "revenue")
+            .innerJoin("oi.order", "o")
+            .innerJoin("oi.product", "p")
+            .leftJoin("p.subcategory", "sc")
+            .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .andWhere("oi.vendorId = :vendorId", { vendorId }) //  filter for vendor
+            .groupBy("sc.name")
+            .orderBy("revenue", "DESC");
+
+        if (startDate && endDate) {
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        }
+
+        const result = await qb.getRawMany();
+
+        return result.map((r) => ({
+            subcategory: r.subcategory || "Uncategorized",
+            revenue: parseFloat(r.revenue || 0),
+        }));
+    }
+
+
+    async revenueByCategoryForVendor(vendorId: number, filterParams: { startDate?: string, endDate?: string }) {
+        const { startDate, endDate } = filterParams;
+
+        const qb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder("oi")
+            .select("c.name", "category")
+            .addSelect("SUM(oi.price * oi.quantity)", "revenue")
+            .innerJoin("oi.order", "o")
+            .innerJoin("oi.product", "p")
+            .leftJoin("p.subcategory", "sc")
+            .leftJoin("sc.category", "c")
+            .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .andWhere("oi.vendorId = :vendorId", { vendorId })
+            .groupBy("c.name")
+            .orderBy("revenue", "DESC");
+
+
+        if (startDate && endDate) {
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        }
+
+        const result = await qb.getRawMany();
+
+        return result.map(r => ({
+            category: r.category || "Uncategorized",
+            revenue: parseFloat(r.revenue || 0),
+        }));
+    }
+
 }

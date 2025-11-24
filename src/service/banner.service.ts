@@ -1,5 +1,5 @@
 import { ILike, Repository } from 'typeorm';
-import { Banner, BannerStatus, ProductSource } from '../entities/banner.entity';
+import { Banner, BannerStatus, BannerType, ProductSource } from '../entities/banner.entity';
 import AppDataSource from '../config/db.config';
 import { v2 as cloudinary } from 'cloudinary';
 import { CreateBannerInput, UpdateBannerInput } from '../utils/zod_validations/banner.zod';
@@ -319,17 +319,20 @@ export class BannerService {
      * @returns {Promise<Banner[]>} - List of all banners 
      * @access Admin
      */
-    async getAllBanners(): Promise<Banner[]> {
+    async getAllBanners(type: BannerType): Promise<Banner[]> {
+        const whereClause = type ? { type } : {};
+
         const banners = await this.bannerRepository.find({
+            where: whereClause,
             relations: [
                 "createdBy",
                 "selectedProducts",
                 "selectedProducts.variants",
                 "selectedProducts.subcategory",
-                "selectedProducts.subcategory.category", 
+                "selectedProducts.subcategory.category",
                 "selectedCategory",
                 "selectedSubcategory",
-                "selectedSubcategory.category", 
+                "selectedSubcategory.category",
             ],
             select: {
                 id: true,
@@ -354,7 +357,7 @@ export class BannerService {
                     id: true,
                     name: true,
                     image: true,
-                    category: {   
+                    category: {
                         id: true,
                         name: true,
                     },

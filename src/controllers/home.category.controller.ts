@@ -39,7 +39,7 @@ export class HomeCategoryController {
                     msg: error.message
                 })
             } else {
-                console.log(error.stack);
+                //(error.stack);
                 res.status(500).json({
                     success: false,
                     msg: (error as Error).message
@@ -62,7 +62,7 @@ export class HomeCategoryController {
                     msg: error.message
                 })
             } else {
-                console.log(error.stack);
+                //(error.stack);
                 res.status(500).json({
                     success: false,
                     msg: (error as Error).message
