@@ -19,6 +19,7 @@ export class Product {
 
     @Column({ nullable: true })
     miniDescription?: string;
+    
 
     @Column({ nullable: true })
     longDescription?: string;
