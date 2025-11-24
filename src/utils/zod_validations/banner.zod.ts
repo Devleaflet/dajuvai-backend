@@ -74,6 +74,8 @@ const baseBannerSchema = z.object({
         .nullable(),
 });
 
+
+
 // Create schema with refinements for validation rules
 export const createBannerSchema = baseBannerSchema
     .refine(
