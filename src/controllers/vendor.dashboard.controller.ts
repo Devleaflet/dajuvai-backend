@@ -25,12 +25,12 @@ export class VendorDashboardController {
      */
     async getDashboard(req: VendorAuthRequest, res: Response): Promise<void> {
         try {
-            // const vendor = req.vendor;
-            // if (!vendor || !vendor.id) {
-            //     throw new APIError(401, "Unauthorized");
-            // }
+            const vendor = req.vendor;
+            if (!vendor || !vendor.id) {
+                throw new APIError(401, "Unauthorized");
+            }
 
-            const stats = await this.dashboardService.getStats(2);
+            const stats = await this.dashboardService.getStats(vendor.id);
             res.status(200).json(stats);
         } catch (error) {
             if (error instanceof APIError) {
