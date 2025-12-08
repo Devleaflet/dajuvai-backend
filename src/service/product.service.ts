@@ -347,6 +347,7 @@ export class ProductService {
             dealId,
             sort = 'all',
             bannerId,
+            vendorId
         } = params;
 
         const qb = this.productRepository
@@ -389,6 +390,11 @@ export class ProductService {
             const deal = await this.dealRepository.findOne({ where: { id: dealId } });
             if (!deal) throw new APIError(404, 'Deal does not exist');
             qb.andWhere('product.dealId = :dealId', { dealId });
+        }
+        if (vendorId) {
+            const vendor = await this.vendorRepository.findOne({ where: { id: Number(vendorId) } })
+            if (!vendor) throw new APIError(404, "Invalid vendor id")
+            qb.andWhere('product.vendorId = :vendorId', { vendorId })
         }
 
         if (search) {
@@ -477,7 +483,7 @@ export class ProductService {
     async getAdminProducts(
         params: IAdminProductQueryParams
     ): Promise<{ products: Product[]; total: number; page: number; limit: number }> {
-        const { page = 1, limit = 7, sort = 'createdAt', filter } = params;
+        const { page = 1, limit = 7, sort = 'createdAt', filter, vendorId } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
@@ -501,6 +507,10 @@ export class ProductService {
 
         if (filter === 'out_of_stock') {
             query.andWhere('(product.stock = 0 OR variants.stock = 0)');
+        }
+
+        if(vendorId){
+            query.andWhere('product.vendorId = :vendorId', {vendorId})
         }
 
         switch (sort) {

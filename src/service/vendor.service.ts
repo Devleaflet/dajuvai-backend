@@ -40,6 +40,15 @@ export class VendorService {
 
         // return await this.vendorRepository.find({})
     }
+    async fetchPartialVendors(): Promise<Vendor[]> {
+        return await this.vendorRepository.find({
+            where: {
+                isApproved: true
+            },
+            select:["email", "id","businessName"]
+        });
+
+    }
 
     async fetchAllUnapprovedVendor() {
         return await this.vendorRepository.find({

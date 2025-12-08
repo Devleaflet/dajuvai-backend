@@ -408,11 +408,12 @@ export class ProductController {
             console.log("----------------------Admin product api hit--------------------")
             console.log("----------Req params--------------")
             console.log(req.params);
+            console.log(req.query)
 
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);
 
-            console.log(products)
+            // console.log(products)
 
             res.status(200).json({ success: true, data: { products, total } });
         } catch (error) {

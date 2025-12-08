@@ -21,6 +21,7 @@ export interface IProductQueryParams {
     limit: number;
     isAdmin?: boolean;
     search?: string;
+    vendorId?: string;
 }
 
 export interface IAdminProductQueryParams {
@@ -32,6 +33,8 @@ export interface IAdminProductQueryParams {
 
     // Filtering options
     filter?: 'out_of_stock';
+
+    vendorId?: string
 }
 
 export interface IVendorProductQueryParams {

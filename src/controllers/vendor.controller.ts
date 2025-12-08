@@ -85,6 +85,19 @@ export class VendorController {
             }
         }
     }
+    async getPartialVendors(req: VendorAuthRequest, res: Response): Promise<void> {
+        try {
+            /* Fetch all vendors */
+            const vendors = await this.vendorService.fetchPartialVendors();
+            res.status(200).json({ success: true, data: vendors });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: 'Internal server error' });
+            }
+        }
+    }
 
 
     async getUnapprovedVendorList(req: AuthRequest, res: Response) {

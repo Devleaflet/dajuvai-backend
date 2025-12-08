@@ -147,6 +147,8 @@ const productController = new ProductController(AppDataSource);
 
 router.get('/', authMiddleware, isAdminOrStaff, vendorController.getVendors.bind(vendorController));
 
+router.get('/partial/vendors', vendorController.getPartialVendors.bind(vendorController));
+
 /**
  * @swagger
  * /api/vendors/unapprove/list:
