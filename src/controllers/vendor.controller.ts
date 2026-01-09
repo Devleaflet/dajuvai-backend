@@ -134,7 +134,6 @@ export class VendorController {
      */
     async vendorSignup(req: VendorAuthRequest<{}, {}, IVendorSignupRequest>, res: Response): Promise<void> {
         try {
-            /* ✅ Validate request body using Zod schema */
             const parsed = vendorSignupSchema.safeParse(req.body);
             if (!parsed.success) {
                 res.status(400).json({ success: false, errors: parsed.error.errors });
@@ -152,67 +151,48 @@ export class VendorController {
                 taxNumber,
                 taxDocuments,
                 citizenshipDocuments,
-                chequePhoto,
                 accountName,
                 bankBranch,
-                bankCode,
                 accountNumber,
                 bankName
             } = parsed.data;
 
             const verificationToken = TokenUtils.generateToken();
 
-            /* ✅ Check for existing vendor or user */
             const existingVendor = await this.vendorService.findVendorByEmail(email);
             const existingUser = await findUserByEmail(email);
 
             if (existingUser) throw new APIError(409, "User already exists");
             if (existingVendor && existingVendor.isVerified) throw new APIError(409, "Vendor already exists");
 
-            /* ✅ Check if district exists */
             const districtEntity = await this.districtService.findDistrictByName(district);
             if (!districtEntity) throw new APIError(400, "District does not exist");
 
-            /* ✅ Hash password */
             const hashedPassword = await bcrypt.hash(password, 10);
 
-            /* ✅ Generate verification token */
+            /*  Generate verification token */
             const hashedToken = await TokenUtils.hashToken(verificationToken);
             const verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000); // 15 mins
 
-            /* ✅ Create vendor */
+            /*  Create vendor */
             const vendor = await this.vendorService.createVendor({
-                businessName,
-                email,
+                ...req.body,
                 password: hashedPassword,
-                phoneNumber,
-                telePhone,
-                district,
-                businessRegNumber,
-                taxNumber,
-                taxDocuments, // array
-                citizenshipDocuments, // optional array
-                chequePhoto,
-                accountName: accountName,
-                bankName: bankName,
-                accountNumber: accountNumber,
-                bankBranch: bankBranch,
-                bankCode: bankCode,
                 verificationCode: hashedToken,
                 verificationCodeExpire,
             });
 
-            /* ✅ Send verification email */
+            /* Send verification email */
             await sendVerificationEmail(email, "Vendor Email Verification", verificationToken);
 
-            /* ✅ Generate JWT */
+            /* Generate JWT */
             const token = jwt.sign(
                 { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
                 this.jwtSecret,
                 { expiresIn: "2h" }
             );
 
-            /* ✅ Set JWT cookie */
+            /* Set JWT cookie */
             res.cookie("vendorToken", token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
@@ -220,7 +200,7 @@ export class VendorController {
                 maxAge: 2 * 60 * 60 * 1000,
             });
 
-            /* ✅ Send success response */
+            /*  Send success response */
             res.status(201).json({
                 success: true,
                 vendor,

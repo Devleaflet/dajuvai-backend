@@ -6,6 +6,7 @@ import { Address } from '../entities/address.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from './district.service';
 import { District } from '../entities/district.entity';
+import { vendorSignupSchema } from '../utils/zod_validations/vendor.zod';
 
 /**
  * Service for managing vendor-related operations such as
@@ -45,7 +46,7 @@ export class VendorService {
             where: {
                 isApproved: true
             },
-            select:["email", "id","businessName"]
+            select: ["email", "id", "businessName"]
         });
 
     }
@@ -67,56 +68,21 @@ export class VendorService {
      */
     async createVendor(vendorSignupData: IVendorSignupRequest): Promise<Vendor> {
         try {
-            const {
-                businessName,
-                email,
-                password,
-                phoneNumber,
-                telePhone,
-                district,
-                businessRegNumber,
-                taxNumber,
-                taxDocuments,
-                citizenshipDocuments,
-                chequePhoto,
-                accountName,
-                bankName,
-                accountNumber,
-                bankBranch,
-                bankCode,
-                verificationCode,
-                verificationCodeExpire,
-            } = vendorSignupData;
-
-            // ✅ Prevent duplicate vendors
+            const email = vendorSignupData.email;
+            const district = vendorSignupData.district
+            //  Prevent duplicate vendors
             const existing = await this.vendorRepository.findOne({ where: { email } });
             if (existing) throw new APIError(409, "Vendor already exists");
 
-            // ✅ Ensure district exists
+            //  Ensure district exists
             const districtEntity = await this.districtService.findDistrictByName(district);
             if (!districtEntity) throw new APIError(400, "District does not exist");
 
-            // ✅ Create vendor entity
+            // Create vendor entity
             const vendor = this.vendorRepository.create({
-                businessName,
-                email,
-                password,
-                phoneNumber,
-                telePhone,
+                ...vendorSignupData,
                 district: districtEntity,
                 districtId: districtEntity.id,
-                businessRegNumber,
-                taxNumber,
-                taxDocuments,
-                citizenshipDocuments,
-                chequePhoto,
-                accountName,
-                bankName,
-                accountNumber,
-                bankBranch,
-                bankCode,
-                verificationCode,
-                verificationCodeExpire,
                 isVerified: false,
                 isApproved: false,
             });

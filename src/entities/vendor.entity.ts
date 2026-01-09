@@ -31,7 +31,7 @@ export class Vendor {
     districtId: number;
 
     @Column({ nullable: true })
-    businessRegNumber: string; // ✅ Added
+    businessRegNumber: string; 
 
     @Column({ type: "varchar", nullable: true })
     taxNumber: string;
@@ -43,9 +43,8 @@ export class Vendor {
     citizenshipDocuments: string[];
 
     @Column({ type: "varchar", nullable: true })
-    chequePhoto: string;
+    chequePhoto: string;// hataune 
 
-    // ✅ Flattened bank details
     @Column({ type: "varchar", nullable: true })
     accountName: string;
 
@@ -57,9 +56,6 @@ export class Vendor {
 
     @Column({ type: "varchar", nullable: true })
     bankBranch: string;
-
-    @Column({ type: "varchar", nullable: true })
-    bankCode: string | null;
 
     @Column({ nullable: true })
     verificationCode: string | null;

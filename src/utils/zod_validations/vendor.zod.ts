@@ -18,14 +18,12 @@ export const vendorSignupSchema = z.object({
     taxNumber: z.string().optional(),
     taxDocuments: z.array(z.string().url()).min(1),
     citizenshipDocuments: z.array(z.string().url()).optional(),
-    chequePhoto: z.string().url().min(1),
 
     // bank detalil
-    accountName: z.string().min(1),
-    bankName: z.string().min(1),
-    accountNumber: z.string().min(1),
-    bankBranch: z.string().min(1),
-    bankCode: z.string().optional(),
+    accountName: z.string().optional(),
+    bankName: z.string().optional(),
+    accountNumber: z.string().optional(),
+    bankBranch: z.string().optional(),
 });
 
 
