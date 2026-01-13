@@ -87,7 +87,7 @@ export class ProductService {
     async getProductDetailsById(productId: number): Promise<Product> {
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            relations: ['vendor', 'variants', 'reviews'], // Include variants relation
+            relations: ['vendor', 'variants', 'reviews', 'deal'],
         });
 
         if (!product) {
@@ -201,21 +201,38 @@ export class ProductService {
 
         return savedProduct;
     }
+    private calculateFinalPrice(
+        basePrice: number,
+        discount = 0,
+        discountType: DiscountType = DiscountType.PERCENTAGE
+    ): number {
+        if (!basePrice || basePrice <= 0) return 0;
 
-    // util function to calculate final price after discount 
-    private calculateFinalPrice(basePrice: number, discount: number, discountType: DiscountType) {
-        if (!basePrice || basePrice <= 0) {
-            return 0
-        }
+        if (!discount || discount <= 0) return basePrice;
 
         if (discountType === DiscountType.FLAT) {
-            return Math.max(0, basePrice - discount)
+            return Math.max(0, basePrice - discount);
         }
 
-        if (discountType === DiscountType.PERCENTAGE) {
-            return Math.max(0, basePrice - (basePrice * discount) / 100);
-        }
+        return Math.max(0, basePrice - (basePrice * discount) / 100);
     }
+
+    private applyDealPrice(
+        priceAfterProductDiscount: number,
+        deal?: Deal | null
+    ): number {
+        if (!deal || !deal.discountPercentage || deal.discountPercentage <= 0) {
+            return priceAfterProductDiscount;
+        }
+
+        return Math.max(
+            0,
+            priceAfterProductDiscount -
+            (priceAfterProductDiscount * deal.discountPercentage) / 100
+        );
+    }
+
+
 
     async updateProduct(
         authId: number,
@@ -241,83 +258,168 @@ export class ProductService {
             productImages
         } = data;
 
-        const whereClause = isAdmin ? { id: productId } : { id: productId, vendor: { id: authId } };
-        const product = await this.productRepository.findOne({ where: whereClause, relations: ['variants'] });
-        if (!product) throw new APIError(404, 'Product not found or not authorized');
+        const whereClause = isAdmin
+            ? { id: productId }
+            : { id: productId, vendor: { id: authId } };
 
-        // Validate category & subcategory
-        if (!(await this.categoryService.getCategoryById(categoryId))) throw new APIError(404, 'Category does not exist');
-        if (!(await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId))) throw new APIError(404, 'Subcategory does not exist');
+        const product = await this.productRepository.findOne({
+            where: whereClause,
+            relations: ['variants', 'deal', 'banner']
+        });
 
-        // Validate banner & deal
-        if (dealId !== undefined && !(await this.dealService.getDealById(Number(dealId)))) throw new APIError(404, 'Deal does not exist');
-        if (bannerId !== undefined && !(await this.bannerService.getBannerById(Number(bannerId)))) throw new APIError(404, 'Banner does not exist');
+        if (!product) {
+            throw new APIError(404, 'Product not found or not authorized');
+        }
 
-        // Normalize hasVariants to boolean
+        if (!(await this.categoryService.getCategoryById(categoryId))) {
+            throw new APIError(404, 'Category does not exist');
+        }
+
+        if (!(await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId))) {
+            throw new APIError(404, 'Subcategory does not exist');
+        }
+
+        let resolvedDeal: Deal | null = null;
+
+        if (dealId !== undefined && dealId !== null) {
+            resolvedDeal = await this.dealService.getDealById(Number(dealId));
+            if (!resolvedDeal || resolvedDeal.status !== DealStatus.ENABLED) {
+                throw new APIError(404, 'Deal does not exist or is disabled');
+            }
+        }
+
         const hasVariantsBool =
-            hasVariants === true || hasVariants === 'true' ? true :
-                hasVariants === false || hasVariants === 'false' ? false :
-                    undefined;
+            hasVariants === true || hasVariants === 'true'
+                ? true
+                : hasVariants === false || hasVariants === 'false'
+                    ? false
+                    : undefined;
 
-        // Update product fields
         product.name = name ?? product.name;
         product.description = description ?? product.description;
-        product.basePrice = hasVariantsBool ? null : (basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice);
-        product.discount = discount !== undefined ? parseFloat(discount.toString()) : product.discount;
-        product.discountType = discountType ?? product.discountType;
-        product.status = this.determineOrderStatus(Number(stock));
-        product.stock = hasVariantsBool ? null : (stock !== undefined ? parseInt(stock.toString()) : product.stock);
         product.subcategoryId = subcategoryId;
-        product.dealId = dealId !== undefined ? parseInt(dealId.toString()) : product.dealId;
-        product.bannerId = bannerId !== undefined ? parseInt(bannerId.toString()) : product.bannerId;
-        product.brandId = brandId !== undefined ? parseInt(brandId.toString()) : product.brandId;
-        if (hasVariantsBool !== undefined) product.hasVariants = hasVariantsBool;
 
-        // Update product images (URLs from frontend)
+        product.discount =
+            discount !== undefined ? parseFloat(discount.toString()) : product.discount;
+
+        product.discountType = discountType ?? product.discountType;
+
+        if (!hasVariantsBool) {
+            product.basePrice =
+                basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice;
+
+            product.stock =
+                stock !== undefined ? parseInt(stock.toString()) : product.stock;
+
+            product.status = this.determineOrderStatus(Number(product.stock));
+        } else {
+            product.basePrice = null;
+            product.stock = null;
+        }
+
+        if (dealId === null) {
+            product.dealId = null;
+            product.deal = null;
+        } else if (dealId !== undefined) {
+            product.dealId = Number(dealId);
+            product.deal = resolvedDeal;
+        }
+
+        if (bannerId === null) {
+            product.bannerId = null;
+            product.banner = null;
+        } else if (bannerId !== undefined) {
+            product.bannerId = Number(bannerId);
+        }
+
+        if (brandId === null) {
+            product.brandId = null;
+        } else if (brandId !== undefined) {
+            product.brandId = Number(brandId);
+        }
+
+        if (hasVariantsBool !== undefined) {
+            product.hasVariants = hasVariantsBool;
+        }
+
         if (productImages && Array.isArray(productImages)) {
             if (productImages.length === 0 && !hasVariantsBool) {
-                throw new APIError(400, 'At least one product image is required for non-variant products');
+                throw new APIError(400, 'At least one product image is required');
             }
             product.productImages = productImages;
         }
 
-        // Handle variants
-        if (hasVariantsBool && variants) {
-            if (!Array.isArray(variants) || variants.length === 0) throw new APIError(400, 'Variants array is required for variant products');
+        if (!hasVariantsBool && product.basePrice !== null) {
+            const priceAfterProductDiscount = this.calculateFinalPrice(
+                product.basePrice,
+                product.discount ?? 0,
+                product.discountType ?? DiscountType.PERCENTAGE
+            );
 
-            // Delete old variants if switching from non-variant to variant
-            if (!product.hasVariants) await this.variantRepository.delete({ productId: productId.toString() });
+            product.finalPrice = this.applyDealPrice(
+                priceAfterProductDiscount,
+                product.deal
+            );
+        }
+
+        if (hasVariantsBool && variants) {
+            if (!Array.isArray(variants) || variants.length === 0) {
+                throw new APIError(400, 'Variants are required for variant products');
+            }
+
+            if (!product.hasVariants) {
+                await this.variantRepository.delete({ productId: productId.toString() });
+            }
 
             const savedVariants = await Promise.all(
-                variants.map(async variant => {
-                    const existingVariant = await this.variantRepository.findOne({ where: { sku: variant.sku, productId: productId.toString() } });
+                variants.map(async (variant) => {
+                    const existingVariant = await this.variantRepository.findOne({
+                        where: { sku: variant.sku, productId: productId.toString() }
+                    });
+
+                    const base = Number(variant.basePrice);
+                    const vDiscount = Number(variant.discount || 0);
+                    const vDiscountType = variant.discountType || DiscountType.PERCENTAGE;
+
+                    const priceAfterProductDiscount = this.calculateFinalPrice(
+                        base,
+                        vDiscount,
+                        vDiscountType
+                    );
+
+                    const finalPrice = this.applyDealPrice(
+                        priceAfterProductDiscount,
+                        product.deal
+                    );
 
                     if (existingVariant) {
-                        // Update existing variant
-                        existingVariant.basePrice = parseFloat(variant.basePrice.toString());
-                        existingVariant.discount = parseFloat(variant.discount?.toString() || '0');
-                        existingVariant.discountType = variant.discountType || DiscountType.PERCENTAGE;
+                        existingVariant.basePrice = base;
+                        existingVariant.discount = vDiscount;
+                        existingVariant.discountType = vDiscountType;
+                        existingVariant.finalPrice = finalPrice;
                         existingVariant.attributes = variant.attributes;
-                        existingVariant.variantImages = variant.variantImages || existingVariant.variantImages;
-                        existingVariant.stock = parseInt(variant.stock.toString());
+                        existingVariant.variantImages = variant.variantImages || [];
+                        existingVariant.stock = Number(variant.stock);
                         existingVariant.status = this.determineOrderStatus(Number(variant.stock));
+
                         return this.variantRepository.save(existingVariant);
-                    } else {
-                        // Create new variant
-                        const newVariant = this.variantRepository.create({
-                            sku: variant.sku,
-                            basePrice: parseFloat(variant.basePrice.toString()),
-                            discount: parseFloat(variant.discount?.toString() || '0'),
-                            discountType: variant.discountType || DiscountType.PERCENTAGE,
-                            attributes: variant.attributes,
-                            variantImages: variant.variantImages || [],
-                            stock: parseInt(variant.stock.toString()),
-                            status: this.determineOrderStatus(Number(variant.stock)),
-                            productId: productId.toString(),
-                            product
-                        });
-                        return this.variantRepository.save(newVariant);
                     }
+
+                    const newVariant = this.variantRepository.create({
+                        sku: variant.sku,
+                        basePrice: base,
+                        discount: vDiscount,
+                        discountType: vDiscountType,
+                        finalPrice,
+                        attributes: variant.attributes,
+                        variantImages: variant.variantImages || [],
+                        stock: Number(variant.stock),
+                        status: this.determineOrderStatus(Number(variant.stock)),
+                        productId: productId.toString(),
+                        product
+                    });
+
+                    return this.variantRepository.save(newVariant);
                 })
             );
 
@@ -327,6 +429,9 @@ export class ProductService {
 
         return await this.productRepository.save(product);
     }
+
+
+
 
     async getAllProducts(): Promise<Product[]> {
         return await this.productRepository.find({
@@ -488,15 +593,33 @@ export class ProductService {
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
             .leftJoinAndSelect('product.variants', 'variants')
+            .leftJoin('product.deal', 'deal')
+            .leftJoinAndSelect('product.subcategory', 'subcategory')
+            .leftJoinAndSelect('subcategory.category', 'category')
             .select([
                 'product.id',
                 'product.name',
                 'product.basePrice',
                 'product.stock',
+                'product.discount',
+                'product.discountType',
                 'product.productImages',
                 'product.created_at',
+
+                'subcategory.id',
+                'subcategory.name',
+
+                'category.id',
+                'category.name',
+
+                'deal.id',
+                'deal.name',
+                'deal.discountPercentage',
+                'deal.status',
+
                 'vendor.id',
                 'vendor.businessName',
+
                 'variants.id',
                 'variants.sku',
                 'variants.basePrice',
@@ -509,8 +632,8 @@ export class ProductService {
             query.andWhere('(product.stock = 0 OR variants.stock = 0)');
         }
 
-        if(vendorId){
-            query.andWhere('product.vendorId = :vendorId', {vendorId})
+        if (vendorId) {
+            query.andWhere('product.vendorId = :vendorId', { vendorId })
         }
 
         switch (sort) {

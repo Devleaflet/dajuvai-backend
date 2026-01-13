@@ -78,6 +78,13 @@ app.use(passport.initialize());
 
 // Setup Swagger UI for API documentation at /docs route
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+app.use((req, res, next) => {
+    console.log(
+        `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`
+    );
+    next();
+});
+
 
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
