@@ -10,13 +10,13 @@ const options: swaggerJSDoc.Options = {
     },
     servers: [
       {
-        url:"https://dev.api.dajuvai.com",
+        url: "http://localhost:5000",
       },
       {
-        url:"https://api.dajuvai.com",
+        url: "https://dev.api.dajuvai.com",
       },
       {
-        url: "http://localhost:4000", 
+        url: "https://api.dajuvai.com",
       },
     ],
     components: {

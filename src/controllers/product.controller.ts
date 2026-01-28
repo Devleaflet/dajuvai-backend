@@ -79,14 +79,10 @@ export class ProductController {
         res: Response
     ): Promise<void> {
         try {
-            console.log('BODY:', req.body);
-            console.log('HEADERS:', req.headers['content-type']);
 
             const data: ProductInterface = req.body;
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
-
-            console.log(data)
 
             if (data.hasVariants === 'true' && (!data.variants || !Array.isArray(data.variants))) {
                 throw new APIError(400, 'Variants array is required for variant products');
@@ -405,10 +401,6 @@ export class ProductController {
      */
     async getAdminProducts(req: AuthRequest<{}, {}, {}, IAdminProductQueryParams>, res: Response) {
         try {
-            console.log("----------------------Admin product api hit--------------------")
-            console.log("----------Req params--------------")
-            console.log(req.params);
-            console.log(req.query)
 
             // Fetch paginated products with admin-specific filtering
             const { products, total } = await this.productService.getAdminProducts(req.query);

@@ -35,6 +35,7 @@ import imageRouter from "./routes/image.routes";
 import homecategoryRoutes from "./routes/home.category.routes";
 import { errorHandler } from "./utils/errorHandler";
 import notificationRoutes from "./routes/notification.routes";
+import { updateAllProductPrices } from "./scripts/update.product";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, 'uploads');
@@ -76,14 +77,14 @@ app.use(cookieParser());
 // Initialize Passport for authentication middleware
 app.use(passport.initialize());
 
-// Setup Swagger UI for API documentation at /docs route
-app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use((req, res, next) => {
     console.log(
         `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`
     );
     next();
 });
+// Setup Swagger UI for API documentation at /docs route
+app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 
 app.use("/api/auth", userRouter);
@@ -114,7 +115,7 @@ const port = process.env.PORT || 4000;
 
 // Initialize database connection
 AppDataSource.initialize()
-    .then(() => {
+    .then(async () => {
         console.log("Database connected");
 
         // Start background cron jobs for token and order cleanup
@@ -122,6 +123,7 @@ AppDataSource.initialize()
         orderCleanUp();
         startOrderCleanupJob();
         removeUnverifiedVendors()
+        // await updateAllProductPrices(AppDataSource)
 
         // Start Express server
         app.listen(port, () => {
@@ -132,14 +134,3 @@ AppDataSource.initialize()
         // Log any errors during DB connection setup
         console.error("Error during Data Source initialization", error);
     });
-
-
-
-    // token 
-    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJkYWp1dmFpMTA2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc2MDUzNTE4OCwiZXhwIjoxNzYwNTQyMzg4fQ.0RqyT7ByuCQnXE9Uc6IRO7WLbQxcHEnwnYcAtmVHO_A
-
-    // admin 
-    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MSwiZW1haWwiOiJkYWp1dmFpMTA2QGdtYWlsLmNvbSIsInJvbGUiOiJhZG1pbiIsImlhdCI6MTc2MDUzNTUyNiwiZXhwIjoxNzYwNTQyNzI2fQ.SbHSSETqwPlN16zV6fW1HD2p_uBfOORht5fn8SyEO-0
-
-    // vendor token 
-    //eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6MiwiZW1haWwiOiJzZ3MwMjAwOTFAZ21haWwuY29tIiwiYnVzaW5lc3NOYW1lIjoiR1MgU3VwcG9ydHMiLCJpYXQiOjE3NjA1MzUzMTEsImV4cCI6MTc2MDU0MjUxMX0._A1EoDAM0zCYgv_TpEhQ7jLcsHH8pm2NrbAgTyET_HY

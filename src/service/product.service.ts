@@ -79,7 +79,7 @@ export class ProductService {
         return this.productRepository.find({
             relations: ['subcategory', 'vendor', 'brand', 'deal', 'reviews'],
             order: {
-                created_at: 'DESC',
+                createdAt: 'DESC',
             },
         });
     }
@@ -116,13 +116,12 @@ export class ProductService {
             basePrice,
             discount,
             discountType,
-            status, // need to remove this from frontend
             stock,
             dealId,
             bannerId,
             hasVariants,
             variants,
-            productImages // frontend sends secure URLs
+            productImages
         } = data;
 
         // Normalize hasVariants to a boolean (handles string or boolean input)
@@ -201,7 +200,7 @@ export class ProductService {
 
         return savedProduct;
     }
-    private calculateFinalPrice(
+    public calculateFinalPrice(
         basePrice: number,
         discount = 0,
         discountType: DiscountType = DiscountType.PERCENTAGE
@@ -217,7 +216,7 @@ export class ProductService {
         return Math.max(0, basePrice - (basePrice * discount) / 100);
     }
 
-    private applyDealPrice(
+    public applyDealPrice(
         priceAfterProductDiscount: number,
         deal?: Deal | null
     ): number {
@@ -437,7 +436,7 @@ export class ProductService {
         return await this.productRepository.find({
             relations: ['subcategory', 'vendor', 'brand', 'deal', 'variants'],
             order: {
-                created_at: 'DESC',
+                createdAt: 'DESC',
             },
         });
     }
@@ -546,30 +545,30 @@ export class ProductService {
         } else if (sort === 'high-to-low') {
             qb.addSelect(
                 `
-      GREATEST(
-        "product"."basePrice" - CASE
-          WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
-          ELSE "product"."discount"
-        END,
-        COALESCE(
-          MAX(
-            "variants"."basePrice" - CASE
-              WHEN "variants"."discountType" = 'PERCENTAGE' THEN "variants"."basePrice" * "variants"."discount" / 100.0
-              ELSE "variants"."discount"
-            END
-          ),
-          "product"."basePrice" - CASE
-            WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
-            ELSE "product"."discount"
-          END
-        )
-      )
-      `,
+                GREATEST(
+                    "product"."basePrice" - CASE
+                    WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+                    ELSE "product"."discount"
+                    END,
+                    COALESCE(
+                    MAX(
+                        "variants"."basePrice" - CASE
+                        WHEN "variants"."discountType" = 'PERCENTAGE' THEN "variants"."basePrice" * "variants"."discount" / 100.0
+                        ELSE "variants"."discount"
+                        END
+                    ),
+                    "product"."basePrice" - CASE
+                        WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+                        ELSE "product"."discount"
+                    END
+                    )
+                )
+                `,
                 'price'
             )
                 .orderBy('price', 'DESC');
         } else {
-            qb.orderBy('product.created_at', 'DESC');
+            qb.orderBy('product.createdAt', 'DESC');
         }
 
         qb.skip(skip).take(limit);
@@ -599,12 +598,16 @@ export class ProductService {
             .select([
                 'product.id',
                 'product.name',
-                'product.basePrice',
                 'product.stock',
                 'product.discount',
                 'product.discountType',
                 'product.productImages',
-                'product.created_at',
+                'product.hasVariants',
+                'product.finalPrice',
+                'product.basePrice',
+                'product.dealId',
+                'product.createdAt',
+                'product.status',
 
                 'subcategory.id',
                 'subcategory.name',
@@ -623,6 +626,7 @@ export class ProductService {
                 'variants.id',
                 'variants.sku',
                 'variants.basePrice',
+                'variants.finalPrice',
                 'variants.stock',
                 'variants.status',
                 'variants.variantImages',
@@ -641,10 +645,10 @@ export class ProductService {
                 query.orderBy('product.name', 'ASC');
                 break;
             case 'oldest':
-                query.orderBy('product.created_at', 'ASC');
+                query.orderBy('product.createdAt', 'ASC');
                 break;
             case 'newest':
-                query.orderBy('product.created_at', 'DESC');
+                query.orderBy('product.createdAt', 'DESC');
                 break;
             case 'price_low_high':
                 query.orderBy('product.basePrice', 'ASC');
@@ -653,7 +657,7 @@ export class ProductService {
                 query.orderBy('product.basePrice', 'DESC');
                 break;
             default:
-                query.orderBy('product.created_at', 'DESC');
+                query.orderBy('product.createdAt', 'DESC');
                 break;
         }
 
@@ -817,7 +821,7 @@ export class ProductService {
         // Find products with vendor relation filtered by vendorId, paginated with total count
         const [products, total] = await this.productRepository.findAndCount({
             where: { vendor: { id: vendorId } },
-            relations: ['subcategory', 'vendor', "variants"],
+            relations: ['subcategory', 'vendor', "variants", "deal"],
             skip,
             take: limit,
         });
