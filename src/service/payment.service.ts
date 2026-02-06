@@ -167,15 +167,5 @@ export class PaymentService {
         return crypto.createHash('sha256').update(signatureString).digest('hex');
     }
 
-    
-
-    async esewaFailure(orderId:number){
-        try{
-            
-        }catch(err){
-            console.log("Error", err)
-            throw new APIError(500, 'Esewa payment verification failed');
-        }
-    }
 
 }
