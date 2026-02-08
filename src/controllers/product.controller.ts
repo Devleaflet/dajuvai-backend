@@ -7,8 +7,6 @@ import { IAdminProductQueryParams, IProductQueryParams } from '../interface/prod
 import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
 import { ReviewService } from '../service/review.service';
-import config from '../config/env.config';
-import { string } from 'zod';
 
 
 /**
@@ -120,10 +118,6 @@ export class ProductController {
             const productId = req.params.id;
             const categoryId = Number(req.params.categoryId);
             const subcategoryId = Number(req.params.subcategoryId);
-
-            console.log("___________Product id _____________________")
-            console.log(data)
-            console.log(productId)
 
             const vendorId = await this.productService.getVendorIdByProductId(Number(productId));
 
