@@ -13,7 +13,7 @@ import { ImageDeletionService } from './image.delete.service';
 import { Category } from '../entities/category.entity';
 import { Brand } from '../entities/brand.entity';
 import { Banner } from '../entities/banner.entity';
-import { InventoryStatus, ProductInterface, DiscountType } from '../utils/zod_validations/product.zod';
+import { InventoryStatus, ProductInterface } from '../utils/zod_validations/product.zod';
 import { CategoryService } from './category.service';
 import { BannerService } from './banner.service';
 import { DealService } from './deal.service';
@@ -21,6 +21,8 @@ import { SubcategoryService } from './subcategory.service';
 import { MulterFile } from '../config/multer.config';
 import { Variant } from '../entities/variant.entity';
 import config from '../config/env.config';
+import { DiscountType } from '../entities/product.enum';
+import { OrderStatus } from '../entities/order.entity';
 
 /**
  * Service class for handling product-related operations.
@@ -124,19 +126,22 @@ export class ProductService {
             productImages
         } = data;
 
-        // Normalize hasVariants to a boolean (handles string or boolean input)
         const isVariantProduct = hasVariants === true || hasVariants === 'true';
 
-        // Validate category and subcategory
+        // ─────────────────────────────────────────────
+        // Validation
+        // ─────────────────────────────────────────────
         const categoryExists = await this.categoryService.getCategoryById(categoryId);
         if (!categoryExists) throw new APIError(404, 'Category does not exist');
 
-        const subcategoryExists = await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId);
+        const subcategoryExists = await this.subcategoryService.getSubcategoryById(
+            subcategoryId,
+            categoryId
+        );
         if (!subcategoryExists) throw new APIError(404, 'Subcategory does not exist');
 
         if (!vendorId) throw new APIError(401, 'Unauthorized: Vendor not found');
 
-        // Validate required fields based on product type
         if (!isVariantProduct) {
             if (basePrice == null || stock == null) {
                 throw new APIError(400, 'Base price and stock are required for non-variant products');
@@ -150,56 +155,117 @@ export class ProductService {
             }
         }
 
-        const finalPrice = this.calculateFinalPrice(Number(basePrice), Number(discount), discountType)
+        let dealValidation: Deal | null = null;
 
-        // Create product
+        if (dealId) {
+            dealValidation = await this.dealService.getDealById(Number(dealId));
+            if (!dealValidation || dealValidation.status !== DealStatus.ENABLED) {
+                throw new APIError(400, 'Invalid or disabled deal');
+            }
+        }
+
+
+        // ─────────────────────────────────────────────
+        // Deal + Discount Normalization
+        // ─────────────────────────────────────────────
+        const hasDeal = !!dealId;
+
+        const deal = hasDeal
+            ? await this.dealService.getDealById(Number(dealId))
+            : null;
+
+        const normalizedDiscount = hasDeal ? 0 : Number(discount || 0);
+        const normalizedDiscountType = DiscountType.PERCENTAGE;
+
+        // ─────────────────────────────────────────────
+        // Product Final Price (non-variant only)
+        // ─────────────────────────────────────────────
+        let finalPrice: number | null = null;
+
+        if (!isVariantProduct) {
+            const priceAfterDiscount = this.calculateFinalPrice(
+                Number(basePrice),
+                normalizedDiscount,
+                normalizedDiscountType
+            );
+
+            finalPrice = this.applyDealPrice(priceAfterDiscount, deal);
+        }
+
+        // ─────────────────────────────────────────────
+        // Create Product
+        // ─────────────────────────────────────────────
         const product = this.productRepository.create({
             name,
             description,
-            basePrice: isVariantProduct ? null : parseFloat(basePrice || '0'),
-            discount: parseFloat(discount || '0'),
-            discountType: discountType || DiscountType.PERCENTAGE,
-            status: this.determineOrderStatus(Number(stock)),
-            stock: isVariantProduct ? null : parseInt(stock || '0'),
+            basePrice: isVariantProduct ? null : Number(basePrice),
+            discount: normalizedDiscount,
+            discountType: normalizedDiscountType,
+            stock: isVariantProduct ? null : Number(stock),
+            status: isVariantProduct
+                ? InventoryStatus.OUT_OF_STOCK
+                : this.determineOrderStatus(Number(stock)),
             subcategoryId,
             vendorId,
             finalPrice,
-            brandId: data.brandId ? parseInt(data.brandId) : null,
-            dealId: dealId ? parseInt(dealId) : null,
-            bannerId: bannerId ? parseInt(bannerId) : null,
+            brandId: data.brandId ? Number(data.brandId) : null,
+            dealId: dealId ? Number(dealId) : null,
+            bannerId: bannerId ? Number(bannerId) : null,
             productImages: isVariantProduct ? [] : productImages,
             hasVariants: isVariantProduct
         });
 
         const savedProduct = await this.productRepository.save(product);
 
-        // Handle variants
-        if (isVariantProduct && variants) {
-            const savedVariants = await Promise.all(
+        // ─────────────────────────────────────────────
+        // Create Variants (if any)
+        // ─────────────────────────────────────────────
+        let savedVariants: Variant[] = [];
+
+        if (isVariantProduct) {
+            savedVariants = await Promise.all(
                 variants.map(async (variant) => {
+                    const base = Number(variant.basePrice);
+
+                    const vDiscount = hasDeal ? 0 : Number(variant.discount || 0);
+                    const vDiscountType = DiscountType.PERCENTAGE;
+
+                    const priceAfterDiscount = this.calculateFinalPrice(
+                        base,
+                        vDiscount,
+                        vDiscountType
+                    );
+
+                    const finalVariantPrice = this.applyDealPrice(
+                        priceAfterDiscount,
+                        deal
+                    );
+
                     const newVariant = this.variantRepository.create({
                         sku: variant.sku,
-                        basePrice: parseFloat(variant.basePrice),
-                        discount: product.discount || 0,
-                        discountType: product.discountType || DiscountType.PERCENTAGE,
+                        basePrice: base,
+                        discount: vDiscount,
+                        discountType: vDiscountType,
                         attributes: variant.attributes,
                         variantImages: variant.variantImages || [],
-                        stock: parseInt(variant.stock),
-                        status: variant.status || InventoryStatus.AVAILABLE,
+                        stock: Number(variant.stock),
+                        status: this.determineOrderStatus(Number(variant.stock)),
                         productId: savedProduct.id.toString(),
                         product: savedProduct,
-                        finalPrice: this.calculateFinalPrice(Number(variant.basePrice), Number(variant.discount), variant.discountType)
+                        finalPrice: finalVariantPrice
                     });
 
                     return this.variantRepository.save(newVariant);
                 })
             );
-
-            savedProduct.variants = savedVariants;
         }
+
+        savedProduct.variants = savedVariants;
 
         return savedProduct;
     }
+
+
     public calculateFinalPrice(
         basePrice: number,
         discount = 0,
@@ -207,7 +273,13 @@ export class ProductService {
     ): number {
         if (!basePrice || basePrice <= 0) return 0;
 
-        if (!discount || discount <= 0) return basePrice;
+        if (
+            discountType === DiscountType.NONE ||
+            !discount ||
+            discount <= 0
+        ) {
+            return basePrice;
+        }
 
         if (discountType === DiscountType.FLAT) {
             return Math.max(0, basePrice - discount);
@@ -278,6 +350,7 @@ export class ProductService {
             throw new APIError(404, 'Subcategory does not exist');
         }
 
+        // ---------------- DEAL RESOLUTION ----------------
         let resolvedDeal: Deal | null = null;
 
         if (dealId !== undefined && dealId !== null) {
@@ -286,6 +359,18 @@ export class ProductService {
                 throw new APIError(404, 'Deal does not exist or is disabled');
             }
         }
+
+        // Apply deal to product FIRST
+        if (dealId === null) {
+            product.deal = null;
+            product.dealId = null;
+        } else if (dealId !== undefined) {
+            product.deal = resolvedDeal;
+            product.dealId = Number(dealId);
+        }
+
+        const hasDeal = !!product.deal;
+
 
         const hasVariantsBool =
             hasVariants === true || hasVariants === 'true'
@@ -298,10 +383,16 @@ export class ProductService {
         product.description = description ?? product.description;
         product.subcategoryId = subcategoryId;
 
-        product.discount =
-            discount !== undefined ? parseFloat(discount.toString()) : product.discount;
+        product.discount = hasDeal
+            ? 0
+            : discount !== undefined
+                ? parseFloat(discount.toString())
+                : product.discount;
 
-        product.discountType = discountType ?? product.discountType;
+        product.discountType = hasDeal
+            ? DiscountType.PERCENTAGE
+            : discountType ?? product.discountType;
+
 
         if (!hasVariantsBool) {
             product.basePrice =
@@ -314,14 +405,6 @@ export class ProductService {
         } else {
             product.basePrice = null;
             product.stock = null;
-        }
-
-        if (dealId === null) {
-            product.dealId = null;
-            product.deal = null;
-        } else if (dealId !== undefined) {
-            product.dealId = Number(dealId);
-            product.deal = resolvedDeal;
         }
 
         if (bannerId === null) {
@@ -352,7 +435,7 @@ export class ProductService {
             const priceAfterProductDiscount = this.calculateFinalPrice(
                 product.basePrice,
                 product.discount ?? 0,
-                product.discountType ?? DiscountType.PERCENTAGE
+                product.discountType ?? DiscountType.NONE
             );
 
             product.finalPrice = this.applyDealPrice(
@@ -377,8 +460,10 @@ export class ProductService {
                     });
 
                     const base = Number(variant.basePrice);
-                    const vDiscount = Number(variant.discount || 0);
-                    const vDiscountType = variant.discountType || DiscountType.PERCENTAGE;
+                    const vDiscount = hasDeal ? 0 : Number(variant.discount || 0);
+                    const vDiscountType = hasDeal
+                        ? DiscountType.PERCENTAGE
+                        : variant.discountType || DiscountType.PERCENTAGE;
 
                     const priceAfterProductDiscount = this.calculateFinalPrice(
                         base,

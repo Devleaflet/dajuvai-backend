@@ -1,11 +1,7 @@
 
 import { z } from "zod";
+import { DiscountType } from "../../entities/product.enum";
 
-// Enums
-export enum DiscountType {
-    PERCENTAGE = 'PERCENTAGE',
-    FLAT = 'FLAT',
-}
 
 export enum InventoryStatus {
     AVAILABLE = 'AVAILABLE',

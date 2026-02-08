@@ -30,7 +30,7 @@ export class Product {
     @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
     discount: number;
 
-    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE })
+    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.NONE })
     discountType: DiscountType;
 
     @Column({ type: 'enum', enum: InventoryStatus, default: InventoryStatus.AVAILABLE, nullable: true })
