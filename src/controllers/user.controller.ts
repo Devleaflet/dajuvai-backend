@@ -152,7 +152,16 @@ export class UserController {
 
             // Get user repository and find user by email
             const userRepo = AppDataSource.getRepository(User);
-            const user = await userRepo.findOneBy({ email });
+            const user = await userRepo.findOne({
+                where: { email },
+                select: {
+                    id: true,
+                    email: true,
+                    password: true,
+                    role: true,
+                    username: true
+                }
+            })
 
             // Return 404 if user not found
             if (!user) {
@@ -197,7 +206,7 @@ export class UserController {
                     id: user.id,
                     username: user.username,
                     email: user.email,
-                    role: user.role, token
+                    role: user.role,
                 }
             });
         } catch (error) {
@@ -530,8 +539,6 @@ export class UserController {
             if (!user) {
                 throw new APIError(404, "User does not exist");
             }
-
-            console.log(user.provider)
 
             if (user.provider !== AuthProvider.LOCAL) {
                 throw new APIError(403, "This account was created with Google. Please log in using Google.");

@@ -57,6 +57,14 @@ export const findUserById = async (id: number): Promise<User> => {
 export const findUserByEmailLogin = async (email: string): Promise<User | null> => {
     return await userDB.findOne({
         where: [{ email }, { username: email }],
+        select: {
+            id: true,
+            email: true,
+            role: true,
+            provider: true,
+            isVerified: true,
+            password: true
+        }
     });
 };
 

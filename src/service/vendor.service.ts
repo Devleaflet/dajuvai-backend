@@ -6,7 +6,9 @@ import { Address } from '../entities/address.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from './district.service';
 import { District } from '../entities/district.entity';
-import { vendorSignupSchema } from '../utils/zod_validations/vendor.zod';
+import { IUpdateVendorPaymentOptionRequest, IUpdateVendorRequestV2, vendorSignupSchema } from '../utils/zod_validations/vendor.zod';
+import { PaymentOption, VendorPaymentOption } from '../entities/vendorPaymentOption';
+import { toVendorAdminDTO } from '../utils/vendorAdminDto';
 
 /**
  * Service for managing vendor-related operations such as
@@ -17,6 +19,7 @@ export class VendorService {
     private readonly vendorRepository: Repository<Vendor>;
     private addressRepository: Repository<Address>;
     private districtService: DistrictService;
+    private vendorPaymentOptionRepository: Repository<VendorPaymentOption>;
 
     /**
      * Initializes repositories and dependent services.
@@ -25,6 +28,7 @@ export class VendorService {
         this.vendorRepository = AppDataSource.getRepository(Vendor);
         this.addressRepository = AppDataSource.getRepository(Address);
         this.districtService = new DistrictService();
+        this.vendorPaymentOptionRepository = AppDataSource.getRepository(VendorPaymentOption);
     }
 
     /**
@@ -36,6 +40,9 @@ export class VendorService {
         return await this.vendorRepository.find({
             where: {
                 isApproved: true
+            },
+            relations: {
+                paymentOptions: true
             }
         });
 
@@ -46,19 +53,30 @@ export class VendorService {
             where: {
                 isApproved: true
             },
-            select: ["email", "id", "businessName"]
+            select: {
+                email: true,
+                id: true,
+                businessName: true
+            }
         });
 
     }
 
     async fetchAllUnapprovedVendor() {
-        return await this.vendorRepository.find({
+        const vendors = await this.vendorRepository.find({
             where: {
                 isApproved: false,
                 isVerified: true
+            },
+            relations: {
+                paymentOptions: true
             }
         })
+
+        return vendors.map(toVendorAdminDTO);
     }
+
+
 
     /**
      * Creates a new vendor with validation on email uniqueness and district existence.
@@ -127,11 +145,20 @@ export class VendorService {
      * @param id - Vendor ID.
      * @returns {Promise<Vendor | null>} Vendor entity or null if not found.
      */
+    // async getVendorByIdService(id: number): Promise<Vendor | null> {
+    //     // Straightforward ID-based lookup
+    //     return await this.vendorRepository.findOne({
+    //         select: ["id", "businessName", "district", "districtId", "email", "phoneNumber", "telePhone"],
+    //         where: { id }
+    //     });
+    // }
     async getVendorByIdService(id: number): Promise<Vendor | null> {
         // Straightforward ID-based lookup
         return await this.vendorRepository.findOne({
-            select: ["id", "businessName", "district", "districtId", "email", "phoneNumber", "telePhone"],
-            where: { id }
+            where: { id },
+            relations: {
+                paymentOptions: true
+            }
         });
     }
 
@@ -142,7 +169,12 @@ export class VendorService {
      */
     async findVendorById(id: number): Promise<Vendor | null> {
         // Duplicate of getVendorByIdService - could unify if desired
-        return await this.vendorRepository.findOne({ where: { id } });
+        return await this.vendorRepository.findOne({
+            where: { id },
+            relations: {
+                paymentOptions: true
+            }
+        });
     }
 
     /**
@@ -195,4 +227,248 @@ export class VendorService {
         // Useful for saving vendor after manual changes outside update method
         return await this.vendorRepository.save(vendor);
     }
+
+
+
+
+
+    // ---------------------------------------------------------------------------------------------------------------------
+    async createVendorV2(data: any): Promise<Vendor> {
+        const queryRunner = this.vendorRepository.manager.connection.createQueryRunner();
+
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+
+        try {
+            const existing = await queryRunner.manager.findOne(Vendor, {
+                where: { email: data.email },
+            });
+
+            if (existing) throw new APIError(409, "Vendor already exists");
+
+            const vendor = queryRunner.manager.create(Vendor, {
+                businessName: data.businessName,
+                email: data.email,
+                password: data.password,
+                phoneNumber: data.phoneNumber,
+                telePhone: data.telePhone,
+                businessRegNumber: data.businessRegNumber,
+                taxNumber: data.taxNumber,
+                taxDocuments: data.taxDocuments,
+                citizenshipDocuments: data.citizenshipDocuments,
+                district: data.districtEntity,
+                districtId: data.districtEntity.id,
+                verificationCode: data.verificationCode,
+                verificationCodeExpire: data.verificationCodeExpire,
+                isVerified: true,
+                isApproved: false,
+
+                accountName: data.accountName,
+                bankName: data.bankName,
+                accountNumber: data.accountNumber,
+                bankBranch: data.bankBranch,
+            });
+
+            const savedVendor = await queryRunner.manager.save(vendor);
+
+            if (data.paymentOptions && data.paymentOptions.length > 0) {
+                const paymentEntities = data.paymentOptions.map((option) =>
+                    queryRunner.manager.create(VendorPaymentOption, {
+                        paymentType: option.paymentType,
+                        details: option.details,
+                        qrCodeImage: option.qrCodeImage ?? null,
+                        isActive: option.isActive ?? true,
+                        vendor: savedVendor,
+                        vendorId: savedVendor.id,
+                    })
+                );
+
+                await queryRunner.manager.save(paymentEntities);
+            }
+
+            if (
+                data.accountNumber &&
+                (!data.paymentOptions ||
+                    !data.paymentOptions.some((p) => p.paymentType === 'NPS'))
+            ) {
+                const bankOption = queryRunner.manager.create(VendorPaymentOption, {
+                    paymentType: PaymentOption.NPS,
+                    details: {
+                        accountNumber: data.accountNumber,
+                        bankName: data.bankName,
+                        accountName: data.accountName,
+                        branch: data.bankBranch,
+                    },
+                    vendor: savedVendor,
+                    vendorId: savedVendor.id,
+                });
+
+                await queryRunner.manager.save(bankOption);
+            }
+
+            await queryRunner.commitTransaction();
+
+            return vendor;
+        } catch (error) {
+            await queryRunner.rollbackTransaction();
+            throw error;
+        } finally {
+            await queryRunner.release();
+        }
+    }
+
+    async updateVendorServiceV2(
+        id: number,
+        updateData: Partial<IUpdateVendorRequestV2>
+    ): Promise<Vendor> {
+
+        const queryRunner = this.vendorRepository.manager.connection.createQueryRunner();
+        await queryRunner.connect();
+        await queryRunner.startTransaction();
+
+        try {
+            const vendor = await queryRunner.manager.findOne(Vendor, {
+                where: { id },
+                relations: {
+                    paymentOptions: true
+                }
+            });
+
+            if (!vendor) throw new APIError(404, "Vendor not found");
+
+            // 🔹 Handle district update
+            if (updateData.district) {
+                const districtEntity = await queryRunner.manager.findOne(District, {
+                    where: { name: updateData.district }
+                });
+
+                if (!districtEntity) throw new APIError(404, "District does not exist");
+
+                vendor.district = districtEntity;
+                vendor.districtId = districtEntity.id;
+            }
+
+            // 🔹 Update scalar fields safely
+            Object.assign(vendor, {
+                businessName: updateData.businessName ?? vendor.businessName,
+                phoneNumber: updateData.phoneNumber ?? vendor.phoneNumber,
+                telePhone: updateData.telePhone ?? vendor.telePhone,
+                taxNumber: updateData.taxNumber ?? vendor.taxNumber,
+                taxDocuments: updateData.taxDocuments ?? vendor.taxDocuments,
+                citizenshipDocuments: updateData.citizenshipDocuments ?? vendor.citizenshipDocuments,
+            });
+
+            await queryRunner.manager.save(vendor);
+
+            if (updateData.paymentOptions) {
+
+                const existingOptions = vendor.paymentOptions;
+
+                const existingMap = new Map(
+                    existingOptions.map(opt => [opt.paymentType, opt])
+                );
+
+                const incomingMap = new Map(
+                    updateData.paymentOptions.map(opt => [opt.paymentType, opt])
+                );
+
+                const toUpdate: VendorPaymentOption[] = [];
+                const toCreate: VendorPaymentOption[] = [];
+                const toDelete: VendorPaymentOption[] = [];
+
+                // UPDATE OR CREATE
+                for (const [paymentType, incomingOption] of incomingMap.entries()) {
+
+                    const existingOption = existingMap.get(paymentType);
+
+                    if (existingOption) {
+
+                        existingOption.details = incomingOption.details;
+
+                        if (incomingOption.qrCodeImage !== undefined) {
+                            existingOption.qrCodeImage = incomingOption.qrCodeImage;
+                        }
+
+                        if (incomingOption.isActive !== undefined) {
+                            existingOption.isActive = incomingOption.isActive;
+                        }
+
+                        toUpdate.push(existingOption);
+
+                    } else {
+
+                        const newOption = queryRunner.manager.create(VendorPaymentOption, {
+                            paymentType: incomingOption.paymentType,
+                            details: incomingOption.details,
+                            qrCodeImage: incomingOption.qrCodeImage ?? null,
+                            isActive: incomingOption.isActive ?? true,
+                            vendor: vendor
+                        });
+
+                        toCreate.push(newOption);
+                    }
+                }
+
+                // DELETE REMOVED
+                for (const [paymentType, existingOption] of existingMap.entries()) {
+                    if (!incomingMap.has(paymentType)) {
+                        toDelete.push(existingOption);
+                    }
+                }
+
+                if (toUpdate.length) await queryRunner.manager.save(toUpdate);
+                if (toCreate.length) await queryRunner.manager.save(toCreate);
+                if (toDelete.length) await queryRunner.manager.remove(toDelete);
+            }
+
+            await queryRunner.commitTransaction();
+
+            return await queryRunner.manager.findOne(Vendor, {
+                where: { id },
+                relations: ['paymentOptions', 'district']
+            });
+
+        } catch (error) {
+            await queryRunner.rollbackTransaction();
+            throw error;
+        } finally {
+            await queryRunner.release();
+        }
+    }
+
+    async updatePaymentOptionService(
+        vendorId: number,
+        paymentOptionId: number,
+        updateData: Partial<IUpdateVendorPaymentOptionRequest>
+    ): Promise<VendorPaymentOption> {
+
+        const paymentOption = await this.vendorPaymentOptionRepository.findOne({
+            where: {
+                id: paymentOptionId,
+                vendor: { id: vendorId }
+            },
+            relations: ['vendor']
+        });
+
+        if (!paymentOption) {
+            throw new APIError(404, "Payment option not found for this vendor");
+        }
+
+        if (updateData.details !== undefined) {
+            paymentOption.details = updateData.details;
+        }
+
+        if (updateData.qrCodeImage !== undefined) {
+            paymentOption.qrCodeImage = updateData.qrCodeImage;
+        }
+
+        if (updateData.isActive !== undefined) {
+            paymentOption.isActive = updateData.isActive;
+        }
+
+        await this.vendorPaymentOptionRepository.save(paymentOption);
+
+        return paymentOption;
+    }
+
 }

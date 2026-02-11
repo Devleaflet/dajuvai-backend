@@ -17,6 +17,10 @@ import {
     verificationTokenSchema,
     resetPasswordSchema,
     updateVendorSchema,
+    IVendorSignupRequestV2,
+    vendorSignupSchemav2,
+    IUpdateVendorRequestV2,
+    IUpdateVendorPaymentOptionRequest,
 } from '../utils/zod_validations/vendor.zod';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from '../service/district.service';
@@ -611,7 +615,7 @@ export class VendorController {
 
     async deleteVendor(req: AuthRequest<{ id: string }, {}, {}, {}>, res: Response) {
         try {
-            const vendorId = req.params.id;
+            const vendorId = req.params.id || 46;
 
             const vendorExists = await this.vendorService.findVendorById(Number(vendorId))
 
@@ -635,4 +639,149 @@ export class VendorController {
             }
         }
     }
+
+
+
+
+
+
+
+
+
+
+    // -------------------- v2 vendor Controller - Add payment options for vendors ------------------------------------------------------
+    async vendorSignupV2(
+        req: VendorAuthRequest<{}, {}, IVendorSignupRequestV2>,
+        res: Response
+    ): Promise<void> {
+        try {
+            console.log("----------------------Vendor payload---------------------")
+            console.log(req.body)
+            const parsed = vendorSignupSchemav2.safeParse(req.body);
+            if (!parsed.success) {
+                res.status(400).json({ success: false, errors: parsed.error.errors });
+                return;
+            }
+
+            const data = parsed.data;
+
+            const existingVendor = await this.vendorService.findVendorByEmail(data.email);
+            const existingUser = await findUserByEmail(data.email);
+
+            if (existingUser) throw new APIError(409, "User already exists");
+            if (existingVendor && existingVendor.isVerified)
+                throw new APIError(409, "Vendor already exists");
+
+            const districtEntity = await this.districtService.findDistrictByName(data.district);
+            if (!districtEntity) throw new APIError(400, "District does not exist");
+
+            const hashedPassword = await bcrypt.hash(data.password, 10);
+
+            const verificationToken = TokenUtils.generateToken();
+            const hashedToken = await TokenUtils.hashToken(verificationToken);
+            const verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
+
+            const vendor = await this.vendorService.createVendorV2({
+                ...data,
+                password: hashedPassword,
+                verificationCode: hashedToken,
+                verificationCodeExpire,
+                districtEntity,
+            });
+
+            await sendVerificationEmail(
+                data.email,
+                "Vendor Email Verification",
+                verificationToken
+            );
+
+            const token = jwt.sign(
+                { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+                this.jwtSecret,
+                { expiresIn: "2h" }
+            );
+
+            res.cookie("vendorToken", token, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 2 * 60 * 60 * 1000,
+            });
+
+            res.status(201).json({
+                success: true,
+                message: "Your account has been successfully registered. Our admin team will review your application within 5 business days",
+                token,
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                console.error("Vendor signup v2 error:", error);
+                res.status(500).json({ success: false, message: "Internal Server Error" });
+            }
+        }
+    }
+
+    async updateVendorV2(
+        req: VendorAuthRequest<{ id: string }, {}, Partial<IUpdateVendorRequestV2>>,
+        res: Response
+    ): Promise<void> {
+        try {
+            const id = Number(req.params.id);
+
+            const vendor = await this.vendorService.findVendorById(id);
+            if (!vendor) throw new APIError(404, "Vendor does not exist");
+
+            const updatedVendor = await this.vendorService.updateVendorServiceV2(id, req.body);
+
+            res.status(200).json({
+                success: true,
+                message: 'Vendor updated successfully',
+                data: updatedVendor
+            });
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(503).json({ success: false, message: 'Vendor update service temporarily unavailable' });
+            }
+        }
+    }
+
+    async updatePaymentOption(
+        req: VendorAuthRequest<
+            { vendorId: string; paymentOptionId: string },
+            {},
+            Partial<IUpdateVendorPaymentOptionRequest>
+        >,
+        res: Response
+    ): Promise<void> {
+        try {
+            const vendorId = Number(req.params.vendorId);
+            const paymentOptionId = Number(req.params.paymentOptionId);
+
+            const updated = await this.vendorService.updatePaymentOptionService(
+                vendorId,
+                paymentOptionId,
+                req.body
+            );
+
+            res.status(200).json({
+                success: true,
+                message: "Payment option updated successfully",
+                data: updated
+            });
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({ success: false, message: "Payment option update failed" });
+            }
+        }
+    }
+
+
 }

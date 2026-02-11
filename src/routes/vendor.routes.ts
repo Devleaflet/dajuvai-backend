@@ -4,22 +4,16 @@ import { authMiddleware, combinedAuthMiddleware, isAdmin, isAdminOrStaff, isVend
 import {
     vendorSignupSchema,
     vendorLoginSchema,
-    verificationTokenSchema,
-    verifyTokenSchema,
-    resetPasswordSchema,
     updateVendorSchema,
+    vendorSignupSchemav2,
+    updateVendorSchema2,
+    updateVendorPaymentOptionSchema,
 } from '../utils/zod_validations/vendor.zod';
 
-import rateLimit from 'express-rate-limit';
 import { validateZod } from '../middlewares/auth.middleware';
 import { ProductController } from '../controllers/product.controller';
 import AppDataSource from '../config/db.config';
 
-const authRateLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limit each IP to 5 requests per window
-    message: 'Too many requests, please try again later.',
-});
 
 const router = Router();
 const vendorController = new VendorController();
@@ -1344,5 +1338,33 @@ router.put("/approve/:id", authMiddleware, isAdminOrStaff, vendorController.appr
  *                   example: "Vendor update service temporarily unavailable"
  */
 router.delete("/:id", authMiddleware, isAdmin, vendorController.deleteVendor.bind(vendorController));
+
+
+
+
+// ---------------------------- v2 routes ------------------------------------------------------------------------------------
+router.post(
+    '/request/register-v2',
+    validateZod(vendorSignupSchemav2),
+    vendorController.vendorSignupV2.bind(vendorController)
+);
+
+router.put("/v2/:id",
+    validateZod(updateVendorSchema2, "body"),
+    combinedAuthMiddleware,
+    restrictToVendorOrAdmin,
+    vendorController.updateVendorV2.bind(vendorController)
+)
+
+
+router.patch(
+    '/:vendorId/payment-options/:paymentOptionId',
+    validateZod(updateVendorPaymentOptionSchema),
+    combinedAuthMiddleware,
+    restrictToVendorOrAdmin,
+    vendorController.updatePaymentOption.bind(vendorController)
+);
+
+
 
 export default router;

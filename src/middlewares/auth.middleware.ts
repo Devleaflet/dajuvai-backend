@@ -459,16 +459,28 @@ export const validateZod = (
         try {
             const parsed = await schema.parseAsync(req[property]);
             req[property] = parsed;
-            next();
+            return next();
         } catch (error) {
-            console.error('validateZod middleware caught error:', error);
             if (error instanceof ZodError) {
-                const formatted = error.flatten();
-                return next(
-                    new APIError(400, 'Validation error: ' + JSON.stringify(formatted.fieldErrors))
-                );
+                const formattedErrors = error.errors.map((err) => ({
+                    field: err.path.join('.'),
+                    message: err.message,
+                }));
+
+                res.status(400).json({
+                    success: false,
+                    type: 'VALIDATION_ERROR',
+                    errors: formattedErrors,
+                });
+                return;
             }
-            next(new APIError(500, 'Unexpected validation middleware error'));
+
+            res.status(500).json({
+                success: false,
+                type: 'INTERNAL_VALIDATION_ERROR',
+                message: 'Unexpected validation error',
+            });
+            return
         }
     };
 };

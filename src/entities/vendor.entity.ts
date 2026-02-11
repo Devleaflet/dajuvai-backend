@@ -2,6 +2,15 @@ import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateCol
 import { Product } from './product.entity';
 import { OrderItem } from './orderItems.entity';
 import { District } from './district.entity';
+import { VendorPaymentOption } from './vendorPaymentOption';
+
+export enum PaymentOption {
+    ESEWA = 'ESEWA',
+    KHALTI = 'KHALTI',
+    IMEPAY = 'IMEPAY',
+    FONEPAY = 'FONEPAY',
+    NPS = "NPS"
+}
 
 @Entity()
 export class Vendor {
@@ -31,7 +40,7 @@ export class Vendor {
     districtId: number;
 
     @Column({ nullable: true })
-    businessRegNumber: string; 
+    businessRegNumber: string;
 
     @Column({ type: "varchar", nullable: true })
     taxNumber: string;
@@ -86,6 +95,15 @@ export class Vendor {
 
     @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
     orderItems: OrderItem[];
+
+    @OneToMany(
+        () => VendorPaymentOption,
+        (paymentOption) => paymentOption.vendor,
+        {
+            cascade: true,
+        },
+    )
+    paymentOptions?: VendorPaymentOption[];
 
     @CreateDateColumn()
     createdAt: Date;
