@@ -139,8 +139,8 @@ const productController = new ProductController(AppDataSource);
  *               message: "Service temporarily unavailable"
  */
 
-router.get('/', vendorController.getVendors.bind(vendorController));
-// authMiddleware, isAdminOrStaff, 
+router.get('/', authMiddleware, isAdminOrStaff, vendorController.getVendors.bind(vendorController));
+
 router.get('/partial/vendors', vendorController.getPartialVendors.bind(vendorController));
 
 /**
