@@ -289,10 +289,10 @@ export class VendorService {
             if (
                 data.accountNumber &&
                 (!data.paymentOptions ||
-                    !data.paymentOptions.some((p) => p.paymentType === 'NPS'))
+                    !data.paymentOptions.some((p) => p.paymentType === 'BANK'))
             ) {
                 const bankOption = queryRunner.manager.create(VendorPaymentOption, {
-                    paymentType: PaymentOption.NPS,
+                    paymentType: PaymentOption.BANK,
                     details: {
                         accountNumber: data.accountNumber,
                         bankName: data.bankName,

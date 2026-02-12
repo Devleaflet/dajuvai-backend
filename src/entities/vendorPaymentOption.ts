@@ -13,9 +13,8 @@ import { Vendor } from './vendor.entity';
 export enum PaymentOption {
     ESEWA = 'ESEWA',
     KHALTI = 'KHALTI',
-    IMEPAY = 'IMEPAY',
-    FONEPAY = 'FONEPAY',
-    NPS = 'NPS',
+    BANK = 'BANK',
+    NPS = "NPS"
 }
 
 @Entity()
@@ -37,7 +36,7 @@ export class VendorPaymentOption {
      *   accountName?: string
      * }
      *
-     * For BANK (NPS):
+     * For BANK (BANK):
      * {
      *   accountNumber: string,
      *   bankName: string,

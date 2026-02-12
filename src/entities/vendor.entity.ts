@@ -7,9 +7,8 @@ import { VendorPaymentOption } from './vendorPaymentOption';
 export enum PaymentOption {
     ESEWA = 'ESEWA',
     KHALTI = 'KHALTI',
-    IMEPAY = 'IMEPAY',
-    FONEPAY = 'FONEPAY',
-    NPS = "NPS"
+    NPS = "NPS",
+    BANK = "BANK"
 }
 
 @Entity()

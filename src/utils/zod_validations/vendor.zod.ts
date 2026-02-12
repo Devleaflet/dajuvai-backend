@@ -94,7 +94,7 @@ const walletDetailsSchema = z.object({
 });
 
 /**
- * Bank payment details schema (NPS)
+ * Bank payment details schema (BANK)
  */
 const bankDetailsSchema = z.object({
     accountNumber: z.string().min(5, 'Account number is required'),
@@ -120,14 +120,8 @@ export const vendorPaymentOptionSchema = z.discriminatedUnion('paymentType', [
         isActive: z.boolean().optional(),
     }),
     z.object({
-        paymentType: z.literal(PaymentOption.IMEPAY),
-        details: walletDetailsSchema,
-        qrCodeImage: z.string().url().optional().nullable(),
-        isActive: z.boolean().optional(),
-    }),
-    z.object({
-        paymentType: z.literal(PaymentOption.FONEPAY),
-        details: walletDetailsSchema,
+        paymentType: z.literal(PaymentOption.BANK),
+        details: bankDetailsSchema,
         qrCodeImage: z.string().url().optional().nullable(),
         isActive: z.boolean().optional(),
     }),
