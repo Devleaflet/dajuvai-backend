@@ -132,6 +132,7 @@ passport.use(
                         id: user.id,
                         email: user.email,
                         username: user.username || profile.displayName,
+                        role: user.role,
                     },
                     process.env.JWT_SECRET || "your_jwt_secret",
                     { expiresIn: "2h" }
@@ -201,6 +202,7 @@ passport.use(
                         id: user.id,
                         email: user.email,
                         username: user.username || profile.displayName,
+                        role: user.role,
                     },
                     process.env.JWT_SECRET || "your_jwt_secret", // Secret key for signing
                     { expiresIn: "2h" } // Token expires in 2 hours

@@ -87,7 +87,15 @@ export const combinedAuthMiddleware = async (
     res: Response,
     next: NextFunction
 ): Promise<void> => {
-    const token = req.cookies.vendorToken || req.cookies.token || req.headers.authorization?.split(' ')[1];
+    // Prefer vendorToken cookie, then Authorization header.
+    // Do NOT fall back to req.cookies.token (the regular user cookie) here
+    // because a user who is also logged in via Google OAuth would have that
+    // cookie set, causing combinedAuthMiddleware to pick up the wrong token
+    // for vendor routes, leading to a 401 "missing role or businessName".
+    const token = req.cookies.vendorToken || req.headers.authorization?.split(' ')[1];
+
+    console.log("--------------Combined token-------------")
+    console.log(token)
 
     if (!token) {
         res.status(401).json({ success: false, message: 'Authentication token is missing' });
@@ -126,6 +134,15 @@ export const combinedAuthMiddleware = async (
         res.status(401).json({ success: false, message: 'Invalid token: missing role or businessName' });
         return;
     } catch (err) {
+        console.log("----------Error------------")
+        console.log(err)
+        // Google OAuth tokens (or any externally-signed JWT) will fail with
+        // "invalid signature" because they are not signed with JWT_SECRET.
+        // Return a clear message instead of the generic one.
+        if (err instanceof Error && err.name === 'JsonWebTokenError' && err.message === 'invalid signature') {
+            res.status(401).json({ success: false, message: 'Vendor session not found. Please log in as a vendor.' });
+            return;
+        }
         res.status(401).json({ success: false, message: 'Invalid or expired token' });
         return;
     }
@@ -183,6 +200,8 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
     try {
         const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
 
+        console.log("------------Token------------")
+        console.log(token)
         if (!token) {
             res.status(401).json({ success: false, message: 'No token provided. Please log in.' });
             return;
