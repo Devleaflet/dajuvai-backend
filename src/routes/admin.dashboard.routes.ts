@@ -96,7 +96,7 @@ const adminDashboardRouter = Router();
  *                   example: "Failed to fetch dashboard statistics: <details>"
  */
 adminDashboardRouter.get("/stats", adminDashboardController.getDashboardStats.bind(adminDashboardController));
-// authMiddleware, isAdminOrStaff,
+// 
 
 /**
  * @swagger
@@ -142,7 +142,7 @@ adminDashboardRouter.get("/stats", adminDashboardController.getDashboardStats.bi
  *       500:
  *         description: Internal server error when fetching revenue data
  */
-adminDashboardRouter.get("/revenue", authMiddleware, isAdminOrStaff, adminDashboardController.getRevenueChart.bind(adminDashboardController));
+adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bind(adminDashboardController));
 
 
 /**
@@ -256,7 +256,7 @@ adminDashboardRouter.get("/revenue", authMiddleware, isAdminOrStaff, adminDashbo
  *                   type: string
  *                   example: "Something went wrong"
  */
-adminDashboardRouter.get("/vendors-sales-amount", authMiddleware, isAdminOrStaff, adminDashboardController.getVendorsSalesAmount.bind(adminDashboardController));
+adminDashboardRouter.get("/vendors-sales-amount", adminDashboardController.getVendorsSalesAmount.bind(adminDashboardController));
 
 
 /**
@@ -370,7 +370,7 @@ adminDashboardRouter.get("/vendors-sales-amount", authMiddleware, isAdminOrStaff
  *                   type: string
  *                   example: "Something went wrong"
  */
-adminDashboardRouter.get("/top-products", authMiddleware, isAdminOrStaff, adminDashboardController.getTopProducts.bind(adminDashboardController));
+adminDashboardRouter.get("/top-products", adminDashboardController.getTopProducts.bind(adminDashboardController));
 
 /**
  * @swagger
@@ -424,7 +424,7 @@ adminDashboardRouter.get("/top-products", authMiddleware, isAdminOrStaff, adminD
  *                   type: string
  *                   example: "Something went wrong"
  */
-adminDashboardRouter.get("/todays-sales", authMiddleware, isAdminOrStaff, adminDashboardController.getTodaysSales.bind(adminDashboardController));
+adminDashboardRouter.get("/todays-sales", adminDashboardController.getTodaysSales.bind(adminDashboardController));
 
 
 /**

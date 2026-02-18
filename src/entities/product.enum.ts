@@ -8,7 +8,7 @@ export enum InventoryStatus {
 }
 
 export enum DiscountType {
-    NONE = 'None',
+    NONE = 'NONE',
     PERCENTAGE = 'PERCENTAGE',
     FLAT = 'FLAT',
 }

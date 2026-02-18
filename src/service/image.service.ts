@@ -10,7 +10,7 @@ export class ImageService {
             cloudinary.uploader.upload_stream(
                 {
                     folder: folderName,
-                    resource_type: isPdf ? "raw" : "auto" 
+                    resource_type: isPdf ? "raw" : "auto"
                 },
                 (error, result) => {
                     if (error || !result) return reject(error || new Error("Upload failed"));
@@ -44,5 +44,24 @@ export class ImageService {
         } catch (error) {
             throw new Error("Cloudinary multiple upload failed: " + error.message);
         }
+    }
+
+    async deleteImageByUrl(url: string): Promise<void> {
+        try {
+            const matches = url.match(/\/upload\/(?:v\d+\/)?(.+)\.[a-zA-Z]+$/);
+            if (!matches || !matches[1]) {
+                console.warn(`[ImageService] Could not parse public_id from URL: ${url}`);
+                return;
+            }
+            const publicId = matches[1];
+            const result = await cloudinary.uploader.destroy(publicId);
+            console.log(`[ImageService] Deleted image ${publicId}:`, result);
+        } catch (error) {
+            console.error(`[ImageService] Failed to delete image at ${url}:`, error);
+        }
+    }
+
+    async deleteImagesByUrls(urls: string[]): Promise<void> {
+        await Promise.all(urls.map((url) => this.deleteImageByUrl(url)));
     }
 }

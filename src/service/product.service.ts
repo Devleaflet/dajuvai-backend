@@ -1,4 +1,4 @@
-import { DataSource, Repository } from 'typeorm';
+import { DataSource, Repository, Not } from 'typeorm';
 import { Product } from '../entities/product.entity';
 import { Subcategory } from '../entities/subcategory.entity';
 import { User, UserRole } from '../entities/user.entity';
@@ -105,6 +105,14 @@ export class ProductService {
         return InventoryStatus.AVAILABLE;
     }
 
+    private sanitizeDiscountType(value: unknown): DiscountType {
+        const validTypes = Object.values(DiscountType);
+        if (typeof value === 'string' && validTypes.includes(value as DiscountType)) {
+            return value as DiscountType;
+        }
+        return DiscountType.NONE;
+    }
+
 
     async createProduct(
         data: Partial<ProductInterface>,
@@ -175,7 +183,9 @@ export class ProductService {
             : null;
 
         const normalizedDiscount = hasDeal ? 0 : Number(discount || 0);
-        const normalizedDiscountType = DiscountType.PERCENTAGE;
+        const normalizedDiscountType = hasDeal
+            ? DiscountType.NONE
+            : this.sanitizeDiscountType(discountType);
 
         // ─────────────────────────────────────────────
         // Product Final Price (non-variant only)
@@ -228,8 +238,11 @@ export class ProductService {
                     const base = Number(variant.basePrice);
 
                     const vDiscount = hasDeal ? 0 : Number(variant.discount || 0);
-                    const vDiscountType = DiscountType.PERCENTAGE;
-
+                    
+                    const vDiscountType = hasDeal
+                        ? DiscountType.NONE
+                        : this.sanitizeDiscountType(variant.discountType);
+                        
                     const priceAfterDiscount = this.calculateFinalPrice(
                         base,
                         vDiscount,
@@ -319,7 +332,6 @@ export class ProductService {
             basePrice,
             discount,
             discountType,
-            status,
             stock,
             dealId,
             bannerId,
@@ -390,7 +402,7 @@ export class ProductService {
                 : product.discount;
 
         product.discountType = hasDeal
-            ? DiscountType.PERCENTAGE
+            ? DiscountType.NONE
             : discountType ?? product.discountType;
 
 
@@ -462,8 +474,8 @@ export class ProductService {
                     const base = Number(variant.basePrice);
                     const vDiscount = hasDeal ? 0 : Number(variant.discount || 0);
                     const vDiscountType = hasDeal
-                        ? DiscountType.PERCENTAGE
-                        : variant.discountType || DiscountType.PERCENTAGE;
+                        ? DiscountType.NONE
+                        : variant.discountType || DiscountType.NONE;
 
                     const priceAfterProductDiscount = this.calculateFinalPrice(
                         base,
@@ -916,10 +928,34 @@ export class ProductService {
 
 
     async deleteProductById(id: number) {
+        // Fetch product with variants to collect all image URLs before deletion
+        const product = await this.productRepository.findOne({
+            where: { id },
+            relations: ['variants'],
+        });
+
+        if (!product) {
+            throw new APIError(404, "Product does not exist");
+        }
+
+        // Collect all image URLs (product images + variant images)
+        const imageUrls: string[] = [
+            ...(product.productImages || []),
+            ...(product.variants?.flatMap(v => v.variantImages || []) || []),
+        ];
+
+        // Delete all images from Cloudinary (non-blocking — DB delete proceeds even if some fail)
+        if (imageUrls.length > 0) {
+            await Promise.allSettled(
+                imageUrls.map(url => this.imageDeletionService.deleteSingleImage(url))
+            );
+        }
+
+        // Delete product from database (cascades to variants)
         const result = await this.productRepository.delete({ id });
 
         if (result.affected === 0) {
-            throw new APIError(404, "Product does not exists")
+            throw new APIError(404, "Product does not exist");
         }
     }
 }

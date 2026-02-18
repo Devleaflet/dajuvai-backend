@@ -87,15 +87,7 @@ export const combinedAuthMiddleware = async (
     res: Response,
     next: NextFunction
 ): Promise<void> => {
-    // Prefer vendorToken cookie, then Authorization header.
-    // Do NOT fall back to req.cookies.token (the regular user cookie) here
-    // because a user who is also logged in via Google OAuth would have that
-    // cookie set, causing combinedAuthMiddleware to pick up the wrong token
-    // for vendor routes, leading to a 401 "missing role or businessName".
     const token = req.cookies.vendorToken || req.headers.authorization?.split(' ')[1];
-
-    console.log("--------------Combined token-------------")
-    console.log(token)
 
     if (!token) {
         res.status(401).json({ success: false, message: 'Authentication token is missing' });

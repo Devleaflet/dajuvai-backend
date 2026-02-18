@@ -6,7 +6,7 @@ import { Address } from '../entities/address.entity';
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from './district.service';
 import { District } from '../entities/district.entity';
-import { IUpdateVendorPaymentOptionRequest, IUpdateVendorRequestV2, vendorSignupSchema } from '../utils/zod_validations/vendor.zod';
+import { IUpdateVendorPaymentOptionRequest, IUpdateVendorRequestV2 } from '../utils/zod_validations/vendor.zod';
 import { PaymentOption, VendorPaymentOption } from '../entities/vendorPaymentOption';
 import { toVendorAdminDTO } from '../utils/vendorAdminDto';
 
