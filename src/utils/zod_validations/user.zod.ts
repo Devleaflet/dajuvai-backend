@@ -113,6 +113,14 @@ export const verifyEmailChangeSchema = z.object({
     emailChangeToken: z.string().min(1, 'Email change token is required'),
 });
 
+export const adminResetPasswordSchema = z.object({
+    newPass: z.string().min(8, 'New password must be at least 8 characters long'),
+    confirmPass: z.string().min(1, 'Confirm password is required'),
+}).refine(data => data.newPass === data.confirmPass, {
+    message: 'Passwords do not match',
+    path: ['confirmPass'],
+});
+
 // Inferred TypeScript types
 export type SignupInput = z.infer<typeof signupSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
@@ -122,3 +130,4 @@ export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type ChangeEmailInput = z.infer<typeof changeEmailSchema>;
 export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type AdminResetPasswordInput = z.infer<typeof adminResetPasswordSchema>;

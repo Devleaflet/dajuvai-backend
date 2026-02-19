@@ -3,7 +3,7 @@ import rateLimit from 'express-rate-limit';
 import passport from 'passport';
 import { UserController } from '../controllers/user.controller';
 import { authMiddleware, isAccountOwner, isAdmin, isAdminOrStaff, validateZod } from '../middlewares/auth.middleware';
-import { changeEmailSchema, loginSchema, resetPasswordSchema, signupSchema, verificationTokenSchema, verifyEmailChangeSchema, verifyTokenSchema } from '../utils/zod_validations/user.zod';
+import { adminResetPasswordSchema, changeEmailSchema, loginSchema, resetPasswordSchema, signupSchema, verificationTokenSchema, verifyEmailChangeSchema, verifyTokenSchema } from '../utils/zod_validations/user.zod';
 import { deleteUserDataByFacebookId } from '../service/user.service';
 import { APIError } from '../utils/ApiError.utils';
 import { UserRole } from '../entities/user.entity';
@@ -1374,6 +1374,8 @@ userRouter.post('/forgot-password', authRateLimiter, validateZod(verificationTok
  *         description: Too many requests, please try again later
  */
 userRouter.post('/reset-password', authRateLimiter, validateZod(resetPasswordSchema), userController.resetPassword.bind(userController));
+
+userRouter.put("/admin/vendors/:vendorId/change-vendor-password", authMiddleware, isAdmin, validateZod(adminResetPasswordSchema, "body"), userController.adminChangeVendorPassword.bind(userController))
 
 /**
  * @swagger

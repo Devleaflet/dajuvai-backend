@@ -180,6 +180,13 @@ export const findVendorByEmail = async (email: string): Promise<Vendor | null> =
     return await vendorDB.findOne({ where: { email } });
 };
 
+
+
+export const findvendorByvendorId = async (vendorId: number): Promise<Vendor | null> => {
+    return await vendorDB.findOne({
+        where: { id: vendorId }
+    })
+}
 /**
  * Saves a vendor entity.
  * @param vendor - Vendor entity instance

@@ -1,9 +1,9 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById } from '../service/user.service';
+import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById, findvendorByvendorId } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
-import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema } from '../utils/zod_validations/user.zod';
+import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
 import { AuthProvider, User, UserRole } from '../entities/user.entity';
 import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
@@ -810,8 +810,10 @@ export class UserController {
             // Attempt to find a user with the provided email
             let user = await findUserByEmail(email);
 
-            if (user.provider === AuthProvider.GOOGLE) {
-                throw new APIError(400, "Google login users cannot change password.");
+            if (user) {
+                if (user.provider === AuthProvider.GOOGLE) {
+                    throw new APIError(400, "Google login users cannot change password.");
+                }
             }
 
             let vendor = null;
@@ -850,6 +852,7 @@ export class UserController {
                 message: 'Password reset request sent',
             });
         } catch (error) {
+            console.log(error)
             // Handle expected API errors with their respective status and message
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
@@ -929,6 +932,38 @@ export class UserController {
             } else {
                 // Handle unexpected errors with generic 503 Service Unavailable
                 throw new APIError(503, 'Password reset service temporarily unavailable');
+            }
+        }
+    }
+
+
+    async adminChangeVendorPassword(req: Request<{ vendorId: number }, {}, AdminResetPasswordInput, {}>, res: Response) {
+        try {
+            const vendorId = req.params.vendorId;
+
+            const data = req.body;
+            const { newPass } = data;
+
+            const vendor = await findvendorByvendorId(vendorId);
+            if (!vendor) {
+                throw new APIError(404, 'Vendor not found');
+            }
+
+            const hashedPassword = await bcrypt.hash(newPass, 10);
+            vendor.password = hashedPassword;
+
+            await saveVendor(vendor);
+
+            res.status(200).json({
+                success: true,
+                message: 'Vendor password updated by admin',
+            });
+
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                throw new APIError(503, 'Service temporarily unavailable');
             }
         }
     }
