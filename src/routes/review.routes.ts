@@ -136,8 +136,83 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  */
 router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewController));
 
+/**
+ * @swagger
+ * /api/reviews/{id}:
+ *   patch:
+ *     summary: Update a review by ID
+ *     description: Allows an authenticated user to update their own review's rating or comment.
+ *     tags: [Reviews]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the review to update
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               rating:
+ *                 type: number
+ *                 format: float
+ *                 minimum: 1.0
+ *                 maximum: 5.0
+ *                 example: 4.0
+ *               comment:
+ *                 type: string
+ *                 maxLength: 500
+ *                 example: "Updated: Still a great product!"
+ *     responses:
+ *       200:
+ *         description: Review updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (not your review)
+ *       404:
+ *         description: Review not found
+ *       500:
+ *         description: Internal server error
+ */
 router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), reviewController.updateProductReview.bind(reviewController))
 
+/**
+ * @swagger
+ * /api/reviews/{id}:
+ *   delete:
+ *     summary: Delete a review by ID
+ *     description: Allows an authenticated user (or admin) to delete a review. Only the review owner or admin can delete.
+ *     tags: [Reviews]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the review to delete
+ *     responses:
+ *       200:
+ *         description: Review deleted successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (not your review)
+ *       404:
+ *         description: Review not found
+ *       500:
+ *         description: Internal server error
+ */
 router.delete("/:id", authMiddleware, canDeleteReview, reviewController.deleteReview.bind(reviewController));
 
 export default router;

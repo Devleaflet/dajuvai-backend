@@ -883,6 +883,60 @@ userRouter.post('/login', validateZod(loginSchema), userController.login.bind(us
 
 /**
  * @swagger
+ * /api/auth/refresh-token:
+ *   post:
+ *     summary: Refresh access token using refresh token cookie
+ *     description: Issues a new access token by validating the refresh token stored in the cookie.
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: Access token refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 token:
+ *                   type: string
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *       401:
+ *         description: Refresh token missing or invalid
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.post('/refresh-token', userController.refreshToken.bind(userController));
+
+/**
+ * @swagger
+ * /api/auth/logout:
+ *   post:
+ *     summary: Log out the authenticated user
+ *     description: Clears the access token and refresh token cookies, effectively logging the user out.
+ *     tags: [Authentication]
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Logged out successfully"
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.post('/logout', userController.logout.bind(userController));
+
+/**
+ * @swagger
  * /api/auth/google:
  *   get:
  *     summary: Google OAuth login
@@ -894,7 +948,70 @@ userRouter.post('/login', validateZod(loginSchema), userController.login.bind(us
  */
 userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'profile'] }));
 
+/**
+ * @swagger
+ * /api/auth/google/mobile:
+ *   post:
+ *     tags: [Auth]
+ *     summary: Google Sign-In for mobile apps
+ *     description: >
+ *       Mobile apps (React Native, Flutter, Android, iOS) use the Google Sign-In SDK
+ *       to obtain an idToken natively, then POST it here. No browser redirect needed.
+ *       Returns access token + refresh token directly in the response body.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [idToken]
+ *             properties:
+ *               idToken:
+ *                 type: string
+ *                 description: Google ID token obtained from Google Sign-In SDK on the mobile device
+ *     responses:
+ *       200:
+ *         description: Successfully authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 token:
+ *                   type: string
+ *                   description: Short-lived access token (15 min)
+ *                 refreshToken:
+ *                   type: string
+ *                   description: Long-lived refresh token (7 days)
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     userId:
+ *                       type: integer
+ *                     email:
+ *                       type: string
+ *                     role:
+ *                       type: string
+ *       400:
+ *         description: idToken missing or email linked to different provider
+ *       401:
+ *         description: Invalid or expired Google token
+ */
+userRouter.post('/google/mobile', userController.googleMobileLogin.bind(userController));
 
+/**
+ * @swagger
+ * /api/auth/google/callback:
+ *   get:
+ *     summary: Google OAuth callback handler
+ *     description: Handles the callback from Google OAuth. Sets a JWT cookie and redirects to the frontend.
+ *     tags: [Authentication]
+ *     responses:
+ *       302:
+ *         description: Redirects to frontend with token on success, or with error on failure
+ */
 userRouter.get('/google/callback',
     passport.authenticate('google', {
         session: false,
@@ -1006,9 +1123,6 @@ userRouter.get('/test-cookie', (req, res) => {
     }
 });
 
-/**
- * Debug endpoint to check received cookies
- */
 userRouter.get('/check-cookies', (req, res) => {
     console.log('=== COOKIE CHECK ENDPOINT ===');
     console.log('Request headers:', JSON.stringify(req.headers, null, 2));

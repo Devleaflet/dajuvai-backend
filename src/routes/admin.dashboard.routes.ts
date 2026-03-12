@@ -584,8 +584,110 @@ adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardCon
 //authMiddleware, isAdmin, 
 
 
+/**
+ * @swagger
+ * /api/admin/dashboard/analytics/vendor/revenue:
+ *   get:
+ *     summary: Get revenue breakdown by vendor
+ *     description: Returns total revenue grouped by vendor. Only includes orders with paymentStatus PAID. Supports optional date range filtering.
+ *     tags:
+ *       - Admin Dashboard
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date filter (ISO 8601 format)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date filter (ISO 8601 format)
+ *     responses:
+ *       200:
+ *         description: Revenue by vendor retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       vendorId:
+ *                         type: integer
+ *                         example: 5
+ *                       businessName:
+ *                         type: string
+ *                         example: "Best Traders"
+ *                       revenue:
+ *                         type: number
+ *                         example: 45000.00
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
 adminDashboardRouter.get("/analytics/vendor/revenue", adminDashboardController.getRevenueByVendor.bind(adminDashboardController))
 
+/**
+ * @swagger
+ * /api/admin/dashboard/analytics/shipping/revenue:
+ *   get:
+ *     summary: Get total shipping revenue
+ *     description: Returns total shipping fee revenue collected from all orders. Supports optional date range filtering.
+ *     tags:
+ *       - Admin Dashboard
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date filter (ISO 8601 format)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date filter (ISO 8601 format)
+ *     responses:
+ *       200:
+ *         description: Total shipping revenue retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     totalShippingRevenue:
+ *                       type: number
+ *                       example: 12500.00
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
 adminDashboardRouter.get("/analytics/shipping/revenue", adminDashboardController.getTotalShippingRevenue.bind(adminDashboardController))
 
 export default adminDashboardRouter;

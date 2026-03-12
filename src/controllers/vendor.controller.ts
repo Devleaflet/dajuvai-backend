@@ -1,4 +1,4 @@
-import { Response } from 'express';
+import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { AuthRequest, VendorAuthRequest, isVendor } from '../middlewares/auth.middleware';
@@ -254,17 +254,32 @@ export class VendorController {
                 throw new APIError(401, 'Invalid credentials');
             }
 
-            /* Generate JWT and set cookie */
+            /* Generate access token (short-lived) */
             const token = jwt.sign(
                 { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
                 this.jwtSecret,
-                { expiresIn: '2h' }
+                { expiresIn: '15m' }
             );
+
+            /* Generate refresh token (long-lived) */
+            const refreshToken = jwt.sign(
+                { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+                process.env.JWT_REFRESH_SECRET || 'your_refresh_secret',
+                { expiresIn: '7d' }
+            );
+
             res.cookie('vendorToken', token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === 'production',
                 sameSite: 'strict',
-                maxAge: 2 * 60 * 60 * 1000,
+                maxAge: 15 * 60 * 1000,
+            });
+
+            res.cookie('vendorRefreshToken', refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: 7 * 24 * 60 * 60 * 1000,
             });
 
             /* Send success response */
@@ -272,6 +287,7 @@ export class VendorController {
                 success: true,
                 vendor: { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
                 token,
+                refreshToken,
             });
         } catch (error) {
             if (error instanceof APIError) {
@@ -280,6 +296,64 @@ export class VendorController {
                 throw new APIError(503, 'Authentication service temporarily unavailable');
             }
         }
+    }
+
+    /**
+     * POST /vendor/refresh-token
+     * Issues a new access token using the vendorRefreshToken cookie.
+     * @access Public
+     */
+    async refreshToken(req: Request, res: Response): Promise<void> {
+        try {
+            // Accept refresh token from: cookie, Authorization Bearer header
+            const token =
+                req.cookies.vendorRefreshToken ||
+                req.headers.authorization?.split(' ')[1]
+
+            if (!token) {
+                res.status(401).json({ success: false, message: 'Refresh token missing' });
+                return;
+            }
+
+            const decoded = jwt.verify(
+                token,
+                process.env.JWT_REFRESH_SECRET || 'your_refresh_secret'
+            ) as { id: number; email: string; businessName: string };
+
+            const vendor = await this.vendorService.findVendorByEmailLogin(decoded.email);
+            if (!vendor) {
+                res.status(401).json({ success: false, message: 'Vendor not found' });
+                return;
+            }
+
+            const newAccessToken = jwt.sign(
+                { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+                this.jwtSecret,
+                { expiresIn: '15m' }
+            );
+
+            res.cookie('vendorToken', newAccessToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: 15 * 60 * 1000,
+            });
+
+            res.status(200).json({ success: true, token: newAccessToken });
+        } catch (error) {
+            res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+        }
+    }
+
+    /**
+     * POST /vendor/logout
+     * Clears both vendor access and refresh token cookies.
+     * @access Public
+     */
+    async logout(_req: Request, res: Response): Promise<void> {
+        res.clearCookie('vendorToken');
+        res.clearCookie('vendorRefreshToken');
+        res.status(200).json({ success: true, message: 'Logged out successfully' });
     }
 
     /**

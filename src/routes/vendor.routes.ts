@@ -973,6 +973,60 @@ router.post("/request/register", validateZod(vendorSignupSchema), vendorControll
  */
 router.post('/login', validateZod(vendorLoginSchema), vendorController.login.bind(vendorController));
 
+/**
+ * @swagger
+ * /api/vendors/refresh-token:
+ *   post:
+ *     summary: Refresh vendor access token
+ *     description: Issues a new vendor access token using the refresh token stored in the cookie.
+ *     tags: [Vendors]
+ *     responses:
+ *       200:
+ *         description: Access token refreshed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 token:
+ *                   type: string
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *       401:
+ *         description: Refresh token missing or invalid
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/refresh-token', vendorController.refreshToken.bind(vendorController));
+
+/**
+ * @swagger
+ * /api/vendors/logout:
+ *   post:
+ *     summary: Log out the authenticated vendor
+ *     description: Clears the vendor access and refresh token cookies.
+ *     tags: [Vendors]
+ *     responses:
+ *       200:
+ *         description: Logged out successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Logged out successfully"
+ *       500:
+ *         description: Internal server error
+ */
+router.post('/logout', vendorController.logout.bind(vendorController));
+
 // router.post('/verify/resend', authRateLimiter, validateZod(verificationTokenSchema), vendorController.sendVerificationToken.bind(vendorController));
 
 // router.post('/verify', validateZod(verifyTokenSchema), vendorController.verifyToken.bind(vendorController));
@@ -1343,12 +1397,108 @@ router.delete("/:id", authMiddleware, isAdmin, vendorController.deleteVendor.bin
 
 
 // ---------------------------- v2 routes ------------------------------------------------------------------------------------
+
+/**
+ * @swagger
+ * /api/vendors/request/register-v2:
+ *   post:
+ *     summary: Register a new vendor (v2)
+ *     description: Allows a prospective vendor to submit a registration request using the v2 schema.
+ *     tags: [Vendors]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - businessName
+ *               - email
+ *               - password
+ *               - phoneNumber
+ *             properties:
+ *               businessName:
+ *                 type: string
+ *                 example: "Fresh Farms"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "vendor@freshfarms.com"
+ *               password:
+ *                 type: string
+ *                 example: "SecurePass123!"
+ *               phoneNumber:
+ *                 type: string
+ *                 example: "9800000000"
+ *               businessAddress:
+ *                 type: string
+ *                 example: "Thamel, Kathmandu"
+ *     responses:
+ *       201:
+ *         description: Vendor registration request submitted successfully
+ *       400:
+ *         description: Validation error
+ *       409:
+ *         description: Email already in use
+ *       500:
+ *         description: Internal server error
+ */
 router.post(
     '/request/register-v2',
     validateZod(vendorSignupSchemav2),
     vendorController.vendorSignupV2.bind(vendorController)
 );
 
+/**
+ * @swagger
+ * /api/vendors/v2/{id}:
+ *   put:
+ *     summary: Update vendor profile (v2)
+ *     description: Updates vendor profile using the v2 schema. Requires authentication as the vendor owner or admin.
+ *     tags: [Vendors]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Vendor ID to update
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               businessName:
+ *                 type: string
+ *                 example: "Fresh Farms Updated"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: "newemail@freshfarms.com"
+ *               phoneNumber:
+ *                 type: string
+ *                 example: "9811111111"
+ *               businessAddress:
+ *                 type: string
+ *                 example: "New Road, Kathmandu"
+ *     responses:
+ *       200:
+ *         description: Vendor updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Vendor not found
+ *       500:
+ *         description: Internal server error
+ */
 router.put("/v2/:id",
     validateZod(updateVendorSchema2, "body"),
     combinedAuthMiddleware,
@@ -1356,7 +1506,58 @@ router.put("/v2/:id",
     vendorController.updateVendorV2.bind(vendorController)
 )
 
-
+/**
+ * @swagger
+ * /api/vendors/{vendorId}/payment-options/{paymentOptionId}:
+ *   patch:
+ *     summary: Update a vendor's payment option
+ *     description: Update specific payment option details for a vendor. Requires authentication as the vendor owner or admin.
+ *     tags: [Vendors]
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: vendorId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Vendor ID
+ *       - in: path
+ *         name: paymentOptionId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Payment option ID to update
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               accountName:
+ *                 type: string
+ *                 example: "Fresh Farms Business"
+ *               accountNumber:
+ *                 type: string
+ *                 example: "9800000000"
+ *               paymentMethod:
+ *                 type: string
+ *                 example: "ESEWA"
+ *     responses:
+ *       200:
+ *         description: Payment option updated successfully
+ *       400:
+ *         description: Validation error
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Vendor or payment option not found
+ *       500:
+ *         description: Internal server error
+ */
 router.patch(
     '/:vendorId/payment-options/:paymentOptionId',
     validateZod(updateVendorPaymentOptionSchema),

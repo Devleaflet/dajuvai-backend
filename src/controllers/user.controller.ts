@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById, findvendorByvendorId } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput } from '../utils/zod_validations/user.zod';
@@ -10,6 +11,8 @@ import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.
 import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import AppDataSource from '../config/db.config';
 import { VendorService } from '../service/vendor.service';
+
+const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
 /**
  * @class TokenUtils
@@ -555,25 +558,40 @@ export class UserController {
                 throw new APIError(401, "Invalid credentials");
             }
 
-            // Generate JWT
+            // Generate access token (short-lived)
             const token = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: "2h" }
+                { expiresIn: "15m" }
             );
 
-            // Set cookie
+            // Generate refresh token (long-lived)
+            const refreshToken = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                process.env.JWT_REFRESH_SECRET,
+                { expiresIn: "7d" }
+            );
+
+            // Set access token cookie
             res.cookie("token", token, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
                 sameSite: "strict",
-                maxAge: 2 * 60 * 60 * 1000,
+                maxAge: 15 * 60 * 1000,
             });
 
-            // Response
+            // Set refresh token in separate httpOnly cookie
+            res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 7 * 24 * 60 * 60 * 1000,
+            });
+
             res.status(200).json({
                 success: true,
                 token,
+                refreshToken,
                 data: { userId: user.id, email: user.email, role: user.role },
             });
 
@@ -584,6 +602,163 @@ export class UserController {
                 console.error("Unexpected error during login:", error);
                 res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
             }
+        }
+    }
+
+    /**
+     * @method refreshToken
+     * @route POST /auth/refresh-token
+     * @description Issues a new access token using a valid refresh token from the cookie.
+     * @access Public
+     */
+    async refreshToken(req: Request, res: Response): Promise<void> {
+        try {
+            // Accept refresh token from: cookie, Authorization Bearer header
+            const token =
+                req.cookies.refreshToken ||
+                req.headers.authorization?.split(' ')[1];
+
+            if (!token) {
+                res.status(401).json({ success: false, message: 'Refresh token missing' });
+                return;
+            }
+
+            const decoded = jwt.verify(
+                token,
+                process.env.JWT_REFRESH_SECRET || 'your_refresh_secret'
+            ) as { id: number; email: string; role: string };
+
+            const userRepo = AppDataSource.getRepository(User);
+            const user = await userRepo.findOneBy({ id: decoded.id });
+            if (!user) {
+                res.status(401).json({ success: false, message: 'User not found' });
+                return;
+            }
+
+            const newAccessToken = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                this.jwtSecret,
+                { expiresIn: '15m' }
+            );
+
+            res.cookie('token', newAccessToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === 'production',
+                sameSite: 'strict',
+                maxAge: 15 * 60 * 1000,
+            });
+
+            res.status(200).json({ success: true, token: newAccessToken });
+        } catch (error) {
+            res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+        }
+    }
+
+    /**
+     * @method logout
+     * @route POST /auth/logout
+     * @description Clears both access and refresh token cookies.
+     * @access Public
+     */
+    async logout(_req: Request, res: Response): Promise<void> {
+        res.clearCookie('token');
+        res.clearCookie('refreshToken');
+        res.status(200).json({ success: true, message: 'Logged out successfully' });
+    }
+
+    /**
+     * @method googleMobileLogin
+     * @route POST /auth/google/mobile
+     * @description Authenticates a mobile user using a Google ID token obtained from the
+     * Google Sign-In SDK (Android/iOS/React Native/Flutter). The mobile app never redirects —
+     * it calls Google natively, gets an idToken, then sends it here for verification.
+     * @access Public
+     */
+    async googleMobileLogin(req: Request, res: Response): Promise<void> {
+        try {
+            const { idToken } = req.body;
+
+            if (!idToken) {
+                res.status(400).json({ success: false, message: 'idToken is required' });
+                return;
+            }
+
+            // Verify the ID token with Google
+            const validAudiences = [
+                process.env.GOOGLE_CLIENT_ID,
+                process.env.GOOGLE_ANDROID_CLIENT_ID,
+                process.env.GOOGLE_IOS_CLIENT_ID,
+            ].filter(Boolean);
+
+            const ticket = await googleClient.verifyIdToken({
+                idToken,
+                audience: validAudiences,
+            });
+
+            const payload = ticket.getPayload();
+            if (!payload || !payload.email) {
+                res.status(401).json({ success: false, message: 'Invalid Google token' });
+                return;
+            }
+
+            const { sub: googleId, email, name } = payload;
+
+            const userRepo = AppDataSource.getRepository(User);
+
+            // Find by googleId first, then by email
+            let user = await userRepo.findOne({ where: { googleId } });
+
+            if (!user) {
+                user = await userRepo.findOne({ where: { email } });
+
+                if (user) {
+                    // Existing local account — link Google ID to it
+                    if (user.provider !== AuthProvider.GOOGLE && user.provider !== AuthProvider.LOCAL) {
+                        res.status(400).json({
+                            success: false,
+                            message: 'This email is registered with a different provider.',
+                        });
+                        return;
+                    }
+                    user.googleId = googleId;
+                    user.isVerified = true;
+                    user.provider = AuthProvider.GOOGLE;
+                    await userRepo.save(user);
+                } else {
+                    // New user — create account
+                    user = userRepo.create({
+                        googleId,
+                        email,
+                        username: name || email.split('@')[0],
+                        isVerified: true,
+                        provider: AuthProvider.GOOGLE,
+                    });
+                    await userRepo.save(user);
+                }
+            }
+
+            // Issue access + refresh tokens
+            const token = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                this.jwtSecret,
+                { expiresIn: '15m' }
+            );
+
+            const refreshToken = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                process.env.JWT_REFRESH_SECRET,
+                { expiresIn: '7d' }
+            );
+
+            res.status(200).json({
+                success: true,
+                token,
+                refreshToken,
+                data: { userId: user.id, email: user.email, role: user.role },
+            });
+        } catch (error) {
+            console.error('Google mobile login error:', error);
+            res.status(401).json({ success: false, message: 'Google authentication failed' });
         }
     }
 

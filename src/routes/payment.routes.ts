@@ -38,6 +38,18 @@ function getAuthHeader(): string {
     return `Basic ${credentials}`;
 }
 
+/**
+ * @swagger
+ * /api/payments/payment-instruments:
+ *   get:
+ *     summary: Get available payment instruments
+ *     tags: [Payments]
+ *     responses:
+ *       200:
+ *         description: List of available payment instruments
+ *       500:
+ *         description: Failed to get payment instruments
+ */
 // 1. Get Payment Instruments
 paymentRouter.get('/payment-instruments', async (_req: Request, res: Response) => {
     try {
@@ -62,6 +74,34 @@ paymentRouter.get('/payment-instruments', async (_req: Request, res: Response) =
     }
 });
 
+/**
+ * @swagger
+ * /api/payments/service-charge:
+ *   post:
+ *     summary: Get service charge for a payment amount and instrument
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *               - instrumentCode
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 example: 500
+ *               instrumentCode:
+ *                 type: string
+ *                 example: "ESEWA"
+ *     responses:
+ *       200:
+ *         description: Service charge retrieved successfully
+ *       500:
+ *         description: Failed to get service charge
+ */
 // 2. Get Service Charge
 paymentRouter.post('/service-charge', async (req: Request, res: Response) => {
     try {
@@ -90,6 +130,34 @@ paymentRouter.post('/service-charge', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/payments/process-id:
+ *   post:
+ *     summary: Get a process ID for initiating a payment
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *               - merchantTxnId
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 example: 500
+ *               merchantTxnId:
+ *                 type: string
+ *                 example: "TXN_001"
+ *     responses:
+ *       200:
+ *         description: Process ID retrieved successfully
+ *       500:
+ *         description: Failed to get process ID
+ */
 // 3. Get Process ID
 paymentRouter.post('/process-id', async (req: Request, res: Response) => {
     try {
@@ -118,6 +186,59 @@ paymentRouter.post('/process-id', async (req: Request, res: Response) => {
     }
 });
 
+/**
+ * @swagger
+ * /api/payments/initiate-payment:
+ *   post:
+ *     summary: Initiate a complete payment flow via Nepal Payment Gateway
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - amount
+ *               - orderId
+ *             properties:
+ *               amount:
+ *                 type: number
+ *                 example: 1500
+ *               instrumentCode:
+ *                 type: string
+ *                 example: "ESEWA"
+ *               transactionRemarks:
+ *                 type: string
+ *                 example: "Payment for order #123"
+ *               orderId:
+ *                 type: integer
+ *                 example: 42
+ *     responses:
+ *       200:
+ *         description: Payment initiation data returned successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 paymentUrl:
+ *                   type: string
+ *                   example: "https://gateway.nepalpayment.com/Payment/Index"
+ *                 formData:
+ *                   type: object
+ *                 merchantTxnId:
+ *                   type: string
+ *       400:
+ *         description: Failed to get process ID
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
 // 4. Initiate Payment (Complete Flow)
 paymentRouter.post('/initiate-payment', async (req: Request, res: Response) => {
     try {
@@ -201,6 +322,30 @@ paymentRouter.post('/initiate-payment', async (req: Request, res: Response) => {
 });
 
 
+/**
+ * @swagger
+ * /api/payments/check-status:
+ *   post:
+ *     summary: Check the status of a transaction
+ *     tags: [Payments]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - merchantTxnId
+ *             properties:
+ *               merchantTxnId:
+ *                 type: string
+ *                 example: "TXN_1700000000000_abc123"
+ *     responses:
+ *       200:
+ *         description: Transaction status retrieved successfully
+ *       500:
+ *         description: Failed to check transaction status
+ */
 // 5. Check Transaction Status
 paymentRouter.post('/check-status', async (req: Request, res: Response) => {
     try {
@@ -229,6 +374,29 @@ paymentRouter.post('/check-status', async (req: Request, res: Response) => {
 });
 
 
+/**
+ * @swagger
+ * /api/payments/response:
+ *   get:
+ *     summary: Payment gateway response redirect handler
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: query
+ *         name: MerchantTxnId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Merchant transaction ID returned by the gateway
+ *       - in: query
+ *         name: GatewayTxnId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Gateway transaction ID
+ *     responses:
+ *       302:
+ *         description: Redirects to frontend with transaction details
+ */
 // Response URL handler
 paymentRouter.get('/response', (req: Request, res: Response) => {
     const { MerchantTxnId, GatewayTxnId } = req.query;
@@ -286,6 +454,41 @@ paymentRouter.get('/response', (req: Request, res: Response) => {
 //     }
 // });
 
+/**
+ * @swagger
+ * /api/payments/notification:
+ *   get:
+ *     summary: Payment gateway webhook notification handler
+ *     description: Receives payment status callbacks from Nepal Payment Gateway and updates order status accordingly.
+ *     tags: [Payments]
+ *     parameters:
+ *       - in: query
+ *         name: MerchantTxnId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: Merchant transaction ID
+ *       - in: query
+ *         name: GatewayTxnId
+ *         schema:
+ *           type: string
+ *         description: Gateway transaction ID
+ *       - in: query
+ *         name: Status
+ *         schema:
+ *           type: string
+ *           enum: [SUCCESS, FAILED, CANCELLED]
+ *         description: Payment status from the gateway
+ *     responses:
+ *       200:
+ *         description: Notification received and processed
+ *       400:
+ *         description: Invalid or missing MerchantTxnId
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
 paymentRouter.get('/notification', async (req: Request, res: Response) => {
     try {
         const { MerchantTxnId, GatewayTxnId, Status } = req.query;

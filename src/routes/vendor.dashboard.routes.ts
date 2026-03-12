@@ -312,10 +312,147 @@ vendorDashBoardRouter.get("/total-sales", vendorAuthMiddleware, isVendor, vendor
  */
 vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDashboardController.getLowStockProducts.bind(vendorDashboardController));
 
+/**
+ * @swagger
+ * /api/vendor/dashboard/analytics/top-selling-products:
+ *   get:
+ *     summary: Get vendor's top selling products
+ *     description: Returns a list of top selling products for the authenticated vendor based on total quantity sold.
+ *     tags:
+ *       - Vendor Dashboard
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: Top selling products retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       productId:
+ *                         type: integer
+ *                       productName:
+ *                         type: string
+ *                       totalSold:
+ *                         type: integer
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
 vendorDashBoardRouter.get("/analytics/top-selling-products", vendorAuthMiddleware, vendorDashboardController.getTopSellingProduct.bind(vendorDashboardController));
 
+/**
+ * @swagger
+ * /api/vendor/dashboard/analytics/revenue-by-category:
+ *   get:
+ *     summary: Get vendor's revenue grouped by category
+ *     description: Returns revenue data grouped by product category for the authenticated vendor.
+ *     tags:
+ *       - Vendor Dashboard
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date filter (inclusive)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date filter (inclusive)
+ *     responses:
+ *       200:
+ *         description: Revenue by category retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       category:
+ *                         type: string
+ *                       revenue:
+ *                         type: number
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
 vendorDashBoardRouter.get("/analytics/revenue-by-category", vendorAuthMiddleware, vendorDashboardController.getRevenueByCategoryForVendor.bind(vendorDashboardController));
 
+/**
+ * @swagger
+ * /api/vendor/dashboard/analytics/revenue-by-sub-category:
+ *   get:
+ *     summary: Get vendor's revenue grouped by subcategory
+ *     description: Returns revenue data grouped by product subcategory for the authenticated vendor.
+ *     tags:
+ *       - Vendor Dashboard
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: Start date filter (inclusive)
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date-time
+ *         required: false
+ *         description: End date filter (inclusive)
+ *     responses:
+ *       200:
+ *         description: Revenue by subcategory retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       subcategory:
+ *                         type: string
+ *                       revenue:
+ *                         type: number
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ */
 vendorDashBoardRouter.get("/analytics/revenue-by-sub-category", vendorAuthMiddleware, vendorDashboardController.getRevenueBySubcategoryForVendor.bind(vendorDashboardController));
 
 

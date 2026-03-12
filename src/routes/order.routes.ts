@@ -2074,12 +2074,125 @@ router.get("/customer/history", authMiddleware, orderController.getCustomerOrder
  */
 router.post("/search/merchant-transactionId", authMiddleware, orderController.getOrderDetailByMerchantTransactionId.bind(orderController));
 
+/**
+ * @swagger
+ * /api/order/order/delete/all:
+ *   delete:
+ *     summary: Delete all orders (dev/test only)
+ *     tags:
+ *       - Orders
+ *     responses:
+ *       200:
+ *         description: All orders deleted
+ *       500:
+ *         description: Internal server error
+ */
 router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
 
+/**
+ * @swagger
+ * /api/order/esewa/success:
+ *   post:
+ *     summary: Handle eSewa payment success callback
+ *     description: Processes the eSewa payment success callback, updates order status to CONFIRMED and payment status to PAID.
+ *     tags:
+ *       - Orders
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               data:
+ *                 type: string
+ *                 description: Base64-encoded payment response from eSewa
+ *                 example: "eyJ0cmFuc2FjdGlvbl9jb2RlIjoiMDAwMEFCQyJ9"
+ *     responses:
+ *       200:
+ *         description: Payment verified and order updated successfully
+ *       400:
+ *         description: Invalid payment data
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
 router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderController));
 
+/**
+ * @swagger
+ * /api/order/esewa/fail:
+ *   post:
+ *     summary: Handle eSewa payment failure callback
+ *     description: Processes the eSewa payment failure callback and marks the order as CANCELLED/UNPAID.
+ *     tags:
+ *       - Orders
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               data:
+ *                 type: string
+ *                 description: Base64-encoded failure response from eSewa
+ *     responses:
+ *       200:
+ *         description: Payment failure handled
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
 router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderController));
 
+/**
+ * @swagger
+ * /api/order/check-promo:
+ *   post:
+ *     summary: Check and apply a promo code
+ *     description: Validates a promo code and returns the discount percentage if valid.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - promoCode
+ *             properties:
+ *               promoCode:
+ *                 type: string
+ *                 example: "SUMMER2025"
+ *     responses:
+ *       200:
+ *         description: Promo code is valid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 discountPercentage:
+ *                   type: integer
+ *                   example: 15
+ *       400:
+ *         description: Invalid or expired promo code
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Promo code not found
+ *       500:
+ *         description: Internal server error
+ */
 router.post("/check-promo", authMiddleware, orderController.checkAvailablePromocode.bind(orderController));
 
 export default router;

@@ -133,6 +133,34 @@ const productController = new ProductController(AppDataSource);
  */
 productRouter.get("/:id", productController.getProductDetailById.bind(productController))
 
+/**
+ * @swagger
+ * /api/product/{id}:
+ *   delete:
+ *     summary: Delete a product by ID
+ *     tags:
+ *       - Products
+ *     security:
+ *       - cookieAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the product to delete
+ *     responses:
+ *       200:
+ *         description: Product deleted successfully
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       404:
+ *         description: Product not found
+ *       500:
+ *         description: Internal server error
+ */
 // /api/product/:id
 productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productController.deleteProductById.bind(productController));
 
@@ -203,6 +231,25 @@ productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productCon
 productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
 
 
+/**
+ * @swagger
+ * /api/product/admin/products:
+ *   get:
+ *     summary: Get all products for admin panel
+ *     tags:
+ *       - Products
+ *     security:
+ *       - cookieAuth: []
+ *     responses:
+ *       200:
+ *         description: List of all products for admin
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden
+ *       500:
+ *         description: Internal server error
+ */
 // /api/product/admin/products
 productRouter.get("/admin/products", authMiddleware, isAdminOrStaff, productController.getAdminProducts.bind(productController))
 
