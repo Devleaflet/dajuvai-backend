@@ -42,7 +42,7 @@ export class User {
 
     @OneToMany(() => Product, (product) => product.vendor)
     products: Product[]
-    @OneToOne(() => Address, (address) => address.user, { cascade: true, eager: true })
+    @OneToOne(() => Address, (address) => address.user, { cascade: true})
     address: Address;
 
     @Column({ nullable: true })

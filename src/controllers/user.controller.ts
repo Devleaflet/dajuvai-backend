@@ -687,7 +687,7 @@ export class UserController {
             const validAudiences = [
                 process.env.GOOGLE_CLIENT_ID,
                 process.env.GOOGLE_ANDROID_CLIENT_ID,
-                process.env.GOOGLE_IOS_CLIENT_ID,
+                // process.env.GOOGLE_IOS_CLIENT_ID,
             ].filter(Boolean);
 
             const ticket = await googleClient.verifyIdToken({
