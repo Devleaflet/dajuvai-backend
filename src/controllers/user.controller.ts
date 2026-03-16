@@ -83,7 +83,6 @@ export class UserController {
             //  Prepare hashed password and verification token
             const hashedPassword = await bcrypt.hash(password, 10);
             const verificationToken = TokenUtils.generateToken(); // raw token for email
-            const hashedToken = await TokenUtils.hashToken(verificationToken); // hashed version for DB
 
             // Check if user already exists by email
             const existingUser = await findUserByEmail(email);
@@ -193,6 +192,13 @@ export class UserController {
                 { expiresIn: '7d' }
             );
 
+            // Generate refresh token (long-lived)
+            const refreshToken = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                process.env.JWT_REFRESH_SECRET,
+                { expiresIn: '7d' }
+            );
+
             // Set token cookie
             res.cookie('token', token, {
                 httpOnly: true,
@@ -200,11 +206,20 @@ export class UserController {
                 maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
             });
 
+            // Set refresh token in separate httpOnly cookie
+            res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 7 * 24 * 60 * 60 * 1000,
+            });
+
             // Send success response with user data and token
             res.status(200).json({
                 success: true,
                 message: 'Admin logged in successfully',
                 token,
+                refreshToken,
                 data: {
                     id: user.id,
                     username: user.username,
@@ -469,7 +484,7 @@ export class UserController {
             });
 
             //  Send email with raw verification code
-            // await sendVerificationEmail(email, 'Email Verification', verificationToken);
+            await sendVerificationEmail(email, 'Email Verification', verificationToken);
 
             //  Generate JWT and set cookie
             const token = jwt.sign(
