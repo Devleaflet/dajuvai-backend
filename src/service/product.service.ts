@@ -599,10 +599,17 @@ export class ProductService {
         }
 
         if (search) {
-            const searchPattern = `%${search}%`;
+            const searchPattern = `%${search.trim()}%`;
             qb.andWhere(
-                '(LOWER(product.name) ILIKE :searchPattern )',
+                '(product.name ILIKE :searchPattern OR product.description ILIKE :searchPattern)',
                 { searchPattern }
+            );
+            qb.addOrderBy(
+                `CASE 
+                    WHEN product.name ILIKE :searchPattern THEN 0 
+                    ELSE 1 
+                 END`,
+                'ASC'
             );
         }
 

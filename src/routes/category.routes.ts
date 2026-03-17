@@ -1019,8 +1019,11 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  * @swagger
  * /api/categories/all/products:
  *   get:
- *     summary: Retrieve all products with optional filtering
- *     description: Fetches products with optional filtering by brand, category, subcategory, deal, and sorting options.
+ *     summary: Retrieve all products with optional filtering and search
+ *     description: >
+ *       Fetches products with optional filtering by brand, category, subcategory, deal, vendor, and banner.
+ *       Supports case-insensitive search across product name and description using partial matching.
+ *       Results where the product name matches the search term are prioritized over description-only matches.
  *     tags: [Product]
  *     parameters:
  *       - in: query
@@ -1055,6 +1058,49 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *           default: all
  *         description: Sort products by price
  *         example: "low-to-high"
+ *       - in: query
+ *         name: bannerId
+ *         schema:
+ *           type: string
+ *         description: Filter by banner ID (positive integer)
+ *         example: "3"
+ *       - in: query
+ *         name: page
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Page number for pagination
+ *         example: 1
+ *       - in: query
+ *         name: limit
+ *         required: true
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *         description: Number of items per page
+ *         example: 10
+ *       - in: query
+ *         name: isAdmin
+ *         schema:
+ *           type: boolean
+ *         description: Optional flag used by clients to indicate admin context
+ *         example: false
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *         description: >
+ *           Case-insensitive search across product name and description using ILIKE.
+ *           Performs partial matching using wildcard (%search%).
+ *           Products with name matches are ranked higher than those matching only in description.
+ *         example: "headphone"
+ *       - in: query
+ *         name: vendorId
+ *         schema:
+ *           type: string
+ *         description: Filter by vendor ID (positive integer)
+ *         example: "7"
  *     responses:
  *       200:
  *         description: Products retrieved successfully
@@ -1179,17 +1225,6 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                                 example: "Electronics"
  *       400:
  *         description: Bad request - Invalid query parameters
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Brand ID must be a positive integer"
  *       500:
  *         description: Internal server error
  */
