@@ -200,18 +200,20 @@ export class UserController {
             );
 
             // Set token cookie
-            res.cookie('token', token, {
+            res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
-                maxAge: 7 * 24 * 60 * 60 * 1000 // 7 days
+                secure: process.env.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 15 * 60 * 1000,
             });
+
 
             // Set refresh token in separate httpOnly cookie
             res.cookie("refreshToken", refreshToken, {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
                 sameSite: "strict",
-                maxAge: 7 * 24 * 60 * 60 * 1000,
+                maxAge: 1 * 24 * 60 * 60 * 1000,
             });
 
             // Send success response with user data and token
@@ -584,7 +586,7 @@ export class UserController {
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 process.env.JWT_REFRESH_SECRET,
-                { expiresIn: "7d" }
+                { expiresIn: "1d" }
             );
 
             // Set access token cookie
@@ -600,7 +602,7 @@ export class UserController {
                 httpOnly: true,
                 secure: process.env.NODE_ENV === "production",
                 sameSite: "strict",
-                maxAge: 7 * 24 * 60 * 60 * 1000,
+                maxAge: 1 * 24 * 60 * 60 * 1000,
             });
 
             res.status(200).json({
