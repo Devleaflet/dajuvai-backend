@@ -1220,6 +1220,8 @@ export class UserController {
         res: Response
     ): Promise<void> {
         try {
+            console.log("------------------api/auth/users/{id} Update profile --------------")
+            console.log(req.body)
             // Validate request body using Zod schema
             const parsed = updateUserSchema.safeParse(req.body);
             if (!parsed.success) {
@@ -1255,9 +1257,21 @@ export class UserController {
             res.status(200).json({
                 success: true,
                 message: 'User updated successfully',
-                data: { id: user.id, username: user.username, email: user.email, role: user.role },
+                data: {
+                    id: user.id,
+                    fullName: user.fullName,
+                    username: user.username,
+                    email: user.email,
+                    phoneNumber: user.phoneNumber,
+                    role: user.role,
+                    provider: user.provider,
+                    isVerified: user.isVerified,
+                    address: user.address || null,
+                },
             });
         } catch (error) {
+            console.log("------------Error----------------")
+            console.log(error)
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {

@@ -139,17 +139,18 @@ export const updateUserService = async (id: number, data: IUpdateUserRequest, us
 
     // update address 
     if (data.address) {
-        if (user.address) {
-            // update existing address
-            const updateAddress = await addressDb.update(user.address.id, data.address)
-            console.log(updateAddress)
+        const existingAddress = await addressDb.findOne({
+            where: { user: { id: user.id } },
+        });
+        if (existingAddress) {
+            await addressDb.update(existingAddress.id, data.address);
         } else {
-            // create address if user dont have any
             const newAddress = addressDb.create({
                 ...data.address,
-                userId: user.id
-            })
-            await addressDb.save(newAddress)
+                user: { id: user.id },
+            });
+
+            await addressDb.save(newAddress);
         }
     }
 
