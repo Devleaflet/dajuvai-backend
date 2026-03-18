@@ -4,6 +4,7 @@ import { CartService } from '../service/cart.service';
 import { APIError } from '../utils/ApiError.utils';
 import { AuthRequest } from '../middlewares/auth.middleware';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
+import { emitCartUpdate } from '../socket/socket';
 
 /**
  * @class CartController
@@ -61,6 +62,8 @@ export class CartController {
             // Add item to cart via service
             const cart = await this.cartService.addToCart(userId, { productId, quantity, variantId });
 
+            emitCartUpdate(userId, cart);
+
             // Send success response
             res.status(200).json({ success: true, data: cart });
         } catch (error) {
@@ -106,6 +109,8 @@ export class CartController {
 
             // Remove item from cart via service
             const cart = await this.cartService.removeFromCart(userId, req.body);
+
+            emitCartUpdate(userId, cart);
 
             // Send success response
             res.status(200).json({ success: true, data: cart });

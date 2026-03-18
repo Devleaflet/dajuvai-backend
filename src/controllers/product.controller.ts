@@ -7,6 +7,7 @@ import { IAdminProductQueryParams, IProductQueryParams } from '../interface/prod
 import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
 import { ReviewService } from '../service/review.service';
+import config from '../config/env.config';
 
 
 /**
@@ -25,9 +26,9 @@ export class ProductController {
         this.reviewService = new ReviewService();
 
         cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
         });
     }
 

@@ -6,6 +6,7 @@ import { AuthProvider, User } from "../entities/user.entity";
 import AppDataSource from "./db.config";
 import jwt from "jsonwebtoken";
 import { APIError } from "../utils/ApiError.utils";
+import config from "./env.config";
 
 // Initialize User repository to interact with the database
 // This sets up TypeORM to perform CRUD operations on the User entity
@@ -32,7 +33,7 @@ const opts = {
         ExtractJwt.fromAuthHeaderAsBearerToken(), // Accepts Authorization: Bearer <token>
         cookieExtractor,                          // Accepts token from cookie
     ]),
-    secretOrKey: process.env.JWT_SECRET,
+    secretOrKey: config.JWT_SECRET,
 };
 
 // Configures JWT Strategy for token-based authentication
@@ -50,7 +51,7 @@ passport.use(
     new JwtStrategy(
         // {
         //     jwtFromRequest: cookieExtractor, // Function to extract JWT from cookies
-        //     secretOrKey: process.env.JWT_SECRET || "jwt_secret_key123", // Secret key for token verification (uses env variable or fallback)
+        //     secretOrKey: config.JWT_SECRET, // Secret key for token verification (uses env variable or fallback)
         // }, 
         opts,
         async (jwt_payload, done) => {
@@ -86,9 +87,9 @@ passport.use(
 passport.use(
     new GoogleStrategy(
         {
-            clientID: process.env.GOOGLE_CLIENT_ID,
-            clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-            callbackURL: "https://api.dajuvai.com/api/auth/google/callback",
+            clientID: config.GOOGLE_CLIENT_ID,
+            clientSecret: config.GOOGLE_CLIENT_SECRET,
+            callbackURL: config.GOOGLE_CALLBACK_URL,
         },
         async (accessToken, refreshToken, profile, done) => {
             try {
@@ -134,7 +135,7 @@ passport.use(
                         username: user.username || profile.displayName,
                         role: user.role,
                     },
-                    process.env.JWT_SECRET || "your_jwt_secret",
+                    config.JWT_SECRET,
                     { expiresIn: "2h" }
                 );
 
@@ -164,8 +165,8 @@ passport.use(
 passport.use(
     new FacebookStrategy(
         {
-            clientID: process.env.FACEBOOK_APP_ID, // Facebook app ID from env
-            clientSecret: process.env.FACEBOOK_APP_SECRET, // Facebook app secret from env
+            clientID: config.FACEBOOK_APP_ID, // Facebook app ID from env
+            clientSecret: config.FACEBOOK_APP_SECRET, // Facebook app secret from env
             // callbackURL: "https://leafletdv.onrender.com/api/auth/facebook/callback", // URL Facebook redirects to after login
             callbackURL: "https://leafletdv.onrender.com/api/auth/facebook/callback", // URL Facebook redirects to after login
             profileFields: ["id", "displayName", "photos", "email"], // Specific data to retrieve from Facebook
@@ -204,7 +205,7 @@ passport.use(
                         username: user.username || profile.displayName,
                         role: user.role,
                     },
-                    process.env.JWT_SECRET || "your_jwt_secret", // Secret key for signing
+                    config.JWT_SECRET, // Secret key for signing
                     { expiresIn: "2h" } // Token expires in 2 hours
                 );
                 // Pass user and token to Passport

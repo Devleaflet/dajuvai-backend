@@ -71,9 +71,9 @@ export class ProductService {
         this.dealService = new DealService();
         this.variantRepository = this.dataSource.getRepository(Variant)
         cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
         });
     }
 

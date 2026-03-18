@@ -6,6 +6,7 @@ import AppDataSource from '../config/db.config';
 import { v2 as cloudinary } from 'cloudinary';
 import { APIError } from '../utils/ApiError.utils';
 import { Subcategory } from '../entities/subcategory.entity';
+import config from '../config/env.config';
 /**
  * Service for managing category-related operations.
  * 
@@ -25,9 +26,9 @@ export class CategoryService {
         this.subcategoryRepository = AppDataSource.getRepository(Subcategory);
 
         cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
         });
     }
 

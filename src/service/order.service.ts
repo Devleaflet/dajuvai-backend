@@ -20,10 +20,10 @@ import { sendCustomerOrderEmail, sendOrderStatusEmail, sendVendorOrderEmail } fr
 import { add } from 'winston';
 import crypto from 'crypto';
 import axios from 'axios';
-import 'dotenv/config';
 import { PromoType } from '../entities/promo.entity';
 import { VendorService } from './vendor.service';
 import { Vendor } from '../entities/vendor.entity';
+import config from '../config/env.config';
 
 
 /**
@@ -87,6 +87,31 @@ export class OrderService {
         this.variantRepository = AppDataSource.getTreeRepository(Variant);
 
         this.vendorService = new VendorService();
+    }
+
+    private calculateLineItemPrice(item: any): number {
+        if (item?.variant) {
+            const variantPrice = item.variant.finalPrice ?? item.variant.basePrice;
+            const numericVariantPrice = Number(variantPrice);
+            return Number.isFinite(numericVariantPrice) ? numericVariantPrice : 0;
+        }
+
+        const basePrice = Number(item?.product?.basePrice ?? 0);
+        const discount = Number(item?.product?.discount ?? 0);
+        const discountType = item?.product?.discountType;
+
+        if (!Number.isFinite(basePrice)) return 0;
+        if (!discount || discount <= 0 || !discountType) return basePrice;
+
+        if (discountType === DiscountType.PERCENTAGE) {
+            return Math.max(0, basePrice - (basePrice * discount) / 100);
+        }
+
+        if (discountType === DiscountType.FLAT) {
+            return Math.max(0, basePrice - discount);
+        }
+
+        return basePrice;
     }
 
     /**
@@ -219,20 +244,7 @@ export class OrderService {
      */
     private createOrderItems(items: any[]): OrderItem[] {
         return items.map(item => {
-            let price;
-            if (item.variant) {
-                price = item.variant.basePrice;
-            } else {
-                if (item.product?.discount && item.product?.discount > 0) {
-                    if (item.product?.discountType === DiscountType.PERCENTAGE) {
-                        price = item.product.basePrice - (item.product.basePrice * (item.product.discount / 100));
-                    } else {
-                        price = item.product.basePrice - item.product.discount;
-                    }
-                } else {
-                    price = item.product.basePrice;
-                }
-            }
+            const price = this.calculateLineItemPrice(item);
             return this.orderItemRepository.create({
                 productId: item.product.id,
                 quantity: item.quantity,
@@ -271,23 +283,8 @@ export class OrderService {
 
         // Calculate subtotal from items
         const subtotal = items.reduce((sum, item) => {
-            let basePrice = 0;
-            if (item.variant) {
-                basePrice += item.variant.basePrice;
-            } else {
-                if (item.product?.discount && item.product?.discount > 0) {
-                    if (item.product?.discountType === DiscountType.PERCENTAGE) {
-
-                        basePrice += item.product.basePrice - (item.product.basePrice * (item.product.discount / 100));
-                    } else {
-                        basePrice += item.product.basePrice - item.product.discount;
-                    }
-                } else {
-                    basePrice += item.product.basePrice;
-                }
-            }
-            // const basePrice = item.variant ? item.variant.basePrice : item.product.basePrice;
-            return sum + (basePrice * item.quantity);
+            const linePrice = this.calculateLineItemPrice(item);
+            return sum + (linePrice * item.quantity);
         }, 0);
         console.log("--------------subtotal------------------");
         console.log(subtotal);
@@ -724,25 +721,25 @@ export class OrderService {
         console.log(order)
         const transaction_uuid = crypto.randomUUID();
 
-        const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${process.env.ESEWA_MERCHANT}`;
+        const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${config.ESEWA_MERCHANT}`;
 
         console.log("-------------Data after order---------------------")
         console.log(data)
         console.log("----------------------------------")
 
-        const esewaSignature = this.generateHmacSha256Hash(data, process.env.SECRET_KEY);
+        const esewaSignature = this.generateHmacSha256Hash(data, config.SECRET_KEY);
 
         let paymentData = {
             amount: order.totalPrice,
-            failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure?oid=${order?.id}`,
-            // failure_url: `${process.env.FRONTEND_URL}/order/esewa-payment-failure&oid=${order?.id}`,
+            failure_url: `${config.FRONTEND_URL}/order/esewa-payment-failure?oid=${order?.id}`,
+            // failure_url: `${config.FRONTEND_URL}/order/esewa-payment-failure&oid=${order?.id}`,
             product_delivery_charge: "0",
             product_service_charge: "0",
-            product_code: process.env.ESEWA_MERCHANT,
+            product_code: config.ESEWA_MERCHANT,
             signed_field_names: "total_amount,transaction_uuid,product_code",
-            success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success?oid=${order?.id}`,
-            // success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success&oid=${order?.id}`,
-            // success_url: `${process.env.FRONTEND_URL}/order/esewa-payment-success`,
+            success_url: `${config.FRONTEND_URL}/order/esewa-payment-success?oid=${order?.id}`,
+            // success_url: `${config.FRONTEND_URL}/order/esewa-payment-success&oid=${order?.id}`,
+            // success_url: `${config.FRONTEND_URL}/order/esewa-payment-success`,
             tax_amount: "0",
             total_amount: order?.totalPrice,
             transaction_uuid: transaction_uuid,
@@ -754,7 +751,7 @@ export class OrderService {
 
 
         try {
-            const paymentResponse = await axios.post(process.env.ESEWA_PAYMENT_URL, null, {
+            const paymentResponse = await axios.post(config.ESEWA_PAYMENT_URL, null, {
                 params: paymentData,
             });
             const reqPayment = JSON.parse(this.safeStringify(paymentResponse));

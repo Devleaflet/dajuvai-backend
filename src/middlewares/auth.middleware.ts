@@ -10,6 +10,7 @@ import { Product } from '../entities/product.entity';
 import { parse } from 'path';
 import { OrderItem } from '../entities/orderItems.entity';
 import { Review } from '../entities/reviews.entity';
+import config from '../config/env.config';
 
 
 /**
@@ -95,7 +96,7 @@ export const combinedAuthMiddleware = async (
     }
 
     try {
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret') as { id: number; email: string; businessName?: string; role?: string;[key: string]: any };
+        const decoded = jwt.verify(token, config.JWT_SECRET) as { id: number; email: string; businessName?: string; role?: string;[key: string]: any };
 
         // //('Decoded token:', decoded);
 
@@ -161,7 +162,7 @@ export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response
     console.log("Authorization Header: ", req.headers.authorization);
 
     try {
-        const decoded = jwt.verify(vendorToken, process.env.JWT_SECRET || 'your_jwt_secret') as {
+        const decoded = jwt.verify(vendorToken, config.JWT_SECRET) as {
             id: number;
             email: string;
             businessName: string;
@@ -199,7 +200,7 @@ export const authMiddleware = async (req: AuthRequest, res: Response, next: Next
             return;
         }
 
-        const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your_jwt_secret') as {
+        const decoded = jwt.verify(token, config.JWT_SECRET) as {
             id: number;
             email: string;
             role: string

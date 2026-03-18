@@ -9,6 +9,7 @@ import { ProductService } from './product.service';
 import { CategoryService } from './category.service';
 import { DealService } from './deal.service';
 import { SubcategoryService } from './subcategory.service';
+import config from '../config/env.config';
 
 
 
@@ -38,9 +39,9 @@ export class BannerService {
 
         // Configure Cloudinary using environment variables
         cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
         });
 
         // Schedule cron job to auto-update banner statuses every 5 hours

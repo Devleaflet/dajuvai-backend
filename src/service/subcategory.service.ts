@@ -7,6 +7,7 @@ import { CreateSubCategoryInput, UpdateSubCategoryInput } from '../utils/zod_val
 import { APIError } from '../utils/ApiError.utils';
 import { v2 as cloudinary } from 'cloudinary';
 import { Product } from '../entities/product.entity';
+import config from '../config/env.config';
 
 /**
  * Service for managing subcategory-related operations.
@@ -33,9 +34,9 @@ export class SubcategoryService {
 
         // Configure Cloudinary with environment variables
         cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
         });
     }
 

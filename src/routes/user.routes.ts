@@ -7,11 +7,12 @@ import { adminResetPasswordSchema, changeEmailSchema, loginSchema, resetPassword
 import { deleteUserDataByFacebookId } from '../service/user.service';
 import { APIError } from '../utils/ApiError.utils';
 import { UserRole } from '../entities/user.entity';
+import config from '../config/env.config';
 
 const userRouter = Router();
 const userController = new UserController();
 
-const frontendUrl = 'https://dajuvai.com';
+const frontendUrl = config.FRONTEND_URL;
 
 
 // Rate limiter for sensitive endpoints
@@ -1028,7 +1029,7 @@ userRouter.get('/google/callback',
             // Set secure cookie
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 maxAge: 2 * 60 * 60 * 1000, // 2 hours
                 sameSite: 'none'
             });
@@ -1048,7 +1049,7 @@ userRouter.get('/test-cookie', (req, res) => {
     console.log('=== COOKIE TEST ENDPOINT ===');
     console.log('Request headers:', JSON.stringify(req.headers, null, 2));
     console.log('Request cookies:', req.cookies);
-    console.log('NODE_ENV:', process.env.NODE_ENV);
+    console.log('NODE_ENV:', config.NODE_ENV);
     console.log('Request origin:', req.headers.origin);
     console.log('Request referer:', req.headers.referer);
 
@@ -1056,7 +1057,7 @@ userRouter.get('/test-cookie', (req, res) => {
         // Test different cookie configurations
         const cookieOptions1 = {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: config.NODE_ENV === 'production',
             maxAge: 2 * 60 * 60 * 1000,
             sameSite: 'none' as 'none',
             domain: '.dajuvai.com'
@@ -1106,7 +1107,7 @@ userRouter.get('/test-cookie', (req, res) => {
                 option2: cookieOptions2,
                 option3: cookieOptions3
             },
-            environment: process.env.NODE_ENV,
+            environment: config.NODE_ENV,
             requestInfo: {
                 origin: req.headers.origin,
                 referer: req.headers.referer,
@@ -1380,11 +1381,11 @@ userRouter.get('/facebook/callback', passport.authenticate('facebook', { session
     const { user, token } = req.user;
     res.cookie('token', token, {
         httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
+        secure: config.NODE_ENV === 'production',
         maxAge: 2 * 60 * 60 * 1000,
         sameSite: 'none'
     });
-    res.redirect('https://dajuvai-frontend-ykrq.vercel.app/google-auth-callback');
+    res.redirect(`${frontendUrl}/google-auth-callback`);
 });
 
 

@@ -2,26 +2,27 @@ import { APIError } from '../utils/ApiError.utils';
 import axios from 'axios';
 import crypto from 'crypto';
 import { Order, PaymentMethod } from '../entities/order.entity';
+import config from '../config/env.config';
 
 export class PaymentService {
     
     // Base URL for the Nepal Payment Gateway sandbox environment
-    private baseUrl = 'https://merchantsandbox.nepalpayment.com/api/merchant/v2';
+    private baseUrl = config.NPG_BASE_URL || 'https://merchantsandbox.nepalpayment.com/api/merchant/v2';
 
     // Merchant ID from environment variables or fallback default
-    private merchantId = process.env.NPS_MERCHANT_ID || '7468';
+    private merchantId = config.NPS_MERCHANT_ID || '7468';
 
     // API username for authenticating with Nepal Payment Gateway
-    private apiUsername = process.env.NPS_API_USERNAME || 'leaflet';
+    private apiUsername = config.NPS_API_USERNAME || 'leaflet';
 
     // API password for authenticating with Nepal Payment Gateway
-    private apiPassword = process.env.NPS_API_PASSWORD || 'Leaflet@123';
+    private apiPassword = config.NPS_API_PASSWORD || 'Leaflet@123';
 
     // Secret key used for generating secure hashes or signatures
-    private secretKey = process.env.NPS_SECRET_KEY || 'Test@123Test';
+    private secretKey = config.NPS_SECRET_KEY || 'Test@123Test';
 
     // Access code for identifying the merchant during API requests
-    private accessCode = process.env.NPS_ACCESS_CODE || 'LFD100';
+    private accessCode = config.NPS_ACCESS_CODE || 'LFD100';
 
 
 
@@ -39,7 +40,7 @@ export class PaymentService {
      */
     async initiatePayment(order: Order, returnUrl: string, cancelUrl: string): Promise<{ redirectUrl: string, transactionId: string }> {
         // Ensure the base URL for the Nepal Payment Gateway is configured
-        if (!process.env.NPG_BASE_URL) {
+        if (!this.baseUrl) {
             throw new APIError(500, 'BASE_URL is not configured');
         }
 

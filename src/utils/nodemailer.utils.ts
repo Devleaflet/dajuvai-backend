@@ -1,16 +1,14 @@
 import nodemailer from "nodemailer";
-import { config } from "dotenv";
+import config from "../config/env.config";
 import { ContactInput } from "./zod_validations/contact.zod";
 import { generateContactEmailHTML } from "./emailTemplate.utils";
-
-config(); // Load environment variables from .env
 
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
 const transporter = nodemailer.createTransport({
   service: "Gmail",
   auth: {
-    user: process.env.USER_EMAIL, // Your Gmail email address
-    pass: process.env.PASS_EMAIL  // App password or actual password (prefer app password for security)
+    user: config.USER_EMAIL, // Your Gmail email address
+    pass: config.PASS_EMAIL  // App password or actual password (prefer app password for security)
   }
 });
 
@@ -22,7 +20,7 @@ export const sendContactEmail = async (dto: ContactInput) => {
   // Email options including recipient, subject, and HTML body generated from dto
   const mailOptions = {
     from: `${dto.email}`, // sender address with friendly name
-    to: `${process.env.USER_EMAIL}`,                       // support or admin email address
+    to: `${config.USER_EMAIL}`,                       // support or admin email address
     subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
     html: generateContactEmailHTML(dto),                // formatted HTML content of the message
   };
@@ -40,7 +38,7 @@ export const sendContactEmail = async (dto: ContactInput) => {
 export const sendVerificationEmail = async (to: string, sub: string, token?: string) => {
   const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login"
   const mailOptions = {
-    from: `<${process.env.USER_EMAIL}>`,
+    from: `<${config.USER_EMAIL}>`,
     to,
     subject: sub,
     html: `
@@ -177,7 +175,7 @@ export const sendCustomerOrderEmail = async (
   );
 
   const mailOptions = {
-    from: `<${process.env.USER_EMAIL}>`,
+    from: `<${config.USER_EMAIL}>`,
     to,
     subject,
     html: `
@@ -345,7 +343,7 @@ export const sendVendorOrderEmail = async (
 
   // Send email
   await transporter.sendMail({
-    from: `<${process.env.USER_EMAIL}>`,
+    from: `<${config.USER_EMAIL}>`,
     to,
     subject,
     html: mailHtml
@@ -360,7 +358,7 @@ export const sendOrderStatusEmail = async (
   subject = "Your Order Status Has Been Updated"
 ) => {
   const mailOptions = {
-    from: `<${process.env.USER_EMAIL}>`,
+    from: `<${config.USER_EMAIL}>`,
     to,
     subject,
     html: `

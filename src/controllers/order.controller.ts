@@ -72,7 +72,8 @@ export class OrderController {
 
             // send email to vendor and customer only when payment method is COD
             if (order.paymentMethod == PaymentMethod.CASH_ON_DELIVERY) {
-                const userDistrict = userexists.address.district || null;
+                const shippingAddress = order.shippingAddress || null;
+                const userDistrict = shippingAddress?.district || null;
 
                 console.log("-------User district-------------");
                 console.log(userDistrict);
@@ -140,10 +141,10 @@ export class OrderController {
                     console.log(userexists.fullName);
                     console.log(userexists.phoneNumber);
                     console.log(userexists.email);
-                    console.log(userexists.address.city);
-                    console.log(userexists.address.district);
-                    console.log(userexists.address.localAddress);
-                    console.log(userexists.address.landmark);
+                    console.log(shippingAddress?.city || null);
+                    console.log(shippingAddress?.district || null);
+                    console.log(shippingAddress?.localAddress || null);
+                    console.log(shippingAddress?.landmark || null);
 
                     await sendVendorOrderEmail(
                         vendor.email,
@@ -154,10 +155,10 @@ export class OrderController {
                             name: userexists.fullName,
                             phone: userexists.phoneNumber,
                             email: userexists.email,
-                            city: userexists.address.city,
-                            district: userexists.address.district,
-                            localAddress: userexists.address.localAddress,
-                            landmark: userexists.address.landmark,
+                            city: shippingAddress?.city || null,
+                            district: shippingAddress?.district || null,
+                            localAddress: shippingAddress?.localAddress || null,
+                            landmark: shippingAddress?.landmark || null,
                         }
                     );
                 }

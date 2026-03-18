@@ -1,7 +1,7 @@
 
 
 import { DataSource } from "typeorm";
-import { config } from "dotenv"
+import config from "./env.config";
 import { User } from "../entities/user.entity"
 import { Subcategory } from "../entities/subcategory.entity"
 import { Category } from "../entities/category.entity"
@@ -31,14 +31,9 @@ import { VendorPaymentOption } from "../entities/vendorPaymentOption";
 
 
 
-config()
-
-
-
-
 const AppDataSource = new DataSource({
   type: "postgres",
-  url: process.env.DATABASE_URL,
+  url: config.DATABASE_URL,
   synchronize: true,
   logging: false,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,

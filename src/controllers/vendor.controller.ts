@@ -25,6 +25,7 @@ import {
 import { APIError } from '../utils/ApiError.utils';
 import { DistrictService } from '../service/district.service';
 import { findUserByEmail } from '../service/user.service';
+import config from '../config/env.config';
 
 /**
  * Utility class for token management
@@ -62,7 +63,7 @@ export class VendorController {
      * Initializes the controller with a JWT secret and VendorService instance.
      */
     constructor() {
-        this.jwtSecret = process.env.JWT_SECRET || 'your_jwt_secret';
+        this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
         this.districtService = new DistrictService();
     }
@@ -199,7 +200,7 @@ export class VendorController {
             /* Set JWT cookie */
             res.cookie("vendorToken", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: config.NODE_ENV === "production",
                 sameSite: "strict",
                 maxAge: 2 * 60 * 60 * 1000,
             });
@@ -264,20 +265,20 @@ export class VendorController {
             /* Generate refresh token (long-lived) */
             const refreshToken = jwt.sign(
                 { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
-                process.env.JWT_REFRESH_SECRET || 'your_refresh_secret',
+                config.JWT_REFRESH_SECRET,
                 { expiresIn: '7d' }
             );
 
             res.cookie('vendorToken', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 15 * 60 * 1000,
             });
 
             res.cookie('vendorRefreshToken', refreshToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 7 * 24 * 60 * 60 * 1000,
             });
@@ -317,7 +318,7 @@ export class VendorController {
 
             const decoded = jwt.verify(
                 token,
-                process.env.JWT_REFRESH_SECRET || 'your_refresh_secret'
+                config.JWT_REFRESH_SECRET
             ) as { id: number; email: string; businessName: string };
 
             const vendor = await this.vendorService.findVendorByEmailLogin(decoded.email);
@@ -334,7 +335,7 @@ export class VendorController {
 
             res.cookie('vendorToken', newAccessToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 15 * 60 * 1000,
             });
@@ -777,7 +778,7 @@ export class VendorController {
 
             res.cookie("vendorToken", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: config.NODE_ENV === "production",
                 sameSite: "strict",
                 maxAge: 2 * 60 * 60 * 1000,
             });

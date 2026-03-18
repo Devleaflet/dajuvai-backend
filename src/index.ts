@@ -1,5 +1,4 @@
 import express, { Request, Response } from "express";
-import { config } from "dotenv";
 import passport from "passport";
 import cookieParser from "cookie-parser";
 import swaggerUi from "swagger-ui-express";
@@ -8,7 +7,11 @@ import AppDataSource from "./config/db.config";
 import "./config/passport.config"; // Passport strategies initialization
 import { join } from "path";
 import { mkdirSync } from "fs";
-import cors, { CorsOptions } from "cors";
+import cors from "cors";
+import { createServer } from "http";
+import { corsOptions } from "./config/cors.config";
+import { initSocket } from "./socket/socket";
+import config from "./config/env.config";
 
 // Route imports
 import userRouter from "./routes/user.routes";
@@ -44,25 +47,7 @@ mkdirSync(uploadDir, { recursive: true }); // recursive:true ensures parent dirs
 // Initialize Express app
 const app = express();
 
-// Load environment variables from .env file
-config();
-
-const allowedOrigins = [
-    'https://dajuvai-frontend-ykrq.vercel.app',
-    'https://dajuvai.com',
-    "http://localhost:5173",
-    'https://dev.dajuvai.com',
-    'https://5srbcmrc-5173.inc1.devtunnels.ms',
-    'http://localhost:3000',
-    "*"
-]
-
-app.use(cors({
-    origin: allowedOrigins,
-    credentials: true,
-    allowedHeaders: ['Content-Type', 'Authorization'],
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH']
-}))
+app.use(cors(corsOptions));
 
 
 
@@ -112,7 +97,8 @@ app.use("/api/notification", notificationRoutes);
 app.use(errorHandler as unknown as express.ErrorRequestHandler);
 
 
-const port = process.env.PORT || 4000;
+const port = config.PORT;
+const server = createServer(app);
 
 // Initialize database connection
 AppDataSource.initialize()
@@ -126,8 +112,9 @@ AppDataSource.initialize()
         removeUnverifiedVendors()
         // await updateAllProductPrices(AppDataSource)
 
-        // Start Express server
-        app.listen(port, () => {
+        // Start Express + WebSocket server
+        initSocket(server);
+        server.listen(port, () => {
             console.log(`Server running at http://localhost:${port} or https://leafletdv.onrender.com`);
         });
     })

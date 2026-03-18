@@ -1,5 +1,6 @@
 import { v2 as cloudinary } from 'cloudinary';
 import { APIError } from '../utils/ApiError.utils';
+import config from '../config/env.config';
 
 
 /**
@@ -51,9 +52,9 @@ export class ImageUploadService {
     constructor() {
         // Configure Cloudinary
         cloudinary.config({
-            cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-            api_key: process.env.CLOUDINARY_API_KEY,
-            api_secret: process.env.CLOUDINARY_API_SECRET,
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
         });
 
         this.validateCloudinaryConfig();
@@ -67,7 +68,9 @@ export class ImageUploadService {
      */
     private validateCloudinaryConfig(): void {
         const requiredEnvVars = ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_API_KEY', 'CLOUDINARY_API_SECRET'];
-        const missingVars = requiredEnvVars.filter(varName => !process.env[varName]);
+        const missingVars = requiredEnvVars.filter((varName) => {
+            const value = (config as unknown as Record<string, unknown>)[varName]; return !value;
+        });
 
         if (missingVars.length > 0) {
             throw new Error(`Missing Cloudinary configuration: ${missingVars.join(', ')}`);

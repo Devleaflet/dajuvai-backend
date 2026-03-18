@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { OAuth2Client } from 'google-auth-library';
+import config from '../config/env.config';
 import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById, findvendorByvendorId } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
 import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput } from '../utils/zod_validations/user.zod';
@@ -12,7 +13,7 @@ import { sendVerificationEmail } from '../utils/nodemailer.utils';
 import AppDataSource from '../config/db.config';
 import { VendorService } from '../service/vendor.service';
 
-const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+const googleClient = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 
 /**
  * @class TokenUtils
@@ -55,7 +56,7 @@ export class UserController {
       * @description Initializes the UserController with a JWT secret key from environment variables.
       */
     constructor() {
-        this.jwtSecret = process.env.JWT_SECRET || 'your_jwt_secret';
+        this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
     }
 
@@ -111,7 +112,7 @@ export class UserController {
             // Set httpOnly cookie with token
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 2 * 60 * 60 * 1000,
             });
@@ -188,21 +189,21 @@ export class UserController {
             // Sign JWT token for 7 days
             const token = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
-                process.env.JWT_SECRET || 'your_jwt_secret',
+                config.JWT_SECRET,
                 { expiresIn: '7d' }
             );
 
             // Generate refresh token (long-lived)
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
-                process.env.JWT_REFRESH_SECRET,
+                config.JWT_REFRESH_SECRET,
                 { expiresIn: '7d' }
             );
 
             // Set token cookie
             res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: config.NODE_ENV === "production",
                 sameSite: "strict",
                 maxAge: 15 * 60 * 1000,
             });
@@ -211,7 +212,7 @@ export class UserController {
             // Set refresh token in separate httpOnly cookie
             res.cookie("refreshToken", refreshToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: config.NODE_ENV === "production",
                 sameSite: "strict",
                 maxAge: 1 * 24 * 60 * 60 * 1000,
             });
@@ -358,7 +359,7 @@ export class UserController {
             // Set httpOnly cookie with token
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 24 * 60 * 60 * 1000,
             });
@@ -498,7 +499,7 @@ export class UserController {
             // Set secure cookie with token
             res.cookie('token', token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 2 * 60 * 60 * 1000, // 2 hours
             });
@@ -585,14 +586,14 @@ export class UserController {
             // Generate refresh token (long-lived)
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
-                process.env.JWT_REFRESH_SECRET,
+                config.JWT_REFRESH_SECRET,
                 { expiresIn: "1d" }
             );
 
             // Set access token cookie
             res.cookie("token", token, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: config.NODE_ENV === "production",
                 sameSite: "strict",
                 maxAge: 15 * 60 * 1000,
             });
@@ -600,7 +601,7 @@ export class UserController {
             // Set refresh token in separate httpOnly cookie
             res.cookie("refreshToken", refreshToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === "production",
+                secure: config.NODE_ENV === "production",
                 sameSite: "strict",
                 maxAge: 1 * 24 * 60 * 60 * 1000,
             });
@@ -642,7 +643,7 @@ export class UserController {
 
             const decoded = jwt.verify(
                 token,
-                process.env.JWT_REFRESH_SECRET || 'your_refresh_secret'
+                config.JWT_REFRESH_SECRET
             ) as { id: number; email: string; role: string };
 
             const userRepo = AppDataSource.getRepository(User);
@@ -660,7 +661,7 @@ export class UserController {
 
             res.cookie('token', newAccessToken, {
                 httpOnly: true,
-                secure: process.env.NODE_ENV === 'production',
+                secure: config.NODE_ENV === 'production',
                 sameSite: 'strict',
                 maxAge: 15 * 60 * 1000,
             });
@@ -702,9 +703,9 @@ export class UserController {
 
             // Verify the ID token with Google
             const validAudiences = [
-                process.env.GOOGLE_CLIENT_ID,
-                process.env.GOOGLE_ANDROID_CLIENT_ID,
-                process.env.GOOGLE_IOS_CLIENT_ID,
+                config.GOOGLE_CLIENT_ID,
+                config.GOOGLE_ANDROID_CLIENT_ID,
+                config.GOOGLE_IOS_CLIENT_ID,
             ].filter(Boolean);
 
             const ticket = await googleClient.verifyIdToken({
@@ -763,7 +764,7 @@ export class UserController {
 
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
-                process.env.JWT_REFRESH_SECRET,
+                config.JWT_REFRESH_SECRET,
                 { expiresIn: '7d' }
             );
 
