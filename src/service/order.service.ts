@@ -377,16 +377,15 @@ export class OrderService {
             throw new Error('User not found');
         }
 
-        // Update the fields
+        // Update fullName always
         user.fullName = fullName;
-        user.phoneNumber = phoneNumber;
+
+        if (phoneNumber && phoneNumber !== user.phoneNumber) {
+            user.phoneNumber = phoneNumber;
+        }
 
         // Save changes
-        const updatedUser = await userDb.save(user);
-
-        console.log("--------------updated user------------------")
-
-        console.log(updatedUser);
+        await userDb.save(user);
     }
 
 

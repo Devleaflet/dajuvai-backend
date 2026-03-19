@@ -30,7 +30,7 @@ export class User {
     @Column({ unique: true, nullable: true })
     email: string;
 
-    @Column({unique: true, nullable: true})
+    @Column({ nullable: true })
     phoneNumber: string;
 
     @Column({
@@ -42,7 +42,7 @@ export class User {
 
     @OneToMany(() => Product, (product) => product.vendor)
     products: Product[]
-    @OneToOne(() => Address, (address) => address.user, { cascade: true})
+    @OneToOne(() => Address, (address) => address.user, { cascade: true })
     address: Address;
 
     @Column({ nullable: true })
