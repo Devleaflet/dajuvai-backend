@@ -7,11 +7,18 @@ export const allowedOrigins = [
     "https://dev.dajuvai.com",
     "https://5srbcmrc-5173.inc1.devtunnels.ms",
     "http://localhost:3000",
-    "*",
 ];
 
 export const corsOptions: CorsOptions = {
-    origin: allowedOrigins,
+    origin: (origin, callback) => {
+        // Allow requests with no origin (mobile apps, curl, Postman)
+        if (!origin) return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            callback(null, origin); // reflect the exact origin, never "*"
+        } else {
+            callback(new Error(`CORS: origin ${origin} not allowed`));
+        }
+    },
     credentials: true,
     allowedHeaders: ["Content-Type", "Authorization"],
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS", "PATCH"],

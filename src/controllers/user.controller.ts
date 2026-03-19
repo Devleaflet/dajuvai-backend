@@ -1025,9 +1025,9 @@ export class UserController {
             // Select the correct entity (user or vendor) to update
             const entity = isVendor ? vendor : user;
 
-            // Generate a new password reset token and set its expiration time (15 minutes from now)
+            // Generate a new password reset token and set its expiration time (1 minutes from now)
             const token = TokenUtils.generateToken();
-            const tokenExpire = new Date(Date.now() + 15 * 60 * 1000);
+            const tokenExpire = new Date(Date.now() + 1 * 60 * 1000);
 
             // Store the reset token and expiration time in the entity
             entity.resetToken = token;
