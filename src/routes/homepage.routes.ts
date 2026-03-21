@@ -226,6 +226,13 @@ router.put(
  *           enum: [true, false]
  *         description: Include inactive sections in the response
  *         example: "true"
+ *       - in: query
+ *         name: search
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: Filter sections by title (case-insensitive, partial match)
+ *         example: "deals"
  *     responses:
  *       200:
  *         description: Homepage sections retrieved successfully

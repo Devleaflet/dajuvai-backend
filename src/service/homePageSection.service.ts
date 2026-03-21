@@ -317,18 +317,30 @@ export class HomePageSectionService {
     // }
 
 
-    async getAllHomePageSections(includeInactive: boolean = false) {
-        const sections = await this.homepageSectionRepository.find({
-            where: includeInactive ? {} : { isActive: true },
-            relations: [
-                'products',
-                'products.variants',
-                'selectedCategory',
-                'selectedSubcategory',
-                'selectedDeal',
-            ],
-            order: { id: 'ASC' },
-        });
+    async getAllHomePageSections(includeInactive: boolean = false, search?: string) {
+        const query = this.homepageSectionRepository.createQueryBuilder('section');
+
+        if (!includeInactive) {
+            query.where('section.isActive = :isActive', { isActive: true });
+        }
+
+        if (search?.trim()) {
+            const condition = 'LOWER(section.title) LIKE :search';
+            const param = { search: `%${search.trim().toLowerCase()}%` };
+            includeInactive
+                ? query.where(condition, param)
+                : query.andWhere(condition, param);
+        }
+
+        query
+            .leftJoinAndSelect('section.products', 'products')
+            .leftJoinAndSelect('products.variants', 'variants')
+            .leftJoinAndSelect('section.selectedCategory', 'selectedCategory')
+            .leftJoinAndSelect('section.selectedSubcategory', 'selectedSubcategory')
+            .leftJoinAndSelect('section.selectedDeal', 'selectedDeal')
+            .orderBy('section.id', 'ASC');
+
+        const sections = await query.getMany();
 
         const homepageSections = await Promise.all(
             sections.map(async (section) => {
@@ -380,7 +392,6 @@ export class HomePageSectionService {
 
                     case ProductSource.MANUAL:
                     default:
-                        // Filter manually selected products in-memory
                         products = (section.products || []).filter(
                             (p) =>
                             (p.hasVariants
@@ -400,7 +411,8 @@ export class HomePageSectionService {
 
 
 
-    /**
+
+/**
      * Retrieves a homepage section by its ID.
      * 
      * @param sectionId {number} - ID of the homepage section

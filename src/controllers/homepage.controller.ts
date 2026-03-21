@@ -215,7 +215,7 @@ export class HomePageSectionController {
      * @returns {Promise<void>} Responds with list of sections and count.
      * @access Public
      */
-    getAllHomePageSections = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    getAllHomePageSections = async (req: Request<{}, {}, {}, { search: string, includeInactive: boolean }>, res: Response, next: NextFunction): Promise<void> => {
         try {
             // Parse and convert includeInactive query parameter
             // Parse and convert includeInactive query parameter
@@ -223,7 +223,7 @@ export class HomePageSectionController {
             const includeInactiveBool = includeInactiveRaw?.toString().toLowerCase() === 'true';
 
             // Fetch sections with products
-            const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool);
+            const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool, req.query.search);
 
             const sectionsWithRatings = await Promise.all(
                 sections.map(async (section) => {
