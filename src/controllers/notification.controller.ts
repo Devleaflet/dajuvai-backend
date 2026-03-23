@@ -75,6 +75,36 @@ export class NotificationController {
     }
 
 
+    async saveFcmTokenController(req: CombinedAuthRequest, res: Response) {
+        try {
+            const user = req.user;
+            const vendor = req.vendor;
+
+            if (!user && !vendor) {
+                throw new APIError(401, "Authentication required");
+            }
+
+            const { token } = req.body as { token: string };
+            if (!token) {
+                throw new APIError(400, "FCM token is required");
+            }
+
+            if (user) {
+                await this.notificationService.saveFcmToken(user.id, token, "user");
+            } else {
+                await this.notificationService.saveFcmToken(vendor.id, token, "vendor");
+            }
+
+            res.status(200).json({ success: true, msg: "FCM token saved" });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, msg: error.message });
+            } else {
+                res.status(500).json({ success: false, msg: "Internal server error" });
+            }
+        }
+    }
+
     async getNotificationByIdController(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
         try {
             const id = req.params.id;

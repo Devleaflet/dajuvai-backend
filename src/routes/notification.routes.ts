@@ -65,6 +65,34 @@ const controller = new NotificationController();
  */
 notificationRoutes.get("/", combinedAuthMiddleware, controller.getNotificationController.bind(controller));
 
+/**
+ * @swagger
+ * /api/notification/fcm-token:
+ *   post:
+ *     summary: Save FCM device token for push notifications (called by Flutter app)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - token
+ *             properties:
+ *               token:
+ *                 type: string
+ *                 example: "fxyz123..."
+ *     responses:
+ *       200:
+ *         description: FCM token saved successfully
+ *       401:
+ *         description: Unauthorized
+ */
+notificationRoutes.post("/fcm-token", combinedAuthMiddleware, controller.saveFcmTokenController.bind(controller));
+
 
 
 /**

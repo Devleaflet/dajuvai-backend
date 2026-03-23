@@ -7,6 +7,7 @@ import { APIError } from '../utils/ApiError.utils';
 import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveToCartRequest } from '../interface/wishlist.interface';
 import { CartService } from './cart.service';
 import { Variant } from '../entities/variant.entity';
+import { NotificationService } from './notification.service';
 
 /**
  * Service for managing wishlist-related operations such as
@@ -118,6 +119,9 @@ export class WishlistService {
                 where: { id: wishlist.id },
                 relations: ['items', 'items.product', 'items.variant'],
             });
+
+            // Push notification (fire-and-forget)
+            new NotificationService().notifyAddToWishlist(userId, product.name).catch(() => {});
 
             return wishlist!;
         });

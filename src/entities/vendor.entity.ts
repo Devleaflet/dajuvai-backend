@@ -89,6 +89,9 @@ export class Vendor {
     @Column({ nullable: true })
     resendBlockUntil: Date | null;
 
+    @Column({ nullable: true })
+    fcmToken?: string;
+
     @OneToMany(() => Product, (product) => product.vendor)
     products: Product[];
 

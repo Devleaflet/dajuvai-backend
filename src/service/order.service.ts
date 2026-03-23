@@ -17,6 +17,7 @@ import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { findUserById } from './user.service';
 import { sendCustomerOrderEmail, sendOrderStatusEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
+import { NotificationService } from './notification.service';
 import { add } from 'winston';
 import crypto from 'crypto';
 import axios from 'axios';
@@ -46,6 +47,7 @@ export class OrderService {
     private promoService: PromoService;
     private variantRepository: Repository<Variant>;
     private vendorService: VendorService;
+    private notificationService: NotificationService;
 
 
     /**
@@ -87,6 +89,7 @@ export class OrderService {
         this.variantRepository = AppDataSource.getTreeRepository(Variant);
 
         this.vendorService = new VendorService();
+        this.notificationService = new NotificationService();
     }
 
     private calculateLineItemPrice(item: any): number {
@@ -687,6 +690,7 @@ export class OrderService {
             // Update order status
             order.status = OrderStatus.CANCELLED;
             await this.orderRepository.save(order);
+            await this.notificationService.notifyPaymentFailed(order.id, order.orderedById);
             return { success: true }
         } catch (err) {
             console.log("Error", err)
@@ -706,6 +710,7 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.PAID;
             order.mTransactionId = transactionId;
             await this.orderRepository.save(order);
+            await this.notificationService.notifyPaymentSuccess(order.id, order.orderedById);
 
             return order;
         } catch (err) {
@@ -1040,6 +1045,11 @@ export class OrderService {
 
         // Save updated order info
         await this.orderRepository.save(order);
+        if (isSuccessful) {
+            await this.notificationService.notifyPaymentSuccess(order.id, order.orderedById);
+        } else {
+            await this.notificationService.notifyPaymentFailed(order.id, order.orderedById);
+        }
 
         if (isSuccessful) {
             // Clear cart after successful payment (currently clears only first item, can be extended)
@@ -1083,6 +1093,7 @@ export class OrderService {
         order.status = OrderStatus.CANCELLED;
 
         await this.orderRepository.save(order);
+        await this.notificationService.notifyPaymentCancelled(order.id, order.orderedById);
     }
 
 

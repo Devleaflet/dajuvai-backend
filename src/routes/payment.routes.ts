@@ -6,6 +6,7 @@ import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { CartService } from '../service/cart.service';
+import { NotificationService } from '../service/notification.service';
 
 
 const paymentRouter = Router();
@@ -512,27 +513,32 @@ paymentRouter.get('/notification', async (req: Request, res: Response) => {
         const cartService = new CartService();
 
         // Handle payment status
+        const notificationService = new NotificationService();
+
         switch ((Status as string).toUpperCase()) {
             case 'SUCCESS':
                 order.paymentStatus = PaymentStatus.PAID;
                 order.status = OrderStatus.CONFIRMED;
-                await cartService.clearCart(userId); // Clear cart after successful payment
+                await cartService.clearCart(userId);
                 console.log(`Order ${order.id} marked as PAID`);
+                await orderDb.save(order);
+                await notificationService.notifyPaymentSuccess(order.id, userId);
                 break;
 
             case 'FAILED':
             case 'CANCELLED':
                 order.paymentStatus = PaymentStatus.UNPAID;
-                order.status = OrderStatus.CANCELLED; 
+                order.status = OrderStatus.CANCELLED;
                 console.log(`Order ${order.id} marked as UNPAID due to ${Status}`);
+                await orderDb.save(order);
+                await notificationService.notifyPaymentFailed(order.id, userId);
                 break;
 
             default:
                 console.log(`Order ${order.id} received unknown status: ${Status}`);
+                await orderDb.save(order);
                 break;
         }
-
-        await orderDb.save(order);
 
         res.send('received');
     } catch (error) {

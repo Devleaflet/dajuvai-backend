@@ -7,6 +7,7 @@ import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
 import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
+import { NotificationService } from './notification.service';
 
 /**
  * Service class for managing shopping cart operations.
@@ -141,7 +142,12 @@ export class CartService {
 
         // Update cart total
         cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        return await this.cartRepository.save(cart);
+        const savedCart = await this.cartRepository.save(cart);
+
+        // Push notification (fire-and-forget)
+        new NotificationService().notifyAddToCart(userId, name).catch(() => {});
+
+        return savedCart;
     }
 
 
