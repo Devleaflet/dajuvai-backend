@@ -8,6 +8,7 @@ import { deleteUserDataByFacebookId } from '../service/user.service';
 import { APIError } from '../utils/ApiError.utils';
 import { UserRole } from '../entities/user.entity';
 import config from '../config/env.config';
+import jwt from "jsonwebtoken"
 
 const userRouter = Router();
 const userController = new UserController();
@@ -1013,33 +1014,73 @@ userRouter.post('/google/mobile', userController.googleMobileLogin.bind(userCont
  *       302:
  *         description: Redirects to frontend with token on success, or with error on failure
  */
-userRouter.get('/google/callback',
-    passport.authenticate('google', {
+userRouter.get(
+    "/google/callback",
+
+    passport.authenticate("google", {
         session: false,
-        failureRedirect: `${frontendUrl}/auth/google/callback?error=authentication_error`
+        failureRedirect: `${frontendUrl}/auth/google/callback?error=authentication_error`,
     }),
-    (req: any, res: Response) => {
+
+    async (req: any, res: Response) => {
         try {
-            const { user, token } = req.user;
+            const { user } = req.user;
 
             if (!user) {
-                console.error('Google OAuth failed - no user')
-                return res.redirect(`${frontendUrl}/auth/google/callback?error=authentication_error`);
+                console.error("Google OAuth failed - no user");
+
+                return res.redirect(
+                    `${frontendUrl}/auth/google/callback?error=authentication_error`
+                );
             }
-            // Set secure cookie
-            res.cookie('token', token, {
+
+            const token = jwt.sign(
+                {
+                    id: user.id,
+                    email: user.email,
+                    role: user.role,
+                },
+                config.JWT_SECRET,
+                {
+                    expiresIn: "15m",
+                }
+            );
+
+            const refreshToken = jwt.sign(
+                {
+                    id: user.id,
+                    email: user.email,
+                    role: user.role,
+                },
+                config.JWT_REFRESH_SECRET,
+                {
+                    expiresIn: "1d",
+                }
+            );
+
+            res.cookie("token", token, {
                 httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                maxAge: 2 * 60 * 60 * 1000, // 2 hours
-                sameSite: 'none'
+                secure: config.NODE_ENV === "production",
+                sameSite: "none",
+                maxAge: 15 * 60 * 1000,
             });
 
-            // Redirect to frontend callback with token
-            res.redirect(`${frontendUrl}/auth/google/callback?token=${token}`);
+            res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "none",
+                maxAge: 24 * 60 * 60 * 1000,
+            });
+
+            // Redirect to frontend callback with token and refreshToken
+            res.redirect(`${frontendUrl}/auth/google/callback?token=${token}&refreshToken=${refreshToken}`);
 
         } catch (error) {
-            console.error('Google OAuth callback error:', error);
-            res.redirect(`${frontendUrl}/auth/google/callback?error=authentication_error`);
+            console.error("Google OAuth callback error:", error);
+
+            res.redirect(
+                `${frontendUrl}/auth/google/callback?error=authentication_error`
+            );
         }
     }
 );
