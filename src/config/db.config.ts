@@ -34,15 +34,12 @@ import { VendorPaymentOption } from "../entities/vendorPaymentOption";
 const AppDataSource = new DataSource({
   type: "postgres",
   url: config.DATABASE_URL,
-  synchronize: true,
+  synchronize: false,
   logging: false,
   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
     Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption],
-  migrations: [],
+  migrations: ['src/migrations/*.ts'],
   ssl: false,
-  // ssl: {
-  //   rejectUnauthorized: false, // Required for Render's managed Postgres
-  // },
 });
 
 export default AppDataSource;
