@@ -32,6 +32,8 @@ import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
 import adminVendorsRouter from "./routes/admin/admin.vendors.routes";
 import adminOrdersRouter from "./routes/admin/admin.orders.routes";
 import adminUsersRouter from "./routes/admin/admin.users.routes";
+import vendorProductsRouter from "./routes/vendor/vendor.products.routes";
+import vendorOrdersRouter from "./routes/vendor/vendor.orders.routes";
 
 // Utils for scheduled background tasks
 import { orderCleanUp, removeUnverifiedVendors, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
@@ -94,6 +96,8 @@ app.use("/api/admin/vendors", adminVendorsRouter);
 app.use("/api/admin/orders", adminOrdersRouter);
 app.use("/api/admin/users", adminUsersRouter);
 app.use("/api/vendor/dashboard", vendorDashBoardRouter);
+app.use("/api/vendor/products", vendorProductsRouter);
+app.use("/api/vendor/orders", vendorOrdersRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
 app.use("/api/image", imageRouter);

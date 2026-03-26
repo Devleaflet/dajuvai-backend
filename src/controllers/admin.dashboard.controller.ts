@@ -1,10 +1,7 @@
-import { Request, Response } from 'express';
+import { Response } from 'express';
 import { APIError } from '../utils/ApiError.utils';
 import { AdminDashBoardService } from '../service/admin.dashboard.service';
 import { AuthRequest } from '../middlewares/auth.middleware';
-import { LoginInput } from '../utils/zod_validations/user.zod';
-import { truncateSync } from 'fs';
-import { InstanceChecker } from 'typeorm';
 
 /**
  * @class AdminDashboardController
@@ -52,7 +49,6 @@ export class AdminDashboardController {
                 res.status(500).json({
                     success: false,
                     message: 'Error fetching dashboard stats',
-                    error: error.message
                 });
             }
         }
