@@ -29,6 +29,9 @@ import homepageRoutes from "./routes/homepage.routes";
 import productRouter from "./routes/product.routes";
 import adminDashboardRouter from "./routes/admin.dashboard.routes";
 import vendorDashBoardRouter from "./routes/vendor.dashboard.routes";
+import adminVendorsRouter from "./routes/admin/admin.vendors.routes";
+import adminOrdersRouter from "./routes/admin/admin.orders.routes";
+import adminUsersRouter from "./routes/admin/admin.users.routes";
 
 // Utils for scheduled background tasks
 import { orderCleanUp, removeUnverifiedVendors, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
@@ -87,6 +90,9 @@ app.use("/api/district", districtRoutes);
 app.use("/api/homepage", homepageRoutes);
 app.use("/api/product", productRouter);
 app.use("/api/admin/dashboard", adminDashboardRouter);
+app.use("/api/admin/vendors", adminVendorsRouter);
+app.use("/api/admin/orders", adminOrdersRouter);
+app.use("/api/admin/users", adminUsersRouter);
 app.use("/api/vendor/dashboard", vendorDashBoardRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);

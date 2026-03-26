@@ -224,4 +224,69 @@ export class AdminDashboardController {
         }
     }
 
+    /**
+     * @method getGrossRevenueTrend
+     * @description Returns gross revenue for the current and last month, with trend direction and percentage.
+     * @route GET /api/admin/dashboard/gross-revenue-trend
+     */
+    async getGrossRevenueTrend(req: AuthRequest, res: Response): Promise<void> {
+        try {
+            const data = await this.adminDashboardService.getGrossRevenueTrend();
+            res.status(200).json({ success: true, data });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching gross revenue trend',
+                });
+            }
+        }
+    }
+
+    /**
+     * @method getOrdersTodayCount
+     * @description Returns the count of orders placed today.
+     * @route GET /api/admin/dashboard/orders-today-count
+     */
+    async getOrdersTodayCount(req: AuthRequest, res: Response): Promise<void> {
+        try {
+            const data = await this.adminDashboardService.getOrdersTodayCount();
+            res.status(200).json({ success: true, data });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching today\'s order count',
+                    error: error.message
+                });
+            }
+        }
+    }
+
+    /**
+     * @method getNeedsAction
+     * @description Returns counts of items that need admin attention: pending vendor approvals and delayed orders.
+     * @route GET /api/admin/dashboard/needs-action
+     */
+    async getNeedsAction(req: AuthRequest, res: Response): Promise<void> {
+        try {
+            const data = await this.adminDashboardService.getNeedsAction();
+            res.status(200).json({ success: true, data });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({ success: false, message: error.message });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    message: 'Error fetching needs-action data',
+                    error: error.message
+                });
+            }
+        }
+    }
+
 }

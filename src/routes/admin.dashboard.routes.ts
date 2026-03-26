@@ -690,7 +690,170 @@ adminDashboardRouter.get("/analytics/vendor/revenue", adminDashboardController.g
  */
 adminDashboardRouter.get("/analytics/shipping/revenue", adminDashboardController.getTotalShippingRevenue.bind(adminDashboardController))
 
+/**
+ * @swagger
+ * /api/admin/dashboard/gross-revenue-trend:
+ *   get:
+ *     summary: Get gross revenue trend (current vs last month)
+ *     description: |
+ *       Returns the gross revenue (totalPrice + shippingFee) for the current calendar month
+ *       and the previous calendar month, along with a trend percentage and direction.
+ *       Only PAID orders are included.
+ *     tags:
+ *       - Admin Dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Gross revenue trend data fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     grossRevenue:
+ *                       type: number
+ *                       format: float
+ *                       description: Total revenue for the current month
+ *                       example: 125000.50
+ *                     lastMonthRevenue:
+ *                       type: number
+ *                       format: float
+ *                       description: Total revenue for last month
+ *                       example: 110000.00
+ *                     trendPercentage:
+ *                       type: string
+ *                       description: Percentage change from last month (e.g., "13.6")
+ *                       example: "13.6"
+ *                     trendDirection:
+ *                       type: string
+ *                       enum: [up, down, neutral]
+ *                       description: Direction of the revenue trend
+ *                       example: "up"
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error fetching gross revenue trend"
+ */
+adminDashboardRouter.get("/gross-revenue-trend", adminDashboardController.getGrossRevenueTrend.bind(adminDashboardController));
+
+/**
+ * @swagger
+ * /api/admin/dashboard/orders-today-count:
+ *   get:
+ *     summary: Get the count of orders placed today
+ *     description: Returns the number of orders created on the current date (DATE(createdAt) = CURRENT_DATE).
+ *     tags:
+ *       - Admin Dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Today's order count fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     ordersToday:
+ *                       type: integer
+ *                       description: Number of orders placed today
+ *                       example: 14
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error fetching today's order count"
+ */
+adminDashboardRouter.get("/orders-today-count", adminDashboardController.getOrdersTodayCount.bind(adminDashboardController));
+
+/**
+ * @swagger
+ * /api/admin/dashboard/needs-action:
+ *   get:
+ *     summary: Get items that need admin attention
+ *     description: |
+ *       Returns a summary of actionable items for the admin:
+ *       - Number of vendors pending approval (isApproved = false)
+ *       - Number of orders with status DELAYED
+ *     tags:
+ *       - Admin Dashboard
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Needs-action data fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     pendingVendorApprovals:
+ *                       type: integer
+ *                       description: Number of vendors waiting for approval
+ *                       example: 5
+ *                     delayedOrders:
+ *                       type: integer
+ *                       description: Number of orders currently delayed
+ *                       example: 3
+ *       401:
+ *         description: Unauthorized
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error fetching needs-action data"
+ */
+adminDashboardRouter.get("/needs-action", adminDashboardController.getNeedsAction.bind(adminDashboardController));
+
 export default adminDashboardRouter;
 
 
-// category wise , subcategory , top selling product 
+// category wise , subcategory , top selling product

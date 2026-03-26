@@ -530,4 +530,85 @@ export class AdminDashBoardService {
         return parseFloat(result.totalShippingRevenue || 0);
     }
 
+    /**
+     * Get gross revenue trend comparing the current month to the previous month.
+     *
+     * @returns Gross revenue for this month and last month, trend percentage, and direction.
+     */
+    async getGrossRevenueTrend(): Promise<{
+        grossRevenue: number;
+        lastMonthRevenue: number;
+        trendPercentage: string;
+        trendDirection: 'up' | 'down' | 'neutral';
+    }> {
+        const now = new Date();
+        const firstDayThisMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59, 999);
+
+        const [currentResult, lastResult] = await Promise.all([
+            this.orderRepository
+                .createQueryBuilder('order')
+                .select('SUM(order.totalPrice + order.shippingFee)', 'total')
+                .where('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
+                .andWhere('order.createdAt >= :start', { start: firstDayThisMonth })
+                .getRawOne(),
+            this.orderRepository
+                .createQueryBuilder('order')
+                .select('SUM(order.totalPrice + order.shippingFee)', 'total')
+                .where('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
+                .andWhere('order.createdAt BETWEEN :start AND :end', {
+                    start: firstDayLastMonth,
+                    end: lastDayLastMonth,
+                })
+                .getRawOne(),
+        ]);
+
+        const grossRevenue = parseFloat(currentResult?.total || 0);
+        const lastMonthRevenue = parseFloat(lastResult?.total || 0);
+
+        let trendPercentage = '0.0';
+        let trendDirection: 'up' | 'down' | 'neutral' = 'neutral';
+
+        if (lastMonthRevenue > 0) {
+            const diff = ((grossRevenue - lastMonthRevenue) / lastMonthRevenue) * 100;
+            trendPercentage = diff.toFixed(1);
+            trendDirection = diff > 0 ? 'up' : diff < 0 ? 'down' : 'neutral';
+        }
+
+        return { grossRevenue, lastMonthRevenue, trendPercentage, trendDirection };
+    }
+
+    /**
+     * Count orders placed today.
+     *
+     * @returns Number of orders placed on the current date.
+     */
+    async getOrdersTodayCount(): Promise<{ ordersToday: number }> {
+        const result = await this.orderRepository
+            .createQueryBuilder('order')
+            .select('COUNT(order.id)', 'ordersToday')
+            .where('DATE(order.createdAt) = CURRENT_DATE')
+            .getRawOne();
+
+        return { ordersToday: parseInt(result?.ordersToday || 0, 10) };
+    }
+
+    /**
+     * Get action items that need attention: pending vendor approvals and delayed orders.
+     *
+     * @returns Counts of pending vendor approvals and delayed orders.
+     */
+    async getNeedsAction(): Promise<{ pendingVendorApprovals: number; delayedOrders: number }> {
+        const [pendingVendorApprovals, delayedOrders] = await Promise.all([
+            this.vendorRepository.count({ where: { isApproved: false } }),
+            this.orderRepository
+                .createQueryBuilder('order')
+                .where('order.status = :status', { status: OrderStatus.DELAYED })
+                .getCount(),
+        ]);
+
+        return { pendingVendorApprovals, delayedOrders };
+    }
+
 }
