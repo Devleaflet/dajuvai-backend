@@ -149,19 +149,20 @@ export class ProductController {
 
 
 
-    async returnProuctRatings(products: any) {
-        const productsWithRatings = await Promise.all(
-            products.map(async (product) => {
-                const avgRating = await this.reviewService.getAverageRating(product.id);
-                return {
-                    ...product,
-                    avgRating: avgRating.avg,
-                    count: avgRating.count
-                };
-            })
-        );
+    async returnProuctRatings(products: any[]) {
+        if (!products.length) return products;
 
-        return productsWithRatings
+        const productIds = products.map(p => p.id);
+        const ratingsMap = await this.reviewService.getBatchAverageRatings(productIds);
+
+        return products.map(product => {
+            const rating = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
+            return {
+                ...product,
+                avgRating: rating.avg,
+                count: rating.count,
+            };
+        });
     }
 
 
@@ -211,12 +212,13 @@ export class ProductController {
             // Fetch product by ID and subcategory
             const product = await this.productService.getProductById(Number(id), Number(subcategoryId));
 
-            const productWithRating = await this.returnProuctRatings(product);
-
             // Return 404 if product doesn't exist
             if (!product) {
                 return res.status(404).json({ success: false, message: 'Product not found' });
             }
+
+            const rating = await this.reviewService.getAverageRating(product.id);
+            const productWithRating = { ...product, avgRating: rating.avg, count: rating.count };
 
             res.status(200).json({
                 success: true,

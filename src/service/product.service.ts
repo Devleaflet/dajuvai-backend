@@ -77,12 +77,12 @@ export class ProductService {
         });
     }
 
-    async getAlllProducts(): Promise<Product[]> {
+    async getAlllProducts(page: number = 1, limit: number = 50): Promise<Product[]> {
         return this.productRepository.find({
             relations: ['subcategory', 'vendor', 'brand', 'deal', 'reviews'],
-            order: {
-                createdAt: 'DESC',
-            },
+            order: { createdAt: 'DESC' },
+            skip: (page - 1) * limit,
+            take: limit,
         });
     }
 

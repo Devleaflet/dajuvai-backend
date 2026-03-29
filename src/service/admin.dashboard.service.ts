@@ -251,42 +251,50 @@ export class AdminDashBoardService {
         }
     }
 
-    async getVendorsSalesAmount(startDate?: string, endDate?: string, page?: number) {
-        const query = AppDataSource.getRepository(OrderItem)
+    async getVendorsSalesAmount(startDate?: string, endDate?: string, page: number = 1) {
+        const pageLimit = config.pagination.pageLimit;
+        const skip = (page - 1) * pageLimit;
+
+        const applyDateFilters = (qb: any) => {
+            if (startDate && endDate) {
+                qb.andWhere("order.createdAt BETWEEN :start AND :end", { start: new Date(startDate), end: new Date(endDate) });
+            } else if (startDate) {
+                qb.andWhere("order.createdAt >= :start", { start: new Date(startDate) });
+            } else if (endDate) {
+                qb.andWhere("order.createdAt <= :end", { end: new Date(endDate) });
+            }
+        };
+
+        // count distinct vendors matching the filter (1 query)
+        const countQb = AppDataSource.getRepository(OrderItem)
+            .createQueryBuilder("orderItem")
+            .innerJoin(Order, "order", "order.id = orderItem.orderId")
+            .select("COUNT(DISTINCT orderItem.vendorId)", "total")
+            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] });
+        applyDateFilters(countQb);
+        const countResult = await countQb.getRawOne();
+        const totalData = parseInt(countResult?.total || '0', 10);
+
+        // paginated data query
+        const dataQb = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder("orderItem")
             .innerJoin(Order, "order", "order.id = orderItem.orderId")
             .innerJoin(Vendor, "vendor", "vendor.id = orderItem.vendorId")
             .select("vendor.id", "vendorId")
             .addSelect("vendor.businessName", "businessName")
             .addSelect("SUM(orderItem.quantity * orderItem.price)", "totalSales")
-            .where("order.status IN (:...statuses)", {
-                statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
-            })
+            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] })
             .groupBy("vendor.id")
-            .addGroupBy("vendor.businessName");
-
-        // ✅ apply date filter only if both are provided
-        if (startDate && endDate) {
-            query.andWhere("order.createdAt BETWEEN :start AND :end", {
-                start: new Date(startDate),
-                end: new Date(endDate),
-            });
-        } else if (startDate) {
-            query.andWhere("order.createdAt >= :start", { start: new Date(startDate) });
-        } else if (endDate) {
-            query.andWhere("order.createdAt <= :end", { end: new Date(endDate) });
-        }
-        // ✅ get all grouped rows once for count
-        const allResults = await query.getRawMany();
-        const totalData = allResults.length;
-        // ✅ pagination
-        const skip = (page - 1) * config.pagination.pageLimit;
-        const data = allResults.slice(skip, skip + config.pagination.pageLimit);
+            .addGroupBy("vendor.businessName")
+            .offset(skip)
+            .limit(pageLimit);
+        applyDateFilters(dataQb);
+        const data = await dataQb.getRawMany();
 
         return {
             success: true,
             currentPage: page,
-            totalPage: Math.ceil(totalData / config.pagination.pageLimit),
+            totalPage: Math.ceil(totalData / pageLimit),
             totalData,
             data,
         };
@@ -297,8 +305,31 @@ export class AdminDashBoardService {
         endDate?: string,
         page: number = 1,
     ) {
-        // Base query
-        const query = this.orderItemRepository
+        const pageLimit = 10;
+        const skip = (page - 1) * pageLimit;
+
+        const applyDateFilters = (qb: any) => {
+            if (startDate && endDate) {
+                qb.andWhere("order.createdAt BETWEEN :start AND :end", { start: new Date(startDate), end: new Date(endDate) });
+            } else if (startDate) {
+                qb.andWhere("order.createdAt >= :start", { start: new Date(startDate) });
+            } else if (endDate) {
+                qb.andWhere("order.createdAt <= :end", { end: new Date(endDate) });
+            }
+        };
+
+        // count distinct products matching the filter (1 query)
+        const countQb = this.orderItemRepository
+            .createQueryBuilder("orderItem")
+            .innerJoin("orderItem.order", "order")
+            .select("COUNT(DISTINCT orderItem.productId)", "total")
+            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] });
+        applyDateFilters(countQb);
+        const countResult = await countQb.getRawOne();
+        const totalData = parseInt(countResult?.total || '0', 10);
+
+        // paginated data query
+        const dataQb = this.orderItemRepository
             .createQueryBuilder("orderItem")
             .innerJoin("orderItem.order", "order")
             .innerJoin("orderItem.product", "product")
@@ -306,47 +337,28 @@ export class AdminDashBoardService {
             .addSelect("product.name", "productName")
             .addSelect("SUM(orderItem.quantity)", "totalQuantity")
             .addSelect("SUM(orderItem.quantity * orderItem.price)", "totalSales")
-            .where("order.status IN (:...statuses)", {
-                statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
-            })
+            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] })
             .groupBy("product.id")
             .addGroupBy("product.name")
-            .orderBy("SUM(orderItem.quantity * orderItem.price)", "DESC");
+            .orderBy("SUM(orderItem.quantity * orderItem.price)", "DESC")
+            .offset(skip)
+            .limit(pageLimit);
+        applyDateFilters(dataQb);
+        const rawData = await dataQb.getRawMany();
 
-        // Optional date filter
-        if (startDate && endDate) {
-            query.andWhere("order.createdAt BETWEEN :start AND :end", {
-                start: new Date(startDate),
-                end: new Date(endDate),
-            });
-        } else if (startDate) {
-            query.andWhere("order.createdAt >= :start", { start: new Date(startDate) });
-        } else if (endDate) {
-            query.andWhere("order.createdAt <= :end", { end: new Date(endDate) });
-        }
-
-        // Get all results for pagination
-        const allResults = await query.getRawMany();
-        const totalData = allResults.length;
-
-        // Pagination slice
-        const skip = (page - 1) * 10;
-        const data = allResults.slice(skip, skip + 10);
-
-        // Format numeric values
-        const formattedData = data.map(item => ({
+        const data = rawData.map(item => ({
             productId: item.productId,
             productName: item.productName,
             totalQuantity: Number(item.totalQuantity),
-            totalSales: Number(item.totalSales)
+            totalSales: Number(item.totalSales),
         }));
 
         return {
             success: true,
             currentPage: page,
-            totalPage: Math.ceil(totalData / 10),
+            totalPage: Math.ceil(totalData / pageLimit),
             totalData,
-            data: formattedData
+            data,
         };
     }
 

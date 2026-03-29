@@ -35,18 +35,13 @@ export class VendorService {
      * Fetches all vendors from the database.
      * @returns {Promise<Vendor[]>} Array of all vendor entities.
      */
-    async fetchAllVendors(): Promise<Vendor[]> {
-        // Simple find all vendors, no filtering.
+    async fetchAllVendors(page: number = 1, limit: number = 50): Promise<Vendor[]> {
         return await this.vendorRepository.find({
-            where: {
-                isApproved: true
-            },
-            relations: {
-                paymentOptions: true
-            }
+            where: { isApproved: true },
+            relations: { paymentOptions: true },
+            skip: (page - 1) * limit,
+            take: limit,
         });
-
-        // return await this.vendorRepository.find({})
     }
     async fetchPartialVendors(): Promise<Vendor[]> {
         return await this.vendorRepository.find({
@@ -62,16 +57,13 @@ export class VendorService {
 
     }
 
-    async fetchAllUnapprovedVendor() {
+    async fetchAllUnapprovedVendor(page: number = 1, limit: number = 50) {
         const vendors = await this.vendorRepository.find({
-            where: {
-                isApproved: false,
-                isVerified: true
-            },
-            relations: {
-                paymentOptions: true
-            }
-        })
+            where: { isApproved: false, isVerified: true },
+            relations: { paymentOptions: true },
+            skip: (page - 1) * limit,
+            take: limit,
+        });
 
         return vendors.map(toVendorAdminDTO);
     }

@@ -1220,8 +1220,6 @@ export class UserController {
         res: Response
     ): Promise<void> {
         try {
-            console.log("------------------api/auth/users/{id} Update profile --------------")
-            console.log(req.body)
             // Validate request body using Zod schema
             const parsed = updateUserSchema.safeParse(req.body);
             if (!parsed.success) {

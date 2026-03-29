@@ -342,70 +342,97 @@ export class HomePageSectionService {
 
         const sections = await query.getMany();
 
-        const homepageSections = await Promise.all(
-            sections.map(async (section) => {
-                let products: Product[] = [];
+        const inStockCondition = `(
+            (product.hasVariants = false AND product.stock > 0)
+            OR
+            (product.hasVariants = true AND variants.stock > 0)
+        )`;
 
-                const inStockCondition = `
-                (
-                    (product.hasVariants = false AND product.stock > 0)
-                    OR
-                    (product.hasVariants = true AND variants.stock > 0)
-                )
-            `;
+        // --- batch fetch products for DEAL sections ---
+        const dealSections = sections.filter(s => s.productSource === ProductSource.DEAL && s.selectedDeal?.id);
+        const dealProductsMap = new Map<number, Product[]>();
+        if (dealSections.length) {
+            const dealIds = dealSections.map(s => s.selectedDeal.id);
+            const dealProducts = await this.productRepository
+                .createQueryBuilder('product')
+                .leftJoinAndSelect('product.variants', 'variants')
+                .where('product.dealId IN (:...dealIds)', { dealIds })
+                .andWhere(inStockCondition)
+                .getMany();
+            for (const p of dealProducts) {
+                const arr = dealProductsMap.get(p.dealId) ?? [];
+                arr.push(p);
+                dealProductsMap.set(p.dealId, arr);
+            }
+        }
 
-                switch (section.productSource) {
-                    case ProductSource.DEAL:
-                        if (section.selectedDeal?.id) {
-                            products = await this.productRepository
-                                .createQueryBuilder('product')
-                                .leftJoinAndSelect('product.variants', 'variants')
-                                .where('product.dealId = :dealId', { dealId: section.selectedDeal.id })
-                                .andWhere(inStockCondition)
-                                .getMany();
-                        }
-                        break;
+        // --- batch fetch products for SUBCATEGORY sections ---
+        const subcategorySections = sections.filter(s => s.productSource === ProductSource.SUBCATEGORY && s.selectedSubcategory?.id);
+        const subcategoryProductsMap = new Map<number, Product[]>();
+        if (subcategorySections.length) {
+            const subcategoryIds = subcategorySections.map(s => s.selectedSubcategory.id);
+            const subcategoryProducts = await this.productRepository
+                .createQueryBuilder('product')
+                .leftJoinAndSelect('product.variants', 'variants')
+                .where('product.subcategoryId IN (:...subcategoryIds)', { subcategoryIds })
+                .andWhere(inStockCondition)
+                .getMany();
+            for (const p of subcategoryProducts) {
+                const arr = subcategoryProductsMap.get(p.subcategoryId) ?? [];
+                arr.push(p);
+                subcategoryProductsMap.set(p.subcategoryId, arr);
+            }
+        }
 
-                    case ProductSource.CATEGORY:
-                        if (section.selectedCategory?.id) {
-                            products = await this.productRepository
-                                .createQueryBuilder('product')
-                                .leftJoinAndSelect('product.variants', 'variants')
-                                .leftJoin('product.subcategory', 'subcategory')
-                                .leftJoin('subcategory.category', 'category')
-                                .where('category.id = :id', { id: section.selectedCategory.id })
-                                .andWhere(inStockCondition)
-                                .getMany();
-                        }
-                        break;
+        // --- batch fetch products for CATEGORY sections ---
+        const categorySections = sections.filter(s => s.productSource === ProductSource.CATEGORY && s.selectedCategory?.id);
+        const categoryProductsMap = new Map<number, Product[]>();
+        if (categorySections.length) {
+            const categoryIds = categorySections.map(s => s.selectedCategory.id);
+            const { entities: categoryProducts, raw } = await this.productRepository
+                .createQueryBuilder('product')
+                .leftJoinAndSelect('product.variants', 'variants')
+                .leftJoin('product.subcategory', 'subcategory')
+                .leftJoin('subcategory.category', 'category')
+                .addSelect('category.id')
+                .where('category.id IN (:...categoryIds)', { categoryIds })
+                .andWhere(inStockCondition)
+                .getRawAndEntities();
+            for (let i = 0; i < categoryProducts.length; i++) {
+                const categoryId = Number(raw[i].category_id);
+                const arr = categoryProductsMap.get(categoryId) ?? [];
+                arr.push(categoryProducts[i]);
+                categoryProductsMap.set(categoryId, arr);
+            }
+        }
 
-                    case ProductSource.SUBCATEGORY:
-                        if (section.selectedSubcategory?.id) {
-                            products = await this.productRepository
-                                .createQueryBuilder('product')
-                                .leftJoinAndSelect('product.variants', 'variants')
-                                .where('product.subcategoryId = :id', { id: section.selectedSubcategory.id })
-                                .andWhere(inStockCondition)
-                                .getMany();
-                        }
-                        break;
+        // --- assemble sections with pre-fetched products ---
+        return sections.map(section => {
+            let products: Product[] = [];
 
-                    case ProductSource.MANUAL:
-                    default:
-                        products = (section.products || []).filter(
-                            (p) =>
-                            (p.hasVariants
-                                ? p.variants?.some((v) => v.stock > 0)
-                                : p.stock > 0)
-                        );
-                        break;
-                }
+            switch (section.productSource) {
+                case ProductSource.DEAL:
+                    products = dealProductsMap.get(section.selectedDeal?.id) ?? [];
+                    break;
 
-                return { ...section, products };
-            })
-        );
+                case ProductSource.CATEGORY:
+                    products = categoryProductsMap.get(section.selectedCategory?.id) ?? [];
+                    break;
 
-        return homepageSections;
+                case ProductSource.SUBCATEGORY:
+                    products = subcategoryProductsMap.get(section.selectedSubcategory?.id) ?? [];
+                    break;
+
+                case ProductSource.MANUAL:
+                default:
+                    products = (section.products || []).filter(p =>
+                        p.hasVariants ? p.variants?.some(v => v.stock > 0) : p.stock > 0
+                    );
+                    break;
+            }
+
+            return { ...section, products };
+        });
     }
 
 

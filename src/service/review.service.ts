@@ -126,6 +126,28 @@ export class ReviewService {
         };
     }
 
+    async getBatchAverageRatings(productIds: number[]): Promise<Map<number, { avg: number; count: number }>> {
+        if (!productIds.length) return new Map();
+
+        const results = await this.reviewRepository
+            .createQueryBuilder('review')
+            .select('review.productId', 'productId')
+            .addSelect('AVG(review.rating)', 'avg')
+            .addSelect('COUNT(review.id)', 'count')
+            .where('review.productId IN (:...productIds)', { productIds })
+            .groupBy('review.productId')
+            .getRawMany();
+
+        const map = new Map<number, { avg: number; count: number }>();
+        for (const r of results) {
+            map.set(Number(r.productId), {
+                avg: Math.round(parseFloat(r.avg) * 10) / 10,
+                count: parseInt(r.count, 10),
+            });
+        }
+        return map;
+    }
+
     async updateReview(id: number, data: UpdateReviewInput) {
         await this.reviewRepository.update(id, data)
     }
