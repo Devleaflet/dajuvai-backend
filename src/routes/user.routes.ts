@@ -1688,4 +1688,66 @@ userRouter.post('/verify-email', authMiddleware, validateZod(verifyEmailChangeSc
 
 userRouter.delete("/:id", userController.deleteUserHandler);
 // isAdminOrStaff,
+
+/**
+ * @swagger
+ * /api/auth/user/check-email:
+ *   get:
+ *     summary: Check if an email is already registered
+ *     description: Returns whether the given email exists as a user or vendor. Used during registration to prevent duplicate accounts.
+ *     tags:
+ *       - User
+ *     security: []
+ *     parameters:
+ *       - in: query
+ *         name: email
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: email
+ *         description: The email address to check
+ *         example: john@example.com
+ *     responses:
+ *       200:
+ *         description: Email check result
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 exists:
+ *                   type: boolean
+ *                   description: True if the email is already registered, false otherwise
+ *                   example: false
+ *       400:
+ *         description: Email query parameter is missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Invalid Email
+ *       503:
+ *         description: Email verification service temporarily unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: Email verification service temporarily unavailable
+ */
+userRouter.get("/user/check-email", userController.checkEmailExists.bind(userController))
 export default userRouter;

@@ -1486,4 +1486,20 @@ export class UserController {
             }
         }
     }
+
+    async checkEmailExists(req: Request<{}, {}, {}, { email: string }>, res: Response): Promise<void> {
+        if (!req.query.email) {
+            res.status(400).json({ success: false, message: "Invalid Email" });
+            return;
+        }
+        try {
+            const userExists = await findUserByEmail(req.query.email);
+            const vendorExists = userExists
+                ? null
+                : await this.vendorService.findVendorByEmail(req.query.email);
+            res.json({ success: true, exists: !!(userExists || vendorExists) });
+        } catch (error) {
+            res.status(503).json({ success: false, message: 'Email verification service temporarily unavailable' });
+        }
+    }
 }
