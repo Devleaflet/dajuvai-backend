@@ -7,7 +7,8 @@ export const allowedOrigins = [
     "https://dev.dajuvai.com",
     "https://5srbcmrc-5173.inc1.devtunnels.ms",
     "http://localhost:3000",
-    "https://project-f6q8p.vercel.app"
+    "https://project-f6q8p.vercel.app",
+    "https://dajuvai-nextjs-frontend.vercel.app"
 ];
 
 export const corsOptions: CorsOptions = {
