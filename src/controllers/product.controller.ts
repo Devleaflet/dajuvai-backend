@@ -100,6 +100,7 @@ export class ProductController {
                 data: savedProduct
             });
         } catch (error) {
+            console.log(error)
             if (error instanceof APIError) {
                 res.status(error.status).json({ success: false, message: error.message });
             } else {

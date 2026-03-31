@@ -1750,4 +1750,5 @@ userRouter.delete("/:id", userController.deleteUserHandler);
  *                   example: Email verification service temporarily unavailable
  */
 userRouter.get("/user/check-email", userController.checkEmailExists.bind(userController))
+
 export default userRouter;

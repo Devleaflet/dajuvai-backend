@@ -43,6 +43,7 @@ import imageRouter from "./routes/image.routes";
 import homecategoryRoutes from "./routes/home.category.routes";
 import { errorHandler } from "./utils/errorHandler";
 import notificationRoutes from "./routes/notification.routes";
+import checkoutRouter from "./routes/mobile.checkout.routes";
 import { updateAllProductPrices } from "./scripts/update.product";
 
 // Create uploads folder if it doesn't exist to store uploaded files
@@ -103,6 +104,7 @@ app.use("/api/promo", promoRouter);
 app.use("/api/image", imageRouter);
 app.use("/api/home/category/section", homecategoryRoutes);
 app.use("/api/notification", notificationRoutes);
+app.use("/api/checkout", checkoutRouter);
 
 app.use(errorHandler as unknown as express.ErrorRequestHandler);
 
