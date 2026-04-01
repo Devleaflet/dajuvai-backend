@@ -58,6 +58,7 @@ export class MobileCheckoutService {
                       const vendor = item.product?.vendor;
                       return {
                           id: item.id,
+                          productId: item.product?.id ?? null,
                           name: item.name,
                           price: item.price,
                           quantity: item.quantity,

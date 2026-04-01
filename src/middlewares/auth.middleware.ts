@@ -192,6 +192,7 @@ export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response
 export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
     try {
         const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
+        // const token = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6NjksImVtYWlsIjoiYXl1c2h5YWRhdjg4OTkwMDBAZ21haWwuY29tIiwicm9sZSI6InVzZXIiLCJpYXQiOjE3NzUwMzkzNjUsImV4cCI6MTc3NTA0MDI2NX0.vhfuyTwKMYzLYfxYgJObDHwcaDfOZWKMHf87DWZGnuo";
 
         console.log("------------Token------------")
         console.log(token)

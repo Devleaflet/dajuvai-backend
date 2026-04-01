@@ -13,7 +13,7 @@ export enum AuthProvider {
 export enum UserRole {
     ADMIN = "admin",
     USER = "user",
-    STAFF = "staff"
+    STAFF = "staff",
 }
 
 @Entity()

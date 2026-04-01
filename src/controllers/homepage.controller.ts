@@ -218,7 +218,6 @@ export class HomePageSectionController {
     getAllHomePageSections = async (req: Request<{}, {}, {}, { search: string, includeInactive: boolean }>, res: Response, next: NextFunction): Promise<void> => {
         try {
             // Parse and convert includeInactive query parameter
-            // Parse and convert includeInactive query parameter
             const includeInactiveRaw = req.query.includeInactive;
             const includeInactiveBool = includeInactiveRaw?.toString().toLowerCase() === 'true';
 

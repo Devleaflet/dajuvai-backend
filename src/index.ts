@@ -45,6 +45,8 @@ import { errorHandler } from "./utils/errorHandler";
 import notificationRoutes from "./routes/notification.routes";
 import checkoutRouter from "./routes/mobile.checkout.routes";
 import { updateAllProductPrices } from "./scripts/update.product";
+import userProfileRouter from "./routes/product.recommend.routes";
+import productRecommendRouter from "./routes/product.recommend.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, 'uploads');
@@ -105,6 +107,7 @@ app.use("/api/image", imageRouter);
 app.use("/api/home/category/section", homecategoryRoutes);
 app.use("/api/notification", notificationRoutes);
 app.use("/api/checkout", checkoutRouter);
+app.use("/api/profile", productRecommendRouter);
 
 app.use(errorHandler as unknown as express.ErrorRequestHandler);
 

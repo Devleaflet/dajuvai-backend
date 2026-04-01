@@ -52,7 +52,7 @@ const controller = new MobileCheckoutController();
  *                           example: "9841000000"
  *                         role:
  *                           type: string
- *                           enum: [admin, user, staff]
+ *                           enum: [admin, user, staff, driver]
  *                           example: "user"
  *                         address:
  *                           type: object
@@ -94,6 +94,10 @@ const controller = new MobileCheckoutController();
  *                               id:
  *                                 type: integer
  *                                 example: 7
+ *                               productId:
+ *                                 type: integer
+ *                                 nullable: true
+ *                                 example: 12
  *                               name:
  *                                 type: string
  *                                 example: "RLX Explorer - Gray"
