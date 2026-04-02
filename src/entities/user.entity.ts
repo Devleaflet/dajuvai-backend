@@ -108,6 +108,9 @@ export class User {
     @Column({ nullable: true })
     resendBlockUntil?: Date; // Blocks resends until this time
 
+    @Column({ nullable: true })
+    fcmToken?: string;
+
     @CreateDateColumn()
     createdAt: Date;
 
