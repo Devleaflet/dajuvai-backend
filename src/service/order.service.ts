@@ -2,7 +2,7 @@ import { In, Not, Repository } from 'typeorm';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { IShippingAddressRequest, IUpdateOrderStatusRequest, IOrderCreateRequest } from '../interface/order.interface';
-import { Order, OrderStatus, PaymentStatus, PaymentMethod } from '../entities/order.entity';
+import { Order, OrderStatus, PaymentStatus, PaymentMethod, DeliveryStatus } from '../entities/order.entity';
 import { Address } from '../entities/address.entity';
 import { OrderItem } from '../entities/orderItems.entity';
 import { Cart } from '../entities/cart.entity';
@@ -328,6 +328,7 @@ export class OrderService {
                     : OrderStatus.PENDING,
             shippingAddress: address,
             orderItems,
+            deliveryStatus: DeliveryStatus.ORDER_PROCESSING,
             isBuyNow: Boolean(isBuyNow),
             phoneNumber: orderData.phoneNumber,
         });

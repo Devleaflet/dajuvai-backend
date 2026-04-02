@@ -1,8 +1,17 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import {
+    Column,
+    CreateDateColumn,
+    Entity,
+    Index,
+    JoinColumn,
+    ManyToOne,
+    OneToMany,
+    PrimaryGeneratedColumn,
+    UpdateDateColumn,
+} from "typeorm";
 import { User } from "./user.entity";
 import { Address } from "./address.entity";
 import { OrderItem } from "./orderItems.entity";
-
 
 export enum OrderStatus {
     CONFIRMED = "CONFIRMED",
@@ -11,7 +20,7 @@ export enum OrderStatus {
     SHIPPED = "SHIPPED",
     DELIVERED = "DELIVERED",
     CANCELLED = "CANCELLED",
-    RETURNED = "RETURNED"
+    RETURNED = "RETURNED",
 }
 
 export enum PaymentStatus {
@@ -19,41 +28,53 @@ export enum PaymentStatus {
     UNPAID = "UNPAID",
 }
 
-
 export enum PaymentMethod {
     ONLINE_PAYMENT = "ONLINE_PAYMENT",
     CASH_ON_DELIVERY = "CASH_ON_DELIVERY",
     KHALIT = "KHALTI",
     ESEWA = "ESEWA",
-    NPX = "NPX"
+    NPX = "NPX",
 }
 
-@Entity('orders')
+export enum DeliveryStatus {
+    ORDER_PROCESSING = "order_processing",
+    AT_WAREHOUSE = "at_warehouse",
+    READY_FOR_DELIVERY = "ready_for_delivery",
+    RIDER_ASSIGNED = "rider_assigned",
+    OUT_FOR_DELIVERY = "out_for_delivery",
+    DELIVERED = "delivered",
+    DELIVERY_FAILED = "delivery_failed",
+    RETURNED_WAREHOUSE = "returned_warehouse",
+}
+
+@Entity("orders")
+@Index(["orderedById", "status"])
+@Index(["paymentStatus"])
+@Index(["createdAt"])
 export class Order {
     @PrimaryGeneratedColumn()
     id: number;
 
     @ManyToOne(() => User, (user) => user.orders, { onDelete: "CASCADE" })
-    @JoinColumn({ name: 'orderedById' })
+    @JoinColumn({ name: "orderedById" })
     orderedBy: User;
 
     @Column()
     orderedById: number;
 
-    @Column('decimal', { precision: 10, scale: 2 })
+    @Column("decimal", { precision: 10, scale: 2 })
     totalPrice: number;
 
-    @Column('decimal', { precision: 8, scale: 2 })
+    @Column("decimal", { precision: 8, scale: 2 })
     shippingFee: number;
 
     @Column({ nullable: true })
-    isBuyNow?: boolean
-
+    isBuyNow?: boolean;
 
     @Column({
         type: "enum",
         enum: PaymentStatus,
-        default: PaymentStatus.UNPAID
+        default: PaymentStatus.UNPAID,
     })
     paymentStatus: PaymentStatus;
 
@@ -66,12 +87,12 @@ export class Order {
     @Column({
         type: "enum",
         enum: OrderStatus,
-        default: OrderStatus.CONFIRMED
+        default: OrderStatus.CONFIRMED,
     })
     status: OrderStatus;
 
     @ManyToOne(() => Address, (address) => address.orders)
-    @JoinColumn({ name: 'shippingAddressId' })
+    @JoinColumn({ name: "shippingAddressId" })
     shippingAddress: Address;
 
     @Column({ nullable: true })
@@ -83,17 +104,24 @@ export class Order {
     // @Column()
     // shippingAddressId: number;
 
-    @OneToMany(() => OrderItem, item => item.order, { cascade: true })
+    @OneToMany(() => OrderItem, (item) => item.order, { cascade: true })
     orderItems: OrderItem[];
 
-    @Column('decimal', { precision: 8, scale: 2, default: 0 })
+    @Column("decimal", { precision: 8, scale: 2, default: 0 })
     serviceCharge: number;
 
     @Column({ nullable: true })
     instrumentName: string;
 
     @Column({ nullable: true })
-    mTransactionId: string
+    mTransactionId: string;
+
+    @Column({
+        type: "enum",
+        enum: DeliveryStatus,
+        default: DeliveryStatus.ORDER_PROCESSING,
+    })
+    deliveryStatus: DeliveryStatus;
 
     @CreateDateColumn()
     createdAt: Date;

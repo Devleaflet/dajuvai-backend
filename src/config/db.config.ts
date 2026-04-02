@@ -31,15 +31,29 @@ import { VendorPaymentOption } from "../entities/vendorPaymentOption";
 
 
 
+// const AppDataSource = new DataSource({
+//   type: "postgres",
+//   url: config.DATABASE_URL,
+//   synchronize: false,
+//   logging: false,
+//   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
+//     Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption],
+//   migrations: ['src/migrations/*.ts'],
+//   ssl: false,
+// });
+
 const AppDataSource = new DataSource({
-  type: "postgres",
-  url: config.DATABASE_URL,
-  synchronize: false,
-  logging: false,
-  entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-    Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption],
-  migrations: ['src/migrations/*.ts'],
-  ssl: false,
+    type: "postgres",
+    host: "localhost",
+    port: 5432,
+    username: "postgres",
+    password: "admin",
+    database: "dajuvai",
+    entities: ["src/entities/**/*.ts"],
+    // synchronize: true,
+    // synchronize: process.env.NODE_ENV === "development",
+    logging: true,
 });
 
 export default AppDataSource;
+export { AppDataSource };

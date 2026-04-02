@@ -18,7 +18,7 @@ import userRouter from "./routes/user.routes";
 import categoryRoutes from "./routes/category.routes";
 import cartRouter from "./routes/cart.routes";
 import vendorRoutes from "./routes/vendor.routes";
-import wishlistRoutes from './routes/wishlist.routes';
+import wishlistRoutes from "./routes/wishlist.routes";
 import contactRoutes from "./routes/contact.routes";
 import dealRoutes from "./routes/deal.routes";
 import reviewRoutes from "./routes/review.routes";
@@ -36,7 +36,12 @@ import vendorProductsRouter from "./routes/vendor/vendor.products.routes";
 import vendorOrdersRouter from "./routes/vendor/vendor.orders.routes";
 
 // Utils for scheduled background tasks
-import { orderCleanUp, removeUnverifiedVendors, startOrderCleanupJob, tokenCleanUp } from "./utils/cronjob.utils";
+import {
+    orderCleanUp,
+    removeUnverifiedVendors,
+    startOrderCleanupJob,
+    tokenCleanUp,
+} from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
@@ -47,17 +52,16 @@ import checkoutRouter from "./routes/mobile.checkout.routes";
 import { updateAllProductPrices } from "./scripts/update.product";
 import userProfileRouter from "./routes/product.recommend.routes";
 import productRecommendRouter from "./routes/product.recommend.routes";
+import deliveryRouter from "./routes/delivery.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
-const uploadDir = join(__dirname, 'uploads');
+const uploadDir = join(__dirname, "uploads");
 mkdirSync(uploadDir, { recursive: true }); // recursive:true ensures parent dirs are created if needed
 
 // Initialize Express app
 const app = express();
 
 app.use(cors(corsOptions));
-
-
 
 // Middleware to parse JSON request bodies
 app.use(express.json());
@@ -73,13 +77,12 @@ app.use(passport.initialize());
 
 app.use((req, res, next) => {
     console.log(
-        `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`
+        `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`,
     );
     next();
 });
 // Setup Swagger UI for API documentation at /docs route
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-
 
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
@@ -108,9 +111,9 @@ app.use("/api/home/category/section", homecategoryRoutes);
 app.use("/api/notification", notificationRoutes);
 app.use("/api/checkout", checkoutRouter);
 app.use("/api/profile", productRecommendRouter);
+app.use("/api/delivery", deliveryRouter);
 
 app.use(errorHandler as unknown as express.ErrorRequestHandler);
-
 
 const port = config.PORT;
 const server = createServer(app);
@@ -124,13 +127,15 @@ AppDataSource.initialize()
         tokenCleanUp();
         orderCleanUp();
         startOrderCleanupJob();
-        removeUnverifiedVendors()
+        removeUnverifiedVendors();
         // await updateAllProductPrices(AppDataSource)
 
         // Start Express + WebSocket server
         initSocket(server);
         server.listen(port, () => {
-            console.log(`Server running at http://localhost:${port} or https://leafletdv.onrender.com`);
+            console.log(
+                `Server running at http://localhost:${port} or https://leafletdv.onrender.com`,
+            );
         });
     })
     .catch((error) => {

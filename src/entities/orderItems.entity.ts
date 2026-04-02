@@ -1,25 +1,34 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from 'typeorm';
-import { Product } from './product.entity';
-import { Vendor } from './vendor.entity';
-import { Order } from './order.entity';
-import { Variant } from './variant.entity';
+import {
+    Column,
+    CreateDateColumn,
+    Entity,
+    JoinColumn,
+    ManyToOne,
+    PrimaryGeneratedColumn,
+} from "typeorm";
+import { Product } from "./product.entity";
+import { Vendor } from "./vendor.entity";
+import { Order } from "./order.entity";
+import { Variant } from "./variant.entity";
 
 export enum OrderStatus {
-    PENDING = 'PENDING',
-    CONFIRMED = 'CONFIRMED',
-    PROCESSING = 'PROCESSING',
-    SHIPPED = 'SHIPPED',
-    OUT_FOR_DELIVERY = 'OUT_FOR_DELIVERY',
-    DELIVERED = 'DELIVERED',
+    PENDING = "PENDING",
+    CONFIRMED = "CONFIRMED",
+    PROCESSING = "PROCESSING",
+    SHIPPED = "SHIPPED",
+    OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY",
+    DELIVERED = "DELIVERED",
 }
 
-@Entity('order_items')
+@Entity("order_items")
 export class OrderItem {
     @PrimaryGeneratedColumn()
     id: number;
 
-    @ManyToOne(() => Product, (product) => product.orderItems, { onDelete: "CASCADE" })
-    @JoinColumn({ name: 'productId' })
+    @ManyToOne(() => Product, (product) => product.orderItems, {
+        onDelete: "CASCADE",
+    })
+    @JoinColumn({ name: "productId" })
     product: Product;
 
     @Column()
@@ -28,29 +37,34 @@ export class OrderItem {
     @Column()
     quantity: number;
 
-    @Column('decimal', { precision: 8, scale: 2 })
+    @Column("decimal", { precision: 8, scale: 2 })
     price: number;
 
-    @ManyToOne(() => Order, (order) => order.orderItems, { onDelete: 'CASCADE' })
-    @JoinColumn({ name: 'orderId' })
+    @ManyToOne(() => Order, (order) => order.orderItems, {
+        onDelete: "CASCADE",
+    })
+    @JoinColumn({ name: "orderId" })
     order: Order;
 
     @Column()
     orderId: number;
 
     @ManyToOne(() => Vendor, (vendor) => vendor.orderItems)
-    @JoinColumn({ name: 'vendorId' })
+    @JoinColumn({ name: "vendorId" })
     vendor: Vendor;
 
     @Column()
     vendorId: number;
 
     @ManyToOne(() => Variant, { nullable: true })
-    @JoinColumn({ name: 'variantId' })
+    @JoinColumn({ name: "variantId" })
     variant?: Variant;
 
     @Column({ nullable: true })
     variantId?: string;
+
+    @Column({ default: false })
+    collectedAtWarehouse: boolean;
 
     @CreateDateColumn()
     createdAt: Date;

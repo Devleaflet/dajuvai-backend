@@ -11,6 +11,7 @@ import { parse } from 'path';
 import { OrderItem } from '../entities/orderItems.entity';
 import { Review } from '../entities/reviews.entity';
 import config from '../config/env.config';
+import { Rider } from '../entities/rider.entity';
 
 
 /**
@@ -41,11 +42,19 @@ export interface CombinedAuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuer
 }
 
 
+/**
+ * Extends Express Request object with `user?: User` and `rider?: Rider`. 
+ * Used for authenticated routes requiring rider context.
+ */
+export interface RiderAuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}> extends Request<P, ResBody, ReqBody, ReqQuery> {
+    user?: User;
+    rider?: Rider;
+}
 
 const userDB = AppDataSource.getRepository(User);
 const vendorDB = AppDataSource.getRepository(Vendor);
 const productDB = AppDataSource.getRepository(Product);
-
+const riderDB = AppDataSource.getRepository(Rider)
 
 
 /**
@@ -386,6 +395,32 @@ export const isAdminOrStaff = async (req: AuthRequest, res: Response, next: Next
         res.status(403).json({ success: false, message: 'Staff or admin access required' });
     }
 }
+
+/**
+ * Check if the logged in user is rider
+ */
+export const isRider = async (
+    req: RiderAuthRequest,
+    res: Response,
+    next: NextFunction,
+) => {
+    if (req.user && req.user.role === UserRole.RIDER) {
+        const rider = await riderDB.findOne({where:{userId: req.user.id}})
+        if(!rider){
+            res.status(403).json({
+                success: false,
+                message: "No rider profile linked to this account",
+            });
+        }
+        req.rider = rider;
+        return next();
+    } else {
+        res.status(403).json({
+            success: false,
+            message: "Rider access required",
+        });
+    }
+};
 
 // export const isAdminOrStaffOrAccountOwner = async(req: CombinedAuthRequest, res: Response, next: NextFunction) => {
 //     if(req.user){
