@@ -53,6 +53,8 @@ import { updateAllProductPrices } from "./scripts/update.product";
 import userProfileRouter from "./routes/product.recommend.routes";
 import productRecommendRouter from "./routes/product.recommend.routes";
 import deliveryRouter from "./routes/delivery.routes";
+import deliveryAdminRouter from "./routes/delivery.admin.routes";
+import deliveryRiderRouter from "./routes/delivery.rider.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, "uploads");
@@ -101,6 +103,12 @@ app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/admin/vendors", adminVendorsRouter);
 app.use("/api/admin/orders", adminOrdersRouter);
 app.use("/api/admin/users", adminUsersRouter);
+
+// admin delivery
+app.use("/api/admin/delivery", deliveryAdminRouter);
+// rider delivery
+app.use("/api/rider/delivery", deliveryRiderRouter);
+
 app.use("/api/vendor/dashboard", vendorDashBoardRouter);
 app.use("/api/vendor/products", vendorProductsRouter);
 app.use("/api/vendor/orders", vendorOrdersRouter);
@@ -111,6 +119,8 @@ app.use("/api/home/category/section", homecategoryRoutes);
 app.use("/api/notification", notificationRoutes);
 app.use("/api/checkout", checkoutRouter);
 app.use("/api/profile", productRecommendRouter);
+
+// old
 app.use("/api/delivery", deliveryRouter);
 
 app.use(errorHandler as unknown as express.ErrorRequestHandler);
