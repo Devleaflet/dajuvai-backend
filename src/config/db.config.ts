@@ -24,30 +24,20 @@ import { Variant } from "../entities/variant.entity";
 import { HomeCategory } from "../entities/home.category";
 import { Notification } from "../entities/notification.entity";
 import { VendorPaymentOption } from "../entities/vendorPaymentOption";
-
-// const AppDataSource = new DataSource({
-//   type: "postgres",
-//   url: config.DATABASE_URL,
-//   synchronize: false,
-//   logging: false,
-//   entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-//     Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption],
-//   migrations: ['src/migrations/*.ts'],
-//   ssl: false,
-// });
+import { Rider } from "../entities/rider.entity";
+import { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 
 const AppDataSource = new DataSource({
     type: "postgres",
-    host: "localhost",
-    port: 5432,
-    username: "postgres",
-    password: "admin",
-    database: "dajuvai",
-    entities: ["src/entities/**/*.ts"],
-    synchronize: true,
-    // synchronize: process.env.NODE_ENV === "development",
-    logging: true,
+    url: config.DATABASE_URL,
+    synchronize: false,
+    logging: false,
+    entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
+        Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption, Rider, DeliveryAssignment],
+    migrations: ['src/migrations/*.ts'],
+    ssl: false,
 });
+
 
 export default AppDataSource;
 export { AppDataSource };
