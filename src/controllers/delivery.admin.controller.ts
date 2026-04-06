@@ -2,12 +2,15 @@ import { Request, Response } from "express";
 import { DeliveryAdminService } from "../service/delivery.admin.service";
 import { APIError } from "../utils/ApiError.utils";
 import { CreateRiderType } from "../utils/zod_validations/delivery.zod";
+import { ImageDeletionResult, ImageDeletionService } from "../service/image.delete.service";
 
 export class DeliveryAdminController {
     private deliveryAdminService: DeliveryAdminService;
+    private imageDeletionService: ImageDeletionService;
 
     constructor() {
         this.deliveryAdminService = new DeliveryAdminService();
+        this.imageDeletionService = new ImageDeletionService();
     }
 
     private handleError(res: Response, error: unknown) {
@@ -29,6 +32,7 @@ export class DeliveryAdminController {
 
     async createRider(req: Request<{}, {}, CreateRiderType>, res: Response) {
         try {
+            
             const rider = await this.deliveryAdminService.createRider(req.body);
 
             res.status(201).json({
@@ -36,6 +40,11 @@ export class DeliveryAdminController {
                 data: rider,
             });
         } catch (error) {
+
+            if (req.body.documentUrl) {
+                await this.imageDeletionService.deleteSingleImage(req.body.documentUrl);
+            }
+
             this.handleError(res, error);
         }
     }

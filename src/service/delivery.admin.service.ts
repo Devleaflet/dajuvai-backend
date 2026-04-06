@@ -108,6 +108,7 @@ export class DeliveryAdminService {
                 userId: savedUser.id,
                 phoneNumber: data.phoneNumber,
                 email: data.email,
+                documentUrl: data.documentUrl
             });
             return await manager.save(rider);
         });
