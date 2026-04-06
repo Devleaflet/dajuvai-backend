@@ -3,6 +3,7 @@ import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { uploadMiddleware } from "../config/multer.config";
 import { authMiddleware, combinedAuthMiddleware, isAdminOrStaff, isAdminOrVendor } from "../middlewares/auth.middleware";
+import { responseCache } from "../middlewares/responseCache.middleware";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
@@ -131,7 +132,7 @@ const productController = new ProductController(AppDataSource);
  *                   type: string
  *                   example: Internal server error
  */
-productRouter.get("/:id", productController.getProductDetailById.bind(productController))
+productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.getProductDetailById.bind(productController))
 
 /**
  * @swagger

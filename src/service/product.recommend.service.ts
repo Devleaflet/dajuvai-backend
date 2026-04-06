@@ -1,4 +1,4 @@
-import { Repository } from "typeorm";
+import { In, Repository } from "typeorm";
 import { Cart } from "../entities/cart.entity";
 import { OrderItem } from "../entities/orderItems.entity";
 import { Wishlist } from "../entities/wishlist.entity";
@@ -87,11 +87,20 @@ export class ProductRecommendService {
         const recommendations: Product[] = [];
         const recommendedIds = new Set<number>();
 
+        const productsBySubcategory = new Map<number, Product[]>();
+        const allProducts = await this.productRepo.find({
+            where: { subcategoryId: In(sortedSubcategoryIds) },
+            relations: ["subcategory", "brand", "variants"],
+        });
+
+        for (const product of allProducts) {
+            const arr = productsBySubcategory.get(product.subcategoryId) ?? [];
+            arr.push(product);
+            productsBySubcategory.set(product.subcategoryId, arr);
+        }
+
         for (const subcategoryId of sortedSubcategoryIds) {
-            const products = await this.productRepo.find({
-                where: { subcategoryId },
-                relations: ["subcategory", "brand", "variants"],
-            });
+            const products = productsBySubcategory.get(subcategoryId) ?? [];
 
             // Exclude products already in orders/cart/wishlist
             const eligible = products.filter(

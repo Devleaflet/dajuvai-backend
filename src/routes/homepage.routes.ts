@@ -5,6 +5,7 @@ import {
     updateHomePageSectionSchema,
 } from "../utils/zod_validations/homepage.zod";
 import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from "../middlewares/auth.middleware";
+import { responseCache } from "../middlewares/responseCache.middleware";
 
 const router = Router();
 const homePageSectionController = new HomePageSectionController();
@@ -283,6 +284,7 @@ router.put(
  */
 router.get(
     "/",
+    responseCache({ ttlSeconds: 30 }),
     homePageSectionController.getAllHomePageSections.bind(homePageSectionController)
 );
 
@@ -351,6 +353,7 @@ router.get(
  */
 router.get(
     "/:id",
+    responseCache({ ttlSeconds: 30 }),
     homePageSectionController.getHomePageSectionById.bind(homePageSectionController)
 );
 

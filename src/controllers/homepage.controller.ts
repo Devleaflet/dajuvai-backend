@@ -3,7 +3,7 @@ import { HomePageSectionService } from '../service/homePageSection.service';
 import { APIError } from '../utils/ApiError.utils';
 import { ReviewService } from '../service/review.service';
 import { ProductController } from './product.controller';
-import { DataSource, TreeRepositoryNotSupportedError } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import AppDataSource from '../config/db.config';
 import { ICreateHomepageSectionInput } from '../interface/homepage.interface';
 import { ProductSource } from '../entities/banner.entity';
@@ -11,6 +11,7 @@ import { ProductService } from '../service/product.service';
 import { CategoryService } from '../service/category.service';
 import { SubcategoryService } from '../service/subcategory.service';
 import { DealService } from '../service/deal.service';
+import { Product } from '../entities/product.entity';
 
 /**
  * @class HomePageSectionController
@@ -64,11 +65,19 @@ export class HomePageSectionController {
 
             switch (data.productSource) {
                 case ProductSource.MANUAL:
-                    for (const id of data.productIds) {
-                        const productExists = await this.productService.getProductDetailsById(id)
+                    {
+                        const uniqueProductIds = [...new Set((data.productIds || []).map(Number))].filter(
+                            (id) => Number.isFinite(id)
+                        );
 
-                        if (!productExists) {
-                            throw new APIError(404, "Product does nto exists")
+                        if (uniqueProductIds.length) {
+                            const productsCount = await AppDataSource.getRepository(Product).count({
+                                where: { id: In(uniqueProductIds) },
+                            });
+
+                            if (productsCount !== uniqueProductIds.length) {
+                                throw new APIError(404, "Product does nto exists");
+                            }
                         }
                     }
 
@@ -220,28 +229,31 @@ export class HomePageSectionController {
             // Parse and convert includeInactive query parameter
             const includeInactiveRaw = req.query.includeInactive;
             const includeInactiveBool = includeInactiveRaw?.toString().toLowerCase() === 'true';
-
+            
             // Fetch sections with products
             const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool, req.query.search);
 
-            const sectionsWithRatings = await Promise.all(
-                sections.map(async (section) => {
-                    const productsWithRatings = await Promise.all(
-                        section.products.map(async (product) => {
-                            const { avg, count } = await this.reviewService.getAverageRating(product.id);
-                            return {
-                                ...product,
-                                avgRating: avg,
-                                reviewCount: count,
-                            };
-                        })
-                    );
+            const allProductIds = [
+                ...new Set(sections.flatMap((section) => section.products?.map((p) => p.id) ?? [])),
+            ];
+
+            const ratingsMap = await this.reviewService.getBatchAverageRatings(allProductIds);
+
+            const sectionsWithRatings = sections.map((section) => {
+                const productsWithRatings = (section.products ?? []).map((product) => {
+                    const ratings = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
                     return {
-                        ...section,
-                        products: productsWithRatings,
+                        ...product,
+                        avgRating: ratings.avg,
+                        reviewCount: ratings.count,
                     };
-                })
-            );
+                });
+
+                return {
+                    ...section,
+                    products: productsWithRatings,
+                };
+            });
 
             res.status(200).json({
                 success: true,
@@ -284,12 +296,13 @@ export class HomePageSectionController {
             // Fetch section via service
             const section = await this.homePageSectionService.getHomePageSectionById(Number(id));
 
-            const productsWithRatings = await Promise.all(
-                section.products.map(async (product) => {
-                    const avgRating = await this.reviewService.getAverageRating(product.id);
-                    return { ...product, avgRating: avgRating.avg, count: avgRating.count };
-                })
-            );
+            const productIds = (section.products ?? []).map((p) => p.id);
+            const ratingsMap = await this.reviewService.getBatchAverageRatings(productIds);
+
+            const productsWithRatings = (section.products ?? []).map((product) => {
+                const ratings = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
+                return { ...product, avgRating: ratings.avg, count: ratings.count };
+            });
 
             // Send success response
             res.status(200).json({

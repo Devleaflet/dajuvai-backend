@@ -809,128 +809,187 @@ export class OrderService {
 
     // Separate method for stock validation
     private async validateStock(cartItems: CartItem[]): Promise<void> {
+        const variantIds = [
+            ...new Set(
+                cartItems
+                    .map((item) => (item.variant ? String(item.variant.id) : null))
+                    .filter((id): id is string => typeof id === "string" && id.length > 0)
+            ),
+        ];
+
+        const productIds = [
+            ...new Set(
+                cartItems
+                    .map((item) => (!item.variant ? Number(item.product?.id) : null))
+                    .filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+            ),
+        ];
+
+        const [variants, products] = await Promise.all([
+            variantIds.length
+                ? this.variantRepository.find({ where: { id: In(variantIds) } })
+                : Promise.resolve([]),
+            productIds.length
+                ? this.productRepository.find({ where: { id: In(productIds) } })
+                : Promise.resolve([]),
+        ]);
+
+        const variantsById = new Map<string, Variant>(variants.map((v) => [String(v.id), v]));
+        const productsById = new Map<number, Product>(products.map((p) => [p.id, p]));
+
         for (const item of cartItems) {
-
-            console.log("------------this is a items for debugging----------------")
-            console.log(item)
             if (item.variant) {
-                const variant = await this.variantRepository.findOne({
-                    where: { id: item.variant.id },
-                });
-
-                console.log("----------Variant-------------------")
-                console.log(variant.stock)
-                console.log(item.quantity)
+                const variant = variantsById.get(String(item.variant.id));
 
                 if (!variant) {
-                    throw new APIError(404, `Variant not found for product: ${item.product.name}`);
+                    throw new APIError(404, `Variant not found for product: ${item.product?.name}`);
                 }
 
                 if (variant.stock < item.quantity) {
-
-                    console.log(`Insufficient stock for variant "${variant.sku || 'N/A'}" of product "${item.product.name}". ` +
-                        `Available: ${variant.stock}, Requested: ${item.quantity}`)
-
                     throw new APIError(400, "Insufficient stock");
                 }
 
                 continue;
             }
-            // Fallback to product-level stock if no variant
-            const product = await this.productRepository.findOne({
-                where: { id: item.product.id },
-            });
 
-            console.log("------------------Products----------------------")
-            console.log(product)
-            console.log(product.stock)
-            console.log(item.quantity)
+            const product = productsById.get(Number(item.product?.id));
 
             if (!product) {
                 throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
             }
 
             if (!product.stock || product.stock < item.quantity) {
-                throw new APIError(400,
+                throw new APIError(
+                    400,
                     `Insufficient stock for product "${product.name}". ` +
                     `Available: ${product.stock || 0}, Requested: ${item.quantity}`
                 );
             }
-
         }
     }
     private async restoreStock(orderItems: any[]): Promise<void> {
-        for (const item of orderItems) {
-            // --- Handle Variant Stock ---
-            if (item.variantId) {
-                const variant = await this.variantRepository.findOne({
-                    where: { id: item.variantId },
-                    relations: ["product"],
-                });
+        const variantIds = [
+            ...new Set(
+                orderItems
+                    .map((item: any) => (item.variantId ? String(item.variantId) : null))
+                    .filter((id: any): id is string => typeof id === "string" && id.length > 0)
+            ),
+        ];
 
+        const productIds = [
+            ...new Set(
+                orderItems
+                    .map((item: any) => (item.productId ? Number(item.productId) : null))
+                    .filter((id: any): id is number => typeof id === 'number' && Number.isFinite(id))
+            ),
+        ];
+
+        const [variants, products] = await Promise.all([
+            variantIds.length
+                ? this.variantRepository.find({ where: { id: In(variantIds) } })
+                : Promise.resolve([]),
+            productIds.length
+                ? this.productRepository.find({ where: { id: In(productIds) } })
+                : Promise.resolve([]),
+        ]);
+
+        const variantsById = new Map<string, Variant>(variants.map((v) => [String(v.id), v]));
+        const productsById = new Map<number, Product>(products.map((p) => [p.id, p]));
+
+        const variantsToSave = new Map<string, Variant>();
+        const productsToSave = new Map<number, Product>();
+
+        for (const item of orderItems) {
+            if (item.variantId) {
+                const variant = variantsById.get(String(item.variantId));
                 if (!variant) {
                     throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
                 }
 
-                // Restore stock instead of deducting
                 variant.stock += item.quantity;
+                variant.status =
+                    variant.stock <= 0
+                        ? InventoryStatus.OUT_OF_STOCK
+                        : variant.stock < 5
+                            ? InventoryStatus.LOW_STOCK
+                            : InventoryStatus.AVAILABLE;
 
-                // Update status
-                variant.status = variant.stock <= 0
-                    ? InventoryStatus.OUT_OF_STOCK
-                    : variant.stock < 5
-                        ? InventoryStatus.LOW_STOCK
-                        : InventoryStatus.AVAILABLE;
-
-                await this.variantRepository.save(variant);
-
+                variantsToSave.set(String(variant.id), variant);
+                continue;
             }
-            // --- Handle Product Stock for non-variant product ---
-            else if (item.productId) {
-                const product = await this.productRepository.findOne({
-                    where: { id: item.productId },
-                });
 
+            if (item.productId) {
+                const product = productsById.get(Number(item.productId));
                 if (!product) {
                     throw new APIError(404, `Product not found for order item ID: ${item.id}`);
                 }
 
-                // Restore stock
                 product.stock += item.quantity;
+                product.status =
+                    product.stock <= 0
+                        ? InventoryStatus.OUT_OF_STOCK
+                        : product.stock < 5
+                            ? InventoryStatus.LOW_STOCK
+                            : InventoryStatus.AVAILABLE;
 
-                // Update status
-                product.status = product.stock <= 0
-                    ? InventoryStatus.OUT_OF_STOCK
-                    : product.stock < 5
-                        ? InventoryStatus.LOW_STOCK
-                        : InventoryStatus.AVAILABLE;
-
-                await this.productRepository.save(product);
-
+                productsToSave.set(product.id, product);
+                continue;
             }
-            // --- Invalid Order Item ---
-            else {
-                throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
-            }
+
+            throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+        }
+
+        if (variantsToSave.size) {
+            await this.variantRepository.save([...variantsToSave.values()]);
+        }
+
+        if (productsToSave.size) {
+            await this.productRepository.save([...productsToSave.values()]);
         }
     }
 
 
     // Separate method for stock updates
     private async updateStock(orderItems: any[]): Promise<void> {
+        const variantIds = [
+            ...new Set(
+                orderItems
+                    .map((item: any) => (item.variantId ? String(item.variantId) : null))
+                    .filter((id: any): id is string => typeof id === "string" && id.length > 0)
+            ),
+        ];
+
+        const productIds = [
+            ...new Set(
+                orderItems
+                    .map((item: any) => (item.productId ? Number(item.productId) : null))
+                    .filter((id: any): id is number => typeof id === 'number' && Number.isFinite(id))
+            ),
+        ];
+
+        const [variants, products] = await Promise.all([
+            variantIds.length
+                ? this.variantRepository.find({ where: { id: In(variantIds) }, relations: ["product"] })
+                : Promise.resolve([]),
+            productIds.length
+                ? this.productRepository.find({ where: { id: In(productIds) } })
+                : Promise.resolve([]),
+        ]);
+
+        const variantsById = new Map<string, Variant>(variants.map((v) => [String(v.id), v]));
+        const productsById = new Map<number, Product>(products.map((p) => [p.id, p]));
+
+        const variantsToSave = new Map<string, Variant>();
+        const productsToSave = new Map<number, Product>();
+
         for (const item of orderItems) {
-            // --- Handle Variant Stock ---
             if (item.variantId) {
-                const variant = await this.variantRepository.findOne({
-                    where: { id: item.variantId },
-                    relations: ["product"],
-                });
+                const variant = variantsById.get(String(item.variantId));
 
                 if (!variant) {
                     throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
                 }
 
-                // Double-check stock
                 if (variant.stock < item.quantity) {
                     throw new APIError(
                         400,
@@ -939,34 +998,25 @@ export class OrderService {
                     );
                 }
 
-                // Deduct stock
                 variant.stock -= item.quantity;
+                variant.status =
+                    variant.stock <= 0
+                        ? InventoryStatus.OUT_OF_STOCK
+                        : variant.stock < 5
+                            ? InventoryStatus.LOW_STOCK
+                            : InventoryStatus.AVAILABLE;
 
-                variant.status = variant.stock <= 0
-                    ? InventoryStatus.OUT_OF_STOCK
-                    : variant.stock < 5
-                        ? InventoryStatus.LOW_STOCK
-                        : InventoryStatus.AVAILABLE;
-
-                await this.variantRepository.save(variant);
-
-                // remove variant from other users cart if stock is zero
-                if (variant.stock <= 0) {
-                    await this.removeItemFromCarts(item.variantId, true)
-                }
-
+                variantsToSave.set(String(variant.id), variant);
+                continue;
             }
-            // --- Handle Product Stock for non variant product---
-            else if (item.productId) {
-                const product = await this.productRepository.findOne({
-                    where: { id: item.productId },
-                });
+
+            if (item.productId) {
+                const product = productsById.get(Number(item.productId));
 
                 if (!product) {
                     throw new APIError(404, `Product not found for order item ID: ${item.id}`);
                 }
 
-                // Double-check stock
                 if (!product.stock || product.stock < item.quantity) {
                     throw new APIError(
                         400,
@@ -975,25 +1025,43 @@ export class OrderService {
                     );
                 }
 
-                // Deduct stock
                 product.stock -= item.quantity;
-                product.status = product.stock <= 0
-                    ? InventoryStatus.OUT_OF_STOCK
-                    : product.stock < 5
-                        ? InventoryStatus.LOW_STOCK
-                        : InventoryStatus.AVAILABLE;
+                product.status =
+                    product.stock <= 0
+                        ? InventoryStatus.OUT_OF_STOCK
+                        : product.stock < 5
+                            ? InventoryStatus.LOW_STOCK
+                            : InventoryStatus.AVAILABLE;
 
-                await this.productRepository.save(product);
-
-                if (product.stock <= 0) {
-                    await this.removeItemFromCarts(item.productId, false)
-                }
-
+                productsToSave.set(product.id, product);
+                continue;
             }
-            // --- Invalid Order Item ---
-            else {
-                throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
-            }
+
+            throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+        }
+
+        if (variantsToSave.size) {
+            await this.variantRepository.save([...variantsToSave.values()]);
+
+            const depletedVariantIds = [...variantsToSave.values()]
+                .filter((v) => v.stock <= 0)
+                .map((v) => String(v.id));
+
+            await Promise.allSettled(
+                depletedVariantIds.map((id) => this.removeItemFromCarts(id, true))
+            );
+        }
+
+        if (productsToSave.size) {
+            await this.productRepository.save([...productsToSave.values()]);
+
+            const depletedProductIds = [...productsToSave.values()]
+                .filter((p) => p.stock <= 0)
+                .map((p) => p.id);
+
+            await Promise.allSettled(
+                depletedProductIds.map((id) => this.removeItemFromCarts(id, false))
+            );
         }
     }
 
@@ -1185,19 +1253,34 @@ export class OrderService {
      * @access Admin | Customer (based on controller-level auth)
      */
     async getCustomerOrderDetails(orderId: number): Promise<Order> {
-        const order = await this.orderRepository.findOne({
-            where: { id: orderId },
-
-            // Load related entities: customer, address, products, variant, and vendor info
-            relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
-                'orderItems.variant'
-            ],
-        });
+        const order = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("vendor.district", "district")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            // select only safe customer fields (exclude password, tokens, verification codes, etc.)
+            .leftJoin("order.orderedBy", "orderedBy")
+            .addSelect([
+                "orderedBy.id",
+                "orderedBy.fullName",
+                "orderedBy.username",
+                "orderedBy.email",
+                "orderedBy.phoneNumber",
+                "orderedBy.role",
+                "orderedBy.addressId",
+                "orderedBy.googleId",
+                "orderedBy.facebookId",
+                "orderedBy.provider",
+                "orderedBy.isVerified",
+                "orderedBy.createdAt",
+                "orderedBy.updatedAt",
+            ])
+            .leftJoinAndSelect("orderedBy.address", "address")
+            .where("order.id = :orderId", { orderId })
+            .getOne();
 
         // Handle case when order does not exist
         if (!order) {

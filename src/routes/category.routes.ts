@@ -8,6 +8,7 @@ import { SubcategoryController } from '../controllers/subcategory.controller';
 import { CategoryController } from '../controllers/category.controller';
 import { createSubCategorySchema, updateSubcategorySchema } from '../utils/zod_validations/subcategory.zod';
 import AppDataSource from '../config/db.config';
+import { responseCache } from '../middlewares/responseCache.middleware';
 
 const router = Router();
 const productController = new ProductController(AppDataSource);
@@ -160,7 +161,7 @@ router.post('/', authMiddleware, isAdminOrStaff, upload.single('image'), validat
  *         description: Internal server error
  */
 
-router.get('/', categoryController.getCategories.bind(categoryController));
+router.get('/', responseCache({ ttlSeconds: 300 }), categoryController.getCategories.bind(categoryController));
 
 /**
  * @swagger
@@ -233,7 +234,7 @@ router.get('/', categoryController.getCategories.bind(categoryController));
  *         description: Internal server error
  */
 
-router.get('/:id', categoryController.getCategoryById.bind(categoryController));
+router.get('/:id', responseCache({ ttlSeconds: 300 }), categoryController.getCategoryById.bind(categoryController));
 
 /**
  * @swagger
@@ -671,7 +672,11 @@ router.post('/:categoryId/subcategories', authMiddleware, isAdminOrStaff, upload
  *         description: Internal server error
  */
 
-router.get('/:categoryId/subcategories', subcategoryController.getSubcategories.bind(subcategoryController));
+router.get(
+    '/:categoryId/subcategories',
+    responseCache({ ttlSeconds: 300 }),
+    subcategoryController.getSubcategories.bind(subcategoryController),
+);
 
 /**
  * @swagger
@@ -744,7 +749,11 @@ router.get('/:categoryId/subcategories', subcategoryController.getSubcategories.
  *         description: Internal server error
  */
 
-router.get('/:categoryId/subcategories/:id', subcategoryController.getSubcategoryById.bind(subcategoryController));
+router.get(
+    '/:categoryId/subcategories/:id',
+    responseCache({ ttlSeconds: 300 }),
+    subcategoryController.getSubcategoryById.bind(subcategoryController),
+);
 
 /**
  * @swagger
@@ -1228,7 +1237,7 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *       500:
  *         description: Internal server error
  */
-router.get('/all/products', productController.getAllProducts.bind(productController));
+router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController.getAllProducts.bind(productController));
 
 /**
  * @swagger
@@ -1351,7 +1360,11 @@ router.get('/all/products', productController.getAllProducts.bind(productControl
  *         description: Internal server error
  */
 
-router.get('/:categoryId/subcategories/:subcategoryId/products/:id', productController.getProductById.bind(productController));
+router.get(
+    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    responseCache({ ttlSeconds: 60 }),
+    productController.getProductById.bind(productController),
+);
 
 /**
  * @swagger

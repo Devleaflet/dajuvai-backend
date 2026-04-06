@@ -12,6 +12,7 @@ import { createServer } from "http";
 import { corsOptions } from "./config/cors.config";
 import { initSocket } from "./socket/socket";
 import config from "./config/env.config";
+import { cacheInvalidationMiddleware } from "./middlewares/cacheInvalidation.middleware";
 
 // Route imports
 import userRouter from "./routes/user.routes";
@@ -74,6 +75,23 @@ app.use(cookieParser());
 
 // Initialize Passport for authentication middleware
 app.use(passport.initialize());
+
+app.use(
+    cacheInvalidationMiddleware([
+        {
+            matchPrefix: "/api/categories",
+            invalidatePrefixes: ["/api/categories", "/api/product", "/api/homepage"],
+        },
+        {
+            matchPrefix: "/api/product",
+            invalidatePrefixes: ["/api/product", "/api/categories", "/api/homepage"],
+        },
+        {
+            matchPrefix: "/api/homepage",
+            invalidatePrefixes: ["/api/homepage"],
+        },
+    ]),
+);
 
 app.use((req, res, next) => {
     console.log(
