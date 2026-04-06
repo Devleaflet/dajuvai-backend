@@ -64,10 +64,11 @@ export class DeliveryAdminController {
         try {
             const riderId = Number(req.params.riderId);
 
-            const { message } = await this.deliveryAdminService.resetRiderPassword(
-                riderId,
-                req.body.newPassword,
-            );
+            const { message } =
+                await this.deliveryAdminService.resetRiderPassword(
+                    riderId,
+                    req.body.newPassword,
+                );
 
             res.status(200).json({ success: true, message });
         } catch (error) {
@@ -79,7 +80,8 @@ export class DeliveryAdminController {
 
     async getProcessingOrders(req: Request, res: Response) {
         try {
-            const orders = await this.deliveryAdminService.getProcessingOrders();
+            const orders =
+                await this.deliveryAdminService.getProcessingOrders();
 
             return res.status(200).json({ success: true, data: orders });
         } catch (error) {
@@ -87,7 +89,10 @@ export class DeliveryAdminController {
         }
     }
 
-    async getProcessingOrderById(req: Request<{ orderId: string }>, res: Response) {
+    async getProcessingOrderById(
+        req: Request<{ orderId: string }>,
+        res: Response,
+    ) {
         try {
             const orderId = Number(req.params.orderId);
 
@@ -102,24 +107,29 @@ export class DeliveryAdminController {
 
     async markAtWarehouse(req: Request<{ orderId: string }>, res: Response) {
         try {
-
             const orderId = Number(req.params.orderId);
 
-            const order = await this.deliveryAdminService.markAtWarehouse(orderId);
+            const order =
+                await this.deliveryAdminService.markAtWarehouse(orderId);
             res.status(200).json({ success: true, data: order });
         } catch (error) {
             this.handleError(res, error);
         }
     }
 
-    async collectOrderItems(req: Request<{ orderItemId: string }>, res: Response) {
+    async collectOrderItems(
+        req: Request<{ orderItemId: string }>,
+        res: Response,
+    ) {
         try {
             const orderItemId = Number(req.params.orderItemId);
 
-            await this.deliveryAdminService.collectOrderItems(orderItemId);
+            const orderItem =
+                await this.deliveryAdminService.collectOrderItems(orderItemId);
 
             res.status(201).json({
                 success: true,
+                data: orderItem,
                 message: "Order Item Collected",
             });
         } catch (error) {
@@ -132,11 +142,16 @@ export class DeliveryAdminController {
             const page = Number(req.query.page as string) || 1;
             const limit = Number(req.query.limit as string) || 20;
 
-            const result = await this.deliveryAdminService.getWarehouseOrderQueue(
-                page,
-                limit,
-            );
-            res.status(200).json({ success: true, data: result });
+            const result =
+                await this.deliveryAdminService.getWarehouseOrderQueue(
+                    page,
+                    limit,
+                );
+            res.status(200).json({
+                success: true,
+                data: result.orders,
+                pagination: result.pagination,
+            });
         } catch (error) {
             this.handleError(res, error);
         }
@@ -173,7 +188,10 @@ export class DeliveryAdminController {
         }
     }
 
-    async findOrderAssignment(req: Request<{ orderId: string }>, res: Response) {
+    async findOrderAssignment(
+        req: Request<{ orderId: string }>,
+        res: Response,
+    ) {
         try {
             const orderId = Number(req.params.orderId);
 
@@ -193,7 +211,8 @@ export class DeliveryAdminController {
         try {
             const orderId = Number(req.params.orderId);
 
-            const order = await this.deliveryAdminService.backToWarehouse(orderId);
+            const order =
+                await this.deliveryAdminService.backToWarehouse(orderId);
             res.status(200).json({ success: true, data: order });
         } catch (error) {
             this.handleError(res, error);

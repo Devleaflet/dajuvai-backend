@@ -232,6 +232,8 @@ export class DeliveryAdminService {
             );
             await this.orderRepository.save(order);
         }
+
+        return orderItem;
     }
 
     async getWarehouseOrderQueue(page: number = 1, limit: number = 20) {
@@ -253,8 +255,8 @@ export class DeliveryAdminService {
 
         return {
             orders,
-            total,
             pagination: {
+                total,
                 currentPage: page,
                 totalPages,
             },
@@ -326,8 +328,8 @@ export class DeliveryAdminService {
 
         return {
             data: assignments,
-            total,
             pagination: {
+                total,
                 currentPage: page,
                 totalPages,
             },
