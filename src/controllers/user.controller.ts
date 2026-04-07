@@ -68,75 +68,64 @@ export class UserController {
      * @param {Response} res - HTTP response object used to return status, token, and user data.
      * @returns {Promise<void>} Responds with the created user object and authentication token in a cookie.
      * @access Public (Admin Signup)
-     */
+    */
     async adminSignup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
-        try {
-            //  Validate request body using Zod schema
-            const parsed = signupSchema.safeParse(req.body);
-            if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
-                return;
-            }
-
-            //  Extract validated fields
-            const { username, email, password } = parsed.data;
-
-            //  Prepare hashed password and verification token
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const verificationToken = TokenUtils.generateToken(); // raw token for email
-
-            // Check if user already exists by email
-            const existingUser = await findUserByEmail(email);
-            if (existingUser) {
-                throw new APIError(409, 'User with this email already exists');
-            }
-
-            // Create user with verified status and ADMIN role
-            const user = await createUser({
-                username,
-                email,
-                password: hashedPassword,
-                verificationCode: null,
-                isVerified: true,
-                verificationCodeExpire: null,
-                role: UserRole.ADMIN,
-            });
-
-            //  Generate JWT and set cookie
-            const token = jwt.sign(
-                { id: user.id, email: user.email, username: user.username, role: user.role },
-                this.jwtSecret,
-                { expiresIn: '2h' }
-            );
-
-            // Set httpOnly cookie with token
-            res.cookie('token', token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                sameSite: 'strict',
-                maxAge: 2 * 60 * 60 * 1000,
-            });
-
-            // Send successful response with user data and token
-            res.status(201).json({
-                success: true,
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    email: user.email,
-                },
-                token,
-            });
-
-        } catch (error) {
-            // Handle API errors and unexpected errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.error('Signup Error:', error);
-                res.status(503).json({ success: false, message: 'Registration service temporarily unavailable' });
-            }
+        //  Validate request body using Zod schema
+        const parsed = signupSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ success: false, errors: parsed.error.errors });
+            return;
         }
+
+        //  Extract validated fields
+        const { username, email, password } = parsed.data;
+
+        //  Prepare hashed password and verification token
+        const hashedPassword = await bcrypt.hash(password, 10);
+        const verificationToken = TokenUtils.generateToken(); // raw token for email
+
+        // Check if user already exists by email
+        const existingUser = await findUserByEmail(email);
+        if (existingUser) {
+            throw new APIError(409, 'User with this email already exists');
+        }
+
+        // Create user with verified status and ADMIN role
+        const user = await createUser({
+            username,
+            email,
+            password: hashedPassword,
+            verificationCode: null,
+            isVerified: true,
+            verificationCodeExpire: null,
+            role: UserRole.ADMIN,
+        });
+
+        //  Generate JWT and set cookie
+        const token = jwt.sign(
+            { id: user.id, email: user.email, username: user.username, role: user.role },
+            this.jwtSecret,
+            { expiresIn: '2h' }
+        );
+
+        // Set httpOnly cookie with token
+        res.cookie('token', token, {
+            httpOnly: true,
+            secure: config.NODE_ENV === 'production',
+            sameSite: 'strict',
+            maxAge: 2 * 60 * 60 * 1000,
+        });
+
+        // Send successful response with user data and token
+        res.status(201).json({
+            success: true,
+            user: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+            },
+            token,
+        });
     }
 
     /**
@@ -149,241 +138,195 @@ export class UserController {
      * @access Public (Admin Login)
      */
     async adminLogin(req: Request, res: Response): Promise<void> {
-        try {
-            // Extract login credentials
-            const { email, password } = req.body;
+        // Extract login credentials
+        const { email, password } = req.body;
 
-            // Get user repository and find user by email
-            const userRepo = AppDataSource.getRepository(User);
-            const user = await userRepo.findOne({
-                where: { email },
-                select: {
-                    id: true,
-                    email: true,
-                    password: true,
-                    role: true,
-                    username: true
-                }
-            })
+        // Get user repository and find user by email
+        const userRepo = AppDataSource.getRepository(User);
+        const user = await userRepo.findOne({
+            where: { email },
+            select: {
+                id: true,
+                email: true,
+                password: true,
+                role: true,
+                username: true,
+            },
+        });
 
-            // Return 404 if user not found
-            if (!user) {
-                res.status(404).json({ success: false, message: 'User not found' });
-                return;
-            }
-
-            // Check user role is ADMIN, else forbid access
-            if (user.role != UserRole.ADMIN) {
-                res.status(403).json({ success: false, message: 'Access denied: not an admin' });
-                return;
-            }
-
-            // Compare passwords
-            const isPasswordValid = await bcrypt.compare(password, user.password || '');
-
-            if (!isPasswordValid) {
-                res.status(401).json({ success: false, message: 'Invalid credentials' });
-                return;
-            }
-
-            // Sign JWT token for 7 days
-            const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
-                config.JWT_SECRET,
-                { expiresIn: '7d' }
-            );
-
-            // Generate refresh token (long-lived)
-            const refreshToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
-                config.JWT_REFRESH_SECRET,
-                { expiresIn: '7d' }
-            );
-
-            // Set token cookie
-            res.cookie("token", token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "strict",
-                maxAge: 15 * 60 * 1000,
-            });
-
-
-            // Set refresh token in separate httpOnly cookie
-            res.cookie("refreshToken", refreshToken, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "strict",
-                maxAge: 1 * 24 * 60 * 60 * 1000,
-            });
-
-            // Send success response with user data and token
-            res.status(200).json({
-                success: true,
-                message: 'Admin logged in successfully',
-                token,
-                refreshToken,
-                data: {
-                    id: user.id,
-                    username: user.username,
-                    email: user.email,
-                    role: user.role,
-                }
-            });
-        } catch (error) {
-            // Handle API and internal errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
+        // Return 404 if user not found
+        if (!user) {
+            res.status(404).json({ success: false, message: "User not found" });
+            return;
         }
+
+        // Check user role is ADMIN, else forbid access
+        if (user.role != UserRole.ADMIN) {
+            res.status(403).json({ success: false, message: "Access denied: not an admin" });
+            return;
+        }
+
+        // Compare passwords
+        const isPasswordValid = await bcrypt.compare(password, user.password || "");
+
+        if (!isPasswordValid) {
+            res.status(401).json({ success: false, message: "Invalid credentials" });
+            return;
+        }
+
+        // Sign JWT token for 7 days
+        const token = jwt.sign(
+            { id: user.id, email: user.email, role: user.role },
+            config.JWT_SECRET,
+            { expiresIn: "7d" },
+        );
+
+        // Generate refresh token (long-lived)
+        const refreshToken = jwt.sign(
+            { id: user.id, email: user.email, role: user.role },
+            config.JWT_REFRESH_SECRET,
+            { expiresIn: "7d" },
+        );
+
+        // Set token cookie
+        res.cookie("token", token, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 15 * 60 * 1000,
+        });
+
+
+        // Set refresh token in separate httpOnly cookie
+        res.cookie("refreshToken", refreshToken, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 1 * 24 * 60 * 60 * 1000,
+        });
+
+        // Send success response with user data and token
+        res.status(200).json({
+            success: true,
+            message: "Admin logged in successfully",
+            token,
+            refreshToken,
+            data: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+                role: user.role,
+            },
+        });
     }
 
 
     async getAllStaff(req: Request, res: Response) {
-        try {
-            const staff = await getAllStaff();
+        const staff = await getAllStaff();
 
-            res.status(200).json({
-                success: true,
-                data: staff
-            })
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+        res.status(200).json({
+            success: true,
+            data: staff,
+        });
     }
 
 
     async deleteStaff(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
-        try {
-            const id = req.params.id;
+        const id = req.params.id;
 
-            const staffExists = await findUserById(Number(id))
+        const staffExists = await findUserById(Number(id));
 
-            if (!staffExists) {
-                throw new APIError(404, "Staff doesnot exists")
-            }
-
-            const deletedStaff = await deleteStaffById(Number(id))
-
-            res.status(200).json({
-                success: true,
-                msg: "Staff deleted succesfully"
-            })
-
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
+        if (!staffExists) {
+            throw new APIError(404, "Staff doesnot exists");
         }
+
+        await deleteStaffById(Number(id));
+
+        res.status(200).json({
+            success: true,
+            msg: "Staff deleted succesfully",
+        });
     }
 
 
     async updateStaff(req: Request<{ id: string }, {}, { data: any }, {}>, res: Response) {
-        try {
-            const id = req.params.id;
-            const data = req.body.data;
+        const id = req.params.id;
+        const data = req.body.data;
 
-            const staffExists = await findUserById(Number(id))
+        const staffExists = await findUserById(Number(id));
 
-            if (!staffExists) {
-                throw new APIError(404, "Staff doesnot exists")
-            }
-
-            const deletedStaff = await updateStaffById(Number(id), data)
-
-            res.status(200).json({
-                success: true,
-                msg: "Staff deleted succesfully"
-            })
-
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
+        if (!staffExists) {
+            throw new APIError(404, "Staff doesnot exists");
         }
+
+        await updateStaffById(Number(id), data);
+
+        res.status(200).json({
+            success: true,
+            msg: "Staff deleted succesfully",
+        });
     }
 
 
 
     async staffSignup(req: AuthRequest, res: Response): Promise<void> {
-        try {
-            //  Validate request body using Zod schema
-            const parsed = signupSchema.safeParse(req.body);
-            if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
-                return;
-            }
-
-            //  Extract validated fields
-            const { username, email, password } = parsed.data;
-
-            //  Prepare hashed password and verification token
-            const hashedPassword = await bcrypt.hash(password, 10);
-
-            const loweredCaseEmail = this.toLowerEmail(email)
-
-            // Check if user already exists by email
-            const existingUser = await findUserByEmail(loweredCaseEmail);
-            if (existingUser) {
-                throw new APIError(409, 'User with this email already exists');
-            }
-
-            // Create user with verified status and ADMIN role
-            const user = await createUser({
-                username,
-                email: loweredCaseEmail,
-                password: hashedPassword,
-                verificationCode: null,
-                isVerified: true,
-                verificationCodeExpire: null,
-                role: UserRole.STAFF,
-            });
-
-            //  Generate JWT and set cookie
-            const token = jwt.sign(
-                { id: user.id, email: user.email, username: user.username, role: user.role },
-                this.jwtSecret,
-                { expiresIn: '24h' }
-            );
-
-            // Set httpOnly cookie with token
-            res.cookie('token', token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                sameSite: 'strict',
-                maxAge: 24 * 60 * 60 * 1000,
-            });
-
-            // Send successful response with user data and token
-            res.status(201).json({
-                success: true,
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    email: user.email,
-                },
-                token,
-            });
-
-        } catch (error) {
-            // Handle API errors and unexpected errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.error('Signup Error:', error);
-                res.status(503).json({ success: false, message: 'Registration service temporarily unavailable' });
-            }
+        //  Validate request body using Zod schema
+        const parsed = signupSchema.safeParse(req.body);
+        if (!parsed.success) {
+            res.status(400).json({ success: false, errors: parsed.error.errors });
+            return;
         }
+
+        //  Extract validated fields
+        const { username, email, password } = parsed.data;
+
+        //  Prepare hashed password and verification token
+        const hashedPassword = await bcrypt.hash(password, 10);
+
+        const loweredCaseEmail = this.toLowerEmail(email);
+
+        // Check if user already exists by email
+        const existingUser = await findUserByEmail(loweredCaseEmail);
+        if (existingUser) {
+            throw new APIError(409, "User with this email already exists");
+        }
+
+        // Create user with verified status and ADMIN role
+        const user = await createUser({
+            username,
+            email: loweredCaseEmail,
+            password: hashedPassword,
+            verificationCode: null,
+            isVerified: true,
+            verificationCodeExpire: null,
+            role: UserRole.STAFF,
+        });
+
+        //  Generate JWT and set cookie
+        const token = jwt.sign(
+            { id: user.id, email: user.email, username: user.username, role: user.role },
+            this.jwtSecret,
+            { expiresIn: "24h" },
+        );
+
+        // Set httpOnly cookie with token
+        res.cookie("token", token, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 24 * 60 * 60 * 1000,
+        });
+
+        // Send successful response with user data and token
+        res.status(201).json({
+            success: true,
+            user: {
+                id: user.id,
+                username: user.username,
+                email: user.email,
+            },
+            token,
+        });
     }
 
     /**
@@ -396,18 +339,8 @@ export class UserController {
      * @access Admin
      */
     async getUsers(req: Request, res: Response): Promise<void> {
-        try {
-            // Fetch all users
-            const users = await fetchAllUser();
-            res.status(200).json({ success: true, data: users });
-        } catch (error) {
-            // Handle API errors and internal server errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+        const users = await fetchAllUser();
+        res.status(200).json({ success: true, data: users });
     }
 
     /**

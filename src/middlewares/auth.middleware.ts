@@ -1,52 +1,74 @@
-import { Request, Response, NextFunction } from 'express';
-import jwt from 'jsonwebtoken';
-import { User, UserRole } from '../entities/user.entity';
-import AppDataSource from '../config/db.config';
-import { string, ZodError, ZodSchema } from 'zod';
-import { Vendor } from '../entities/vendor.entity';
-import { APIError } from '../utils/ApiError.utils';
-import { ProductService } from '../service/product.service';
-import { Product } from '../entities/product.entity';
-import { parse } from 'path';
-import { OrderItem } from '../entities/orderItems.entity';
-import { Review } from '../entities/reviews.entity';
-import config from '../config/env.config';
-import { Rider } from '../entities/rider.entity';
-
+import { Request, Response, NextFunction } from "express";
+import jwt, { JsonWebTokenError, TokenExpiredError as JwtTokenExpiredError } from "jsonwebtoken";
+import { User, UserRole } from "../entities/user.entity";
+import AppDataSource from "../config/db.config";
+import { ZodError, ZodSchema } from "zod";
+import { Vendor } from "../entities/vendor.entity";
+import { Product } from "../entities/product.entity";
+import { OrderItem } from "../entities/orderItems.entity";
+import { Review } from "../entities/reviews.entity";
+import config from "../config/env.config";
+import { Rider } from "../entities/rider.entity";
+import {
+    AuthError,
+    BadRequestError,
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    TokenExpiredError,
+    ValidationError,
+} from "../errors";
 
 /**
  * Extends Express Request object with `user?: User`.
  * Used for authenticated routes requiring user context.
  */
-export interface AuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}> extends Request<P, ResBody, ReqBody, ReqQuery> {
+export interface AuthRequest<
+    P = {},
+    ResBody = {},
+    ReqBody = {},
+    ReqQuery = {},
+> extends Request<P, ResBody, ReqBody, ReqQuery> {
     user?: User;
 }
-
 
 /**
  * Extends Express Request object with `vendor?: Vendor`.
  * Used for authenticated routes requiring vendor context.
  */
-export interface VendorAuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}> extends Request<P, ResBody, ReqBody, ReqQuery> {
+export interface VendorAuthRequest<
+    P = {},
+    ResBody = {},
+    ReqBody = {},
+    ReqQuery = {},
+> extends Request<P, ResBody, ReqBody, ReqQuery> {
     vendor?: Vendor;
 }
-
 
 /**
  * Extends Express Request object with both `user?` and `vendor?`.
  * Used when either type of authentication is supported.
  */
-export interface CombinedAuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}> extends Request<P, ResBody, ReqBody, ReqQuery> {
+export interface CombinedAuthRequest<
+    P = {},
+    ResBody = {},
+    ReqBody = {},
+    ReqQuery = {},
+> extends Request<P, ResBody, ReqBody, ReqQuery> {
     user?: User;
     vendor?: Vendor;
 }
 
-
 /**
- * Extends Express Request object with `user?: User` and `rider?: Rider`. 
+ * Extends Express Request object with `user?: User` and `rider?: Rider`.
  * Used for authenticated routes requiring rider context.
  */
-export interface RiderAuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}> extends Request<P, ResBody, ReqBody, ReqQuery> {
+export interface RiderAuthRequest<
+    P = {},
+    ResBody = {},
+    ReqBody = {},
+    ReqQuery = {},
+> extends Request<P, ResBody, ReqBody, ReqQuery> {
     user?: User;
     rider?: Rider;
 }
@@ -54,121 +76,116 @@ export interface RiderAuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery =
 const userDB = AppDataSource.getRepository(User);
 const vendorDB = AppDataSource.getRepository(Vendor);
 const productDB = AppDataSource.getRepository(Product);
-const riderDB = AppDataSource.getRepository(Rider)
-
+const riderDB = AppDataSource.getRepository(Rider);
 
 /**
  * Authorizes access to vendors and admins only.
- * Checks if `req.vendor` or `req.user.role === ADMIN`.
  * @route Middleware
  * @access Vendor | Admin
  */
-
 export const restrictToVendorOrAdmin = async (
     req: VendorAuthRequest & AuthRequest,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
 ) => {
     const user = req.user;
     const vendor = req.vendor;
 
     if (!user && !vendor) {
-        res.status(401).json({ success: false, message: 'Authentication required' });
-        return;
+        return next(new AuthError("Authentication required"));
     }
 
     if (user?.role === UserRole.ADMIN || vendor) {
         return next();
     }
 
-    res.status(403).json({ success: false, message: 'Not authorized: Admin or Vendor only' });
+    return next(new ForbiddenError("Not authorized: Admin or Vendor only"));
 };
 
-
-
 /**
- * Middleware that authenticates both vendors and users using JWT tokens.
- * Token can be in cookies (`vendorToken` or `token`) or Authorization header.
+ * Authenticates both vendors and users using JWT tokens.
+ * Token can be in cookies (vendorToken or token) or Authorization header.
  * @route Middleware
  * @access Admin | Vendor
  */
 export const combinedAuthMiddleware = async (
     req: CombinedAuthRequest,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
 ): Promise<void> => {
-    const token = req.cookies.vendorToken || req.headers.authorization?.split(' ')[1];
+    const token =
+        req.cookies.vendorToken || req.headers.authorization?.split(" ")[1];
 
     if (!token) {
-        res.status(401).json({ success: false, message: 'Authentication token is missing' });
-        return;
+        return next(new AuthError("Authentication token is missing"));
     }
 
     try {
-        const decoded = jwt.verify(token, config.JWT_SECRET) as { id: number; email: string; businessName?: string; role?: string;[key: string]: any };
+        const decoded = jwt.verify(token, config.JWT_SECRET) as {
+            id: number;
+            email: string;
+            businessName?: string;
+            role?: string;
+            [key: string]: any;
+        };
 
-        // //('Decoded token:', decoded);
-
-        // Check if token is for a vendor (has businessName)
         if (decoded.businessName) {
             const vendor = await vendorDB.findOneBy({ id: decoded.id });
             if (!vendor) {
-                res.status(401).json({ success: false, message: 'Invalid token: vendor not found' });
-                return;
+                return next(new AuthError("Invalid token: vendor not found"));
             }
             req.vendor = vendor;
-            next();
-            return;
+            return next();
         }
 
-        // Check if token is for a user/admin (has role)
         if (decoded.role) {
             const user = await userDB.findOneBy({ id: decoded.id });
             if (!user) {
-                res.status(401).json({ success: false, message: 'Invalid token: user not found' });
-                return;
+                return next(new AuthError("Invalid token: user not found"));
             }
             req.user = user;
-            next();
-            return;
+            return next();
         }
 
-        res.status(401).json({ success: false, message: 'Invalid token: missing role or businessName' });
-        return;
+        return next(new AuthError("Invalid token: missing role or businessName"));
     } catch (err) {
-        console.log("----------Error------------")
-        console.log(err)
-        // Google OAuth tokens (or any externally-signed JWT) will fail with
-        // "invalid signature" because they are not signed with JWT_SECRET.
-        // Return a clear message instead of the generic one.
-        if (err instanceof Error && err.name === 'JsonWebTokenError' && err.message === 'invalid signature') {
-            res.status(401).json({ success: false, message: 'Vendor session not found. Please log in as a vendor.' });
-            return;
+        if (
+            err instanceof JsonWebTokenError &&
+            err.message === "invalid signature"
+        ) {
+            return next(
+                new AuthError(
+                    "Vendor session not found. Please log in as a vendor.",
+                ),
+            );
         }
-        res.status(401).json({ success: false, message: 'Invalid or expired token' });
-        return;
+        if (err instanceof JwtTokenExpiredError) {
+            return next(new TokenExpiredError("Token has expired — please log in again"));
+        }
+        if (err instanceof JsonWebTokenError) {
+            return next(new AuthError("Invalid or expired token"));
+        }
+        return next(err);
     }
 };
-
 
 /**
  * Authenticates a vendor by verifying the vendorToken.
  * Attaches vendor to `req.vendor` if valid.
  * @route Middleware
  * @access Vendor
- * @throws APIError - If token is missing or invalid.
  */
-export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response, next: NextFunction): Promise<void> => {
-    const vendorToken = req.cookies.vendorToken || req.headers.authorization?.split(' ')[1];
-    console.log("-------------Vendor token------------")
-    console.log(vendorToken)
+export const vendorAuthMiddleware = async (
+    req: VendorAuthRequest,
+    res: Response,
+    next: NextFunction,
+): Promise<void> => {
+    const vendorToken =
+        req.cookies.vendorToken || req.headers.authorization?.split(" ")[1];
 
-    // //("request reached vendor auth middleware")
     if (!vendorToken) {
-        throw new APIError(401, 'Authentication token is missing');
+        return next(new AuthError("Authentication token is missing"));
     }
-
-    console.log("Authorization Header: ", req.headers.authorization);
 
     try {
         const decoded = jwt.verify(vendorToken, config.JWT_SECRET) as {
@@ -179,17 +196,20 @@ export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response
 
         const vendor = await vendorDB.findOneBy({ id: decoded.id });
         if (!vendor) {
-            throw new APIError(401, 'Vendor not found');
+            return next(new AuthError("Vendor not found"));
         }
-        //("Vendor details: ", vendor)
         req.vendor = vendor;
-        next();
-    } catch (error) {
-        throw new APIError(401, 'Invalid or expired token');
+        return next();
+    } catch (err) {
+        if (err instanceof JwtTokenExpiredError) {
+            return next(new TokenExpiredError("Token has expired — please log in again"));
+        }
+        if (err instanceof JsonWebTokenError) {
+            return next(new AuthError("Invalid or expired token"));
+        }
+        return next(err);
     }
 };
-
-
 
 /**
  * Authenticates a user (admin or customer) by verifying the JWT token.
@@ -197,207 +217,196 @@ export const vendorAuthMiddleware = async (req: VendorAuthRequest, res: Response
  * @route Middleware
  * @access Admin | Customer
  */
+export const authMiddleware = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+): Promise<void> => {
+    const token =
+        req.cookies.token || req.headers.authorization?.split(" ")[1];
 
-export const authMiddleware = async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    if (!token) {
+        return next(new AuthError("No token provided. Please log in."));
+    }
+
     try {
-        const token = req.cookies.token || req.headers.authorization?.split(' ')[1];
-
-        console.log("------------Token------------")
-        console.log(token)
-        if (!token) {
-            res.status(401).json({ success: false, message: 'No token provided. Please log in.' });
-            return;
-        }
-
         const decoded = jwt.verify(token, config.JWT_SECRET) as {
             id: number;
             email: string;
-            role: string
+            role: string;
         };
 
         const user = await userDB.findOneBy({ id: decoded.id });
 
-        if (!user.isVerified) {
-            throw new APIError(401, "Invalid token")
+        if (!user) {
+            return next(new AuthError("User not found. Please log in again."));
         }
 
-        if (!user) {
-            res.status(401).json({ success: false, message: 'User not found. Please log in again.' });
-            return;
+        if (!user.isVerified) {
+            return next(new AuthError("Account is not verified."));
         }
-        //("admin detail:", user)
+
         req.user = user;
-        next();
-    } catch (error) {
-        console.error('Authentication error:', error);
-        res.status(401).json({ success: false, message: 'Invalid or expired token. Please log in.' });
+        return next();
+    } catch (err) {
+        if (err instanceof JwtTokenExpiredError) {
+            return next(new TokenExpiredError("Token has expired — please log in again"));
+        }
+        if (err instanceof JsonWebTokenError) {
+            return next(new AuthError("Invalid or expired token. Please log in."));
+        }
+        return next(err);
     }
 };
 
 /**
  * Authorizes the currently logged-in user to access their own account.
- * @param req - Contains target user ID in req.params
  * @route Middleware
  * @access Account Owner
  */
-export const isAccountOwner = (req: AuthRequest<{ id: string }>, res: Response, next: NextFunction): void => {
+export const isAccountOwner = (
+    req: AuthRequest<{ id: string }>,
+    res: Response,
+    next: NextFunction,
+): void => {
     const targetUserId = parseInt(req.params.id, 10);
 
     if (isNaN(targetUserId)) {
-        res.status(400).json({ success: false, message: 'Invalid user ID in URL' });
-        return;
+        return next(new BadRequestError("Invalid user ID in URL"));
     }
 
     if (!req.user) {
-        res.status(401).json({ success: false, message: 'Authentication required' });
-        return;
+        return next(new AuthError("Authentication required"));
     }
 
     if (req.user.id !== targetUserId) {
-        res.status(403).json({ success: false, message: 'You can only access your own account' });
-        return;
+        return next(new ForbiddenError("You can only access your own account"));
     }
 
     next();
 };
 
-export const isAccountOwnerOrAdmin = (req: AuthRequest<{ id: string }>, res: Response, next: NextFunction): void => {
+export const isAccountOwnerOrAdmin = (
+    req: AuthRequest<{ id: string }>,
+    res: Response,
+    next: NextFunction,
+): void => {
     const loggedInUser = req.user;
 
     if (!loggedInUser) {
-        res.status(401).json({ success: true, msg: "Authentication required" })
-        return;
+        return next(new AuthError("Authentication required"));
     }
 
     const targetUserId = parseInt(req.params.id, 10);
     if (isNaN(targetUserId)) {
-        res.status(400).json({ success: false, message: 'Invalid user ID parameter' });
-        return;
+        return next(new BadRequestError("Invalid user ID parameter"));
     }
 
     const isOwner = loggedInUser.id == targetUserId;
     const isAdmin = loggedInUser.role == UserRole.ADMIN;
 
     if (isOwner || isAdmin) {
-        next();
-    } else {
-        res.status(403).json({ success: false, message: "Not authorized to perform this action" })
+        return next();
     }
-}
 
+    return next(new ForbiddenError("Not authorized to perform this action"));
+};
 
 /**
- * Authorizes access if the vendor/user is the owner of the account or if the user is an admin.
- * @param req - Contains target vendor/user ID in req.params
+ * Authorizes if the vendor/user is the account owner or an admin/staff.
  * @route Middleware
  * @access Vendor Owner | Admin
  */
 export const isVendorAccountOwnerOrAdminOrStaff = async (
     req: CombinedAuthRequest<{ id: string }>,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
 ): Promise<void> => {
     const loggedInUser = req.vendor || req.user;
 
     if (!loggedInUser) {
-        //('No logged-in user or vendor found:', { user: req.user, vendor: req.vendor });
-        res.status(401).json({ success: false, msg: "Authentication required" });
-        return;
+        return next(new AuthError("Authentication required"));
     }
 
     const productId = parseInt(req.params.id, 10);
     if (isNaN(productId)) {
-        //('Invalid product ID:', req.params.id);
-        res.status(400).json({ success: false, message: 'Invalid product ID parameter' });
-        return;
+        return next(new BadRequestError("Invalid product ID parameter"));
     }
 
-    const isAdminOrStaff = req.user?.role === UserRole.ADMIN || req.user?.role === UserRole.STAFF;
+    const isAdminOrStaff =
+        req.user?.role === UserRole.ADMIN || req.user?.role === UserRole.STAFF;
 
     let isVendorProductOwner = false;
 
     if (req.vendor) {
         try {
             const product = await productDB.findOne({
-                where: {
-                    id: productId,
-                    vendorId: req.vendor.id,
-                },
+                where: { id: productId, vendorId: req.vendor.id },
             });
-
-            //(`Product details : ${product}`)
-
-            if (product) {
-                isVendorProductOwner = true;
-                //('Vendor owns product:', { productId, vendorId: req.vendor.id });
-            } else {
-                //('Product not found or not owned by vendor:', { productId, vendorId: req.vendor.id });
-            }
+            if (product) isVendorProductOwner = true;
         } catch (error) {
-            console.error("Error fetching product for ownership check:", error);
-            res.status(500).json({ success: false, message: "Internal server error in middleware" });
-            return;
+            return next(error);
         }
-    } else {
-        //('No vendor in request, checking user role:', { userRole: req.user?.role });
     }
 
     if (isVendorProductOwner || isAdminOrStaff) {
-        //('Authorization granted:', { isVendorProductOwner, isAdminOrStaff });
-        next();
-    } else {
-        //('Authorization denied:', { isVendorProductOwner, isAdminOrStaff });
-        res.status(403).json({ success: false, message: "Not authorized to perform this action" });
+        return next();
     }
+
+    return next(new ForbiddenError("Not authorized to perform this action"));
 };
-
-
 
 /**
  * Checks if the authenticated user has admin privileges.
  * @route Middleware
  * @access Admin
  */
-
-export const isAdmin = (req: AuthRequest, res: Response, next: NextFunction) => {
-    //("req reached is admin middleware")
+export const isAdmin = (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+) => {
     if (req.user && req.user.role === UserRole.ADMIN) {
-        //(req.user);
-        next();
-    } else {
-        res.status(403).json({ success: false, message: 'Admin access required' });
+        return next();
     }
+    return next(new ForbiddenError("Admin access required"));
 };
-
 
 /**
  * Checks if the authenticated user is a vendor.
  * @route Middleware
  * @access Vendor
  */
-
-export const isVendor = async (req: VendorAuthRequest, res: Response, next: NextFunction) => {
+export const isVendor = async (
+    req: VendorAuthRequest,
+    res: Response,
+    next: NextFunction,
+) => {
     if (req.vendor) {
-        //(req.vendor)
-        next();
-    } else {
-        res.status(403).json({ success: false, message: 'Vendor access required' });
+        return next();
     }
+    return next(new ForbiddenError("Vendor access required"));
 };
 
 /**
- * Check if the logged in user is eiher staff or admin 
+ * Checks if the logged-in user is either staff or admin.
  */
-export const isAdminOrStaff = async (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (req.user && (req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF)) {
+export const isAdminOrStaff = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+) => {
+    if (
+        req.user &&
+        (req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF)
+    ) {
         return next();
-    } else {
-        res.status(403).json({ success: false, message: 'Staff or admin access required' });
     }
-}
+    return next(new ForbiddenError("Staff or admin access required"));
+};
 
 /**
- * Check if the logged in user is rider
+ * Checks if the logged-in user is a rider.
  */
 export const isRider = async (
     req: RiderAuthRequest,
@@ -405,201 +414,161 @@ export const isRider = async (
     next: NextFunction,
 ) => {
     if (req.user && req.user.role === UserRole.RIDER) {
-        const rider = await riderDB.findOne({where:{userId: req.user.id}})
-        if(!rider){
-            res.status(403).json({
-                success: false,
-                message: "No rider profile linked to this account",
-            });
+        const rider = await riderDB.findOne({ where: { userId: req.user.id } });
+        if (!rider) {
+            return next(
+                new ForbiddenError("No rider profile linked to this account"),
+            );
         }
         req.rider = rider;
         return next();
-    } else {
-        res.status(403).json({
-            success: false,
-            message: "Rider access required",
-        });
+    }
+    return next(new ForbiddenError("Rider access required"));
+};
+
+export const requireAdminStaffOrVendor = async (
+    req: CombinedAuthRequest,
+    res: Response,
+    next: NextFunction,
+) => {
+    if (
+        (req.user &&
+            (req.user.role == UserRole.ADMIN ||
+                req.user.role == UserRole.STAFF)) ||
+        req.vendor
+    ) {
+        return next();
+    }
+    return next(
+        new ForbiddenError("Admin, Staff or Vendor access required"),
+    );
+};
+
+export const requireUserRole = async (
+    req: AuthRequest,
+    res: Response,
+    next: NextFunction,
+) => {
+    if (req.user) {
+        if (req.user.role !== UserRole.USER) {
+            return next(
+                new ConflictError(
+                    "Only customer accounts can perform this action.",
+                ),
+            );
+        }
+        return next();
     }
 };
 
-// export const isAdminOrStaffOrAccountOwner = async(req: CombinedAuthRequest, res: Response, next: NextFunction) => {
-//     if(req.user){
-//         if(req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF){
-//             return next();
-//         } else{
-//             const userId = req.user.id;
-
-//             // const id = req.params.id;
-//         }
-//     }
-// }
-
-export const requireAdminStaffOrVendor = async (req: CombinedAuthRequest, res: Response, next: NextFunction) => {
-    if ((req.user && (req.user.role == UserRole.ADMIN || req.user.role == UserRole.STAFF)) || req.vendor) {
-        next()
-    } else {
-        res.status(403).json({ success: false, message: 'Either admin , staff or vendor access required' });
-    }
-}
-
-export const requireUserRole = async (req: AuthRequest, res: Response, next: NextFunction) => {
-    if (req.user) {
-        if (req.user.role !== UserRole.USER) {
-            //("this is error")
-            throw new APIError(400, "Only customer accounts can perform this action. .")
-        }
-        //("error passed")
-        next()
-    }
-}
 /**
  * Authorizes both admin and vendor roles.
  * @route Middleware
  * @access Admin | Vendor
  */
-
 export const isAdminOrVendor = async (
     req: CombinedAuthRequest,
     res: Response,
-    next: NextFunction
+    next: NextFunction,
 ): Promise<void> => {
-    try {
-        if (req.user?.role === UserRole.ADMIN) {
-            next();
-            return;
-        }
-
-        if (req.vendor) {
-            next();
-            return;
-        }
-
-        res.status(403).json({
-            success: false,
-            message: "Forbidden: Admin or Vendor access required",
-        });
-    } catch (err) {
-        console.error("Middleware error in isAdminOrVendor:", err);
-        res.status(500).json({
-            success: false,
-            message: "Internal server error",
-        });
+    if (req.user?.role === UserRole.ADMIN || req.vendor) {
+        return next();
     }
+    return next(new ForbiddenError("Admin or Vendor access required"));
 };
 
-
-
-
 /**
- * Validates request body/query/params using Zod schema.
- * Automatically formats validation errors and passes them to next middleware.
+ * Validates request body/query/params using a Zod schema.
+ * Forwards a ValidationError to the global error handler on failure.
  * @param schema - Zod schema to validate against
  * @param property - Target request property ('body' | 'query' | 'params'), defaults to 'body'
- * @route Middleware
- * @access Public (used for input validation)
  */
 export const validateZod = (
     schema: ZodSchema,
-    property: 'body' | 'query' | 'params' = 'body'
+    property: "body" | "query" | "params" = "body",
 ) => {
     return async (req: Request, res: Response, next: NextFunction) => {
         try {
-            const parsed = await schema.parseAsync(req[property]);
-            req[property] = parsed;
+            req[property] = await schema.parseAsync(req[property]);
             return next();
         } catch (error) {
             if (error instanceof ZodError) {
-                const formattedErrors = error.errors.map((err) => ({
-                    field: err.path.join('.'),
-                    message: err.message,
+                const fields = error.errors.map((e) => ({
+                    field: e.path.join("."),
+                    message: e.message,
                 }));
-
-                res.status(400).json({
-                    success: false,
-                    type: 'VALIDATION_ERROR',
-                    errors: formattedErrors,
-                });
-                return;
+                return next(new ValidationError("Validation failed", fields));
             }
-
-            res.status(500).json({
-                success: false,
-                type: 'INTERNAL_VALIDATION_ERROR',
-                message: 'Unexpected validation error',
-            });
-            return
+            return next(error);
         }
     };
 };
 
-export const canReviewProduct = async (req: AuthRequest<{}, {}, { productId: string }, {}>, res: Response, next: NextFunction): Promise<void> => {
+export const canReviewProduct = async (
+    req: AuthRequest<{}, {}, { productId: string }, {}>,
+    res: Response,
+    next: NextFunction,
+): Promise<void> => {
+    const userId = req.user?.id;
+    const productId = parseInt(req.body.productId, 10);
+
+    if (!userId) {
+        return next(new AuthError("Authentication required"));
+    }
+
+    if (isNaN(productId)) {
+        return next(new BadRequestError("Invalid product ID"));
+    }
+
     try {
-        const userId = req.user?.id;
-
-        const productId = parseInt(req.body.productId, 10)
-
-        if (!userId) {
-            res.status(401).json({ success: false, message: "Authentication required" });
-            return;
-        }
-
-        if (isNaN(productId)) {
-            res.status(400).json({ success: false, message: "Invalid product ID" });
-            return;
-        }
-
         const orderItemRepo = AppDataSource.getRepository(OrderItem);
 
-        // check if user has DELIVERED order containing this product
         const purchasedItem = await orderItemRepo
             .createQueryBuilder("orderItem")
             .innerJoinAndSelect("orderItem.order", "order")
             .where("order.orderedById = :userId", { userId })
             .andWhere("order.status = :status", { status: "CONFIRMED" })
             .andWhere("orderItem.productId = :productId", { productId })
-            .getOne()
+            .getOne();
 
         if (!purchasedItem) {
-            res.status(403).json({
-                success: false,
-                message: "You can only review products you have purchased."
-            });
-            return;
+            return next(
+                new ForbiddenError(
+                    "You can only review products you have purchased.",
+                ),
+            );
         }
 
-        // check if user has already reviewed this  product
         const reviewRepo = AppDataSource.getRepository(Review);
-
         const existingReview = await reviewRepo.findOne({
             where: { userId, productId },
         });
 
         if (existingReview) {
-            res.status(400).json({
-                success: false,
-                message: "You have already reviewed this product",
-            });
-            return;
+            return next(
+                new ConflictError("You have already reviewed this product"),
+            );
         }
 
-        next();
-
+        return next();
     } catch (error) {
-        //("Can review product middleware error: ", error)
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return next(error);
     }
-}
+};
 
-// Review author (user) → can delete their own review.
+// Review author → can delete their own review.
 // Product vendor → can delete any review on their product.
-export const canDeleteReview = async (req: CombinedAuthRequest<{ id: string }>, res: Response, next: NextFunction): Promise<void> => {
-    try {
-        const reviewId = parseInt(req.params.id, 10);
-        if (isNaN(reviewId)) {
-            res.status(400).json({ success: false, message: "Invalid review ID" });
-            return;
-        }
+export const canDeleteReview = async (
+    req: CombinedAuthRequest<{ id: string }>,
+    res: Response,
+    next: NextFunction,
+): Promise<void> => {
+    const reviewId = parseInt(req.params.id, 10);
+    if (isNaN(reviewId)) {
+        return next(new BadRequestError("Invalid review ID"));
+    }
 
+    try {
         const reviewRepo = AppDataSource.getRepository(Review);
         const review = await reviewRepo.findOne({
             where: { id: reviewId },
@@ -607,27 +576,24 @@ export const canDeleteReview = async (req: CombinedAuthRequest<{ id: string }>, 
         });
 
         if (!review) {
-            res.status(404).json({ success: false, message: "Review not found" });
-            return;
+            return next(new NotFoundError("Review"));
         }
 
         const userId = req.user?.id;
         const vendorId = req.vendor?.id;
 
         const isReviewOwner = userId === review.userId;
-        const isProductOwner = vendorId !== undefined && review.product.vendorId === vendorId;
+        const isProductOwner =
+            vendorId !== undefined && review.product.vendorId === vendorId;
 
         if (!isReviewOwner && !isProductOwner) {
-            res.status(403).json({
-                success: false,
-                message: "You are not authorized to delete this review",
-            });
-            return;
+            return next(
+                new ForbiddenError("You are not authorized to delete this review"),
+            );
         }
 
-        next();
+        return next();
     } catch (err) {
-        console.error("Delete review middleware error:", err);
-        res.status(500).json({ success: false, message: "Internal server error" });
+        return next(err);
     }
 };

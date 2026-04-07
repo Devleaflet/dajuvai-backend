@@ -1,137 +1,42 @@
-import { Request, Response } from "express";
+import { Request, Response, NextFunction } from "express";
 import { CombinedAuthRequest } from "../middlewares/auth.middleware";
 import { NotificationService } from "../service/notification.service";
-import { APIError } from "../utils/ApiError.utils";
+import { NotFoundError } from "../errors";
 
 export class NotificationController {
     private notificationService: NotificationService;
 
     constructor() {
-        this.notificationService = new NotificationService()
+        this.notificationService = new NotificationService();
     }
 
-    async getNotificationController(req: CombinedAuthRequest, res: Response) {
-        try {
-            const user = req.user;
-            const vendor = req.vendor;
-
-            if (!user && !vendor) {
-                throw new APIError(401, "Authentication required");
-            }
-
-            const notification = await this.notificationService.getNotifications(user || vendor);
-
-            res.status(200).json({
-                success: true,
-                data: notification
-            })
-
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({
-                    success: false,
-                    msg: error.message
-                })
-            } else {
-                res.status(500).json({
-                    success: false,
-                    msg: "Internal server error"
-                })
-            }
-        }
+    async getNotificationController(req: CombinedAuthRequest, res: Response, _next: NextFunction) {
+        const notification = await this.notificationService.getNotifications(req.user || req.vendor);
+        res.status(200).json({ success: true, data: notification });
     }
 
-    async markReadController(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
-        try {
-            const id = req.params.id;
-            const notificationExists = await this.notificationService.getNotificationById(id);
+    async markReadController(req: Request<{ id: string }, {}, {}, {}>, res: Response, _next: NextFunction) {
+        const id = req.params.id;
+        const notificationExists = await this.notificationService.getNotificationById(id);
+        if (!notificationExists) throw new NotFoundError("Notification");
 
-            if (!notificationExists) {
-                throw new APIError(404, "Invalid notification id")
-            }
-
-            const notification = await this.notificationService.markAsRead(id)
-
-            res.status(200).json({
-                success: true,
-                msg: "marked as read",
-                data: notification
-            })
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({
-                    success: false,
-                    msg: error.message
-                })
-            } else {
-                res.status(500).json({
-                    success: false,
-                    msg: "Internal server error"
-                })
-            }
-        }
+        const notification = await this.notificationService.markAsRead(id);
+        res.status(200).json({ success: true, msg: "marked as read", data: notification });
     }
 
-
-    async saveFcmTokenController(req: CombinedAuthRequest, res: Response) {
-        try {
-            const user = req.user;
-            const vendor = req.vendor;
-
-            if (!user && !vendor) {
-                throw new APIError(401, "Authentication required");
-            }
-
-            const { token } = req.body as { token: string };
-            if (!token) {
-                throw new APIError(400, "FCM token is required");
-            }
-
-            if (user) {
-                await this.notificationService.saveFcmToken(user.id, token, "user");
-            } else {
-                await this.notificationService.saveFcmToken(vendor.id, token, "vendor");
-            }
-
-            res.status(200).json({ success: true, msg: "FCM token saved" });
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, msg: error.message });
-            } else {
-                res.status(500).json({ success: false, msg: "Internal server error" });
-            }
+    async saveFcmTokenController(req: CombinedAuthRequest, res: Response, _next: NextFunction) {
+        const { token } = req.body as { token: string };
+        if (req.user) {
+            await this.notificationService.saveFcmToken(req.user.id, token, "user");
+        } else {
+            await this.notificationService.saveFcmToken(req.vendor.id, token, "vendor");
         }
+        res.status(200).json({ success: true, msg: "FCM token saved" });
     }
 
-    async getNotificationByIdController(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
-        try {
-            const id = req.params.id;
-
-            const notification = await this.notificationService.getNotificationById(id);
-
-            if (!notification) {
-                throw new APIError(404, "Notification does not exists")
-            }
-
-            res.status(200).json({
-                success: true,
-                data: notification
-            })
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({
-                    success: false,
-                    msg: error.message
-                })
-            } else {
-                res.status(500).json({
-                    success: false,
-                    msg: "Internal server error"
-                })
-            }
-        }
+    async getNotificationByIdController(req: Request<{ id: string }, {}, {}, {}>, res: Response, _next: NextFunction) {
+        const notification = await this.notificationService.getNotificationById(req.params.id);
+        if (!notification) throw new NotFoundError("Notification");
+        res.status(200).json({ success: true, data: notification });
     }
 }

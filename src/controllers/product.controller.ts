@@ -1,8 +1,8 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
 import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
-import { ProductInterface, ProductUpdateType } from '../utils/zod_validations/product.zod';
+import { ProductInterface } from '../utils/zod_validations/product.zod';
 import { ProductService } from '../service/product.service';
-import { APIError } from '../utils/ApiError.utils';
+import { BadRequestError, NotFoundError } from '../errors';
 import { IAdminProductQueryParams, IProductQueryParams } from '../interface/product.interface';
 import { v2 as cloudinary } from 'cloudinary';
 import { DataSource } from 'typeorm';
@@ -17,10 +17,7 @@ import config from '../config/env.config';
 export class ProductController {
     private productService: ProductService;
     private reviewService: ReviewService;
-    /**
-     * @constructor
-     * @description Instantiates ProductService for business logic related to products.
-     */
+
     constructor(dataSource: DataSource) {
         this.productService = new ProductService(dataSource);
         this.reviewService = new ReviewService();
@@ -35,122 +32,65 @@ export class ProductController {
     /**
      * @method getProductDetailById
      * @route GET /products/:id
-     * @description Retrieves detailed information for a specific product by its ID.
-     * @param {Request<{ id: string }>} req - Express request with product ID in URL params.
-     * @param {Response} res - Express response object.
-     * @returns {Promise<void>} Responds with product details JSON or error.
      * @access Public
      */
-    async getProductDetailById(req: Request<{ id: string }, {}, {}>, res: Response) {
-        try {
-            // Parse product ID from route parameters
-            const productId = parseInt(req.params.id);
+    async getProductDetailById(req: Request<{ id: string }, {}, {}>, res: Response, _next: NextFunction): Promise<void> {
+        const productId = parseInt(req.params.id);
 
-            // Fetch product details from service layer
-            const product = await this.productService.getProductDetailsById(productId);
+        const product = await this.productService.getProductDetailsById(productId);
+        const averageRating = await this.reviewService.getReviewsByProductId(productId);
 
-            const averageRating = await this.reviewService.getReviewsByProductId(productId);
-
-            // Send success response with product data
-            res.status(200).json({
-                success: true,
-                product: product,
-                avgRating: averageRating
-            })
-
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Handle unexpected errors with generic 500 response
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+        res.status(200).json({ success: true, product, avgRating: averageRating });
     }
-
-
-
-
 
     async createProduct(
         req: VendorAuthRequest<{ subcategoryId: string; categoryId: string }, {}, ProductInterface, {}>,
-        res: Response
+        res: Response,
+        _next: NextFunction
     ): Promise<void> {
-        try {
+        const data: ProductInterface = req.body;
+        const categoryId = Number(req.params.categoryId);
+        const subcategoryId = Number(req.params.subcategoryId);
 
-            const data: ProductInterface = req.body;
-            const categoryId = Number(req.params.categoryId);
-            const subcategoryId = Number(req.params.subcategoryId);
-
-            if (data.hasVariants === 'true' && (!data.variants || !Array.isArray(data.variants))) {
-                throw new APIError(400, 'Variants array is required for variant products');
-            }
-
-            const savedProduct = await this.productService.createProduct(
-                data,
-                categoryId,
-                subcategoryId,
-                Number(req.vendor.id)
-            );
-
-            res.status(201).json({
-                success: true,
-                message: 'Product created successfully',
-                data: savedProduct
-            });
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.error('createProduct error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
-            }
+        if (data.hasVariants === 'true' && (!data.variants || !Array.isArray(data.variants))) {
+            throw new BadRequestError('Variants array is required for variant products');
         }
-    }
 
+        const savedProduct = await this.productService.createProduct(
+            data,
+            categoryId,
+            subcategoryId,
+            Number(req.vendor.id)
+        );
+
+        res.status(201).json({ success: true, message: 'Product created successfully', data: savedProduct });
+    }
 
     async updateProduct(
         req: VendorAuthRequest<{ id: string; categoryId: string; subcategoryId: string }, {}, Partial<ProductInterface>, {}>,
-        res: Response
+        res: Response,
+        _next: NextFunction
     ): Promise<void> {
-        try {
-            const data: Partial<ProductInterface> = req.body;
-            const productId = req.params.id;
-            const categoryId = Number(req.params.categoryId);
-            const subcategoryId = Number(req.params.subcategoryId);
+        const data: Partial<ProductInterface> = req.body;
+        const productId = req.params.id;
+        const categoryId = Number(req.params.categoryId);
+        const subcategoryId = Number(req.params.subcategoryId);
 
-            const vendorId = await this.productService.getVendorIdByProductId(Number(productId));
+        const vendorId = await this.productService.getVendorIdByProductId(Number(productId));
 
-            const updatedProduct = await this.productService.updateProduct(
-                req.vendor ? req.vendor.id : vendorId,
-                req.vendor ? false : true,  // admin flag
-                Number(productId),
-                data,
-                categoryId,
-                subcategoryId
-            );
+        const updatedProduct = await this.productService.updateProduct(
+            req.vendor ? req.vendor.id : vendorId,
+            req.vendor ? false : true,
+            Number(productId),
+            data,
+            categoryId,
+            subcategoryId
+        );
 
-            res.status(200).json({
-                success: true,
-                message: 'Product updated successfully',
-                data: updatedProduct
-            });
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.error('updateProduct error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
-            }
-        }
+        res.status(200).json({ success: true, message: 'Product updated successfully', data: updatedProduct });
     }
 
-
-
-
-    async returnProuctRatings(products: any[]) {
+    async returnProuctRatings(products: any[]): Promise<any[]> {
         if (!products.length) return products;
 
         const productIds = products.map(p => p.id);
@@ -158,294 +98,141 @@ export class ProductController {
 
         return products.map(product => {
             const rating = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
-            return {
-                ...product,
-                avgRating: rating.avg,
-                count: rating.count,
-            };
+            return { ...product, avgRating: rating.avg, count: rating.count };
         });
     }
 
+    async getAllProducts(req: Request, res: Response, _next: NextFunction): Promise<void> {
+        const { page, limit, ...filters } = req.query;
 
-    async getAllProducts(req: Request, res: Response) {
-        try {
-            console.log("Query params:", req.query);
+        const queryParams: IProductQueryParams = {
+            ...filters,
+            page: Number(page) || 1,
+            limit: Number(limit) || 40,
+        };
 
-            const { page, limit, ...filters } = req.query;
+        const result = await this.productService.filterProducts(queryParams);
+        const productWithRatings = await this.returnProuctRatings(result.data);
 
-            const queryParams: IProductQueryParams = {
-                ...filters,
-                page: Number(page) || 1,
-                limit: Number(limit) || 40,
-            };
-
-            const result = await this.productService.filterProducts(queryParams);
-
-            const productWithRatings = await this.returnProuctRatings(result.data);
-
-            return res.status(200).json({
-                success: true,
-                message: "All products retrieved successfully",
-                data: productWithRatings,
-                meta: {
-                    total: result.total,
-                    page: result.page,
-                    limit: result.limit,
-                    totalPages: result.totalPages,
-                },
-            });
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.error("getProducts error:", error);
-                res.status(500).json({ success: false, message: "Internal Server Error" });
-            }
-        }
+        res.status(200).json({
+            success: true,
+            message: "All products retrieved successfully",
+            data: productWithRatings,
+            meta: {
+                total: result.total,
+                page: result.page,
+                limit: result.limit,
+                totalPages: result.totalPages,
+            },
+        });
     }
 
+    async getProductById(req: Request<{ id: string, subcategoryId: string }>, res: Response, _next: NextFunction): Promise<void> {
+        const { id, subcategoryId } = req.params;
 
-    async getProductById(req: Request<{ id: string, subcategoryId: string }>, res: Response) {
-        try {
-            // Extract IDs from route parameters
-            const { id, subcategoryId } = req.params;
+        const product = await this.productService.getProductById(Number(id), Number(subcategoryId));
+        if (!product) throw new NotFoundError('Product');
 
-            // Fetch product by ID and subcategory
-            const product = await this.productService.getProductById(Number(id), Number(subcategoryId));
+        const rating = await this.reviewService.getAverageRating(product.id);
+        const productWithRating = { ...product, avgRating: rating.avg, count: rating.count };
 
-            // Return 404 if product doesn't exist
-            if (!product) {
-                return res.status(404).json({ success: false, message: 'Product not found' });
-            }
-
-            const rating = await this.reviewService.getAverageRating(product.id);
-            const productWithRating = { ...product, avgRating: rating.avg, count: rating.count };
-
-            res.status(200).json({
-                success: true,
-                data: productWithRating,
-            });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('getProductById error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
-            }
-        }
+        res.status(200).json({ success: true, data: productWithRating });
     }
-
-
 
     async getProductsByVendorId(
         req: Request<{ vendorId: string }, {}, {}, { page: string, limit: string }>,
-        res: Response
-    ) {
-        try {
-            // Extract vendor ID from route parameters
-            const { vendorId } = req.params;
+        res: Response,
+        _next: NextFunction
+    ): Promise<void> {
+        const { vendorId } = req.params;
+        const { page = 1, limit = 10 } = req.query;
 
-            // Set default pagination values if not provided
-            const { page = 1, limit = 10 } = req.query;
+        const { products, total } = await this.productService.getProductsByVendorId(
+            Number(vendorId),
+            Number(page),
+            Number(limit)
+        );
 
-            // Fetch paginated products for specific vendor
-            const { products, total } = await this.productService.getProductsByVendorId(
-                Number(vendorId),
-                Number(page),
-                Number(limit)
-            );
+        const product = await this.returnProuctRatings(products);
 
-            const product = await this.returnProuctRatings(products);
-
-
-            res.status(200).json({ success: true, data: { product, total } });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('getProductsByVendorId error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
-            }
-        }
+        res.status(200).json({ success: true, data: { product, total } });
     }
 
+    async deleteProduct(req: AuthRequest<{ id: string, subcategoryId: string }>, res: Response, _next: NextFunction): Promise<void> {
+        const { id, subcategoryId } = req.params;
 
+        await this.productService.deleteProduct(Number(id), Number(subcategoryId), req.user!.id);
 
-
-    async deleteProduct(req: AuthRequest<{ id: string, subcategoryId: string }>, res: Response) {
-        try {
-            // Extract product and subcategory IDs from route parameters
-            const { id, subcategoryId } = req.params;
-
-            // Delete product with user authorization check
-            await this.productService.deleteProduct(Number(id), Number(subcategoryId), req.user!.id);
-
-            // Return 204 No Content on successful deletion
-            res.status(204).json({ success: true });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('deleteProduct error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
-            }
-        }
+        res.status(204).json({ success: true });
     }
-
-
 
     /**
      * @method deleteProductImage
      * @route DELETE /products/:id/:subcategoryId/image
-     * @description Deletes a specific image from a product, requires valid image URL and authorization.
-     * @param {AuthRequest} req - Authenticated request containing product ID, subcategory ID, and image URL.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with updated product or error.
      * @access Authenticated
      */
-    async deleteProductImage(req: CombinedAuthRequest<{ id: string, subcategoryId: string }, {}, { imageUrl: string }>, res: Response): Promise<void> {
-        try {
-            // Extract product and subcategory IDs from route parameters
-            const { id, subcategoryId } = req.params;
+    async deleteProductImage(req: CombinedAuthRequest<{ id: string, subcategoryId: string }, {}, { imageUrl: string }>, res: Response, _next: NextFunction): Promise<void> {
+        const { id, subcategoryId } = req.params;
+        const { imageUrl } = req.body;
 
-            // Extract image URL from request body
-            const { imageUrl } = req.body;
+        if (!imageUrl) throw new BadRequestError("Image URL is required");
 
-            // Validate that image URL is provided
-            if (!imageUrl) {
-                throw new APIError(400, "Image URL is required")
-            }
+        const userId = req.user?.id || req.vendor?.id;
 
-            const userId = req.user?.id || req.vendor?.id;
+        const product = await this.productService.deleteProductImage(
+            Number(id),
+            Number(subcategoryId),
+            userId,
+            imageUrl
+        );
 
-            // Delete product image through service layer with authorization
-            const product = await this.productService.deleteProductImage(
-                Number(id),
-                Number(subcategoryId),
-                userId,
-                imageUrl
-            );
+        if (!product) throw new NotFoundError("Product or image");
 
-            // Return 404 if product or image not found
-            if (!product) {
-                throw new APIError(404, "Product or image not found")
-            }
-
-            res.status(200).json({ success: true, data: product });
-        } catch (error) {
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors for debugging
-                console.error('deleteProductImage error:', error);
-                res.status(500).json({ success: false, message: 'Internal Server Error' });
-            }
-        }
+        res.status(200).json({ success: true, data: product });
     }
 
+    async deleteProductById(req: Request<{ id: string }>, res: Response, _next: NextFunction): Promise<void> {
+        const id = Number(req.params.id);
 
+        if (isNaN(id)) throw new BadRequestError("Invalid product ID");
 
-    async deleteProductById(req: Request<{ id: string }>, res: Response) {
-        try {
-            console.log("[deleteProductById] Request params:", req.params);
+        await this.productService.deleteProductById(id);
 
-            const id = Number(req.params.id);
-            console.log("[deleteProductById] Parsed product ID:", id);
-
-            if (isNaN(id)) {
-                console.warn("[deleteProductById] Invalid product ID");
-                return res.status(400).json({
-                    success: false,
-                    msg: "Invalid product ID"
-                });
-            }
-
-            console.log("[deleteProductById] Calling productService.deleteProductById...");
-            const deleteProduct = await this.productService.deleteProductById(id);
-            console.log("[deleteProductById] deleteProduct result:", deleteProduct);
-
-            res.status(200).json({
-                success: true,
-                msg: "Product deleted successfully"
-            });
-            console.log("[deleteProductById] Response sent successfully");
-        } catch (error) {
-            console.error("[deleteProductById] Error caught:", error);
-
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, msg: error.message });
-            } else {
-                res.status(500).json({ success: false, msg: "Internal server error" });
-            }
-        }
+        res.status(200).json({ success: true, msg: "Product deleted successfully" });
     }
-
 
     /**
      * @method getAdminProducts
      * @route GET /admin/products
-     * @description Fetches paginated products for admin dashboard with advanced filtering options.
-     * @param {AuthRequest} req - Authenticated request with admin query filters.
-     * @param {Response} res - Response object.
-     * @returns {Promise<void>} Responds with filtered paginated products.
      * @access Admin and staff
      */
-    async getAdminProducts(req: AuthRequest<{}, {}, {}, IAdminProductQueryParams>, res: Response) {
-        try {
-
-            // Fetch paginated products with admin-specific filtering
-            const { products, total } = await this.productService.getAdminProducts(req.query);
-
-            // console.log(products)
-
-            res.status(200).json({ success: true, data: { products, total } });
-        } catch (error) {
-            console.log(error)
-            // Handle API errors with specific status codes
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                console.log(error)
-                // Handle unexpected errors with generic 500 response
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getAdminProducts(req: AuthRequest<{}, {}, {}, IAdminProductQueryParams>, res: Response, _next: NextFunction): Promise<void> {
+        const { products, total } = await this.productService.getAdminProducts(req.query);
+        res.status(200).json({ success: true, data: { products, total } });
     }
 
-    async uplaodImage(req: Request, res: Response) {
-        try {
-            if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
-                return res.status(400).json({ success: false, message: 'No files uploaded' });
-            }
-
-            const files = req.files as Express.Multer.File[];
-
-            const uploadedUrls = await Promise.all(
-                files.map(
-                    file =>
-                        new Promise<string>((resolve, reject) => {
-                            cloudinary.uploader.upload_stream(
-                                { resource_type: 'image', folder: 'products', public_id: `prod_${Date.now()}` },
-                                (error, result) => {
-                                    if (error || !result) return reject(error || new Error('Upload failed'));
-                                    resolve(result.secure_url);
-                                }
-                            ).end(file.buffer);
-                        })
-                )
-            );
-
-            res.status(200).json({ success: true, urls: uploadedUrls });
-        } catch (err) {
-            console.error('Image upload error:', err);
-            res.status(500).json({ success: false, message: 'Image upload failed' });
+    async uplaodImage(req: Request, res: Response, _next: NextFunction): Promise<void> {
+        if (!req.files || (req.files as Express.Multer.File[]).length === 0) {
+            throw new BadRequestError('No files uploaded');
         }
+
+        const files = req.files as Express.Multer.File[];
+
+        const uploadedUrls = await Promise.all(
+            files.map(
+                file =>
+                    new Promise<string>((resolve, reject) => {
+                        cloudinary.uploader.upload_stream(
+                            { resource_type: 'image', folder: 'products', public_id: `prod_${Date.now()}` },
+                            (error, result) => {
+                                if (error || !result) return reject(error || new Error('Upload failed'));
+                                resolve(result.secure_url);
+                            }
+                        ).end(file.buffer);
+                    })
+            )
+        );
+
+        res.status(200).json({ success: true, urls: uploadedUrls });
     }
 }

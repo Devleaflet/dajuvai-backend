@@ -1,206 +1,53 @@
-import { stat } from "fs";
 import { VendorAuthRequest } from "../middlewares/auth.middleware";
-import { VendorDashBoardService } from "../service/vendor.dashboard.service"
-import { APIError } from "../utils/ApiError.utils";
-import { Response } from 'express';
-import { throwDeprecation } from "process";
+import { VendorDashBoardService } from "../service/vendor.dashboard.service";
+import { Response, NextFunction } from "express";
 
-
-/**
- * Controller for vendor dashboard related endpoints.
- */
 export class VendorDashboardController {
     private dashboardService = new VendorDashBoardService();
 
-    /**
-     * Retrieves dashboard statistics for the authenticated vendor.
-     * 
-     * @param req - VendorAuthRequest containing authenticated vendor information
-     * @param res - Express response object to send JSON response
-     * @returns Promise<void> - Responds with HTTP 200 and stats JSON on success,
-     * or appropriate error status and message on failure.
-     * 
-     * @throws APIError - Throws 401 if vendor is not authenticated.
-     * @throws APIError - Other errors from the dashboard service are handled and returned as JSON.
-     */
-    async getDashboard(req: VendorAuthRequest, res: Response): Promise<void> {
-        try {
-            const vendor = req.vendor;
-            if (!vendor || !vendor.id) {
-                throw new APIError(401, "Unauthorized");
-            }
-
-            const stats = await this.dashboardService.getStats(vendor.id);
-            res.status(200).json(stats);
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getDashboard(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
+        const stats = await this.dashboardService.getStats(req.vendor.id);
+        res.status(200).json(stats);
     }
 
-    /**
-     * Retrieves detailed order information for the authenticated vendor.
-     * 
-     * @param req - VendorAuthRequest containing authenticated vendor information
-     * @param res - Express response object to send JSON response
-     * @returns Promise<void> - Responds with HTTP 200 and order details JSON on success,
-     * or appropriate error status and message on failure.
-     * 
-     * @throws APIError - Throws 401 if vendor is not authenticated.
-     * @throws APIError - Other errors from the dashboard service are handled and returned as JSON.
-     */
-    async getVendorOrderDetails(req: VendorAuthRequest, res: Response): Promise<void> {
-        try {
-            const vendor = req.vendor;
-            if (!vendor || !vendor.id) {
-                throw new APIError(401, 'Unauthorized');
-            }
-
-            const orderDetails = await this.dashboardService.getVendorOrders(vendor.id);
-            res.status(200).json(orderDetails);
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getVendorOrderDetails(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
+        const orderDetails = await this.dashboardService.getVendorOrders(req.vendor.id);
+        res.status(200).json(orderDetails);
     }
 
-    async vendorSalesReport(req: VendorAuthRequest, res: Response): Promise<void> {
-        try {
-            const vendor = req.vendor;
-            if (!vendor || !vendor.id) {
-                throw new APIError(401, 'Unauthorized');
-            }
-
-            const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
-
-            const report = await this.dashboardService.getTotalSales(7, startDate, endDate);
-            res.status(200).json(report);
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async vendorSalesReport(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
+        const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+        const report = await this.dashboardService.getTotalSales(7, startDate, endDate);
+        res.status(200).json(report);
     }
 
-    async getLowStockProducts(req: VendorAuthRequest, res: Response): Promise<void> {
-        try {
-            const vendor = req.vendor;
-            if (!vendor || !vendor.id) {
-                throw new APIError(401, 'Unauthorized');
-            }
-
-            let { page } = req.query as { page?: number };
-            if (!page || page < 1) page = 1;
-
-            const lowStockProducts = await this.dashboardService.getLowStockProducts(vendor.id, page);
-            res.status(200).json(lowStockProducts);
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getLowStockProducts(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
+        let { page } = req.query as { page?: number };
+        if (!page || page < 1) page = 1;
+        const lowStockProducts = await this.dashboardService.getLowStockProducts(req.vendor.id, page);
+        res.status(200).json(lowStockProducts);
     }
 
-
-    async getTopSellingProduct(req: VendorAuthRequest, res: Response): Promise<void> {
-        try {
-            const vendor = req.vendor;
-            if (!vendor || !vendor.id) {
-                throw new APIError(401, 'Unauthorized');
-            }
-
-            console.log(vendor)
-
-            console.log("------------Vendor controller reached-----------")
-
-            const topSellingProduct = await this.dashboardService.getTopProductsByVendor(vendor.id);
-            res.status(200).json(topSellingProduct);
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getTopSellingProduct(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
+        const topSellingProduct = await this.dashboardService.getTopProductsByVendor(req.vendor.id);
+        res.status(200).json(topSellingProduct);
     }
 
-
-
-    async getRevenueBySubcategoryForVendor(req: VendorAuthRequest<{}, {}, {}, { startDate?: string, endDate?: string }>, res: Response): Promise<void> {
-        try {
-            const vendor = req.vendor;
-
-            const { startDate, endDate } = req.query;
-
-            const filterParams: { startDate?: string; endDate?: string } = {};
-
-            if (startDate) {
-                filterParams.startDate = startDate;
-            }
-
-            if (endDate) {
-                filterParams.endDate = endDate;
-            }
-
-            const data = await this.dashboardService.getRevenueBySubcategoryForVendor(vendor.id, filterParams)
-
-            res.status(200).json({
-                success: true,
-                data
-            })
-
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getRevenueBySubcategoryForVendor(req: VendorAuthRequest<{}, {}, {}, { startDate?: string; endDate?: string }>, res: Response, _next: NextFunction): Promise<void> {
+        const { startDate, endDate } = req.query;
+        const filterParams: { startDate?: string; endDate?: string } = {};
+        if (startDate) filterParams.startDate = startDate;
+        if (endDate) filterParams.endDate = endDate;
+        const data = await this.dashboardService.getRevenueBySubcategoryForVendor(req.vendor.id, filterParams);
+        res.status(200).json({ success: true, data });
     }
 
-    async getRevenueByCategoryForVendor(req: VendorAuthRequest<{}, {}, {}, { startDate?: string, endDate?: string }>, res: Response): Promise<void> {
-        try {
-
-            const vendor = req.vendor;
-
-            const { startDate, endDate } = req.query;
-
-            const filterParams: { startDate?: string; endDate?: string } = {};
-
-            if (startDate) {
-                filterParams.startDate = startDate;
-            }
-
-            if (endDate) {
-                filterParams.endDate = endDate;
-            }
-
-            const data = await this.dashboardService.revenueByCategoryForVendor(vendor.id, filterParams)
-
-            res.status(200).json({
-                success: true,
-                data
-            })
-
-        } catch (error) {
-            console.log(error)
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+    async getRevenueByCategoryForVendor(req: VendorAuthRequest<{}, {}, {}, { startDate?: string; endDate?: string }>, res: Response, _next: NextFunction): Promise<void> {
+        const { startDate, endDate } = req.query;
+        const filterParams: { startDate?: string; endDate?: string } = {};
+        if (startDate) filterParams.startDate = startDate;
+        if (endDate) filterParams.endDate = endDate;
+        const data = await this.dashboardService.revenueByCategoryForVendor(req.vendor.id, filterParams);
+        res.status(200).json({ success: true, data });
     }
 }

@@ -1,6 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
 import { HomePageSectionService } from '../service/homePageSection.service';
-import { APIError } from '../utils/ApiError.utils';
 import { ReviewService } from '../service/review.service';
 import { ProductController } from './product.controller';
 import { DataSource, In } from 'typeorm';
@@ -12,6 +11,7 @@ import { CategoryService } from '../service/category.service';
 import { SubcategoryService } from '../service/subcategory.service';
 import { DealService } from '../service/deal.service';
 import { Product } from '../entities/product.entity';
+import { BadRequestError, ConflictError, NotFoundError } from '../errors';
 
 /**
  * @class HomePageSectionController
@@ -19,23 +19,19 @@ import { Product } from '../entities/product.entity';
  */
 export class HomePageSectionController {
     private homePageSectionService: HomePageSectionService;
-    private reviewService: ReviewService
+    private reviewService: ReviewService;
     private productController: ProductController;
     private productService: ProductService;
     private categoryService: CategoryService;
     private subcategoryService: SubcategoryService;
     private dealService: DealService;
 
-    /**
-     * @constructor
-     * @description Instantiates HomePageSectionService for business logic.
-     */
     constructor() {
         this.homePageSectionService = new HomePageSectionService();
         this.reviewService = new ReviewService();
-        this.productController = new ProductController(AppDataSource)
-        this.productService = new ProductService(AppDataSource)
-        this.categoryService = new CategoryService()
+        this.productController = new ProductController(AppDataSource);
+        this.productService = new ProductService(AppDataSource);
+        this.categoryService = new CategoryService();
         this.subcategoryService = new SubcategoryService();
         this.dealService = new DealService();
     }
@@ -43,359 +39,170 @@ export class HomePageSectionController {
     /**
      * @method createHomePageSection
      * @route POST /api/homepage-sections
-     * @description Creates a new homepage section with title, active status, and product IDs.
-     * @param {Request} req - Express request with title, isActive, and productIds in body.
-     * @param {Response} res - Express response object.
-     * @param {NextFunction} next - Express next middleware function.
-     * @returns {Promise<void>} Responds with created section data.
-     * @access Admin and staff 
+     * @access Admin and staff
      */
-    createHomePageSection = async (req: Request<{}, {}, ICreateHomepageSectionInput, {}>, res: Response, next: NextFunction): Promise<void> => {
-        try {
+    createHomePageSection = async (req: Request<{}, {}, ICreateHomepageSectionInput, {}>, res: Response, _next: NextFunction): Promise<void> => {
+        const data: ICreateHomepageSectionInput = req.body;
 
-            console.log("📩 Incoming create home page request:", { body: req.body });
+        const existingSection = await this.homePageSectionService.checkByTitle(data.title);
+        if (existingSection) throw new ConflictError("Section with this title already exists");
 
-            const data: ICreateHomepageSectionInput = req.body;
+        switch (data.productSource) {
+            case ProductSource.MANUAL: {
+                const uniqueProductIds = [...new Set((data.productIds || []).map(Number))].filter(
+                    (id) => Number.isFinite(id)
+                );
 
-            const existingSection = await this.homePageSectionService.checkByTitle(data.title);
+                if (uniqueProductIds.length) {
+                    const productsCount = await AppDataSource.getRepository(Product).count({
+                        where: { id: In(uniqueProductIds) },
+                    });
 
-            if (existingSection) {
-                throw new APIError(404, "Section with this title already exists")
+                    if (productsCount !== uniqueProductIds.length) {
+                        throw new NotFoundError("Product");
+                    }
+                }
+
+                const homepageManual = await this.homePageSectionService.createHomePageSection(data);
+                res.status(201).json({ success: true, homepage: homepageManual });
+                break;
             }
 
-            switch (data.productSource) {
-                case ProductSource.MANUAL:
-                    {
-                        const uniqueProductIds = [...new Set((data.productIds || []).map(Number))].filter(
-                            (id) => Number.isFinite(id)
-                        );
+            case ProductSource.CATEGORY: {
+                const categoryExists = await this.categoryService.getCategoryById(data.selectedCategoryId);
+                if (!categoryExists) throw new NotFoundError("Selected category");
 
-                        if (uniqueProductIds.length) {
-                            const productsCount = await AppDataSource.getRepository(Product).count({
-                                where: { id: In(uniqueProductIds) },
-                            });
-
-                            if (productsCount !== uniqueProductIds.length) {
-                                throw new APIError(404, "Product does nto exists");
-                            }
-                        }
-                    }
-
-                    console.log("create home catalog")
-                    const homepageManual = await this.homePageSectionService.createHomePageSection(data)
-
-                    res.status(201).json({
-                        success: true,
-                        homepage: homepageManual
-                    })
-
-                    break;
-
-                case ProductSource.CATEGORY:
-                    const categoryExists = await this.categoryService.getCategoryById(data.selectedCategoryId);
-
-                    if (!categoryExists) {
-                        throw new APIError(404, "Selected category doesnot exists")
-                    }
-
-                    const homepagecategory = await this.homePageSectionService.createHomePageSection(data)
-
-                    res.status(201).json({
-                        success: true,
-                        homepage: homepagecategory
-                    })
-
-                    break;
-
-                case ProductSource.SUBCATEGORY:
-                    const subcategoryExists = await this.subcategoryService.handleGetSubcategoryById(data.selectedSubcategoryId)
-
-                    if (!subcategoryExists) {
-                        throw new APIError(404, "Selected sucategory does not exists")
-                    }
-
-                    const homepagesubcategory = await this.homePageSectionService.createHomePageSection(data);
-
-                    res.status(201).json({
-                        success: true,
-                        homepage: homepagesubcategory
-                    })
-
-                    break;
-
-                case ProductSource.DEAL:
-                    const dealExists = await this.dealService.handleGetDealById(data.selectedDealId);
-
-                    if (!dealExists) {
-                        throw new APIError(404, "selected deal doesnot exists")
-                    }
-
-                    const homepagedeal = await this.homePageSectionService.createHomePageSection(data);
-
-                    res.status(201).json({
-                        success: true,
-                        homepage: homepagedeal
-                    })
-
-                    break;
-
-                default:
-                    console.warn("⚠️ Invalid product source type received:", data.productSource);
-                    throw new APIError(400, "Invalid product source type");
+                const homepagecategory = await this.homePageSectionService.createHomePageSection(data);
+                res.status(201).json({ success: true, homepage: homepagecategory });
+                break;
             }
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors
-                console.error('Create homepage section error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
+
+            case ProductSource.SUBCATEGORY: {
+                const subcategoryExists = await this.subcategoryService.handleGetSubcategoryById(data.selectedSubcategoryId);
+                if (!subcategoryExists) throw new NotFoundError("Selected subcategory");
+
+                const homepagesubcategory = await this.homePageSectionService.createHomePageSection(data);
+                res.status(201).json({ success: true, homepage: homepagesubcategory });
+                break;
             }
+
+            case ProductSource.DEAL: {
+                const dealExists = await this.dealService.handleGetDealById(data.selectedDealId);
+                if (!dealExists) throw new NotFoundError("Selected deal");
+
+                const homepagedeal = await this.homePageSectionService.createHomePageSection(data);
+                res.status(201).json({ success: true, homepage: homepagedeal });
+                break;
+            }
+
+            default:
+                throw new BadRequestError("Invalid product source type");
         }
     };
 
     /**
      * @method updateHomePageSection
      * @route PUT /api/homepage-sections/:id
-     * @description Updates an existing homepage section by ID.
-     * @param {Request} req - Express request with section ID in params and optional title, isActive, productIds in body.
-     * @param {Response} res - Express response object.
-     * @param {NextFunction} next - Express next middleware function.
-     * @returns {Promise<void>} Responds with updated section data.
      * @access Admin and staff
      */
-    updateHomePageSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            // Extract and validate section ID
-            console.log("Update catalog body: ", req.body);
-            const { id } = req.params;
-            if (!id || isNaN(Number(id))) {
-                throw new APIError(400, 'Valid section ID is required');
-            }
+    updateHomePageSection = async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
+        const { id } = req.params;
+        if (!id || isNaN(Number(id))) throw new BadRequestError('Valid section ID is required');
 
-            // Extract request body
-            const { title, isActive, productIds, productSource, selectedCategoryId, selectedSubcategoryId, selectedDealId } = req.body;
+        const { title, isActive, productIds, productSource, selectedCategoryId, selectedSubcategoryId, selectedDealId } = req.body;
 
-            const updatePayload = {
-                sectionId: Number(id),
-                title,
-                isActive,
-                productIds,
-                productSource,
-                selectedCategoryId,
-                selectedSubcategoryId,
-                selectedDealId
-            };
+        const updatePayload = {
+            sectionId: Number(id),
+            title,
+            isActive,
+            productIds,
+            productSource,
+            selectedCategoryId,
+            selectedSubcategoryId,
+            selectedDealId,
+        };
 
-            console.log("➡️ Update request data: ", updatePayload);
+        const section = await this.homePageSectionService.updateHomePageSection(updatePayload);
 
-            // Update section via service
-            const section = await this.homePageSectionService.updateHomePageSection(updatePayload);
-
-            console.log("✅ Section returned from service: ", section);
-
-            // Send success response
-            res.status(200).json({
-                success: true,
-                message: 'Home page section updated successfully',
-                data: section
-            });
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors
-                console.error('❌ Update homepage section error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+        res.status(200).json({ success: true, message: 'Home page section updated successfully', data: section });
     };
-
 
     /**
      * @method getAllHomePageSections
      * @route GET /api/homepage-sections
-     * @description Retrieves all homepage sections, optionally including inactive ones.
-     * @param {Request<{}, {}, {}, { includeInactive?: string }>} req - Express request with optional includeInactive query param.
-     * @param {Response} res - Express response object.
-     * @param {NextFunction} next - Express next middleware function.
-     * @returns {Promise<void>} Responds with list of sections and count.
      * @access Public
      */
-    getAllHomePageSections = async (req: Request<{}, {}, {}, { search: string, includeInactive: boolean }>, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            // Parse and convert includeInactive query parameter
-            const includeInactiveRaw = req.query.includeInactive;
-            const includeInactiveBool = includeInactiveRaw?.toString().toLowerCase() === 'true';
-            
-            // Fetch sections with products
-            const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool, req.query.search);
+    getAllHomePageSections = async (req: Request<{}, {}, {}, { search: string, includeInactive: boolean }>, res: Response, _next: NextFunction): Promise<void> => {
+        const includeInactiveRaw = req.query.includeInactive;
+        const includeInactiveBool = includeInactiveRaw?.toString().toLowerCase() === 'true';
 
-            const allProductIds = [
-                ...new Set(sections.flatMap((section) => section.products?.map((p) => p.id) ?? [])),
-            ];
+        const sections = await this.homePageSectionService.getAllHomePageSections(includeInactiveBool, req.query.search);
 
-            const ratingsMap = await this.reviewService.getBatchAverageRatings(allProductIds);
+        const allProductIds = [
+            ...new Set(sections.flatMap((section) => section.products?.map((p) => p.id) ?? [])),
+        ];
 
-            const sectionsWithRatings = sections.map((section) => {
-                const productsWithRatings = (section.products ?? []).map((product) => {
-                    const ratings = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
-                    return {
-                        ...product,
-                        avgRating: ratings.avg,
-                        reviewCount: ratings.count,
-                    };
-                });
+        const ratingsMap = await this.reviewService.getBatchAverageRatings(allProductIds);
 
-                return {
-                    ...section,
-                    products: productsWithRatings,
-                };
-            });
-
-            res.status(200).json({
-                success: true,
-                message: 'Home page sections retrieved successfully',
-                data: sectionsWithRatings,
-            });
-
-
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors
-                console.error('Get all homepage sections error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
-    };
-
-
-    /**
-      * @method getHomePageSectionById
-      * @route GET /api/homepage-sections/:id
-      * @description Retrieves a specific homepage section by its ID.
-      * @param {Request<{ id: string }>} req - Express request with section ID.
-      * @param {Response} res - Express response object.
-      * @param {NextFunction} next - Express next middleware function.
-      * @returns {Promise<void>} Responds with section data.
-      * @access Public
-      */
-    getHomePageSectionById = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            // Extract and validate section ID
-            const { id } = req.params;
-            if (!id || isNaN(Number(id))) {
-                throw new APIError(400, 'Valid section ID is required');
-            }
-
-            // Fetch section via service
-            const section = await this.homePageSectionService.getHomePageSectionById(Number(id));
-
-            const productIds = (section.products ?? []).map((p) => p.id);
-            const ratingsMap = await this.reviewService.getBatchAverageRatings(productIds);
-
+        const sectionsWithRatings = sections.map((section) => {
             const productsWithRatings = (section.products ?? []).map((product) => {
                 const ratings = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
-                return { ...product, avgRating: ratings.avg, count: ratings.count };
+                return { ...product, avgRating: ratings.avg, reviewCount: ratings.count };
             });
 
-            // Send success response
-            res.status(200).json({
-                success: true,
-                message: 'Home page section retrieved successfully',
-                data: productsWithRatings
-            });
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors
-                console.error('Get homepage section by ID error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+            return { ...section, products: productsWithRatings };
+        });
+
+        res.status(200).json({ success: true, message: 'Home page sections retrieved successfully', data: sectionsWithRatings });
+    };
+
+    /**
+     * @method getHomePageSectionById
+     * @route GET /api/homepage-sections/:id
+     * @access Public
+     */
+    getHomePageSectionById = async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
+        const { id } = req.params;
+        if (!id || isNaN(Number(id))) throw new BadRequestError('Valid section ID is required');
+
+        const section = await this.homePageSectionService.getHomePageSectionById(Number(id));
+
+        const productIds = (section.products ?? []).map((p) => p.id);
+        const ratingsMap = await this.reviewService.getBatchAverageRatings(productIds);
+
+        const productsWithRatings = (section.products ?? []).map((product) => {
+            const ratings = ratingsMap.get(product.id) ?? { avg: 0, count: 0 };
+            return { ...product, avgRating: ratings.avg, count: ratings.count };
+        });
+
+        res.status(200).json({ success: true, message: 'Home page section retrieved successfully', data: productsWithRatings });
     };
 
     /**
      * @method deleteHomePageSection
      * @route DELETE /api/homepage-sections/:id
-     * @description Deletes a homepage section by its ID.
-     * @param {Request<{ id: string }>} req - Express request with section ID.
-     * @param {Response} res - Express response object.
-     * @param {NextFunction} next - Express next middleware function.
-     * @returns {Promise<void>} Responds with success message.
      * @access Admin
      */
-    deleteHomePageSection = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            // Extract and validate section ID
-            const { id } = req.params;
-            if (!id || isNaN(Number(id))) {
-                throw new APIError(400, 'Valid section ID is required');
-            }
+    deleteHomePageSection = async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
+        const { id } = req.params;
+        if (!id || isNaN(Number(id))) throw new BadRequestError('Valid section ID is required');
 
-            // Delete section via service
-            const result = await this.homePageSectionService.deleteHomePageSection(Number(id));
+        const result = await this.homePageSectionService.deleteHomePageSection(Number(id));
 
-            // Send success response
-            res.status(200).json({
-                success: true,
-                message: result.message
-            });
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors
-                console.error('Delete homepage section error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+        res.status(200).json({ success: true, message: result.message });
     };
 
     /**
      * @method toggleSectionStatus
      * @route PATCH /api/homepage-sections/:id/status
-     * @description Toggles the active status of a homepage section by its ID.
-     * @param {Request<{ id: string }>} req - Express request with section ID.
-     * @param {Response} res - Express response object.
-     * @param {NextFunction} next - Express next middleware function.
-     * @returns {Promise<void>} Responds with updated section data.
      * @access Admin and staff
      */
-    toggleSectionStatus = async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-        try {
-            // Extract and validate section ID
-            const { id } = req.params;
-            if (!id || isNaN(Number(id))) {
-                throw new APIError(400, 'Valid section ID is required');
-            }
+    toggleSectionStatus = async (req: Request, res: Response, _next: NextFunction): Promise<void> => {
+        const { id } = req.params;
+        if (!id || isNaN(Number(id))) throw new BadRequestError('Valid section ID is required');
 
-            // Toggle section status via service
-            const section = await this.homePageSectionService.toggleSectionStatus(Number(id));
+        const section = await this.homePageSectionService.toggleSectionStatus(Number(id));
 
-            // Send success response
-            res.status(200).json({
-                success: true,
-                message: 'Section status toggled successfully',
-                data: section
-            });
-        } catch (error) {
-            // Handle known API errors
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Log unexpected errors
-                console.error('Toggle section status error:', error);
-                res.status(500).json({ success: false, message: 'Internal server error' });
-            }
-        }
+        res.status(200).json({ success: true, message: 'Section status toggled successfully', data: section });
     };
 }

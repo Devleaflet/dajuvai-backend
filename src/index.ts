@@ -13,6 +13,8 @@ import { corsOptions } from "./config/cors.config";
 import { initSocket } from "./socket/socket";
 import config from "./config/env.config";
 import { cacheInvalidationMiddleware } from "./middlewares/cacheInvalidation.middleware";
+import logger from "./utils/logger";
+import { globalErrorHandler, notFoundHandler } from "./middlewares/errorHandler.middleware";
 
 // Route imports
 import userRouter from "./routes/user.routes";
@@ -47,7 +49,6 @@ import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
 import homecategoryRoutes from "./routes/home.category.routes";
-import { errorHandler } from "./utils/errorHandler";
 import notificationRoutes from "./routes/notification.routes";
 import checkoutRouter from "./routes/mobile.checkout.routes";
 import { updateAllProductPrices } from "./scripts/update.product";
@@ -61,6 +62,31 @@ mkdirSync(uploadDir, { recursive: true }); // recursive:true ensures parent dirs
 
 // Initialize Express app
 const app = express();
+
+// Create HTTP server early so process-level hooks can reference it for graceful shutdown
+const server = createServer(app);
+
+// ── Process-level safety net ──────────────────────────────────────────────────
+// Must be registered before any async code runs.
+
+process.on("uncaughtException", (error: Error) => {
+    logger.error("UNCAUGHT EXCEPTION — shutting down", {
+        name: error.name,
+        message: error.message,
+        stack: error.stack,
+    });
+    process.exit(1);
+});
+
+process.on("unhandledRejection", (reason: unknown) => {
+    logger.error("UNHANDLED REJECTION — shutting down", {
+        reason: reason instanceof Error ? reason.message : String(reason),
+        stack: reason instanceof Error ? reason.stack : undefined,
+    });
+    server.close(() => process.exit(1));
+    // Force exit if graceful close hangs
+    setTimeout(() => process.exit(1), 10_000).unref();
+});
 
 app.use(cors(corsOptions));
 
@@ -131,15 +157,17 @@ app.use("/api/checkout", checkoutRouter);
 app.use("/api/profile", productRecommendRouter);
 app.use("/api/delivery", deliveryRouter);
 
-app.use(errorHandler as unknown as express.ErrorRequestHandler);
+// ── Catch-all for unknown routes + global error handler ───────────────────────
+// These MUST come after all route registrations.
+app.use(notFoundHandler);
+app.use(globalErrorHandler);
 
 const port = config.PORT;
-const server = createServer(app);
 
 // Initialize database connection
 AppDataSource.initialize()
     .then(async () => {
-        console.log("Database connected");
+        logger.info("Database connected");
 
         // Start background cron jobs for token and order cleanup
         tokenCleanUp();
@@ -151,12 +179,12 @@ AppDataSource.initialize()
         // Start Express + WebSocket server
         initSocket(server);
         server.listen(port, () => {
-            console.log(
+            logger.info(
                 `Server running at http://localhost:${port} or https://leafletdv.onrender.com`,
             );
         });
     })
     .catch((error) => {
-        // Log any errors during DB connection setup
-        console.error("Error during Data Source initialization", error);
+        logger.error("Failed to initialize database", { error });
+        process.exit(1);
     });
