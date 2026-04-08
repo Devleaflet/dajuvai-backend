@@ -14,6 +14,11 @@ import {
 import { OrderItem } from "../entities/orderItems.entity";
 import bcrypt from "bcryptjs";
 import { User, UserRole } from "../entities/user.entity";
+import {
+    sanitizeAssignmentForDelivery,
+    sanitizeOrderForDelivery,
+    sanitizeRiderForDelivery,
+} from "../utils/deliveryResponseSanitizer.utils";
 
 export class DeliveryAdminService {
     private orderRepository: Repository<Order>;
@@ -110,14 +115,16 @@ export class DeliveryAdminService {
                 email: data.email,
                 documentUrl: data.documentUrl
             });
-            return await manager.save(rider);
+            const saved = await manager.save(rider);
+            return sanitizeRiderForDelivery(saved);
         });
     }
 
     async getAllRiders() {
-        return await this.riderRepository.find({
+        const riders = await this.riderRepository.find({
             order: { createdAt: "DESC" },
         });
+        return riders.map((r) => sanitizeRiderForDelivery(r));
     }
 
     async getRiderById(riderId: number) {
@@ -126,7 +133,11 @@ export class DeliveryAdminService {
             relations: ["assignments"],
         });
         if (!rider) throw new APIError(404, "rider not found");
-        return rider;
+        // Keep assignments but do not expose documentUrl.
+        return {
+            ...sanitizeRiderForDelivery(rider),
+            assignments: (rider as any).assignments ?? [],
+        };
     }
 
     async resetRiderPassword(riderId: number, newPassword: string) {
@@ -160,15 +171,26 @@ export class DeliveryAdminService {
     async getProcessingOrders() {
         const orders = await this.orderRepository.find({
             where: { deliveryStatus: DeliveryStatus.ORDER_PROCESSING },
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.variant",
+                "orderItems.vendor",
+            ],
+            order: { createdAt: "DESC" },
         });
 
-        return orders;
+        return orders.map((o) => sanitizeOrderForDelivery(o));
     }
 
     async getProcessingOrderById(orderId: number) {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
+                "orderedBy",
+                "shippingAddress",
                 "orderItems",
                 "orderItems.product",
                 "orderItems.variant",
@@ -187,7 +209,7 @@ export class DeliveryAdminService {
         //     );
         // }
 
-        return order;
+        return sanitizeOrderForDelivery(order);
     }
 
     async markAtWarehouse(orderId: number) {
@@ -196,7 +218,7 @@ export class DeliveryAdminService {
         this.validateAndTransition(order, DeliveryStatus.AT_WAREHOUSE);
         await this.orderRepository.save(order);
 
-        return order;
+        return sanitizeOrderForDelivery(order);
     }
 
     async collectOrderItems(orderItemId: number) {
@@ -239,7 +261,7 @@ export class DeliveryAdminService {
 
     async getWarehouseOrderQueue(page: number = 1, limit: number = 20) {
         const [orders, total] = await this.orderRepository.findAndCount({
-            where: { deliveryStatus: DeliveryStatus.READY_FOR_DELIVERY },
+            where: { deliveryStatus: DeliveryStatus.AT_WAREHOUSE},
             relations: [
                 "orderedBy",
                 "shippingAddress",
@@ -255,7 +277,7 @@ export class DeliveryAdminService {
         const totalPages = Math.ceil(total / limit);
 
         return {
-            orders,
+            orders: orders.map((o) => sanitizeOrderForDelivery(o)),
             pagination: {
                 total,
                 currentPage: page,
@@ -328,7 +350,7 @@ export class DeliveryAdminService {
         const totalPages = Math.ceil(total / limit);
 
         return {
-            data: assignments,
+            data: assignments.map((a) => sanitizeAssignmentForDelivery(a)),
             pagination: {
                 total,
                 currentPage: page,
@@ -357,7 +379,7 @@ export class DeliveryAdminService {
             );
         }
 
-        return assignment;
+        return sanitizeAssignmentForDelivery(assignment);
     }
 
     async backToWarehouse(orderId: number) {
@@ -367,6 +389,6 @@ export class DeliveryAdminService {
         order.status = OrderStatus.RETURNED;
         await this.orderRepository.save(order);
 
-        return order;
+        return sanitizeOrderForDelivery(order);
     }
 }

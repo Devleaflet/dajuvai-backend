@@ -690,6 +690,7 @@ export class OrderService {
 
             // Update order status
             order.status = OrderStatus.CANCELLED;
+            order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
             await this.orderRepository.save(order);
             await this.notificationService.notifyPaymentFailed(order.id, order.orderedById);
             return { success: true }
@@ -1110,6 +1111,8 @@ export class OrderService {
         } else {
             order.paymentStatus = PaymentStatus.UNPAID;
             order.status = OrderStatus.CANCELLED;
+            order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
+
         }
 
         // Save updated order info
@@ -1160,6 +1163,7 @@ export class OrderService {
 
         // Optionally, update order status to CANCELLED
         order.status = OrderStatus.CANCELLED;
+        order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
 
         await this.orderRepository.save(order);
         await this.notificationService.notifyPaymentCancelled(order.id, order.orderedById);

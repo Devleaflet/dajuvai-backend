@@ -9,6 +9,7 @@ import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import { DeliveryFailedType } from "../utils/zod_validations/delivery.zod";
 import { DeliveryAdminService } from "./delivery.admin.service";
+import { sanitizeAssignmentForDelivery } from "../utils/deliveryResponseSanitizer.utils";
 
 export class DeliveryRiderService {
     private orderRepository: Repository<Order>;
@@ -23,11 +24,13 @@ export class DeliveryRiderService {
     }
 
     async getRiderAssignments(riderId: number) {
-        return await this.assignmentRepository.find({
+        const assignments = await this.assignmentRepository.find({
             where: { riderId },
             relations: ["order", "order.shippingAddress", "order.orderedBy"],
             order: { createdAt: "DESC" },
         });
+
+        return assignments.map((a) => sanitizeAssignmentForDelivery(a));
     }
 
     async confirmPickup(orderId: number, riderId: number) {

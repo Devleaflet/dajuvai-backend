@@ -2,7 +2,7 @@ import cron from "node-cron";
 import { User } from "../entities/user.entity";
 import { In, LessThan, Not } from "typeorm";
 import AppDataSource from "../config/db.config";
-import { OrderStatus, Order, PaymentStatus, PaymentMethod } from '../entities/order.entity';
+import { OrderStatus, Order, PaymentStatus, PaymentMethod, DeliveryStatus } from '../entities/order.entity';
 import { sendOrderStatusEmail } from "./nodemailer.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { NotificationService } from "../service/notification.service";
@@ -159,6 +159,7 @@ export const startOrderCleanupJob = () => {
                 console.log(`🚨 [ORDER] Processing Order ID: ${order.id} ...`);
 
                 order.status = OrderStatus.CANCELLED;
+                order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
                 await orderDB.save(order);
                 console.log(`🛑 [ORDER] Order #${order.id} status set to CANCELLED.`);
 

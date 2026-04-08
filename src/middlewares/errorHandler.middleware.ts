@@ -26,6 +26,15 @@ function normalizeError(err: unknown): APIError {
     // Already one of our errors — pass through unchanged
     if (err instanceof APIError) return err;
 
+    // Legacy APIError shape used across older services/controllers (src/utils/ApiError.utils.ts)
+    // This prevents intentional 4xx errors from being downgraded to a generic 500.
+    if (err && typeof err === "object") {
+        const e = err as { status?: unknown; message?: unknown };
+        if (typeof e.status === "number" && typeof e.message === "string") {
+            return new APIError(e.status, e.message, "LEGACY_API_ERROR");
+        }
+    }
+
     // TypeORM: QueryFailedError — map PostgreSQL error codes
     if (err instanceof QueryFailedError) {
         const pgErr = err as QueryFailedError & {
@@ -55,7 +64,10 @@ function normalizeError(err: unknown): APIError {
         }
 
         // All other DB errors are programmer errors — never expose internals
-        return new DatabaseError("A database error occurred");
+        const dbErr = new DatabaseError("A database error occurred");
+        dbErr.stack = err.stack;
+        (dbErr as unknown as { cause?: unknown }).cause = err;
+        return dbErr;
     }
 
     // TypeORM: EntityNotFoundError (thrown by findOneOrFail)

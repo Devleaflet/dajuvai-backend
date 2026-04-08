@@ -229,7 +229,7 @@ export class DeliveryService {
 
     async getWarehouseOrderQueue(page: number = 1, limit: number = 20) {
         const [orders, total] = await this.orderRepository.findAndCount({
-            where: { deliveryStatus: DeliveryStatus.READY_FOR_DELIVERY },
+            where: { deliveryStatus: DeliveryStatus.AT_WAREHOUSE },
             relations: [
                 "orderedBy",
                 "shippingAddress",

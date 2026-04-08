@@ -2,7 +2,7 @@ import { Request, Response } from 'express';
 import crypto from 'crypto';
 import axios from 'axios';
 import { Router } from 'express';
-import { Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
+import { DeliveryStatus, Order, OrderStatus, PaymentStatus } from '../entities/order.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { CartService } from '../service/cart.service';
@@ -529,6 +529,7 @@ paymentRouter.get('/notification', async (req: Request, res: Response) => {
             case 'CANCELLED':
                 order.paymentStatus = PaymentStatus.UNPAID;
                 order.status = OrderStatus.CANCELLED;
+                order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
                 console.log(`Order ${order.id} marked as UNPAID due to ${Status}`);
                 await orderDb.save(order);
                 await notificationService.notifyPaymentFailed(order.id, userId);
