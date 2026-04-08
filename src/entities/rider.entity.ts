@@ -38,6 +38,9 @@ export class Rider {
     @OneToMany(() => DeliveryAssignment, (a) => a.rider)
     assignments: DeliveryAssignment[];
 
+    @Column({ nullable: true })
+    documentUrl: string;
+
     @CreateDateColumn()
     createdAt: Date;
 

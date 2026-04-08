@@ -121,7 +121,7 @@ export class ImageDeletionService {
             });
 
             if (result.result === 'ok') {
-                console.log(`✓ Image deleted successfully: ${publicId}`);
+                console.log(`\n\n\n✓ Image deleted successfully: ${publicId}\n\n\n`);
                 return {
                     publicId,
                     success: true,

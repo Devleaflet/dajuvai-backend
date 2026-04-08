@@ -5,6 +5,7 @@ export const createRiderSchema = z.object({
     email: z.string().email("invalid email"),
     phoneNumber: z.string().length(10, "phone number must be 10 digits long"),
     password: z.string().min(8, "password must be atleast 8 characters long"),
+    documentUrl: z.string().url("invalid url")
 });
 
 export const assignRiderSchema = z.object({
