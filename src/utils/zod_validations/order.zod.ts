@@ -5,7 +5,7 @@ import { z } from 'zod';
  * Enum schema for Nepal provinces used in shipping addresses.
  */
 const ProvinceEnum = z.enum([
-    'Province 1',
+    'Koshi',
     'Madhesh',
     'Bagmati',
     'Gandaki',

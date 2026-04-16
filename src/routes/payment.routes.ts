@@ -299,8 +299,6 @@ paymentRouter.post('/initiate-payment', async (req: Request, res: Response) => {
         // Update order with merchant transaction info
         order.mTransactionId = merchantTxnId;
         order.instrumentName = instrumentCode;
-        // order.paymentStatus = PaymentStatus.PAID;
-        // order.status = OrderStatus.CONFIRMED;
 
         await orderDb.save(order);
         console.log('Order updated with merchantTxnId:', order);

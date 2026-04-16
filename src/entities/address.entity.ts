@@ -4,7 +4,7 @@ import { User } from './user.entity';
 import { Order } from './order.entity';
 
 export enum Province {
-    PROVINCE_1 = 'Province 1',
+    Koshi = 'Koshi',
     MADHESH = 'Madhesh',
     BAGMATI = 'Bagmati',
     GANDAKI = 'Gandaki',

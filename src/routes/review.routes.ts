@@ -112,6 +112,12 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  *                       type: number
  *                       format: float
  *                       example: 4.3
+ *                     total:
+ *                       type: integer
+ *                       example: 2
+ *                     totalPages:
+ *                       type: integer
+ *                       example: 1
  *                     reviews:
  *                       type: array
  *                       items:
@@ -119,16 +125,53 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  *                         properties:
  *                           id:
  *                             type: integer
+ *                             example: 1
  *                           userId:
  *                             type: integer
+ *                             example: 42
  *                           rating:
  *                             type: number
  *                             format: float
+ *                             example: 4.5
  *                           comment:
  *                             type: string
+ *                             example: "Great product, highly recommend!"
  *                           createdAt:
  *                             type: string
  *                             format: date-time
+ *                             example: "2026-04-10T08:30:00.000Z"
+ *                           user:
+ *                             type: object
+ *                             properties:
+ *                               id:
+ *                                 type: integer
+ *                                 example: 42
+ *                               name:
+ *                                 type: string
+ *                                 example: "Nirajan Thapa"
+ *             example:
+ *               success: true
+ *               data:
+ *                 averageRating: 4.3
+ *                 total: 2
+ *                 totalPages: 1
+ *                 reviews:
+ *                   - id: 1
+ *                     userId: 42
+ *                     rating: 4.5
+ *                     comment: "Great product, highly recommend!"
+ *                     createdAt: "2026-04-10T08:30:00.000Z"
+ *                     user:
+ *                       id: 42
+ *                       name: "Nirajan Thapa"
+ *                   - id: 2
+ *                     userId: 7
+ *                     rating: 4.0
+ *                     comment: "Good quality but shipping was slow."
+ *                     createdAt: "2026-04-12T14:15:00.000Z"
+ *                     user:
+ *                       id: 7
+ *                       name: "Sanskriti Adhikari"
  *       404:
  *         description: Product not found or no reviews available
  *       500:

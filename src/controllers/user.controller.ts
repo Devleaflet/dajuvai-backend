@@ -1160,6 +1160,8 @@ export class UserController {
                 return;
             }
 
+            console.log(req.body)
+
             // Validate and parse user ID from URL parameters
             const id = parseInt(req.params.id, 10);
             if (isNaN(id)) {
