@@ -1,7 +1,7 @@
 import { Repository } from "typeorm";
 import { Promo } from '../entities/promo.entity';
 import AppDataSource from "../config/db.config";
-import { CreatePromoCodeInput, DeletePromoCodeInput } from "../utils/zod_validations/promo.zod";
+import { CreatePromoCodeInput, DeletePromoCodeInput, UpdatePromoCodeInput } from "../utils/zod_validations/promo.zod";
 import { APIError } from "../utils/ApiError.utils";
 
 export class PromoService {
@@ -57,5 +57,12 @@ export class PromoService {
                 id: promoCodeId
             }
         })
+    }
+
+    async updatePromoCodeById(promoCode: number, data: UpdatePromoCodeInput) {
+        return await this.promoRepository.save({
+            id: promoCode,
+            ...data,
+        });
     }
 }

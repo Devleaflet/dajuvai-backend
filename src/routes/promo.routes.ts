@@ -2,7 +2,7 @@
 import { Router } from "express";
 import { authMiddleware, isAdminOrStaff, validateZod } from "../middlewares/auth.middleware";
 import { PromoController } from "../controllers/promo.controller";
-import { createPromoSchema, deletePromoSchema } from "../utils/zod_validations/promo.zod";
+import { createPromoSchema, deletePromoSchema, editPromoSchema } from "../utils/zod_validations/promo.zod";
 
 const promoRouter = Router();
 
@@ -291,5 +291,89 @@ promoRouter.post("/", authMiddleware, isAdminOrStaff, validateZod(createPromoSch
  *                   example: Internal Server Error
  */
 promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePromoSchema, "params"), promoController.deletePromo.bind(promoController));
+
+
+/**
+ * @swagger
+ * /api/promo/{id}:
+ *   patch:
+ *     summary: Update a promo code
+ *     description: Allows admin or staff to update an existing promo code.
+ *     tags:
+ *       - Promo
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: Promo ID
+ *         schema:
+ *           type: integer
+ *           example: 1
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               promoCode:
+ *                 type: string
+ *                 example: "NEWYEAR25"
+ *               discountPercentage:
+ *                 type: number
+ *                 minimum: 1
+ *                 maximum: 100
+ *                 example: 25
+ *               applyOn:
+ *                 type: string
+ *                 enum: [LINE_TOTAL, SHIPPING]
+ *                 example: LINE_TOTAL
+ *               isValid:
+ *                 type: boolean
+ *                 example: true
+ *     responses:
+ *       200:
+ *         description: Promo code updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 sucess:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: Promo code update succesfully
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     promoCode:
+ *                       type: string
+ *                       example: "NEWYEAR25"
+ *                     discountPercentage:
+ *                       type: number
+ *                       example: 25
+ *                     applyOn:
+ *                       type: string
+ *                       example: LINE_TOTAL
+ *                     isValid:
+ *                       type: boolean
+ *                       example: true
+ *       400:
+ *         description: Bad request (invalid input)
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden (not admin or staff)
+ *       404:
+ *         description: Promo code not found
+ */
+promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
 
 export default promoRouter;

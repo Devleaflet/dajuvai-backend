@@ -24,5 +24,9 @@ export const deletePromoSchema = z.object({
         .transform(Number)
         .pipe(z.number().int().positive())
 })
+
+export const editPromoSchema = createPromoSchema.partial();
+
+export type UpdatePromoCodeInput = z.infer<typeof editPromoSchema>;
 export type CreatePromoCodeInput = z.infer<typeof createPromoSchema>;
 export type DeletePromoCodeInput = z.infer<typeof deletePromoSchema>;
