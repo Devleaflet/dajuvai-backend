@@ -169,6 +169,21 @@ export class VendorService {
         });
     }
 
+
+    async checkVendorProduct(id: number): Promise<boolean> {
+        const vendorWithProduct = await this.vendorRepository.findOne({
+            where: { id },
+            relations: {
+                products: true
+            }
+        })
+
+        if (vendorWithProduct.products.length > 0) {
+            return false
+        }
+        return true
+    }
+    
     /**
      * Updates vendor information.
      * @param id - Vendor ID.

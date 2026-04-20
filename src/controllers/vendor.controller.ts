@@ -21,7 +21,7 @@ import {
     IUpdateVendorRequestV2,
     IUpdateVendorPaymentOptionRequest,
 } from '../utils/zod_validations/vendor.zod';
-import { ValidationError, BadRequestError, AuthError, ForbiddenError, NotFoundError, ConflictError, RateLimitError } from '../errors';
+import { ValidationError, BadRequestError, AuthError, ForbiddenError, NotFoundError, ConflictError, RateLimitError, APIError } from '../errors';
 import { DistrictService } from '../service/district.service';
 import { findUserByEmail } from '../service/user.service';
 import config from '../config/env.config';
@@ -348,6 +348,12 @@ export class VendorController {
 
         const vendorExists = await this.vendorService.findVendorById(Number(vendorId));
         if (!vendorExists) throw new NotFoundError('Vendor');
+
+        const productExists = await this.vendorService.checkVendorProduct(Number(vendorId))
+
+        if (productExists) {
+            throw new APIError(400, "Vendor delete failed , This vendor has active products ")
+        }
 
         await this.vendorService.deleteVendor(Number(vendorId));
 
