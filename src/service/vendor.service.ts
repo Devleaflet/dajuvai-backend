@@ -178,10 +178,7 @@ export class VendorService {
             }
         })
 
-        if (vendorWithProduct.products.length > 0) {
-            return false
-        }
-        return true
+        return vendorWithProduct.products.length > 0
     }
     
     /**
