@@ -35,6 +35,7 @@ export interface IAdminProductQueryParams {
     filter?: 'out_of_stock';
 
     vendorId?: string
+    search?: string;
 }
 
 export interface IVendorProductQueryParams {

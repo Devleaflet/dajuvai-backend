@@ -14,7 +14,10 @@ import { initSocket } from "./socket/socket";
 import config from "./config/env.config";
 import { cacheInvalidationMiddleware } from "./middlewares/cacheInvalidation.middleware";
 import logger from "./utils/logger";
-import { globalErrorHandler, notFoundHandler } from "./middlewares/errorHandler.middleware";
+import {
+  globalErrorHandler,
+  notFoundHandler,
+} from "./middlewares/errorHandler.middleware";
 
 // Route imports
 import userRouter from "./routes/user.routes";
@@ -40,10 +43,10 @@ import vendorOrdersRouter from "./routes/vendor/vendor.orders.routes";
 
 // Utils for scheduled background tasks
 import {
-    orderCleanUp,
-    removeUnverifiedVendors,
-    startOrderCleanupJob,
-    tokenCleanUp,
+  orderCleanUp,
+  removeUnverifiedVendors,
+  startOrderCleanupJob,
+  tokenCleanUp,
 } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
@@ -72,22 +75,22 @@ const server = createServer(app);
 // Must be registered before any async code runs.
 
 process.on("uncaughtException", (error: Error) => {
-    logger.error("UNCAUGHT EXCEPTION — shutting down", {
-        name: error.name,
-        message: error.message,
-        stack: error.stack,
-    });
-    process.exit(1);
+  logger.error("UNCAUGHT EXCEPTION — shutting down", {
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+  });
+  process.exit(1);
 });
 
 process.on("unhandledRejection", (reason: unknown) => {
-    logger.error("UNHANDLED REJECTION — shutting down", {
-        reason: reason instanceof Error ? reason.message : String(reason),
-        stack: reason instanceof Error ? reason.stack : undefined,
-    });
-    server.close(() => process.exit(1));
-    // Force exit if graceful close hangs
-    setTimeout(() => process.exit(1), 10_000).unref();
+  logger.error("UNHANDLED REJECTION — shutting down", {
+    reason: reason instanceof Error ? reason.message : String(reason),
+    stack: reason instanceof Error ? reason.stack : undefined,
+  });
+  server.close(() => process.exit(1));
+  // Force exit if graceful close hangs
+  setTimeout(() => process.exit(1), 10_000).unref();
 });
 
 app.use(cors(corsOptions));
@@ -105,27 +108,25 @@ app.use(cookieParser());
 app.use(passport.initialize());
 
 app.use(
-    cacheInvalidationMiddleware([
-        {
-            matchPrefix: "/api/categories",
-            invalidatePrefixes: ["/api/categories", "/api/product", "/api/homepage"],
-        },
-        {
-            matchPrefix: "/api/product",
-            invalidatePrefixes: ["/api/product", "/api/categories", "/api/homepage"],
-        },
-        {
-            matchPrefix: "/api/homepage",
-            invalidatePrefixes: ["/api/homepage"],
-        },
-    ]),
+  cacheInvalidationMiddleware([
+    {
+      matchPrefix: "/api/categories",
+      invalidatePrefixes: ["/api/categories", "/api/product", "/api/homepage"],
+    },
+    {
+      matchPrefix: "/api/product",
+      invalidatePrefixes: ["/api/product", "/api/categories", "/api/homepage"],
+    },
+    {
+      matchPrefix: "/api/homepage",
+      invalidatePrefixes: ["/api/homepage"],
+    },
+  ]),
 );
 
 app.use((req, res, next) => {
-    console.log(
-        `[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`,
-    );
-    next();
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  next();
 });
 // Setup Swagger UI for API documentation at /docs route
 app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
@@ -176,25 +177,25 @@ const port = config.PORT;
 
 // Initialize database connection
 AppDataSource.initialize()
-    .then(async () => {
-        logger.info("Database connected");
+  .then(async () => {
+    logger.info("Database connected");
 
-        // Start background cron jobs for token and order cleanup
-        tokenCleanUp();
-        orderCleanUp();
-        startOrderCleanupJob();
-        removeUnverifiedVendors();
-        // await updateAllProductPrices(AppDataSource)
+    // Start background cron jobs for token and order cleanup
+    tokenCleanUp();
+    orderCleanUp();
+    startOrderCleanupJob();
+    removeUnverifiedVendors();
+    // await updateAllProductPrices(AppDataSource)
 
-        // Start Express + WebSocket server
-        initSocket(server);
-        server.listen(port, () => {
-            logger.info(
-                `Server running at http://localhost:${port} or https://leafletdv.onrender.com`,
-            );
-        });
-    })
-    .catch((error) => {
-        logger.error("Failed to initialize database", { error });
-        process.exit(1);
+    // Start Express + WebSocket server
+    initSocket(server);
+    server.listen(port, () => {
+      logger.info(
+        `Server running at http://localhost:${port} or https://leafletdv.onrender.com`,
+      );
     });
+  })
+  .catch((error) => {
+    logger.error("Failed to initialize database", { error });
+    process.exit(1);
+  });

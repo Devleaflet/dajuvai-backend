@@ -691,7 +691,7 @@ export class ProductService {
     async getAdminProducts(
         params: IAdminProductQueryParams
     ): Promise<{ products: Product[]; total: number; page: number; limit: number }> {
-        const { page = 1, limit = 7, sort = 'createdAt', filter, vendorId } = params;
+        const { page = 1, limit = 7, sort = 'createdAt', filter, vendorId, search } = params;
 
         const query = this.productRepository.createQueryBuilder('product')
             .leftJoinAndSelect('product.vendor', 'vendor')
@@ -742,6 +742,12 @@ export class ProductService {
 
         if (vendorId) {
             query.andWhere('product.vendorId = :vendorId', { vendorId })
+        }
+
+        if (search && search.trim()) {
+            query.andWhere('(product.name ILIKE :search OR vendor.businessName ILIKE :search)', {
+                search: `%${search.trim()}%`,
+            });
         }
 
         switch (sort) {

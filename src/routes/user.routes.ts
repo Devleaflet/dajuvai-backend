@@ -1,26 +1,40 @@
-import { Router, Request, Response, NextFunction } from 'express';
-import rateLimit from 'express-rate-limit';
-import passport from 'passport';
-import { UserController } from '../controllers/user.controller';
-import { authMiddleware, isAccountOwner, isAdmin, isAdminOrStaff, validateZod } from '../middlewares/auth.middleware';
-import { adminResetPasswordSchema, changeEmailSchema, loginSchema, resetPasswordSchema, signupSchema, verificationTokenSchema, verifyEmailChangeSchema, verifyTokenSchema } from '../utils/zod_validations/user.zod';
-import { deleteUserDataByFacebookId } from '../service/user.service';
-import { APIError } from '../utils/ApiError.utils';
-import { UserRole } from '../entities/user.entity';
-import config from '../config/env.config';
-import jwt from "jsonwebtoken"
+import { Router, Request, Response, NextFunction } from "express";
+import rateLimit from "express-rate-limit";
+import passport from "passport";
+import { UserController } from "../controllers/user.controller";
+import {
+  authMiddleware,
+  isAccountOwner,
+  isAdmin,
+  isAdminOrStaff,
+  validateZod,
+} from "../middlewares/auth.middleware";
+import {
+  adminResetPasswordSchema,
+  changeEmailSchema,
+  loginSchema,
+  resetPasswordSchema,
+  signupSchema,
+  verificationTokenSchema,
+  verifyEmailChangeSchema,
+  verifyTokenSchema,
+} from "../utils/zod_validations/user.zod";
+import { deleteUserDataByFacebookId } from "../service/user.service";
+import { APIError } from "../utils/ApiError.utils";
+import { UserRole } from "../entities/user.entity";
+import config from "../config/env.config";
+import jwt from "jsonwebtoken";
 
 const userRouter = Router();
 const userController = new UserController();
 
 const frontendUrl = config.FRONTEND_URL;
 
-
 // Rate limiter for sensitive endpoints
 const authRateLimiter = rateLimit({
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limit each IP to 5 requests per window
-    message: 'Too many requests, please try again later.',
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Limit each IP to 5 requests per window
+  message: "Too many requests, please try again later.",
 });
 
 /**
@@ -123,7 +137,10 @@ const authRateLimiter = rateLimit({
  *                   type: string
  *                   example: "Registration service temporarily unavailable"
  */
-userRouter.post("/admin/signup", userController.adminSignup.bind(userController));
+userRouter.post(
+  "/admin/signup",
+  userController.adminSignup.bind(userController),
+);
 
 /**
  * @swagger
@@ -233,7 +250,12 @@ userRouter.post("/admin/signup", userController.adminSignup.bind(userController)
  *                   type: string
  *                   example: Registration service temporarily unavailable
  */
-userRouter.post("/signup/staff", authMiddleware, isAdmin, userController.staffSignup.bind(userController));
+userRouter.post(
+  "/signup/staff",
+  authMiddleware,
+  isAdmin,
+  userController.staffSignup.bind(userController),
+);
 
 /**
  * @swagger
@@ -342,7 +364,6 @@ userRouter.post("/signup/staff", authMiddleware, isAdmin, userController.staffSi
  */
 userRouter.get("/staff", userController.getAllStaff.bind(userController));
 
-
 /**
  * @swagger
  * /api/auth/staff/{id}:
@@ -394,7 +415,12 @@ userRouter.get("/staff", userController.getAllStaff.bind(userController));
  *       500:
  *         description: Internal server error
  */
-userRouter.delete("/staff/:id", authMiddleware, isAdmin, userController.deleteStaff.bind(userController))
+userRouter.delete(
+  "/staff/:id",
+  authMiddleware,
+  isAdmin,
+  userController.deleteStaff.bind(userController),
+);
 
 /**
  * @swagger
@@ -484,9 +510,12 @@ userRouter.delete("/staff/:id", authMiddleware, isAdmin, userController.deleteSt
  *                   type: string
  *                   example: "Internal server error"
  */
-userRouter.put("/staff/:id", authMiddleware, isAdmin, userController.updateStaff.bind(userController))
-
-
+userRouter.put(
+  "/staff/:id",
+  authMiddleware,
+  isAdmin,
+  userController.updateStaff.bind(userController),
+);
 
 /**
  * @swagger
@@ -647,9 +676,8 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *       403:
  *         description: Forbidden - Not an admin
  */
-userRouter.get('/users', userController.getUsers.bind(userController));
+userRouter.get("/users", userController.getUsers.bind(userController));
 //authMiddleware, isAdminOrStaff,
-
 
 /**
  * @swagger
@@ -715,7 +743,11 @@ userRouter.get('/users', userController.getUsers.bind(userController));
  *       409:
  *         description: Email or username already in use
  */
-userRouter.post('/signup', validateZod(signupSchema), userController.signup.bind(userController));
+userRouter.post(
+  "/signup",
+  validateZod(signupSchema),
+  userController.signup.bind(userController),
+);
 
 /**
  * @swagger
@@ -759,7 +791,12 @@ userRouter.post('/signup', validateZod(signupSchema), userController.signup.bind
  *       429:
  *         description: Too many requests, please try again later
  */
-userRouter.post('/verify/resend', authRateLimiter, validateZod(verificationTokenSchema), userController.sendVerificationToken.bind(userController));
+userRouter.post(
+  "/verify/resend",
+  authRateLimiter,
+  validateZod(verificationTokenSchema),
+  userController.sendVerificationToken.bind(userController),
+);
 
 /**
  * @swagger
@@ -808,7 +845,11 @@ userRouter.post('/verify/resend', authRateLimiter, validateZod(verificationToken
  *       410:
  *         description: Token expired
  */
-userRouter.post('/verify', validateZod(verifyTokenSchema), userController.verifyToken.bind(userController));
+userRouter.post(
+  "/verify",
+  validateZod(verifyTokenSchema),
+  userController.verifyToken.bind(userController),
+);
 
 /**
  * @swagger
@@ -881,7 +922,11 @@ userRouter.post('/verify', validateZod(verifyTokenSchema), userController.verify
  *       401:
  *         description: Email not verified
  */
-userRouter.post('/login', validateZod(loginSchema), userController.login.bind(userController));
+userRouter.post(
+  "/login",
+  validateZod(loginSchema),
+  userController.login.bind(userController),
+);
 
 /**
  * @swagger
@@ -909,7 +954,10 @@ userRouter.post('/login', validateZod(loginSchema), userController.login.bind(us
  *       500:
  *         description: Internal server error
  */
-userRouter.post('/refresh-token', userController.refreshToken.bind(userController));
+userRouter.post(
+  "/refresh-token",
+  userController.refreshToken.bind(userController),
+);
 
 /**
  * @swagger
@@ -935,7 +983,7 @@ userRouter.post('/refresh-token', userController.refreshToken.bind(userControlle
  *       500:
  *         description: Internal server error
  */
-userRouter.post('/logout', userController.logout.bind(userController));
+userRouter.post("/logout", userController.logout.bind(userController));
 
 /**
  * @swagger
@@ -948,7 +996,10 @@ userRouter.post('/logout', userController.logout.bind(userController));
  *       302:
  *         description: Redirects to Google authentication page
  */
-userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'profile'] }));
+userRouter.get(
+  "/google",
+  passport.authenticate("google", { scope: ["email", "profile"] }),
+);
 
 /**
  * @swagger
@@ -1001,7 +1052,10 @@ userRouter.get('/google', passport.authenticate('google', { scope: ['email', 'pr
  *       401:
  *         description: Invalid or expired Google token
  */
-userRouter.post('/google/mobile', userController.googleMobileLogin.bind(userController));
+userRouter.post(
+  "/google/mobile",
+  userController.googleMobileLogin.bind(userController),
+);
 
 /**
  * @swagger
@@ -1015,76 +1069,93 @@ userRouter.post('/google/mobile', userController.googleMobileLogin.bind(userCont
  *         description: Redirects to frontend with token on success, or with error on failure
  */
 userRouter.get(
-    "/google/callback",
+  "/google/callback",
 
-    passport.authenticate("google", {
-        session: false,
-        failureRedirect: `${frontendUrl}/auth/google/callback?error=authentication_error`,
-    }),
-
-    async (req: any, res: Response) => {
-        try {
-            const { user } = req.user;
-
-            if (!user) {
-                console.error("Google OAuth failed - no user");
-
-                return res.redirect(
-                    `${frontendUrl}/auth/google/callback?error=authentication_error`
-                );
-            }
-
-            const token = jwt.sign(
-                {
-                    id: user.id,
-                    email: user.email,
-                    role: user.role,
-                },
-                config.JWT_SECRET,
-                {
-                    expiresIn: "15m",
-                }
-            );
-
-            const refreshToken = jwt.sign(
-                {
-                    id: user.id,
-                    email: user.email,
-                    role: user.role,
-                },
-                config.JWT_REFRESH_SECRET,
-                {
-                    expiresIn: "1d",
-                }
-            );
-
-            res.cookie("token", token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "none",
-                maxAge: 15 * 60 * 1000,
-            });
-
-            res.cookie("refreshToken", refreshToken, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "none",
-                maxAge: 24 * 60 * 60 * 1000,
-            });
-
-            // Redirect to frontend callback with token and refreshToken
-            res.redirect(`${frontendUrl}/auth/google/callback?token=${token}&refreshToken=${refreshToken}`);
-
-        } catch (error) {
-            console.error("Google OAuth callback error:", error);
-
-            res.redirect(
-                `${frontendUrl}/auth/google/callback?error=authentication_error`
-            );
+  (req: any, res: Response, next: any) => {
+    passport.authenticate(
+      "google",
+      { session: false },
+      (err: any, authResult: any, info: any) => {
+        if (err) {
+          console.error("Google OAuth callback error:", err);
+          return res.redirect(
+            `${frontendUrl}/auth/google/callback?error=server_error`,
+          );
         }
-    }
-);
+        if (!authResult) {
+          return res.redirect(
+            `${frontendUrl}/auth/google/callback?error=${info?.message || "authentication_error"}`,
+          );
+        }
+        req.user = authResult;
+        next();
+      },
+    )(req, res, next);
+  },
 
+  async (req: any, res: Response) => {
+    try {
+      const { user } = req.user;
+
+      if (!user) {
+        console.error("Google OAuth failed - no user");
+
+        return res.redirect(
+          `${frontendUrl}/auth/google/callback?error=authentication_error`,
+        );
+      }
+
+      const token = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+        },
+        config.JWT_SECRET,
+        {
+          expiresIn: "15m",
+        },
+      );
+
+      const refreshToken = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          role: user.role,
+        },
+        config.JWT_REFRESH_SECRET,
+        {
+          expiresIn: "1d",
+        },
+      );
+
+      res.cookie("token", token, {
+        httpOnly: true,
+        secure: config.NODE_ENV === "production",
+        sameSite: "none",
+        maxAge: 15 * 60 * 1000,
+      });
+
+      res.cookie("refreshToken", refreshToken, {
+        httpOnly: true,
+        secure: config.NODE_ENV === "production",
+        sameSite: "none",
+        maxAge: 24 * 60 * 60 * 1000,
+      });
+
+      // Redirect to frontend callback with token and refreshToken
+      res.redirect(
+        `${frontendUrl}/auth/google/callback?token=${token}&refreshToken=${refreshToken}`,
+      );
+    } catch (error) {
+      console.error("Google OAuth callback error:", error);
+
+      res.redirect(
+        `${frontendUrl}/auth/google/callback?error=authentication_error`,
+      );
+    }
+  },
+);
 
 /**
  * @swagger
@@ -1155,24 +1226,29 @@ userRouter.get(
  *         bearerFormat: JWT
  *         description: JWT token stored in an httpOnly cookie, extracted by the cookieExtractor function
  */
-userRouter.get('/me', passport.authenticate('jwt', { session: false }), async (req: any, res: Response) => {
+userRouter.get(
+  "/me",
+  passport.authenticate("jwt", { session: false }),
+  async (req: any, res: Response) => {
     try {
-        const user = req.user;
+      const user = req.user;
 
-        res.status(200).json({
-            success: true,
-            data: {
-                userId: user.id,
-                email: user.email,
-                role: user.role || UserRole.USER
-            },
-        });
+      res.status(200).json({
+        success: true,
+        data: {
+          userId: user.id,
+          email: user.email,
+          role: user.role || UserRole.USER,
+        },
+      });
     } catch (error) {
-        console.error('Error in /me endpoint:', error);
-        res.status(500).json({ success: false, message: 'Internal server error' });
+      console.error("Error in /me endpoint:", error);
+      res
+        .status(500)
+        .json({ success: false, message: "Internal server error" });
     }
-});
-
+  },
+);
 
 /**
  * @swagger
@@ -1260,31 +1336,32 @@ userRouter.get('/me', passport.authenticate('jwt', { session: false }), async (r
  *                   type: string
  *                   example: Internal server error
  */
-userRouter.post("/facebook/data-deletion", async (req: Request, res: Response) => {
+userRouter.post(
+  "/facebook/data-deletion",
+  async (req: Request, res: Response) => {
     try {
-        const { user_id } = req.body;
-        const deleteUser = await deleteUserDataByFacebookId(user_id)
-        res.status(200).json({
-            success: true,
-            msg: "User deleted succesfully",
-            data: deleteUser
-        })
+      const { user_id } = req.body;
+      const deleteUser = await deleteUserDataByFacebookId(user_id);
+      res.status(200).json({
+        success: true,
+        msg: "User deleted succesfully",
+        data: deleteUser,
+      });
     } catch (error) {
-        if (error instanceof APIError) {
-            res.status(error.status).json({
-                success: false,
-                msg: error.message
-            })
-        } else {
-            res.status(500).json({
-                success: false,
-                msg: "Internal server error"
-            })
-        }
+      if (error instanceof APIError) {
+        res.status(error.status).json({
+          success: false,
+          msg: error.message,
+        });
+      } else {
+        res.status(500).json({
+          success: false,
+          msg: "Internal server error",
+        });
+      }
     }
-})
-
-
+  },
+);
 
 /**
  * @swagger
@@ -1297,7 +1374,10 @@ userRouter.post("/facebook/data-deletion", async (req: Request, res: Response) =
  *       302:
  *         description: Redirects to Facebook authentication page
  */
-userRouter.get('/facebook', passport.authenticate('facebook', { scope: ['email', 'public_profile'] }));
+userRouter.get(
+  "/facebook",
+  passport.authenticate("facebook", { scope: ["email", "public_profile"] }),
+);
 
 /**
  * @swagger
@@ -1317,17 +1397,23 @@ userRouter.get('/facebook', passport.authenticate('facebook', { scope: ['email',
  *       302:
  *         description: Redirects to frontend with JWT token
  */
-userRouter.get('/facebook/callback', passport.authenticate('facebook', { session: false, failureRedirect: "/api/auth/login?error=facebook_auth_failed" }), (req: any, res: Response) => {
+userRouter.get(
+  "/facebook/callback",
+  passport.authenticate("facebook", {
+    session: false,
+    failureRedirect: "/api/auth/login?error=facebook_auth_failed",
+  }),
+  (req: any, res: Response) => {
     const { user, token } = req.user;
-    res.cookie('token', token, {
-        httpOnly: true,
-        secure: config.NODE_ENV === 'production',
-        maxAge: 2 * 60 * 60 * 1000,
-        sameSite: 'none'
+    res.cookie("token", token, {
+      httpOnly: true,
+      secure: config.NODE_ENV === "production",
+      maxAge: 2 * 60 * 60 * 1000,
+      sameSite: "none",
     });
     res.redirect(`${frontendUrl}/google-auth-callback`);
-});
-
+  },
+);
 
 /**
  * @swagger
@@ -1371,7 +1457,12 @@ userRouter.get('/facebook/callback', passport.authenticate('facebook', { session
  *       429:
  *         description: Too many requests, please try again later
  */
-userRouter.post('/forgot-password', authRateLimiter, validateZod(verificationTokenSchema), userController.forgotPassword.bind(userController));
+userRouter.post(
+  "/forgot-password",
+  authRateLimiter,
+  validateZod(verificationTokenSchema),
+  userController.forgotPassword.bind(userController),
+);
 
 /**
  * @swagger
@@ -1428,9 +1519,20 @@ userRouter.post('/forgot-password', authRateLimiter, validateZod(verificationTok
  *       429:
  *         description: Too many requests, please try again later
  */
-userRouter.post('/reset-password', authRateLimiter, validateZod(resetPasswordSchema), userController.resetPassword.bind(userController));
+userRouter.post(
+  "/reset-password",
+  authRateLimiter,
+  validateZod(resetPasswordSchema),
+  userController.resetPassword.bind(userController),
+);
 
-userRouter.put("/admin/vendors/:vendorId/change-vendor-password", authMiddleware, isAdmin, validateZod(adminResetPasswordSchema, "body"), userController.adminChangeVendorPassword.bind(userController))
+userRouter.put(
+  "/admin/vendors/:vendorId/change-vendor-password",
+  authMiddleware,
+  isAdmin,
+  validateZod(adminResetPasswordSchema, "body"),
+  userController.adminChangeVendorPassword.bind(userController),
+);
 
 /**
  * @swagger
@@ -1496,7 +1598,7 @@ userRouter.put("/admin/vendors/:vendorId/change-vendor-password", authMiddleware
  *       404:
  *         description: User not found
  */
-userRouter.get('/users/:id', userController.getUserById.bind(userController));
+userRouter.get("/users/:id", userController.getUserById.bind(userController));
 
 /**
  * @swagger
@@ -1574,7 +1676,12 @@ userRouter.get('/users/:id', userController.getUserById.bind(userController));
  *       404:
  *         description: User not found
  */
-userRouter.put('/users/:id', authMiddleware, isAccountOwner, userController.updateUser.bind(userController));
+userRouter.put(
+  "/users/:id",
+  authMiddleware,
+  isAccountOwner,
+  userController.updateUser.bind(userController),
+);
 
 /**
  * @swagger
@@ -1620,7 +1727,12 @@ userRouter.put('/users/:id', authMiddleware, isAccountOwner, userController.upda
  *       409:
  *         description: Email already in use
  */
-userRouter.patch('/change-email', authMiddleware, validateZod(changeEmailSchema), userController.updateEmail.bind(userController));
+userRouter.patch(
+  "/change-email",
+  authMiddleware,
+  validateZod(changeEmailSchema),
+  userController.updateEmail.bind(userController),
+);
 
 /**
  * @swagger
@@ -1683,8 +1795,12 @@ userRouter.patch('/change-email', authMiddleware, validateZod(changeEmailSchema)
  *       410:
  *         description: Token expired
  */
-userRouter.post('/verify-email', authMiddleware, validateZod(verifyEmailChangeSchema), userController.verifyEmailChange.bind(userController));
-
+userRouter.post(
+  "/verify-email",
+  authMiddleware,
+  validateZod(verifyEmailChangeSchema),
+  userController.verifyEmailChange.bind(userController),
+);
 
 userRouter.delete("/:id", userController.deleteUserHandler);
 // isAdminOrStaff,
@@ -1749,6 +1865,9 @@ userRouter.delete("/:id", userController.deleteUserHandler);
  *                   type: string
  *                   example: Email verification service temporarily unavailable
  */
-userRouter.get("/user/check-email", userController.checkEmailExists.bind(userController))
+userRouter.get(
+  "/user/check-email",
+  userController.checkEmailExists.bind(userController),
+);
 
 export default userRouter;
