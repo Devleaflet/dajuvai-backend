@@ -55,6 +55,35 @@ export const verifyTokenSchema = z.object({
 });
 
 /**
+ * Schema for updating a staff member (admin-only).
+ * Fields are optional but at least one must be provided.
+ * If password is provided, confirmPassword must match and meet the same
+ * complexity rules enforced at signup.
+ */
+export const updateStaffSchema = z.object({
+    username: z.string().min(3, "Username must be at least 3 characters").optional(),
+    email: z.string().email("Invalid email format").optional(),
+    fullName: z.string().min(1, "Full name is required").optional(),
+    phoneNumber: z
+        .string()
+        .regex(/^[0-9]{7,15}$/, "Invalid phone number")
+        .optional(),
+    password: z.string()
+        .min(8, "Password must be at least 8 characters long")
+        .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+        .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+        .regex(/[0-9]/, "Password must contain at least one number")
+        .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character")
+        .optional(),
+    confirmPassword: z.string().optional(),
+}).refine(data => Object.keys(data).length > 0, {
+    message: "At least one field is required",
+}).refine(data => !data.password || data.password === data.confirmPassword, {
+    message: "Passwords do not match",
+    path: ["confirmPassword"],
+});
+
+/**
  * Schema for updating user profile.
  * Fields are optional: username, email, role.
  * Validates role against UserRole enum.
@@ -70,6 +99,7 @@ export const updateUserSchema = z.object({
     role: z.nativeEnum(UserRole, {
         errorMap: () => ({ message: "Invalid role" }),
     }).optional(),
+    profilePicture: z.string().url("Invalid profile picture URL").optional(),
     address: z
         .object({
             province: z.nativeEnum(Province).optional(),
@@ -130,4 +160,5 @@ export type ResetPasswordInput = z.infer<typeof resetPasswordSchema>;
 export type ChangeEmailInput = z.infer<typeof changeEmailSchema>;
 export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
+export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;
 export type AdminResetPasswordInput = z.infer<typeof adminResetPasswordSchema>;

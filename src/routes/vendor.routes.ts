@@ -1,19 +1,26 @@
-import { Router } from 'express';
-import { VendorController } from '../controllers/vendor.controller';
-import { authMiddleware, combinedAuthMiddleware, isAdmin, isAdminOrStaff, isVendor, restrictToVendorOrAdmin, vendorAuthMiddleware } from '../middlewares/auth.middleware';
+import { Router } from "express";
+import { VendorController } from "../controllers/vendor.controller";
 import {
-    vendorSignupSchema,
-    vendorLoginSchema,
-    updateVendorSchema,
-    vendorSignupSchemav2,
-    updateVendorSchema2,
-    updateVendorPaymentOptionSchema,
-} from '../utils/zod_validations/vendor.zod';
+  authMiddleware,
+  combinedAuthMiddleware,
+  isAdmin,
+  isAdminOrStaff,
+  isVendor,
+  restrictToVendorOrAdmin,
+  vendorAuthMiddleware,
+} from "../middlewares/auth.middleware";
+import {
+  vendorSignupSchema,
+  vendorLoginSchema,
+  updateVendorSchema,
+  vendorSignupSchemav2,
+  updateVendorSchema2,
+  updateVendorPaymentOptionSchema,
+} from "../utils/zod_validations/vendor.zod";
 
-import { validateZod } from '../middlewares/auth.middleware';
-import { ProductController } from '../controllers/product.controller';
-import AppDataSource from '../config/db.config';
-
+import { validateZod } from "../middlewares/auth.middleware";
+import { ProductController } from "../controllers/product.controller";
+import AppDataSource from "../config/db.config";
 
 const router = Router();
 const vendorController = new VendorController();
@@ -139,9 +146,17 @@ const productController = new ProductController(AppDataSource);
  *               message: "Service temporarily unavailable"
  */
 
-router.get('/', authMiddleware, isAdminOrStaff, vendorController.getVendors.bind(vendorController));
+router.get(
+  "/",
+  authMiddleware,
+  isAdminOrStaff,
+  vendorController.getVendors.bind(vendorController),
+);
 
-router.get('/partial/vendors', vendorController.getPartialVendors.bind(vendorController));
+router.get(
+  "/partial/vendors",
+  vendorController.getPartialVendors.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -278,8 +293,12 @@ router.get('/partial/vendors', vendorController.getPartialVendors.bind(vendorCon
  *                   type: string
  *                   example: "Service temporarily unavailable"
  */
-router.get("/unapprove/list", authMiddleware, isAdminOrStaff, vendorController.getUnapprovedVendorList.bind(vendorController));
-
+router.get(
+  "/unapprove/list",
+  authMiddleware,
+  isAdminOrStaff,
+  vendorController.getUnapprovedVendorList.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -358,7 +377,10 @@ router.get("/unapprove/list", authMiddleware, isAdminOrStaff, vendorController.g
  *                   type: string
  *                   example: "Internal Server Error"
  */
-router.get('/:vendorId/products', productController.getProductsByVendorId.bind(productController));
+router.get(
+  "/:vendorId/products",
+  productController.getProductsByVendorId.bind(productController),
+);
 
 /**
  * @swagger
@@ -430,10 +452,15 @@ router.get('/:vendorId/products', productController.getProductsByVendorId.bind(p
  *                   type: string
  *                   example: "Vendor service temporarily unavailable"
  */
-router.get('/:id', vendorController.getVendorById.bind(vendorController));
+router.get("/:id", vendorController.getVendorById.bind(vendorController));
 
 // /api/vendors/auth/vendor
-router.get('/auth/vendor', vendorAuthMiddleware, isVendor, vendorController.authVendor.bind(vendorController));
+router.get(
+  "/auth/vendor",
+  vendorAuthMiddleware,
+  isVendor,
+  vendorController.authVendor.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -628,7 +655,13 @@ router.get('/auth/vendor', vendorAuthMiddleware, isVendor, vendorController.auth
  *               success: false
  *               message: "Vendor registration service temporarily unavailable"
  */
-router.post('/signup', authMiddleware, isAdmin, validateZod(vendorSignupSchema), vendorController.vendorSignup.bind(vendorController));
+router.post(
+  "/signup",
+  authMiddleware,
+  isAdmin,
+  validateZod(vendorSignupSchema),
+  vendorController.vendorSignup.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -823,7 +856,11 @@ router.post('/signup', authMiddleware, isAdmin, validateZod(vendorSignupSchema),
  *               success: false
  *               message: "Vendor registration service temporarily unavailable"
  */
-router.post("/request/register", validateZod(vendorSignupSchema), vendorController.vendorSignup.bind(vendorController))
+router.post(
+  "/request/register",
+  validateZod(vendorSignupSchema),
+  vendorController.vendorSignup.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -971,7 +1008,11 @@ router.post("/request/register", validateZod(vendorSignupSchema), vendorControll
  *               success: false
  *               message: "Authentication service temporarily unavailable"
  */
-router.post('/login', validateZod(vendorLoginSchema), vendorController.login.bind(vendorController));
+router.post(
+  "/login",
+  validateZod(vendorLoginSchema),
+  vendorController.login.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -999,7 +1040,10 @@ router.post('/login', validateZod(vendorLoginSchema), vendorController.login.bin
  *       500:
  *         description: Internal server error
  */
-router.post('/refresh-token', vendorController.refreshToken.bind(vendorController));
+router.post(
+  "/refresh-token",
+  vendorController.refreshToken.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -1025,15 +1069,13 @@ router.post('/refresh-token', vendorController.refreshToken.bind(vendorControlle
  *       500:
  *         description: Internal server error
  */
-router.post('/logout', vendorController.logout.bind(vendorController));
+router.post("/logout", vendorController.logout.bind(vendorController));
 
 // router.post('/verify/resend', authRateLimiter, validateZod(verificationTokenSchema), vendorController.sendVerificationToken.bind(vendorController));
 
 // router.post('/verify', validateZod(verifyTokenSchema), vendorController.verifyToken.bind(vendorController));
 
-
 // router.post('/forgot-password', authRateLimiter, validateZod(verificationTokenSchema), vendorController.forgotPassword.bind(vendorController));
-
 
 // router.post('/reset-password', authRateLimiter, vendorController.resetPassword.bind(vendorController));
 
@@ -1274,8 +1316,13 @@ router.post('/logout', vendorController.logout.bind(vendorController));
  *               success: false
  *               message: "Vendor update service temporarily unavailable"
  */
-router.put('/:id', combinedAuthMiddleware, restrictToVendorOrAdmin, validateZod(updateVendorSchema), vendorController.updateVendor.bind(vendorController));
-
+router.put(
+  "/:id",
+  combinedAuthMiddleware,
+  restrictToVendorOrAdmin,
+  validateZod(updateVendorSchema),
+  vendorController.updateVendor.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -1333,7 +1380,12 @@ router.put('/:id', combinedAuthMiddleware, restrictToVendorOrAdmin, validateZod(
  *                   type: string
  *                   example: "Vendor update service temporarily unavailable"
  */
-router.put("/approve/:id", authMiddleware, isAdminOrStaff, vendorController.approveVendor.bind(vendorController));
+router.put(
+  "/approve/:id",
+  authMiddleware,
+  isAdminOrStaff,
+  vendorController.approveVendor.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -1391,10 +1443,12 @@ router.put("/approve/:id", authMiddleware, isAdminOrStaff, vendorController.appr
  *                   type: string
  *                   example: "Vendor update service temporarily unavailable"
  */
-router.delete("/:id", authMiddleware, isAdmin, vendorController.deleteVendor.bind(vendorController));
-
-
-
+router.delete(
+  "/:id",
+  authMiddleware,
+  isAdmin,
+  vendorController.deleteVendor.bind(vendorController),
+);
 
 // ---------------------------- v2 routes ------------------------------------------------------------------------------------
 
@@ -1444,9 +1498,9 @@ router.delete("/:id", authMiddleware, isAdmin, vendorController.deleteVendor.bin
  *         description: Internal server error
  */
 router.post(
-    '/request/register-v2',
-    validateZod(vendorSignupSchemav2),
-    vendorController.vendorSignupV2.bind(vendorController)
+  "/request/register-v2",
+  validateZod(vendorSignupSchemav2),
+  vendorController.vendorSignupV2.bind(vendorController),
 );
 
 /**
@@ -1499,12 +1553,13 @@ router.post(
  *       500:
  *         description: Internal server error
  */
-router.put("/v2/:id",
-    validateZod(updateVendorSchema2, "body"),
-    combinedAuthMiddleware,
-    restrictToVendorOrAdmin,
-    vendorController.updateVendorV2.bind(vendorController)
-)
+router.put(
+  "/v2/:id",
+  validateZod(updateVendorSchema2, "body"),
+  combinedAuthMiddleware,
+  restrictToVendorOrAdmin,
+  vendorController.updateVendorV2.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -1559,13 +1614,11 @@ router.put("/v2/:id",
  *         description: Internal server error
  */
 router.patch(
-    '/:vendorId/payment-options/:paymentOptionId',
-    validateZod(updateVendorPaymentOptionSchema),
-    combinedAuthMiddleware,
-    restrictToVendorOrAdmin,
-    vendorController.updatePaymentOption.bind(vendorController)
+  "/:vendorId/payment-options/:paymentOptionId",
+  validateZod(updateVendorPaymentOptionSchema),
+  combinedAuthMiddleware,
+  restrictToVendorOrAdmin,
+  vendorController.updatePaymentOption.bind(vendorController),
 );
-
-
 
 export default router;

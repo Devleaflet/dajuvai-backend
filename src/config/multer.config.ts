@@ -10,13 +10,18 @@ export const multerOptions = {
             'image/webp',
             'image/avif',
             'application/pdf',
-            'image/heic',   
-            'image/heif',   
-            'image/x-canon-cr2' 
+            'image/heic',
+            'image/heif',
+            'image/x-canon-cr2',
+            'application/vnd.ms-excel',
+            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            'application/msword',
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            'text/csv',
         ];
 
         if (!allowedTypes.includes(file.mimetype)) {
-            return cb(new Error('Only JPEG, PNG, WebP images and PDF files are allowed'), false);
+            return cb(new Error('Only JPEG, PNG, WebP images, PDF, Word, Excel and CSV files are allowed'), false);
         }
         cb(null, true);
     },

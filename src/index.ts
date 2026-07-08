@@ -53,6 +53,7 @@ import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
 import homecategoryRoutes from "./routes/home.category.routes";
 import notificationRoutes from "./routes/notification.routes";
+import commissionRoutes from "./routes/commission.routes";
 import checkoutRouter from "./routes/mobile.checkout.routes";
 import { updateAllProductPrices } from "./scripts/update.product";
 import userProfileRouter from "./routes/product.recommend.routes";
@@ -162,6 +163,7 @@ app.use("/api/promo", promoRouter);
 app.use("/api/image", imageRouter);
 app.use("/api/home/category/section", homecategoryRoutes);
 app.use("/api/notification", notificationRoutes);
+app.use("/api/commission", commissionRoutes);
 app.use("/api/checkout", checkoutRouter);
 app.use("/api/profile", productRecommendRouter);
 

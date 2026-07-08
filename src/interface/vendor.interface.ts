@@ -20,6 +20,7 @@ export interface IVendorSignupRequest {
     bankName?: string;
     accountNumber?: string;
     bankBranch?: string;
+    profilePicture?: string;
 
     // handled internally
     verificationCode?: string;

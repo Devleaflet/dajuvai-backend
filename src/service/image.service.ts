@@ -1,28 +1,49 @@
 import { v2 as cloudinary } from 'cloudinary';
+
+export interface UploadedFile {
+    url: string;
+    publicId: string;
+    resourceType: string;
+}
+
 export class ImageService {
 
-    async uploadSingleImage(file: Express.Multer.File, folderName: string) {
+    async uploadSingleImage(file: Express.Multer.File, folderName: string): Promise<UploadedFile> {
         if (!file) throw new Error("No file provided");
 
+        const isImage = file.mimetype.startsWith("image/");
         const isPdf = file.mimetype === "application/pdf";
 
-        const result = await new Promise<string>((resolve, reject) => {
+        const uploadOptions: Record<string, unknown> = {
+            folder: folderName,
+            resource_type: isImage || isPdf ? "auto" : "raw",
+        };
+
+        if (!isImage && !isPdf) {
+            const originalExt = file.originalname.split(".").pop() || "bin";
+            const baseName = file.originalname
+                .replace(/\.[^/.]+$/, "")
+                .replace(/[^a-zA-Z0-9_-]/g, "_")
+                .slice(0, 80);
+            uploadOptions.public_id = `${baseName}_${Date.now()}.${originalExt}`;
+        }
+
+        const result = await new Promise<any>((resolve, reject) => {
             cloudinary.uploader.upload_stream(
-                {
-                    folder: folderName,
-                    resource_type: isPdf ? "raw" : "auto"
-                },
+                uploadOptions,
                 (error, result) => {
                     if (error || !result) return reject(error || new Error("Upload failed"));
-                    resolve(result.secure_url);
+                    resolve(result);
                 }
             ).end(file.buffer);
         });
 
-        return result;
+        return {
+            url: result.secure_url,
+            publicId: result.public_id,
+            resourceType: result.resource_type,
+        };
     }
-
-
 
     async uploadMultipleImage(folderName: string, files: Express.Multer.File[]): Promise<{ url: string; public_id: string }[]> {
         try {

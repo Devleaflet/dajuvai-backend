@@ -92,6 +92,9 @@ export class Vendor {
     @Column({ nullable: true })
     fcmToken?: string;
 
+    @Column({ nullable: true })
+    profilePicture?: string;
+
     @OneToMany(() => Product, (product) => product.vendor)
     products: Product[];
 

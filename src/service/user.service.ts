@@ -1,4 +1,5 @@
 import { DataSource, MoreThan } from 'typeorm';
+import bcrypt from 'bcryptjs';
 import AppDataSource from '../config/db.config';
 import { User, UserRole } from '../entities/user.entity';
 import { Vendor } from '../entities/vendor.entity';
@@ -103,7 +104,19 @@ export const getAllStaff = async () => {
     return await userDB.find({
         where: {
             role: UserRole.STAFF
-        }
+        },
+        // Exclude password hash and other sensitive/internal fields from the list response
+        select: [
+            "id",
+            "fullName",
+            "username",
+            "email",
+            "phoneNumber",
+            "role",
+            "isVerified",
+            "createdAt",
+            "updatedAt",
+        ],
     })
 }
 
@@ -114,11 +127,18 @@ export const deleteStaffById = async (id: number) => {
 
 
 export const updateStaffById = async (id: number, data: any) => {
+    const { confirmPassword, password, ...rest } = data;
+    const updateData: Record<string, unknown> = { ...rest };
+
+    if (password) {
+        updateData.password = await bcrypt.hash(password, 10);
+    }
+
     await userDB.update({
         id,
         role: UserRole.STAFF
     },
-        data
+        updateData
     )
 
     const updateStaff = await userDB.findOne({

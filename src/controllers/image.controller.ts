@@ -14,6 +14,11 @@ export class ImageController {
         if (!files || files.length === 0) return next(new BadRequestError("No file uploaded"));
 
         const upload = await this.imageService.uploadSingleImage(files[0], req.query.folder);
-        res.json({ success: true, data: upload });
+        res.json({
+            success: true,
+            data: upload.url,
+            publicId: upload.publicId,
+            resourceType: upload.resourceType,
+        });
     }
 }

@@ -5,7 +5,7 @@ import { OAuth2Client } from 'google-auth-library';
 import config from '../config/env.config';
 import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById, findvendorByvendorId } from '../service/user.service';
 import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
-import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput } from '../utils/zod_validations/user.zod';
+import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput, UpdateStaffInput } from '../utils/zod_validations/user.zod';
 import { APIError } from '../utils/ApiError.utils';
 import { AuthProvider, User, UserRole } from '../entities/user.entity';
 import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
@@ -236,7 +236,7 @@ export class UserController {
 
         const staffExists = await findUserById(Number(id));
 
-        if (!staffExists) {
+        if (!staffExists || staffExists.role !== UserRole.STAFF) {
             throw new APIError(404, "Staff doesnot exists");
         }
 
@@ -249,36 +249,34 @@ export class UserController {
     }
 
 
-    async updateStaff(req: Request<{ id: string }, {}, { data: any }, {}>, res: Response) {
+    async updateStaff(req: Request<{ id: string }, {}, UpdateStaffInput, {}>, res: Response) {
         const id = req.params.id;
-        const data = req.body.data;
 
         const staffExists = await findUserById(Number(id));
-
-        if (!staffExists) {
-            throw new APIError(404, "Staff doesnot exists");
+        if (!staffExists || staffExists.role !== UserRole.STAFF) {
+            throw new APIError(404, "Staff does not exist");
         }
 
-        await updateStaffById(Number(id), data);
+        const updatedStaff = await updateStaffById(Number(id), req.body);
 
         res.status(200).json({
             success: true,
-            msg: "Staff deleted succesfully",
+            msg: "Staff updated successfully",
+            data: {
+                id: updatedStaff.id,
+                username: updatedStaff.username,
+                email: updatedStaff.email,
+                fullName: updatedStaff.fullName,
+                phoneNumber: updatedStaff.phoneNumber,
+            },
         });
     }
 
 
 
-    async staffSignup(req: AuthRequest, res: Response): Promise<void> {
-        //  Validate request body using Zod schema
-        const parsed = signupSchema.safeParse(req.body);
-        if (!parsed.success) {
-            res.status(400).json({ success: false, errors: parsed.error.errors });
-            return;
-        }
-
-        //  Extract validated fields
-        const { username, email, password } = parsed.data;
+    async staffSignup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+        //  Body already validated by validateZod(signupSchema) middleware
+        const { username, email, password } = req.body;
 
         //  Prepare hashed password and verification token
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -1199,6 +1197,7 @@ export class UserController {
                     role: user.role,
                     provider: user.provider,
                     isVerified: user.isVerified,
+                    profilePicture: user.profilePicture || null,
                     address: user.address || null,
                 },
             });

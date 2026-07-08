@@ -26,6 +26,7 @@ import { Notification } from "../entities/notification.entity";
 import { VendorPaymentOption } from "../entities/vendorPaymentOption";
 import { Rider } from "../entities/rider.entity";
 import { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
+import { CommissionDocument } from "../entities/commissionDocument.entity";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -70,7 +71,7 @@ const AppDataSource = new DataSource({
     synchronize: false,
     logging: false,
     entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-        Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption, Rider, DeliveryAssignment],
+        Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption, Rider, DeliveryAssignment, CommissionDocument],
     migrations: ['src/migrations/*.ts'],
     ssl: false,
 });

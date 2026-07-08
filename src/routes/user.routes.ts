@@ -15,6 +15,7 @@ import {
   loginSchema,
   resetPasswordSchema,
   signupSchema,
+  updateStaffSchema,
   verificationTokenSchema,
   verifyEmailChangeSchema,
   verifyTokenSchema,
@@ -254,6 +255,7 @@ userRouter.post(
   "/signup/staff",
   authMiddleware,
   isAdmin,
+  validateZod(signupSchema),
   userController.staffSignup.bind(userController),
 );
 
@@ -362,7 +364,12 @@ userRouter.post(
  *       500:
  *         description: Internal server error
  */
-userRouter.get("/staff", userController.getAllStaff.bind(userController));
+userRouter.get(
+  "/staff",
+  authMiddleware,
+  isAdmin,
+  userController.getAllStaff.bind(userController),
+);
 
 /**
  * @swagger
@@ -514,6 +521,7 @@ userRouter.put(
   "/staff/:id",
   authMiddleware,
   isAdmin,
+  validateZod(updateStaffSchema),
   userController.updateStaff.bind(userController),
 );
 

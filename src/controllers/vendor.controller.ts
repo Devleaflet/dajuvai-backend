@@ -206,11 +206,12 @@ export class VendorController {
     });
 
     res.status(200).json({
-      success: true,
+    success: true,
       vendor: {
         id: vendor.id,
         email: vendor.email,
         businessName: vendor.businessName,
+        profilePicture: vendor.profilePicture,
       },
       token,
       refreshToken,
@@ -445,6 +446,7 @@ export class VendorController {
         phoneNumber: updateVendor.phoneNumber,
         telephone: updateVendor.telePhone,
         district: updateVendor.district,
+        profilePicture: updateVendor.profilePicture,
       },
     });
   }
@@ -591,13 +593,11 @@ export class VendorController {
       req.body,
     );
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Vendor updated successfully",
-        data: updatedVendor,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Vendor updated successfully",
+      data: updatedVendor,
+    });
   }
 
   async updatePaymentOption(
@@ -618,12 +618,10 @@ export class VendorController {
       req.body,
     );
 
-    res
-      .status(200)
-      .json({
-        success: true,
-        message: "Payment option updated successfully",
-        data: updated,
-      });
+    res.status(200).json({
+      success: true,
+      message: "Payment option updated successfully",
+      data: updated,
+    });
   }
 }

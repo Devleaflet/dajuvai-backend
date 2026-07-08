@@ -111,6 +111,9 @@ export class User {
     @Column({ nullable: true })
     fcmToken?: string;
 
+    @Column({ nullable: true })
+    profilePicture?: string;
+
     @CreateDateColumn()
     createdAt: Date;
 
