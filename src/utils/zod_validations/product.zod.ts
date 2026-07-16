@@ -27,6 +27,7 @@ export interface ProductInterface {
     name: string;
     brand?: string;
     description?: string;
+    keywords?: string;
     basePrice?: string; // Required for non-variant products
     discount?: string; // Optional, defaults to "0"
     discountType?: DiscountType; // Optional, defaults to PERCENTAGE
@@ -35,7 +36,7 @@ export interface ProductInterface {
     hasVariants: boolean | "true" | "false"; // String from form
     subcategoryId?: string; // From req.params.subcategoryId
     vendorId?: string; // From req.body or req.user.vendorId
-    brandId?: string;
+    // brandId?: string;
     dealId?: string;
     bannerId?: string;
     variants?: VariantInterface[]; // Required if hasVariants is "true"
@@ -46,6 +47,20 @@ const ProductBaseSchema = z.object({
     name: z.string().min(1, "Name is required").optional(),
     brand: z.string().min(1, "Brand is required").optional(),
     description: z.string().min(1, "Description is required").optional(),
+    // make user input consistent: 'wool, cotton ,lenin' -> 'wool,cotton,lenin'
+    keywords: z
+        .string()
+        .transform((value) => {
+            const keywords = new Set(
+                value
+                    .split(",")
+                    .map((k) => k.trim().toLowerCase())
+                    .filter(Boolean),
+            );
+
+            return [...keywords].join(",");
+        })
+        .optional(),
     basePrice: z.number().min(0, "Base price must be non-negative").optional(),
     discount: z
         .number()

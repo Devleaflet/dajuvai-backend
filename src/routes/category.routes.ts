@@ -998,6 +998,10 @@ router.delete(
  *                 type: string
  *                 nullable: true
  *                 example: Premium Cotton T-shirt
+ *               keywords:
+ *                 type: string
+ *                 nullable: true
+ *                 example: "cotton,summer,t-shirt"
  *               basePrice:
  *                 type: number
  *                 nullable: true
@@ -1195,6 +1199,9 @@ router.post(
  *                       description:
  *                         type: string
  *                         example: "Noise cancelling over-ear headphones"
+ *                       keywords:
+ *                         type: string
+ *                         example: "tech,headphones,sony,original"
  *                       basePrice:
  *                         type: number
  *                         format: float
@@ -1343,6 +1350,9 @@ router.get(
  *                     description:
  *                       type: string
  *                       example: "Portable Bluetooth speaker with rich bass"
+ *                     keywords:
+ *                       type: string
+ *                       example: "tech,headphones,sony,original"
  *                     basePrice:
  *                       type: number
  *                       format: float
@@ -1474,6 +1484,10 @@ router.get(
  *                 type: string
  *                 description: Updated description of the product (optional)
  *                 example: Premium Cotton T-shirt
+ *               keywords:
+ *                 type: string
+ *                 description: Updated keywords of the product (optional)
+ *                 example: "cotton,summer,t-shirt"
  *               basePrice:
  *                 type: number
  *                 description: Base price for non-variant products (optional, ignored if hasVariants is true)

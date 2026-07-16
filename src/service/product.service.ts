@@ -135,6 +135,7 @@ export class ProductService {
             name,
             brand,
             description,
+            keywords,
             basePrice,
             discount,
             discountType,
@@ -236,6 +237,7 @@ export class ProductService {
             name,
             brand,
             description,
+            keywords,
             basePrice: isVariantProduct ? null : Number(basePrice),
             discount: normalizedDiscount,
             discountType: normalizedDiscountType,
@@ -355,6 +357,7 @@ export class ProductService {
             name,
             brand,
             description,
+            keywords,
             basePrice,
             discount,
             discountType,
@@ -424,6 +427,7 @@ export class ProductService {
         product.name = name ?? product.name;
         product.brand = brand ?? product.brand;
         product.description = description ?? product.description;
+        product.keywords = keywords ?? product.keywords;
         product.subcategoryId = subcategoryId;
 
         product.discount = hasDeal
@@ -773,6 +777,8 @@ export class ProductService {
             .select([
                 "product.id",
                 "product.name",
+                "product.brand",
+                "product.keywords",
                 "product.stock",
                 "product.discount",
                 "product.discountType",

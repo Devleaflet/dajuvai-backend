@@ -49,11 +49,13 @@ const productController = new ProductController(AppDataSource);
  *                       example: "Organic Honey"
  *                     brand:
  *                       type: string
- *                       nullable: true
  *                       example: "Dabur"
  *                     description:
  *                       type: string
  *                       example: "Raw and organic honey collected from forest bees."
+ *                     keywords:
+ *                       type: string
+ *                       example: "honey,food,health,organic"
  *                     basePrice:
  *                       type: number
  *                       format: float
@@ -358,6 +360,9 @@ export default productRouter;
  *         description:
  *           type: string
  *           example: "The latest Apple iPhone with A17 chip."
+ *         keywords:
+ *           type: string
+ *           example: "apple,smartphone,flagship"
  *         basePrice:
  *           type: number
  *           format: float

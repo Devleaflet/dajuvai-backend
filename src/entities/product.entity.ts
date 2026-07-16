@@ -32,6 +32,9 @@ export class Product {
     @Column({ nullable: true })
     description?: string;
 
+    @Column({ type: "text", nullable: true })
+    keywords?: string;
+
     // Only used if hasVariants = false
     @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
     basePrice?: number;
