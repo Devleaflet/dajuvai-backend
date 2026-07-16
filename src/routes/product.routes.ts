@@ -2,7 +2,12 @@ import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { uploadMiddleware } from "../config/multer.config";
-import { authMiddleware, combinedAuthMiddleware, isAdminOrStaff, isAdminOrVendor } from "../middlewares/auth.middleware";
+import {
+    authMiddleware,
+    combinedAuthMiddleware,
+    isAdminOrStaff,
+    isAdminOrVendor,
+} from "../middlewares/auth.middleware";
 import { responseCache } from "../middlewares/responseCache.middleware";
 
 const productRouter = Router();
@@ -42,6 +47,10 @@ const productController = new ProductController(AppDataSource);
  *                     name:
  *                       type: string
  *                       example: "Organic Honey"
+ *                     brand:
+ *                       type: string
+ *                       nullable: true
+ *                       example: "Dabur"
  *                     description:
  *                       type: string
  *                       example: "Raw and organic honey collected from forest bees."
@@ -89,10 +98,6 @@ const productController = new ProductController(AppDataSource);
  *                     vendorId:
  *                       type: integer
  *                       example: 3
- *                     brand_id:
- *                       type: integer
- *                       nullable: true
- *                       example: 2
  *                     dealId:
  *                       type: integer
  *                       nullable: true
@@ -132,7 +137,11 @@ const productController = new ProductController(AppDataSource);
  *                   type: string
  *                   example: Internal server error
  */
-productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.getProductDetailById.bind(productController))
+productRouter.get(
+    "/:id",
+    responseCache({ ttlSeconds: 60 }),
+    productController.getProductDetailById.bind(productController),
+);
 
 /**
  * @swagger
@@ -163,7 +172,12 @@ productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.g
  *         description: Internal server error
  */
 // /api/product/:id
-productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productController.deleteProductById.bind(productController));
+productRouter.delete(
+    "/:id",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    productController.deleteProductById.bind(productController),
+);
 
 /**
  * @swagger
@@ -229,8 +243,11 @@ productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productCon
  *                   type: string
  *                   example: Image upload failed
  */
-productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
-
+productRouter.post(
+    "/image/upload",
+    uploadMiddleware,
+    productController.uplaodImage.bind(productController),
+);
 
 /**
  * @swagger
@@ -252,13 +269,16 @@ productRouter.post("/image/upload", uploadMiddleware, productController.uplaodIm
  *         description: Internal server error
  */
 // /api/product/admin/products
-productRouter.get("/admin/products", authMiddleware, isAdminOrStaff, productController.getAdminProducts.bind(productController))
+productRouter.get(
+    "/admin/products",
+    authMiddleware,
+    isAdminOrStaff,
+    productController.getAdminProducts.bind(productController),
+);
 
 export default productRouter;
 
-
-
-// product schema 
+// product schema
 /**
  * @swagger
  * components:
@@ -332,6 +352,9 @@ export default productRouter;
  *         name:
  *           type: string
  *           example: "iPhone 15 Pro"
+ *         brand:
+ *           type: string
+ *           example: "Apple"
  *         description:
  *           type: string
  *           example: "The latest Apple iPhone with A17 chip."
@@ -380,9 +403,6 @@ export default productRouter;
  *         bannerId:
  *           type: integer
  *           example: 3
- *         brandId:
- *           type: integer
- *           example: 7
  *         created_at:
  *           type: string
  *           format: date-time

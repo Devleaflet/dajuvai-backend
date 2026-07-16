@@ -1,12 +1,10 @@
-
 import { z } from "zod";
 import { DiscountType } from "../../entities/product.enum";
 
-
 export enum InventoryStatus {
-    AVAILABLE = 'AVAILABLE',
-    OUT_OF_STOCK = 'OUT_OF_STOCK',
-    LOW_STOCK = 'LOW_STOCK',
+    AVAILABLE = "AVAILABLE",
+    OUT_OF_STOCK = "OUT_OF_STOCK",
+    LOW_STOCK = "LOW_STOCK",
 }
 
 // Interfaces
@@ -27,13 +25,14 @@ interface VariantInterface {
 
 export interface ProductInterface {
     name: string;
+    brand?: string;
     description?: string;
     basePrice?: string; // Required for non-variant products
     discount?: string; // Optional, defaults to "0"
     discountType?: DiscountType; // Optional, defaults to PERCENTAGE
     stock?: string; // Required for non-variant products
     status?: InventoryStatus; // Optional, defaults to AVAILABLE
-    hasVariants: boolean | 'true' | 'false'; // String from form
+    hasVariants: boolean | "true" | "false"; // String from form
     subcategoryId?: string; // From req.params.subcategoryId
     vendorId?: string; // From req.body or req.user.vendorId
     brandId?: string;
@@ -45,79 +44,141 @@ export interface ProductInterface {
 
 const ProductBaseSchema = z.object({
     name: z.string().min(1, "Name is required").optional(),
+    brand: z.string().min(1, "Brand is required").optional(),
     description: z.string().min(1, "Description is required").optional(),
     basePrice: z.number().min(0, "Base price must be non-negative").optional(),
-    discount: z.number().min(0, "Discount must be non-negative").max(100, "Discount cannot exceed 100").optional(),
-    discountType: z.enum([DiscountType.PERCENTAGE, DiscountType.FLAT]).optional(),
-    status: z.enum([InventoryStatus.AVAILABLE, InventoryStatus.OUT_OF_STOCK, InventoryStatus.LOW_STOCK]).optional(),
+    discount: z
+        .number()
+        .min(0, "Discount must be non-negative")
+        .max(100, "Discount cannot exceed 100")
+        .optional(),
+    discountType: z
+        .enum([DiscountType.PERCENTAGE, DiscountType.FLAT])
+        .optional(),
+    status: z
+        .enum([
+            InventoryStatus.AVAILABLE,
+            InventoryStatus.OUT_OF_STOCK,
+            InventoryStatus.LOW_STOCK,
+        ])
+        .optional(),
     stock: z.number().int().min(0, "Stock must be non-negative").optional(),
     hasVariants: z.boolean().optional(),
-    variants: z.array(
-        z.object({
-            sku: z.string().min(1, "SKU is required"),
-            price: z.number().min(0, "Price must be non-negative"),
-            stock: z.number().int().min(0, "Stock must be non-negative"),
-            status: z.enum([InventoryStatus.AVAILABLE, InventoryStatus.OUT_OF_STOCK, InventoryStatus.LOW_STOCK]),
-            attributes: z.array(
-                z.object({
-                    attributeType: z.string().min(1, "Attribute type is required"),
-                    attributeValues: z.array(z.string().min(1, "Attribute value is required")).min(1, "At least one attribute value is required"),
-                })
-            ).optional(),
-            images: z.array(z.object({ url: z.string().url("Invalid image URL") })).optional(),
-        })
-    ).optional(),
-    productImages: z.array(z.object({ url: z.string().url("Invalid image URL") })).optional(),
-    subcategoryId: z.number().int().positive("Subcategory ID must be positive").optional(),
+    variants: z
+        .array(
+            z.object({
+                sku: z.string().min(1, "SKU is required"),
+                price: z.number().min(0, "Price must be non-negative"),
+                stock: z.number().int().min(0, "Stock must be non-negative"),
+                status: z.enum([
+                    InventoryStatus.AVAILABLE,
+                    InventoryStatus.OUT_OF_STOCK,
+                    InventoryStatus.LOW_STOCK,
+                ]),
+                attributes: z
+                    .array(
+                        z.object({
+                            attributeType: z
+                                .string()
+                                .min(1, "Attribute type is required"),
+                            attributeValues: z
+                                .array(
+                                    z
+                                        .string()
+                                        .min(1, "Attribute value is required"),
+                                )
+                                .min(
+                                    1,
+                                    "At least one attribute value is required",
+                                ),
+                        }),
+                    )
+                    .optional(),
+                images: z
+                    .array(
+                        z.object({ url: z.string().url("Invalid image URL") }),
+                    )
+                    .optional(),
+            }),
+        )
+        .optional(),
+    productImages: z
+        .array(z.object({ url: z.string().url("Invalid image URL") }))
+        .optional(),
+    subcategoryId: z
+        .number()
+        .int()
+        .positive("Subcategory ID must be positive")
+        .optional(),
     dealId: z.number().int().positive("Deal ID must be positive").optional(),
-    bannerId: z.number().int().positive("Banner ID must be positive").optional(),
+    bannerId: z
+        .number()
+        .int()
+        .positive("Banner ID must be positive")
+        .optional(),
 });
 
 export const ProductCreateSchema = ProductBaseSchema.refine(
     (data) => {
         if (data.hasVariants === true) {
-            return data.variants && data.variants.length > 0 &&
+            return (
+                data.variants &&
+                data.variants.length > 0 &&
                 data.basePrice === undefined &&
                 data.stock === undefined &&
-                data.productImages === undefined;
+                data.productImages === undefined
+            );
         } else if (data.hasVariants === false) {
-            return !data.variants && data.basePrice !== undefined && data.stock !== undefined;
-        }
-        return true;
-    },
-    {
-        message: "Products with variants must have variants and no basePrice/stock/images. Non-variant products must have basePrice and stock.",
-        path: ["hasVariants"],
-    }
-).refine(
-    (data) => {
-        if (data.discount !== undefined && (data.discountType === undefined || data.basePrice === undefined)) {
-            return false;
-        }
-        return true;
-    },
-    {
-        message: "Discount requires discountType and basePrice to be provided.",
-        path: ["discount"],
-    }
-).refine(
-    (data) => {
-        // For variant products, ensure each variant has required fields
-        if (data.hasVariants === true && data.variants) {
-            return data.variants.every(variant =>
-                variant.sku &&
-                variant.price !== undefined &&
-                variant.stock !== undefined &&
-                variant.status
+            return (
+                !data.variants &&
+                data.basePrice !== undefined &&
+                data.stock !== undefined
             );
         }
         return true;
     },
     {
-        message: "Each variant must have SKU, price, stock, and status.",
-        path: ["variants"],
-    }
-);
+        message:
+            "Products with variants must have variants and no basePrice/stock/images. Non-variant products must have basePrice and stock.",
+        path: ["hasVariants"],
+    },
+)
+    .refine(
+        (data) => {
+            if (
+                data.discount !== undefined &&
+                (data.discountType === undefined ||
+                    data.basePrice === undefined)
+            ) {
+                return false;
+            }
+            return true;
+        },
+        {
+            message:
+                "Discount requires discountType and basePrice to be provided.",
+            path: ["discount"],
+        },
+    )
+    .refine(
+        (data) => {
+            // For variant products, ensure each variant has required fields
+            if (data.hasVariants === true && data.variants) {
+                return data.variants.every(
+                    (variant) =>
+                        variant.sku &&
+                        variant.price !== undefined &&
+                        variant.stock !== undefined &&
+                        variant.status,
+                );
+            }
+            return true;
+        },
+        {
+            message: "Each variant must have SKU, price, stock, and status.",
+            path: ["variants"],
+        },
+    );
 
 export const ProductUpdateSchema = ProductBaseSchema.partial();
 

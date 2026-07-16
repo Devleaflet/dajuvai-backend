@@ -1,15 +1,24 @@
-import { Column, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, JoinColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import {
+    Column,
+    Entity,
+    ManyToOne,
+    OneToMany,
+    PrimaryGeneratedColumn,
+    JoinColumn,
+    CreateDateColumn,
+    UpdateDateColumn,
+} from "typeorm";
 import { Subcategory } from "./subcategory.entity";
 import { Vendor } from "./vendor.entity";
 import { Deal } from "./deal.entity";
 import { Banner } from "./banner.entity";
 import { DiscountType, InventoryStatus } from "./product.enum";
 import { OrderItem } from "./orderItems.entity";
-import { Brand } from "./brand.entity";
+// import { Brand } from "./brand.entity";
 import { Review } from "./reviews.entity";
 import { Variant } from "./variant.entity";
 
-@Entity('products')
+@Entity("products")
 export class Product {
     @PrimaryGeneratedColumn()
     id: number;
@@ -18,22 +27,30 @@ export class Product {
     name: string;
 
     @Column({ nullable: true })
+    brand?: string;
+
+    @Column({ nullable: true })
     description?: string;
 
     // Only used if hasVariants = false
-    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
+    @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
     basePrice?: number;
 
-    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
+    @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
     finalPrice?: number;
 
-    @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+    @Column({ type: "decimal", precision: 5, scale: 2, default: 0 })
     discount: number;
 
-    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.NONE })
+    @Column({ type: "enum", enum: DiscountType, default: DiscountType.NONE })
     discountType: DiscountType;
 
-    @Column({ type: 'enum', enum: InventoryStatus, default: InventoryStatus.AVAILABLE, nullable: true })
+    @Column({
+        type: "enum",
+        enum: InventoryStatus,
+        default: InventoryStatus.AVAILABLE,
+        nullable: true,
+    })
     status?: InventoryStatus;
 
     @Column({ nullable: true })
@@ -67,19 +84,19 @@ export class Product {
     @Column({ nullable: true })
     bannerId?: number;
 
-    @Column({ type: 'text', array: true, nullable: true })
+    @Column({ type: "text", array: true, nullable: true })
     productImages?: string[];
 
     @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
     orderItems: OrderItem[];
 
-    @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
-    brand: Brand;
+    // @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
+    // brand: Brand;
 
-    @Column({ nullable: true })
-    brandId?: number;
+    // @Column({ nullable: true })
+    // brandId?: number;
 
-    @Column({ type: 'boolean', default: false })
+    @Column({ type: "boolean", default: false })
     hasVariants: boolean;
 
     @OneToMany(() => Variant, (variant) => variant.product, { cascade: true })
@@ -88,12 +105,9 @@ export class Product {
     @OneToMany(() => Review, (review) => review.product, { cascade: true })
     reviews: Review[];
 
-    @CreateDateColumn({ name: 'created_at' })
+    @CreateDateColumn({ name: "created_at" })
     createdAt: Date;
 
-
-    @UpdateDateColumn({ name: 'updated_at' })
+    @UpdateDateColumn({ name: "updated_at" })
     updatedAt: Date;
-
 }
-
