@@ -1,38 +1,45 @@
-import { DataSource, Repository, Not } from 'typeorm';
-import { Product } from '../entities/product.entity';
-import { Subcategory } from '../entities/subcategory.entity';
-import { User, UserRole } from '../entities/user.entity';
-import { v2 as cloudinary } from 'cloudinary';
-import { APIError } from '../utils/ApiError.utils';
-import { Vendor } from '../entities/vendor.entity';
-import { VendorService } from './vendor.service';
-import { IProductQueryParams, IAdminProductQueryParams } from '../interface/product.interface';
-import { Deal, DealStatus } from '../entities/deal.entity';
-import { ImageUploadService } from './image.upload.service';
-import { ImageDeletionService } from './image.delete.service';
-import { Category } from '../entities/category.entity';
-import { Brand } from '../entities/brand.entity';
-import { Banner } from '../entities/banner.entity';
-import { InventoryStatus, ProductInterface } from '../utils/zod_validations/product.zod';
-import { CategoryService } from './category.service';
-import { BannerService } from './banner.service';
-import { DealService } from './deal.service';
-import { SubcategoryService } from './subcategory.service';
-import { MulterFile } from '../config/multer.config';
-import { Variant } from '../entities/variant.entity';
-import config from '../config/env.config';
-import { DiscountType } from '../entities/product.enum';
-import { OrderStatus } from '../entities/order.entity';
+import { DataSource, Repository, Not } from "typeorm";
+import { Product } from "../entities/product.entity";
+import { Subcategory } from "../entities/subcategory.entity";
+import { User, UserRole } from "../entities/user.entity";
+import { v2 as cloudinary } from "cloudinary";
+import { APIError } from "../utils/ApiError.utils";
+import { Vendor } from "../entities/vendor.entity";
+import { VendorService } from "./vendor.service";
+import {
+    IProductQueryParams,
+    IAdminProductQueryParams,
+} from "../interface/product.interface";
+import { Deal, DealStatus } from "../entities/deal.entity";
+import { ImageUploadService } from "./image.upload.service";
+import { ImageDeletionService } from "./image.delete.service";
+import { Category } from "../entities/category.entity";
+import { Brand } from "../entities/brand.entity";
+import { Banner } from "../entities/banner.entity";
+import {
+    InventoryStatus,
+    ProductInterface,
+} from "../utils/zod_validations/product.zod";
+import { CategoryService } from "./category.service";
+import { BannerService } from "./banner.service";
+import { DealService } from "./deal.service";
+import { SubcategoryService } from "./subcategory.service";
+import { MulterFile } from "../config/multer.config";
+import { Variant } from "../entities/variant.entity";
+import config from "../config/env.config";
+import { DiscountType } from "../entities/product.enum";
+import { OrderStatus } from "../entities/order.entity";
+import { sanitizeVendor } from "../utils/sanitize.util";
 
 /**
  * Service class for handling product-related operations.
- * 
+ *
  * This includes managing products, categories, subcategories,
  * vendors, deals, brands, and associated image upload and deletion.
- * 
+ *
  * It interacts with respective repositories and auxiliary services
  * such as VendorService and image management services.
- * 
+ *
  * @module Product Management
  */
 export class ProductService {
@@ -69,7 +76,7 @@ export class ProductService {
         this.subcategoryService = new SubcategoryService();
         this.bannerService = new BannerService();
         this.dealService = new DealService();
-        this.variantRepository = this.dataSource.getRepository(Variant)
+        this.variantRepository = this.dataSource.getRepository(Variant);
         cloudinary.config({
             cloud_name: config.CLOUDINARY_CLOUD_NAME,
             api_key: config.CLOUDINARY_API_KEY,
@@ -77,10 +84,13 @@ export class ProductService {
         });
     }
 
-    async getAlllProducts(page: number = 1, limit: number = 50): Promise<Product[]> {
+    async getAlllProducts(
+        page: number = 1,
+        limit: number = 50,
+    ): Promise<Product[]> {
         return this.productRepository.find({
-            relations: ['subcategory', 'vendor', 'brand', 'deal', 'reviews'],
-            order: { createdAt: 'DESC' },
+            relations: ["subcategory", "vendor", "deal", "reviews"],
+            order: { createdAt: "DESC" },
             skip: (page - 1) * limit,
             take: limit,
         });
@@ -89,7 +99,7 @@ export class ProductService {
     async getProductDetailsById(productId: number): Promise<Product> {
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            relations: ['vendor', 'variants', 'reviews', 'deal'],
+            relations: ["vendor", "variants", "reviews", "deal"],
         });
 
         if (!product) {
@@ -107,22 +117,26 @@ export class ProductService {
 
     private sanitizeDiscountType(value: unknown): DiscountType {
         const validTypes = Object.values(DiscountType);
-        if (typeof value === 'string' && validTypes.includes(value as DiscountType)) {
+        if (
+            typeof value === "string" &&
+            validTypes.includes(value as DiscountType)
+        ) {
             return value as DiscountType;
         }
         return DiscountType.NONE;
     }
 
-
     async createProduct(
         data: Partial<ProductInterface>,
         categoryId: number,
         subcategoryId: number,
-        vendorId: number
+        vendorId: number,
     ): Promise<Product> {
         const {
             name,
+            brand,
             description,
+            keywords,
             basePrice,
             discount,
             discountType,
@@ -131,35 +145,48 @@ export class ProductService {
             bannerId,
             hasVariants,
             variants,
-            productImages
+            productImages,
         } = data;
 
-        const isVariantProduct = hasVariants === true || hasVariants === 'true';
+        const isVariantProduct = hasVariants === true || hasVariants === "true";
 
         // ─────────────────────────────────────────────
         // Validation
         // ─────────────────────────────────────────────
-        const categoryExists = await this.categoryService.getCategoryById(categoryId);
-        if (!categoryExists) throw new APIError(404, 'Category does not exist');
+        const categoryExists =
+            await this.categoryService.getCategoryById(categoryId);
+        if (!categoryExists) throw new APIError(404, "Category does not exist");
 
-        const subcategoryExists = await this.subcategoryService.getSubcategoryById(
-            subcategoryId,
-            categoryId
-        );
-        if (!subcategoryExists) throw new APIError(404, 'Subcategory does not exist');
+        const subcategoryExists =
+            await this.subcategoryService.getSubcategoryById(
+                subcategoryId,
+                categoryId,
+            );
+        if (!subcategoryExists)
+            throw new APIError(404, "Subcategory does not exist");
 
-        if (!vendorId) throw new APIError(401, 'Unauthorized: Vendor not found');
+        if (!vendorId)
+            throw new APIError(401, "Unauthorized: Vendor not found");
 
         if (!isVariantProduct) {
             if (basePrice == null || stock == null) {
-                throw new APIError(400, 'Base price and stock are required for non-variant products');
+                throw new APIError(
+                    400,
+                    "Base price and stock are required for non-variant products",
+                );
             }
             if (!productImages || productImages.length === 0) {
-                throw new APIError(400, 'At least one product image is required');
+                throw new APIError(
+                    400,
+                    "At least one product image is required",
+                );
             }
         } else {
             if (!variants || variants.length === 0) {
-                throw new APIError(400, 'Variants array is required for variant products');
+                throw new APIError(
+                    400,
+                    "Variants array is required for variant products",
+                );
             }
         }
 
@@ -167,11 +194,13 @@ export class ProductService {
 
         if (dealId) {
             dealValidation = await this.dealService.getDealById(Number(dealId));
-            if (!dealValidation || dealValidation.status !== DealStatus.ENABLED) {
-                throw new APIError(400, 'Invalid or disabled deal');
+            if (
+                !dealValidation ||
+                dealValidation.status !== DealStatus.ENABLED
+            ) {
+                throw new APIError(400, "Invalid or disabled deal");
             }
         }
-
 
         // ─────────────────────────────────────────────
         // Deal + Discount Normalization
@@ -196,7 +225,7 @@ export class ProductService {
             const priceAfterDiscount = this.calculateFinalPrice(
                 Number(basePrice),
                 normalizedDiscount,
-                normalizedDiscountType
+                normalizedDiscountType,
             );
 
             finalPrice = this.applyDealPrice(priceAfterDiscount, deal);
@@ -207,7 +236,9 @@ export class ProductService {
         // ─────────────────────────────────────────────
         const product = this.productRepository.create({
             name,
+            brand,
             description,
+            keywords,
             basePrice: isVariantProduct ? null : Number(basePrice),
             discount: normalizedDiscount,
             discountType: normalizedDiscountType,
@@ -218,11 +249,11 @@ export class ProductService {
             subcategoryId,
             vendorId,
             finalPrice,
-            brandId: data.brandId ? Number(data.brandId) : null,
+            // brandId: data.brandId ? Number(data.brandId) : null,
             dealId: dealId ? Number(dealId) : null,
             bannerId: bannerId ? Number(bannerId) : null,
             productImages: isVariantProduct ? [] : productImages,
-            hasVariants: isVariantProduct
+            hasVariants: isVariantProduct,
         });
 
         const savedProduct = await this.productRepository.save(product);
@@ -237,21 +268,23 @@ export class ProductService {
                 variants.map(async (variant) => {
                     const base = Number(variant.basePrice);
 
-                    const vDiscount = hasDeal ? 0 : Number(variant.discount || 0);
-                    
+                    const vDiscount = hasDeal
+                        ? 0
+                        : Number(variant.discount || 0);
+
                     const vDiscountType = hasDeal
                         ? DiscountType.NONE
                         : this.sanitizeDiscountType(variant.discountType);
-                        
+
                     const priceAfterDiscount = this.calculateFinalPrice(
                         base,
                         vDiscount,
-                        vDiscountType
+                        vDiscountType,
                     );
 
                     const finalVariantPrice = this.applyDealPrice(
                         priceAfterDiscount,
-                        deal
+                        deal,
                     );
 
                     const newVariant = this.variantRepository.create({
@@ -262,14 +295,16 @@ export class ProductService {
                         attributes: variant.attributes,
                         variantImages: variant.variantImages || [],
                         stock: Number(variant.stock),
-                        status: this.determineOrderStatus(Number(variant.stock)),
+                        status: this.determineOrderStatus(
+                            Number(variant.stock),
+                        ),
                         productId: savedProduct.id.toString(),
                         product: savedProduct,
-                        finalPrice: finalVariantPrice
+                        finalPrice: finalVariantPrice,
                     });
 
                     return this.variantRepository.save(newVariant);
-                })
+                }),
             );
         }
 
@@ -278,19 +313,14 @@ export class ProductService {
         return savedProduct;
     }
 
-
     public calculateFinalPrice(
         basePrice: number,
         discount = 0,
-        discountType: DiscountType = DiscountType.PERCENTAGE
+        discountType: DiscountType = DiscountType.PERCENTAGE,
     ): number {
         if (!basePrice || basePrice <= 0) return 0;
 
-        if (
-            discountType === DiscountType.NONE ||
-            !discount ||
-            discount <= 0
-        ) {
+        if (discountType === DiscountType.NONE || !discount || discount <= 0) {
             return basePrice;
         }
 
@@ -303,7 +333,7 @@ export class ProductService {
 
     public applyDealPrice(
         priceAfterProductDiscount: number,
-        deal?: Deal | null
+        deal?: Deal | null,
     ): number {
         if (!deal || !deal.discountPercentage || deal.discountPercentage <= 0) {
             return priceAfterProductDiscount;
@@ -312,11 +342,9 @@ export class ProductService {
         return Math.max(
             0,
             priceAfterProductDiscount -
-            (priceAfterProductDiscount * deal.discountPercentage) / 100
+                (priceAfterProductDiscount * deal.discountPercentage) / 100,
         );
     }
-
-
 
     async updateProduct(
         authId: number,
@@ -324,11 +352,13 @@ export class ProductService {
         productId: number,
         data: Partial<ProductInterface>,
         categoryId: number,
-        subcategoryId: number
+        subcategoryId: number,
     ): Promise<Product> {
         const {
             name,
+            brand,
             description,
+            keywords,
             basePrice,
             discount,
             discountType,
@@ -337,8 +367,8 @@ export class ProductService {
             bannerId,
             hasVariants,
             variants,
-            brandId,
-            productImages
+            // brandId,
+            productImages,
         } = data;
 
         const whereClause = isAdmin
@@ -347,19 +377,24 @@ export class ProductService {
 
         const product = await this.productRepository.findOne({
             where: whereClause,
-            relations: ['variants', 'deal', 'banner']
+            relations: ["variants", "deal", "banner"],
         });
 
         if (!product) {
-            throw new APIError(404, 'Product not found or not authorized');
+            throw new APIError(404, "Product not found or not authorized");
         }
 
         if (!(await this.categoryService.getCategoryById(categoryId))) {
-            throw new APIError(404, 'Category does not exist');
+            throw new APIError(404, "Category does not exist");
         }
 
-        if (!(await this.subcategoryService.getSubcategoryById(subcategoryId, categoryId))) {
-            throw new APIError(404, 'Subcategory does not exist');
+        if (
+            !(await this.subcategoryService.getSubcategoryById(
+                subcategoryId,
+                categoryId,
+            ))
+        ) {
+            throw new APIError(404, "Subcategory does not exist");
         }
 
         // ---------------- DEAL RESOLUTION ----------------
@@ -368,7 +403,7 @@ export class ProductService {
         if (dealId !== undefined && dealId !== null) {
             resolvedDeal = await this.dealService.getDealById(Number(dealId));
             if (!resolvedDeal || resolvedDeal.status !== DealStatus.ENABLED) {
-                throw new APIError(404, 'Deal does not exist or is disabled');
+                throw new APIError(404, "Deal does not exist or is disabled");
             }
         }
 
@@ -383,35 +418,39 @@ export class ProductService {
 
         const hasDeal = !!product.deal;
 
-
         const hasVariantsBool =
-            hasVariants === true || hasVariants === 'true'
+            hasVariants === true || hasVariants === "true"
                 ? true
-                : hasVariants === false || hasVariants === 'false'
-                    ? false
-                    : undefined;
+                : hasVariants === false || hasVariants === "false"
+                  ? false
+                  : undefined;
 
         product.name = name ?? product.name;
+        product.brand = brand ?? product.brand;
         product.description = description ?? product.description;
+        product.keywords = keywords ?? product.keywords;
         product.subcategoryId = subcategoryId;
 
         product.discount = hasDeal
             ? 0
             : discount !== undefined
-                ? parseFloat(discount.toString())
-                : product.discount;
+              ? parseFloat(discount.toString())
+              : product.discount;
 
         product.discountType = hasDeal
             ? DiscountType.NONE
-            : discountType ?? product.discountType;
-
+            : (discountType ?? product.discountType);
 
         if (!hasVariantsBool) {
             product.basePrice =
-                basePrice !== undefined ? parseFloat(basePrice.toString()) : product.basePrice;
+                basePrice !== undefined
+                    ? parseFloat(basePrice.toString())
+                    : product.basePrice;
 
             product.stock =
-                stock !== undefined ? parseInt(stock.toString()) : product.stock;
+                stock !== undefined
+                    ? parseInt(stock.toString())
+                    : product.stock;
 
             product.status = this.determineOrderStatus(Number(product.stock));
         } else {
@@ -426,11 +465,11 @@ export class ProductService {
             product.bannerId = Number(bannerId);
         }
 
-        if (brandId === null) {
-            product.brandId = null;
-        } else if (brandId !== undefined) {
-            product.brandId = Number(brandId);
-        }
+        // if (brandId === null) {
+        //     product.brandId = null;
+        // } else if (brandId !== undefined) {
+        //     product.brandId = Number(brandId);
+        // }
 
         if (hasVariantsBool !== undefined) {
             product.hasVariants = hasVariantsBool;
@@ -438,7 +477,10 @@ export class ProductService {
 
         if (productImages && Array.isArray(productImages)) {
             if (productImages.length === 0 && !hasVariantsBool) {
-                throw new APIError(400, 'At least one product image is required');
+                throw new APIError(
+                    400,
+                    "At least one product image is required",
+                );
             }
             product.productImages = productImages;
         }
@@ -447,32 +489,43 @@ export class ProductService {
             const priceAfterProductDiscount = this.calculateFinalPrice(
                 product.basePrice,
                 product.discount ?? 0,
-                product.discountType ?? DiscountType.NONE
+                product.discountType ?? DiscountType.NONE,
             );
 
             product.finalPrice = this.applyDealPrice(
                 priceAfterProductDiscount,
-                product.deal
+                product.deal,
             );
         }
 
         if (hasVariantsBool && variants) {
             if (!Array.isArray(variants) || variants.length === 0) {
-                throw new APIError(400, 'Variants are required for variant products');
+                throw new APIError(
+                    400,
+                    "Variants are required for variant products",
+                );
             }
 
             if (!product.hasVariants) {
-                await this.variantRepository.delete({ productId: productId.toString() });
+                await this.variantRepository.delete({
+                    productId: productId.toString(),
+                });
             }
 
             const savedVariants = await Promise.all(
                 variants.map(async (variant) => {
-                    const existingVariant = await this.variantRepository.findOne({
-                        where: { sku: variant.sku, productId: productId.toString() }
-                    });
+                    const existingVariant =
+                        await this.variantRepository.findOne({
+                            where: {
+                                sku: variant.sku,
+                                productId: productId.toString(),
+                            },
+                        });
 
                     const base = Number(variant.basePrice);
-                    const vDiscount = hasDeal ? 0 : Number(variant.discount || 0);
+                    const vDiscount = hasDeal
+                        ? 0
+                        : Number(variant.discount || 0);
                     const vDiscountType = hasDeal
                         ? DiscountType.NONE
                         : variant.discountType || DiscountType.NONE;
@@ -480,12 +533,12 @@ export class ProductService {
                     const priceAfterProductDiscount = this.calculateFinalPrice(
                         base,
                         vDiscount,
-                        vDiscountType
+                        vDiscountType,
                     );
 
                     const finalPrice = this.applyDealPrice(
                         priceAfterProductDiscount,
-                        product.deal
+                        product.deal,
                     );
 
                     if (existingVariant) {
@@ -494,9 +547,12 @@ export class ProductService {
                         existingVariant.discountType = vDiscountType;
                         existingVariant.finalPrice = finalPrice;
                         existingVariant.attributes = variant.attributes;
-                        existingVariant.variantImages = variant.variantImages || [];
+                        existingVariant.variantImages =
+                            variant.variantImages || [];
                         existingVariant.stock = Number(variant.stock);
-                        existingVariant.status = this.determineOrderStatus(Number(variant.stock));
+                        existingVariant.status = this.determineOrderStatus(
+                            Number(variant.stock),
+                        );
 
                         return this.variantRepository.save(existingVariant);
                     }
@@ -510,13 +566,15 @@ export class ProductService {
                         attributes: variant.attributes,
                         variantImages: variant.variantImages || [],
                         stock: Number(variant.stock),
-                        status: this.determineOrderStatus(Number(variant.stock)),
+                        status: this.determineOrderStatus(
+                            Number(variant.stock),
+                        ),
                         productId: productId.toString(),
-                        product
+                        product,
                     });
 
                     return this.variantRepository.save(newVariant);
-                })
+                }),
             );
 
             product.variants = savedVariants;
@@ -526,14 +584,11 @@ export class ProductService {
         return await this.productRepository.save(product);
     }
 
-
-
-
     async getAllProducts(): Promise<Product[]> {
         return await this.productRepository.find({
-            relations: ['subcategory', 'vendor', 'brand', 'deal', 'variants'],
+            relations: ["subcategory", "vendor", "deal", "variants"],
             order: {
-                createdAt: 'DESC',
+                createdAt: "DESC",
             },
         });
     }
@@ -542,86 +597,98 @@ export class ProductService {
         const { page, limit, search } = params;
         const skip = (page - 1) * limit;
         const {
-            brandId,
+            // brandId,
             categoryId,
             subcategoryId,
             dealId,
-            sort = 'all',
+            sort = "all",
             bannerId,
-            vendorId
+            vendorId,
         } = params;
 
         const qb = this.productRepository
-            .createQueryBuilder('product')
-            .leftJoinAndSelect('product.subcategory', 'subcategory')
-            .leftJoinAndSelect('subcategory.category', 'category')
-            .leftJoinAndSelect('product.brand', 'brand')
-            .leftJoin('product.vendor', 'vendor')
+            .createQueryBuilder("product")
+            .leftJoinAndSelect("product.subcategory", "subcategory")
+            .leftJoinAndSelect("subcategory.category", "category")
+            .leftJoin("product.vendor", "vendor")
             .addSelect([
-                'vendor.id',
-                'vendor.businessName',
-                'vendor.districtId',
-                'vendor.createdAt',
-                'vendor.updatedAt',
+                "vendor.id",
+                "vendor.businessName",
+                "vendor.districtId",
+                "vendor.createdAt",
+                "vendor.updatedAt",
             ])
-            .leftJoinAndSelect('product.deal', 'deal')
-            .leftJoinAndSelect('product.variants', 'variants')
-            .where('(product.stock > 0 OR variants.stock > 0)');
+            .leftJoinAndSelect("product.deal", "deal")
+            .leftJoinAndSelect("product.variants", "variants")
+            .where("(product.stock > 0 OR variants.stock > 0)");
 
         if (bannerId) {
-            const banner = await this.bannerRepository.findOne({ where: { id: bannerId } });
-            if (!banner) throw new APIError(404, 'Banner does not exist');
-            qb.andWhere('product.bannerId = :bannerId', { bannerId });
+            const banner = await this.bannerRepository.findOne({
+                where: { id: bannerId },
+            });
+            if (!banner) throw new APIError(404, "Banner does not exist");
+            qb.andWhere("product.bannerId = :bannerId", { bannerId });
         }
         if (subcategoryId) {
-            const sub = await this.subcategoryRepository.findOne({ where: { id: subcategoryId } });
-            if (!sub) throw new APIError(404, 'Subcategory does not exist');
-            qb.andWhere('product.subcategoryId = :subcategoryId', { subcategoryId });
+            const sub = await this.subcategoryRepository.findOne({
+                where: { id: subcategoryId },
+            });
+            if (!sub) throw new APIError(404, "Subcategory does not exist");
+            qb.andWhere("product.subcategoryId = :subcategoryId", {
+                subcategoryId,
+            });
         } else if (categoryId) {
-            const cat = await this.categoryRepository.findOne({ where: { id: categoryId } });
-            if (!cat) throw new APIError(404, 'Category does not exist');
-            qb.andWhere('subcategory.categoryId = :categoryId', { categoryId });
+            const cat = await this.categoryRepository.findOne({
+                where: { id: categoryId },
+            });
+            if (!cat) throw new APIError(404, "Category does not exist");
+            qb.andWhere("subcategory.categoryId = :categoryId", { categoryId });
         }
-        if (brandId) {
-            const brand = await this.brandRepository.findOne({ where: { id: brandId } });
-            if (!brand) throw new APIError(404, 'Brand does not exist');
-            qb.andWhere('product.brandId = :brandId', { brandId });
-        }
+        // if (brandId) {
+        //     const brand = await this.brandRepository.findOne({
+        //         where: { id: brandId },
+        //     });
+        //     if (!brand) throw new APIError(404, "Brand does not exist");
+        //     qb.andWhere("product.brandId = :brandId", { brandId });
+        // }
         if (dealId) {
-            const deal = await this.dealRepository.findOne({ where: { id: dealId } });
-            if (!deal) throw new APIError(404, 'Deal does not exist');
-            qb.andWhere('product.dealId = :dealId', { dealId });
+            const deal = await this.dealRepository.findOne({
+                where: { id: dealId },
+            });
+            if (!deal) throw new APIError(404, "Deal does not exist");
+            qb.andWhere("product.dealId = :dealId", { dealId });
         }
         if (vendorId) {
-            const vendor = await this.vendorRepository.findOne({ where: { id: Number(vendorId) } })
-            if (!vendor) throw new APIError(404, "Invalid vendor id")
-            qb.andWhere('product.vendorId = :vendorId', { vendorId })
+            const vendor = await this.vendorRepository.findOne({
+                where: { id: Number(vendorId) },
+            });
+            if (!vendor) throw new APIError(404, "Invalid vendor id");
+            qb.andWhere("product.vendorId = :vendorId", { vendorId });
         }
 
         if (search) {
             const searchPattern = `%${search.trim()}%`;
             qb.andWhere(
-                '(product.name ILIKE :searchPattern OR product.description ILIKE :searchPattern)',
-                { searchPattern }
+                "(product.name ILIKE :searchPattern OR product.description ILIKE :searchPattern OR product.brand ILIKE :searchPattern)",
+                { searchPattern },
             );
             qb.addOrderBy(
                 `CASE 
                     WHEN product.name ILIKE :searchPattern THEN 0 
                     ELSE 1 
                  END`,
-                'ASC'
+                "ASC",
             );
         }
 
-        qb.groupBy('product.id')
-            .addGroupBy('subcategory.id')
-            .addGroupBy('category.id')
-            .addGroupBy('brand.id')
-            .addGroupBy('vendor.id')
-            .addGroupBy('deal.id')
-            .addGroupBy('variants.id');
+        qb.groupBy("product.id")
+            .addGroupBy("subcategory.id")
+            .addGroupBy("category.id")
+            .addGroupBy("vendor.id")
+            .addGroupBy("deal.id")
+            .addGroupBy("variants.id");
 
-        if (sort === 'low-to-high') {
+        if (sort === "low-to-high") {
             qb.addSelect(
                 `
       LEAST(
@@ -643,10 +710,9 @@ export class ProductService {
         )
       )
       `,
-                'price'
-            )
-                .orderBy('price', 'ASC');
-        } else if (sort === 'high-to-low') {
+                "price",
+            ).orderBy("price", "ASC");
+        } else if (sort === "high-to-low") {
             qb.addSelect(
                 `
                 GREATEST(
@@ -668,11 +734,10 @@ export class ProductService {
                     )
                 )
                 `,
-                'price'
-            )
-                .orderBy('price', 'DESC');
+                "price",
+            ).orderBy("price", "DESC");
         } else {
-            qb.orderBy('product.createdAt', 'DESC');
+            qb.orderBy("product.createdAt", "DESC");
         }
 
         qb.skip(skip).take(limit);
@@ -688,86 +753,102 @@ export class ProductService {
         };
     }
 
-    async getAdminProducts(
-        params: IAdminProductQueryParams
-    ): Promise<{ products: Product[]; total: number; page: number; limit: number }> {
-        const { page = 1, limit = 7, sort = 'createdAt', filter, vendorId, search } = params;
+    async getAdminProducts(params: IAdminProductQueryParams): Promise<{
+        products: Product[];
+        total: number;
+        page: number;
+        limit: number;
+    }> {
+        const {
+            page = 1,
+            limit = 7,
+            sort = "createdAt",
+            filter,
+            vendorId,
+            search,
+        } = params;
 
-        const query = this.productRepository.createQueryBuilder('product')
-            .leftJoinAndSelect('product.vendor', 'vendor')
-            .leftJoinAndSelect('product.variants', 'variants')
-            .leftJoin('product.deal', 'deal')
-            .leftJoinAndSelect('product.subcategory', 'subcategory')
-            .leftJoinAndSelect('subcategory.category', 'category')
+        const query = this.productRepository
+            .createQueryBuilder("product")
+            .leftJoinAndSelect("product.vendor", "vendor")
+            .leftJoinAndSelect("product.variants", "variants")
+            .leftJoin("product.deal", "deal")
+            .leftJoinAndSelect("product.subcategory", "subcategory")
+            .leftJoinAndSelect("subcategory.category", "category")
             .select([
-                'product.id',
-                'product.name',
-                'product.stock',
-                'product.discount',
-                'product.discountType',
-                'product.productImages',
-                'product.hasVariants',
-                'product.finalPrice',
-                'product.basePrice',
-                'product.dealId',
-                'product.createdAt',
-                'product.status',
+                "product.id",
+                "product.name",
+                "product.brand",
+                "product.keywords",
+                "product.stock",
+                "product.discount",
+                "product.discountType",
+                "product.productImages",
+                "product.hasVariants",
+                "product.finalPrice",
+                "product.basePrice",
+                "product.dealId",
+                "product.createdAt",
+                "product.status",
 
-                'subcategory.id',
-                'subcategory.name',
+                "subcategory.id",
+                "subcategory.name",
 
-                'category.id',
-                'category.name',
+                "category.id",
+                "category.name",
 
-                'deal.id',
-                'deal.name',
-                'deal.discountPercentage',
-                'deal.status',
+                "deal.id",
+                "deal.name",
+                "deal.discountPercentage",
+                "deal.status",
 
-                'vendor.id',
-                'vendor.businessName',
+                "vendor.id",
+                "vendor.businessName",
 
-                'variants.id',
-                'variants.sku',
-                'variants.basePrice',
-                'variants.finalPrice',
-                'variants.stock',
-                'variants.status',
-                'variants.variantImages',
+                "variants.id",
+                "variants.sku",
+                "variants.basePrice",
+                "variants.finalPrice",
+                "variants.stock",
+                "variants.status",
+                "variants.variantImages",
             ]);
 
-        if (filter === 'out_of_stock') {
-            query.andWhere('(product.stock = 0 OR variants.stock = 0)');
+        if (filter === "out_of_stock") {
+            query.andWhere("(product.stock = 0 OR variants.stock = 0)");
         }
 
         if (vendorId) {
-            query.andWhere('product.vendorId = :vendorId', { vendorId })
+            query.andWhere("product.vendorId = :vendorId", { vendorId });
         }
 
         if (search && search.trim()) {
-            query.andWhere('(product.name ILIKE :search OR vendor.businessName ILIKE :search)', {
-                search: `%${search.trim()}%`,
-            });
+            query.andWhere(
+                "(product.name ILIKE :search OR vendor.businessName ILIKE :search)",
+                {
+                    search: `%${search.trim()}%`,
+                },
+            );
         }
 
         switch (sort) {
-            case 'name':
-                query.orderBy('product.name', 'ASC');
+            case "name":
+                query.orderBy("product.name", "ASC");
                 break;
-            case 'oldest':
-                query.orderBy('product.createdAt', 'ASC');
+            case "oldest":
+                query.orderBy("product.createdAt", "ASC");
                 break;
-            case 'newest':
-                query.orderBy('product.createdAt', 'DESC');
+            case "newest":
+                query.orderBy("product.createdAt", "DESC");
                 break;
-            case 'price_low_high':
-                query.orderBy('product.basePrice', 'ASC');
+            case "price_low_high":
+                query.orderBy("product.basePrice", "ASC");
                 break;
-            case 'price_high_low':
-                query.orderBy('product.basePrice', 'DESC');
+            case "price_high_low":
+                query.orderBy("product.basePrice", "DESC");
                 break;
             default:
-                query.orderBy('product.createdAt', 'DESC');
+                query.orderBy("product.createdAt", "DESC");
                 break;
         }
 
@@ -779,49 +860,55 @@ export class ProductService {
         return { products, total, page, limit };
     }
 
-
-
-    async getProductById(id: number, subcategoryId: number): Promise<Product | null> {
+    async getProductById(
+        id: number,
+        subcategoryId: number,
+    ): Promise<Product | null> {
         return this.productRepository
-            .createQueryBuilder('product')
-            .leftJoinAndSelect('product.vendor', 'vendor')
-            .leftJoinAndSelect('product.subcategory', 'subcategory')
-            .leftJoinAndSelect('product.variants', 'variant')
-            .where('product.id = :id', { id })
-            .andWhere('subcategory.id = :subcategoryId', { subcategoryId })
+            .createQueryBuilder("product")
+            .leftJoinAndSelect("product.vendor", "vendor")
+            .leftJoinAndSelect("product.subcategory", "subcategory")
+            .leftJoinAndSelect("product.variants", "variant")
+            .where("product.id = :id", { id })
+            .andWhere("subcategory.id = :subcategoryId", { subcategoryId })
             .getOne();
     }
-
 
     async getVendorIdByProductId(productId: number): Promise<number> {
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            select: ['vendorId'],
+            select: ["vendorId"],
         });
 
         if (!product) {
-            throw new APIError(404, 'Product not found');
+            throw new APIError(404, "Product not found");
         }
 
         return product.vendorId;
     }
 
-    async deleteProduct(id: number, subcategoryId: number, userId: number): Promise<void> {
-        const user = await this.userRepository.findOne({ where: { id: userId } });
+    async deleteProduct(
+        id: number,
+        subcategoryId: number,
+        userId: number,
+    ): Promise<void> {
+        const user = await this.userRepository.findOne({
+            where: { id: userId },
+        });
         if (!user) {
-            throw new APIError(404, 'User not found');
+            throw new APIError(404, "User not found");
         }
 
         const product = await this.productRepository.findOne({
             where: { id, subcategory: { id: subcategoryId } },
-            relations: ['vendor'],
+            relations: ["vendor"],
         });
         if (!product) {
-            throw new APIError(404, 'Product not found');
+            throw new APIError(404, "Product not found");
         }
 
         if (user.role !== UserRole.ADMIN && product.vendor.id !== userId) {
-            throw new APIError(403, 'You can only delete your own products');
+            throw new APIError(403, "You can only delete your own products");
         }
 
         await this.productRepository.delete(id);
@@ -831,31 +918,36 @@ export class ProductService {
         id: number,
         subcategoryId: number,
         userId: number,
-        imageUrl: string
+        imageUrl: string,
     ): Promise<Product | null> {
-        const user = await this.userRepository.findOne({ where: { id: userId } });
+        const user = await this.userRepository.findOne({
+            where: { id: userId },
+        });
         const vendor = !user
             ? await this.vendorRepository.findOne({ where: { id: userId } })
             : null;
 
         if (!user && !vendor) {
-            throw new APIError(404, 'User not found');
+            throw new APIError(404, "User not found");
         }
 
         // Fetch product with variants
         const product = await this.productRepository.findOne({
             where: { id, subcategory: { id: subcategoryId } },
-            relations: ['vendor', 'variants'],
+            relations: ["vendor", "variants"],
         });
         if (!product) {
-            throw new APIError(404, 'Product not found');
+            throw new APIError(404, "Product not found");
         }
 
         const isAdmin = user?.role === UserRole.ADMIN;
         const isVendorOwner = vendor && product.vendor?.id === vendor.id;
 
         if (!isAdmin && !isVendorOwner) {
-            throw new APIError(403, 'You can only delete images from your own products');
+            throw new APIError(
+                403,
+                "You can only delete images from your own products",
+            );
         }
 
         // Determine if the image belongs to the main product or a variant
@@ -864,65 +956,77 @@ export class ProductService {
 
         if (updatedProductImages.includes(imageUrl)) {
             // Image belongs to main product
-            updatedProductImages = updatedProductImages.filter(img => img !== imageUrl);
+            updatedProductImages = updatedProductImages.filter(
+                (img) => img !== imageUrl,
+            );
         } else if (product.variants && product.variants.length > 0) {
             // Check each variant
             for (const variant of product.variants) {
                 if (variant.variantImages?.includes(imageUrl)) {
                     variantToUpdate = variant;
-                    variant.variantImages = variant.variantImages.filter(img => img !== imageUrl);
+                    variant.variantImages = variant.variantImages.filter(
+                        (img) => img !== imageUrl,
+                    );
                     break;
                 }
             }
         } else {
-            throw new APIError(400, 'Image not found in product or variants');
+            throw new APIError(400, "Image not found in product or variants");
         }
 
         // Delete image from Cloudinary
-        const deletionResult = await this.imageDeletionService.deleteSingleImage(imageUrl);
+        const deletionResult =
+            await this.imageDeletionService.deleteSingleImage(imageUrl);
         if (!deletionResult.success) {
-            throw new APIError(500, `Failed to delete image: ${deletionResult.error || 'Unknown error'}`);
+            throw new APIError(
+                500,
+                `Failed to delete image: ${deletionResult.error || "Unknown error"}`,
+            );
         }
 
         // Save changes
         if (variantToUpdate) {
             await this.variantRepository.save(variantToUpdate);
         } else {
-            await this.productRepository.update(id, { productImages: updatedProductImages });
+            await this.productRepository.update(id, {
+                productImages: updatedProductImages,
+            });
         }
 
         return this.productRepository.findOne({
             where: { id, subcategory: { id: subcategoryId } },
-            relations: ['subcategory', 'vendor', 'variants'],
+            relations: ["subcategory", "vendor", "variants"],
         });
     }
 
-
-    async calculateProductPrice(
-        product: Product
-    ): Promise<{ finalPrice: number; vendorDiscount: number; dealDiscount: number }> {
+    async calculateProductPrice(product: Product): Promise<{
+        finalPrice: number;
+        vendorDiscount: number;
+        dealDiscount: number;
+    }> {
         const vendorDiscount = product.discount || 0;
         let dealDiscount = 0;
 
-        if (product.dealId && product.deal && product.deal.status === DealStatus.ENABLED) {
+        if (
+            product.dealId &&
+            product.deal &&
+            product.deal.status === DealStatus.ENABLED
+        ) {
             dealDiscount = product.deal.discountPercentage;
         }
 
         const finalDiscount = vendorDiscount + dealDiscount;
-        const finalPrice = product.basePrice - (product.basePrice * finalDiscount / 100);
+        const finalPrice =
+            product.basePrice - (product.basePrice * finalDiscount) / 100;
 
         return { finalPrice, vendorDiscount, dealDiscount };
     }
 
-    async getProductsByVendorId(
-        vendorId: number,
-        page: number,
-        limit: number
-    ): Promise<{ products: Product[]; total: number }> {
+    async getProductsByVendorId(vendorId: number, page: number, limit: number) {
         // Verify vendor existence via vendor service
         const vendor = await this.vendorService.findVendorById(vendorId);
         if (!vendor) {
-            throw new APIError(404, 'Vendor not found');
+            throw new APIError(404, "Vendor not found");
         }
 
         // Calculate number of records to skip based on pagination parameters
@@ -931,20 +1035,28 @@ export class ProductService {
         // Find products with vendor relation filtered by vendorId, paginated with total count
         const [products, total] = await this.productRepository.findAndCount({
             where: { vendor: { id: vendorId } },
-            relations: ['subcategory', 'vendor', "variants", "deal"],
+            relations: ["subcategory", "vendor", "variants", "deal"],
             skip,
             take: limit,
         });
 
-        return { products, total };
-    }
+        const sanitzedProducts = products.map((p) => {
+            return {
+                ...p,
+                vendor: sanitizeVendor(p.vendor),
+            };
+        });
 
+        console.log(sanitzedProducts);
+
+        return { products: sanitzedProducts, total };
+    }
 
     async deleteProductById(id: number) {
         // Fetch product with variants to collect all image URLs before deletion
         const product = await this.productRepository.findOne({
             where: { id },
-            relations: ['variants'],
+            relations: ["variants"],
         });
 
         if (!product) {
@@ -954,13 +1066,15 @@ export class ProductService {
         // Collect all image URLs (product images + variant images)
         const imageUrls: string[] = [
             ...(product.productImages || []),
-            ...(product.variants?.flatMap(v => v.variantImages || []) || []),
+            ...(product.variants?.flatMap((v) => v.variantImages || []) || []),
         ];
 
         // Delete all images from Cloudinary (non-blocking — DB delete proceeds even if some fail)
         if (imageUrls.length > 0) {
             await Promise.allSettled(
-                imageUrls.map(url => this.imageDeletionService.deleteSingleImage(url))
+                imageUrls.map((url) =>
+                    this.imageDeletionService.deleteSingleImage(url),
+                ),
             );
         }
 

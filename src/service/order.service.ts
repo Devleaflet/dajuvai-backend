@@ -1,37 +1,51 @@
-import { In, Not, Repository } from 'typeorm';
-import AppDataSource from '../config/db.config';
-import { APIError } from '../utils/ApiError.utils';
-import { IShippingAddressRequest, IUpdateOrderStatusRequest, IOrderCreateRequest } from '../interface/order.interface';
-import { Order, OrderStatus, PaymentStatus, PaymentMethod, DeliveryStatus } from '../entities/order.entity';
-import { Address } from '../entities/address.entity';
-import { OrderItem } from '../entities/orderItems.entity';
-import { Cart } from '../entities/cart.entity';
-import { CartItem } from '../entities/cartItem.entity';
-import { User } from '../entities/user.entity';
-import { CartService } from './cart.service';
-import { PaymentService } from './payment.service';
-import { District } from '../entities/district.entity';
-import { Product } from '../entities/product.entity';
-import { PromoService } from './promo.service';
-import { DiscountType, InventoryStatus } from '../entities/product.enum';
-import { Variant } from '../entities/variant.entity';
-import { findUserById } from './user.service';
-import { sendCustomerOrderEmail, sendOrderStatusEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
-import { NotificationService } from './notification.service';
-import { add } from 'winston';
-import crypto from 'crypto';
-import axios from 'axios';
-import { PromoType } from '../entities/promo.entity';
-import { VendorService } from './vendor.service';
-import { Vendor } from '../entities/vendor.entity';
-import config from '../config/env.config';
-
+import { In, Not, Repository } from "typeorm";
+import AppDataSource from "../config/db.config";
+import { APIError } from "../utils/ApiError.utils";
+import {
+    IShippingAddressRequest,
+    IUpdateOrderStatusRequest,
+    IOrderCreateRequest,
+} from "../interface/order.interface";
+import {
+    Order,
+    OrderStatus,
+    PaymentStatus,
+    PaymentMethod,
+    DeliveryStatus,
+} from "../entities/order.entity";
+import { Address } from "../entities/address.entity";
+import { OrderItem } from "../entities/orderItems.entity";
+import { Cart } from "../entities/cart.entity";
+import { CartItem } from "../entities/cartItem.entity";
+import { User } from "../entities/user.entity";
+import { CartService } from "./cart.service";
+import { PaymentService } from "./payment.service";
+import { District } from "../entities/district.entity";
+import { Product } from "../entities/product.entity";
+import { PromoService } from "./promo.service";
+import { DiscountType, InventoryStatus } from "../entities/product.enum";
+import { Variant } from "../entities/variant.entity";
+import { findUserById } from "./user.service";
+import {
+    sendCustomerOrderEmail,
+    sendOrderStatusEmail,
+    sendVendorOrderEmail,
+} from "../utils/nodemailer.utils";
+import { NotificationService } from "./notification.service";
+import { add } from "winston";
+import crypto from "crypto";
+import axios from "axios";
+import { PromoType } from "../entities/promo.entity";
+import { VendorService } from "./vendor.service";
+import { Vendor } from "../entities/vendor.entity";
+import config from "../config/env.config";
+import { sanitizeUser, sanitizeVendor } from "../utils/sanitize.util";
 
 /**
  * Service class responsible for managing orders.
  * Handles creation, retrieval, update, and deletion of orders,
  * as well as related entities like addresses, order items, carts, and payments.
- * 
+ *
  * @module OrderService
  */
 export class OrderService {
@@ -49,14 +63,12 @@ export class OrderService {
     private vendorService: VendorService;
     private notificationService: NotificationService;
 
-
     /**
-    * Initialize repositories and dependent services.
-    * Uses AppDataSource to get TypeORM repositories for database operations.
-    * Instantiates CartService and PaymentService for related business logic.
-    */
+     * Initialize repositories and dependent services.
+     * Uses AppDataSource to get TypeORM repositories for database operations.
+     * Instantiates CartService and PaymentService for related business logic.
+     */
     constructor() {
-
         // Repository to perform CRUD ope
         // rations on Order entities
         this.orderRepository = AppDataSource.getRepository(Order);
@@ -94,9 +106,12 @@ export class OrderService {
 
     private calculateLineItemPrice(item: any): number {
         if (item?.variant) {
-            const variantPrice = item.variant.finalPrice ?? item.variant.basePrice;
+            const variantPrice =
+                item.variant.finalPrice ?? item.variant.basePrice;
             const numericVariantPrice = Number(variantPrice);
-            return Number.isFinite(numericVariantPrice) ? numericVariantPrice : 0;
+            return Number.isFinite(numericVariantPrice)
+                ? numericVariantPrice
+                : 0;
         }
 
         const basePrice = Number(item?.product?.basePrice ?? 0);
@@ -127,11 +142,11 @@ export class OrderService {
         // Attempt to find user by ID with related address data eagerly loaded
         const user = await this.userRepository.findOne({
             where: { id: userId },
-            relations: ['address'], // Include associated address in the query result
+            relations: ["address"], // Include associated address in the query result
         });
 
         // Throw an error if user is not found in the database
-        if (!user) throw new APIError(404, 'User not found');
+        if (!user) throw new APIError(404, "User not found");
 
         // Return the found user entity
         return user;
@@ -146,38 +161,45 @@ export class OrderService {
     private async getCart(userId: number): Promise<Cart> {
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.product.vendor', 'items.product.vendor.district', 'items.variant'],
+            relations: [
+                "items",
+                "items.product",
+                "items.product.vendor",
+                "items.product.vendor.district",
+                "items.variant",
+            ],
         });
 
         // If cart not found or cart has no items, throw an error indicating cart is empty
-        if (!cart || !cart.items.length) throw new APIError(400, 'Cart is empty');
+        if (!cart || !cart.items.length)
+            throw new APIError(400, "Cart is empty");
 
         // Return the fully populated cart entity
         return cart;
     }
 
-
     /**
- * Retrieve a District entity by its name.
- * @param {string} districtName - The name of the district to look up.
- * @throws {APIError} Throws 400 error if the district is not found.
- * @returns {Promise<District>} The matched District entity.
- */
+     * Retrieve a District entity by its name.
+     * @param {string} districtName - The name of the district to look up.
+     * @throws {APIError} Throws 400 error if the district is not found.
+     * @returns {Promise<District>} The matched District entity.
+     */
     private async getDistrict(districtName: string): Promise<District> {
         // Attempt to find the district by its name
-        const district = await this.districtRepository.findOne({ where: { name: districtName } });
+        const district = await this.districtRepository.findOne({
+            where: { name: districtName },
+        });
 
         // If the district does not exist, throw an error
-        if (!district) throw new APIError(400, 'Invalid district');
+        if (!district) throw new APIError(400, "Invalid district");
 
         // Return the found district entity
         return district;
     }
 
-
     /**
      * Get an existing address for the user or create a new one based on shipping info.
-     * 
+     *
      * Priority:
      *   1. Use the shipping address from the user's last order (if exists).
      *   2. Use the user's default address if it matches the new shipping details.
@@ -191,10 +213,11 @@ export class OrderService {
     private async getOrCreateAddress(
         userId: number,
         shippingAddress: IShippingAddressRequest,
-        user: User
+        user: User,
     ): Promise<Address> {
-
-        let address = await this.addressRepository.findOne({ where: { userId } });
+        let address = await this.addressRepository.findOne({
+            where: { userId },
+        });
 
         if (address) {
             if (
@@ -227,7 +250,7 @@ export class OrderService {
             localAddress: shippingAddress.streetAddress,
             landmark: shippingAddress.landmark,
             // phoneNumber,
-            userId
+            userId,
         });
 
         const savedAddress = await this.addressRepository.save(newAddress);
@@ -235,8 +258,6 @@ export class OrderService {
         await this.userRepository.save(user);
         return savedAddress;
     }
-
-
 
     /**
      * Convert cart items into OrderItem entities for persistence.
@@ -246,7 +267,7 @@ export class OrderService {
      * @returns {OrderItem[]} - Array of OrderItem entities ready to be saved to the database.
      */
     private createOrderItems(items: any[]): OrderItem[] {
-        return items.map(item => {
+        return items.map((item) => {
             const price = this.calculateLineItemPrice(item);
             return this.orderItemRepository.create({
                 productId: item.product.id,
@@ -257,8 +278,6 @@ export class OrderService {
             });
         });
     }
-
-
 
     /**
      * Create a new Order entity from the given cart, user, and order data.
@@ -279,7 +298,7 @@ export class OrderService {
         items: any[],
         address: Address,
         shippingFee: number,
-        orderData: IOrderCreateRequest
+        orderData: IOrderCreateRequest,
     ): Promise<Order> {
         // Convert items into OrderItem entities
         const orderItems = this.createOrderItems(items);
@@ -287,7 +306,7 @@ export class OrderService {
         // Calculate subtotal from items
         const subtotal = items.reduce((sum, item) => {
             const linePrice = this.calculateLineItemPrice(item);
-            return sum + (linePrice * item.quantity);
+            return sum + linePrice * item.quantity;
         }, 0);
         console.log("--------------subtotal------------------");
         console.log(subtotal);
@@ -297,14 +316,24 @@ export class OrderService {
         let appliedPromoCode: string | null = null;
 
         if (orderData.promoCode) {
-            const promo = await this.promoService.findPromoByCode(orderData.promoCode);
-            let pastOrderTransaction = await this.orderRepository.find({ where: { appliedPromoCode: orderData.promoCode, orderedById: userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]) } })
+            const promo = await this.promoService.findPromoByCode(
+                orderData.promoCode,
+            );
+            let pastOrderTransaction = await this.orderRepository.find({
+                where: {
+                    appliedPromoCode: orderData.promoCode,
+                    orderedById: userId,
+                    status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
+                },
+            });
 
             if (promo && promo.isValid && pastOrderTransaction.length === 0) {
                 if (promo.applyOn === PromoType.LINE_TOTAL) {
-                    discountAmount = (subtotal * promo.discountPercentage) / 100;
+                    discountAmount =
+                        (subtotal * promo.discountPercentage) / 100;
                 } else {
-                    discountAmount = (shippingFee * promo.discountPercentage) / 100;
+                    discountAmount =
+                        (shippingFee * promo.discountPercentage) / 100;
                 }
                 appliedPromoCode = promo.promoCode;
             }
@@ -334,16 +363,19 @@ export class OrderService {
         });
     }
 
-
-
-
     async checkAvailablePromocode(promoCode: string, userId: number) {
         const promo = await this.promoService.findPromoByCode(promoCode);
-        console.log(promo)
+        console.log(promo);
         if (!promo) {
             return null;
         }
-        let pastOrderTransaction = await this.orderRepository.find({ where: { appliedPromoCode: promoCode, orderedById: userId, status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]) } })
+        let pastOrderTransaction = await this.orderRepository.find({
+            where: {
+                appliedPromoCode: promoCode,
+                orderedById: userId,
+                status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
+            },
+        });
         if (pastOrderTransaction.length > 0) {
             return null;
         }
@@ -351,26 +383,25 @@ export class OrderService {
         return promo;
     }
 
-
-
     async trackOrder(email: string, orderId: number) {
         const order = await this.orderRepository.findOne({
             where: {
                 id: orderId,
-                orderedBy: { email }
+                orderedBy: { email },
             },
             relations: ["orderedBy"],
-            select: ["id", "status"]
-        })
+            select: ["id", "status"],
+        });
 
         if (!order) {
-            throw new APIError(404, "Order does not exist or does not belong to the user");
+            throw new APIError(
+                404,
+                "Order does not exist or does not belong to the user",
+            );
         }
 
         return order;
     }
-
-
 
     async updateUserDetail(id: number, fullName: string, phoneNumber: string) {
         const userDb = AppDataSource.getRepository(User);
@@ -378,7 +409,7 @@ export class OrderService {
         // Fetch the user first
         const user = await userDb.findOne({ where: { id: id } });
         if (!user) {
-            throw new Error('User not found');
+            throw new Error("User not found");
         }
 
         // Update fullName always
@@ -392,15 +423,29 @@ export class OrderService {
         await userDb.save(user);
     }
 
-
     async createOrder(
         userId: number,
-        orderData: IOrderCreateRequest
-    ): Promise<{ order: Order; redirectUrl?: string, vendorids: any[], useremail: string, esewaRedirectUrl: string | undefined }> {
+        orderData: IOrderCreateRequest,
+    ): Promise<{
+        order: Order;
+        redirectUrl?: string;
+        vendorids: any[];
+        useremail: string;
+        esewaRedirectUrl: string | undefined;
+    }> {
         try {
-            const { shippingAddress, paymentMethod, phoneNumber, fullName, productId, isBuyNow, variantId, quantity } = orderData;
+            const {
+                shippingAddress,
+                paymentMethod,
+                phoneNumber,
+                fullName,
+                productId,
+                isBuyNow,
+                variantId,
+                quantity,
+            } = orderData;
 
-            console.log("-----------------Order data-------------------")
+            console.log("-----------------Order data-------------------");
             console.log(orderData);
 
             await this.updateUserDetail(userId, fullName, phoneNumber);
@@ -420,14 +465,16 @@ export class OrderService {
                     relations: ["variants", "vendor", "vendor.district"],
                 });
 
-                console.log("------------------Product------------------")
-                console.log(product)
+                console.log("------------------Product------------------");
+                console.log(product);
 
                 if (!product) throw new APIError(404, "Product not found");
 
                 let variant = null;
                 if (variantId) {
-                    variant = await this.variantRepository.findOne({ where: { id: variantId } });
+                    variant = await this.variantRepository.findOne({
+                        where: { id: variantId },
+                    });
                     if (!variant) throw new APIError(404, "Variant not found");
                 }
 
@@ -443,30 +490,45 @@ export class OrderService {
                 items = cart.items;
             }
 
-            console.log("----------------items-------------------")
+            console.log("----------------items-------------------");
             console.log(items);
 
             // Check stock before creating the order
             await this.validateStock(items);
 
             // Either fetch user's existing address or create a new one based on input
-            const address = await this.getOrCreateAddress(userId, shippingAddress, user);
+            const address = await this.getOrCreateAddress(
+                userId,
+                shippingAddress,
+                user,
+            );
 
-            console.log("-----------saved address----------------")
-            console.log(address)
+            console.log("-----------saved address----------------");
+            console.log(address);
 
             // Calculate total shipping fee based on items and destination address
-            const shippingFee = await this.calculateShippingFee(address, userId, items);
+            const shippingFee = await this.calculateShippingFee(
+                address,
+                userId,
+                items,
+            );
 
             const vendorids = shippingFee.vendorIds;
 
             const userDetail = await findUserById(userId);
 
-            const useremail = userDetail.email
-
+            const useremail = userDetail.email;
 
             // Create the Order entity (not yet saved in DB)
-            let order = await this.createOrderEntity(userId, isBuyNow, user, items, address, shippingFee.shippingFee, orderData);
+            let order = await this.createOrderEntity(
+                userId,
+                isBuyNow,
+                user,
+                items,
+                address,
+                shippingFee.shippingFee,
+                orderData,
+            );
             console.log(order);
 
             // let redirectUrl: string | undefined;
@@ -477,7 +539,11 @@ export class OrderService {
 
                 order = await this.orderRepository.findOne({
                     where: { id: order.id },
-                    relations: ["orderItems", "orderItems.product", "orderItems.variant"],
+                    relations: [
+                        "orderItems",
+                        "orderItems.product",
+                        "orderItems.variant",
+                    ],
                 });
 
                 console.log(order.orderItems);
@@ -488,36 +554,44 @@ export class OrderService {
                 if (!isBuyNow) {
                     await this.cartService.clearCart(userId);
                 }
-
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
                 paymentMethod === PaymentMethod.ESEWA ||
                 paymentMethod === PaymentMethod.NPX
             ) {
-                console.log("------------Order saving after payment is initated for online payment-------- ")
+                console.log(
+                    "------------Order saving after payment is initated for online payment-------- ",
+                );
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
                 if (paymentMethod === PaymentMethod.ESEWA) {
-
                     esewaRedirectUrl = await this.initateEsewaPayment(order);
-                    console.log("Respose of Esewa", esewaRedirectUrl)
+                    console.log("Respose of Esewa", esewaRedirectUrl);
                 }
             } else {
                 throw new APIError(400, "Invalid payment method");
             }
 
-            return { order, esewaRedirectUrl, vendorids, useremail };
-
+            return {
+                order,
+                esewaRedirectUrl,
+                vendorids,
+                useremail,
+            };
         } catch (error) {
             console.log(error);
-            throw error instanceof APIError ? error : new APIError(500, "Failed to create order");
+            throw error instanceof APIError
+                ? error
+                : new APIError(500, "Failed to create order");
         }
     }
 
     async esewaSuccess(token: string, orderId: number) {
         try {
-            let object = JSON.parse(Buffer.from(token, "base64").toString("ascii"))
-            console.log("This is the object after decoding", object)
+            let object = JSON.parse(
+                Buffer.from(token, "base64").toString("ascii"),
+            );
+            console.log("This is the object after decoding", object);
 
             if (object.status !== "COMPLETE") {
                 throw new APIError(400, "Payment not completed");
@@ -529,11 +603,10 @@ export class OrderService {
             // Send emails to customer and vendors
             await this.sendOrderEmails(orderId);
 
-            return { success: true }
-
+            return { success: true };
         } catch (err) {
-            console.log("Error", err)
-            throw new APIError(500, 'Esewa payment verification failed');
+            console.log("Error", err);
+            throw new APIError(500, "Esewa payment verification failed");
         }
     }
 
@@ -541,7 +614,6 @@ export class OrderService {
     //             where: { id: orderId },
     //             relations: ["orderedBy", "orderItems", "orderItems.product", "orderItems.variant"],
     //         });
-
 
     //         if (!order) {
     //             throw new APIError(404, `Order with ID ${orderId} not found`);
@@ -602,7 +674,13 @@ export class OrderService {
         // Fetch the order with all relations
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
-            relations: ["orderedBy", "orderedBy.address", "orderItems", "orderItems.product", "orderItems.variant"],
+            relations: [
+                "orderedBy",
+                "orderedBy.address",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.variant",
+            ],
         });
 
         if (!order) {
@@ -617,7 +695,9 @@ export class OrderService {
         }
 
         // Extract unique vendor IDs
-        const vendorIds = [...new Set(order.orderItems.map((item) => item.vendorId))];
+        const vendorIds = [
+            ...new Set(order.orderItems.map((item) => item.vendorId)),
+        ];
 
         // Fetch vendor details including district
         const vendorRepository = AppDataSource.getRepository(Vendor);
@@ -628,22 +708,28 @@ export class OrderService {
         });
 
         // Send customer email
-        await sendCustomerOrderEmail(
-            user.email,
-            order.id,
-            order.orderItems.map((item) => {
-                const vendor = vendors.find((v) => v.id === item.vendorId);
-                return {
-                    name: item.product.name,
-                    sku: item.variant?.sku || null,
-                    quantity: item.quantity,
-                    price: item.price,
-                    variantAttributes: item.variant?.attributes || null,
-                    vendorDistrict: vendor?.district?.name || null,
-                };
-            }),
-            user.address.district || null
-        );
+        try {
+            await sendCustomerOrderEmail(
+                user.email,
+                order.id,
+                order.totalPrice,
+                order.shippingFee,
+                order.orderItems.map((item) => {
+                    const vendor = vendors.find((v) => v.id === item.vendorId);
+                    return {
+                        name: item.product.name,
+                        sku: item.variant?.sku || null,
+                        quantity: item.quantity,
+                        price: item.price,
+                        variantAttributes: item.variant?.attributes || null,
+                        vendorDistrict: vendor?.district?.name || null,
+                    };
+                }),
+                user.address.district || null,
+            );
+        } catch (error) {
+            console.log("Failed to send customer order email:", error);
+        }
 
         // Send emails to vendors
         for (const vendorId of vendorIds) {
@@ -662,28 +748,39 @@ export class OrderService {
 
             if (itemsForVendor.length === 0) continue;
 
-            await sendVendorOrderEmail(
-                vendor.email,
-                order.paymentMethod,
-                order.id,
-                itemsForVendor,
-                {
-                    name: user.fullName,
-                    phone: user.phoneNumber,
-                    email: user.email,
-                    city: user.address.city,
-                    district: user.address.district,
-                    localAddress: user.address.localAddress,
-                    landmark: user.address.landmark,
-                }
-            );
+            try {
+                await sendVendorOrderEmail(
+                    vendor.email,
+                    order.paymentMethod,
+                    order.id,
+                    order.totalPrice,
+                    order.shippingFee,
+                    itemsForVendor,
+                    {
+                        name: user.fullName,
+                        phone: user.phoneNumber,
+                        email: user.email,
+                        city: user.address.city,
+                        district: user.address.district,
+                        localAddress: user.address.localAddress,
+                        landmark: user.address.landmark,
+                    },
+                );
+            } catch (error) {
+                console.log(
+                    "Failed to send email to vendor, vendor id: ",
+                    vendorId,
+                    error,
+                );
+            }
         }
     }
 
-
     async esewaFailed(orderId: number) {
         try {
-            const order = await this.orderRepository.findOne({ where: { id: orderId } });
+            const order = await this.orderRepository.findOne({
+                where: { id: orderId },
+            });
             if (!order) {
                 throw new APIError(404, "Order not found");
             }
@@ -692,17 +789,22 @@ export class OrderService {
             order.status = OrderStatus.CANCELLED;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
             await this.orderRepository.save(order);
-            await this.notificationService.notifyPaymentFailed(order.id, order.orderedById);
-            return { success: true }
+            await this.notificationService.notifyPaymentFailed(
+                order.id,
+                order.orderedById,
+            );
+            return { success: true };
         } catch (err) {
-            console.log("Error", err)
-            throw new APIError(500, 'Esewa payment verification failed');
+            console.log("Error", err);
+            throw new APIError(500, "Esewa payment verification failed");
         }
     }
 
     async orderSuccess(orderId: number, transactionId: string) {
         try {
-            const order = await this.orderRepository.findOne({ where: { id: orderId } });
+            const order = await this.orderRepository.findOne({
+                where: { id: orderId },
+            });
             if (!order) {
                 throw new APIError(404, "Order not found");
             }
@@ -712,28 +814,33 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.PAID;
             order.mTransactionId = transactionId;
             await this.orderRepository.save(order);
-            await this.notificationService.notifyPaymentSuccess(order.id, order.orderedById);
+            await this.notificationService.notifyPaymentSuccess(
+                order.id,
+                order.orderedById,
+            );
 
             return order;
         } catch (err) {
-            console.log(err)
+            console.log(err);
             throw new APIError(500, "Failed to confirm order");
         }
     }
 
-
     private async initateEsewaPayment(order: Order) {
-        console.log("------------Order to Initiate Esewa payment-------------")
-        console.log(order)
+        console.log("------------Order to Initiate Esewa payment-------------");
+        console.log(order);
         const transaction_uuid = crypto.randomUUID();
 
         const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${config.ESEWA_MERCHANT}`;
 
-        console.log("-------------Data after order---------------------")
-        console.log(data)
-        console.log("----------------------------------")
+        console.log("-------------Data after order---------------------");
+        console.log(data);
+        console.log("----------------------------------");
 
-        const esewaSignature = this.generateHmacSha256Hash(data, config.SECRET_KEY);
+        const esewaSignature = this.generateHmacSha256Hash(
+            data,
+            config.SECRET_KEY,
+        );
 
         let paymentData = {
             amount: order.totalPrice,
@@ -752,36 +859,44 @@ export class OrderService {
             metadata: {
                 paymentId: order?.id,
             },
-            signature: esewaSignature
+            signature: esewaSignature,
         };
 
-
         try {
-            const paymentResponse = await axios.post(config.ESEWA_PAYMENT_URL, null, {
-                params: paymentData,
-            });
+            const paymentResponse = await axios.post(
+                config.ESEWA_PAYMENT_URL,
+                null,
+                {
+                    params: paymentData,
+                },
+            );
             const reqPayment = JSON.parse(this.safeStringify(paymentResponse));
-            if (reqPayment.status === 200 && reqPayment.request?.res?.responseUrl) {
-                console.log("---------re payment responseurl ")
-                console.log(reqPayment.request.res.responseUrl)
+            if (
+                reqPayment.status === 200 &&
+                reqPayment.request?.res?.responseUrl
+            ) {
+                console.log("---------re payment responseurl ");
+                console.log(reqPayment.request.res.responseUrl);
                 return {
-                    url: reqPayment.request.res.responseUrl
+                    url: reqPayment.request.res.responseUrl,
                 };
             } else {
-                throw new Error('Esewa payment initiation failed');
+                throw new Error("Esewa payment initiation failed");
             }
         } catch (error) {
-            console.error('Esewa payment error:', error);
-            throw new APIError(500, 'Esewa payment initiation failed');
+            console.error("Esewa payment error:", error);
+            throw new APIError(500, "Esewa payment initiation failed");
         }
     }
 
     private generateHmacSha256Hash(data: string, secret: string) {
-        console.log("Generated Hash")
-        console.log("data", data)
-        console.log("Secret", secret)
+        console.log("Generated Hash");
+        console.log("data", data);
+        console.log("Secret", secret);
         if (!data || !secret) {
-            throw new Error("Both data and secret are required to generate a hash.");
+            throw new Error(
+                "Both data and secret are required to generate a hash.",
+            );
         }
 
         // Create HMAC SHA256 hash and encode it in Base64
@@ -807,22 +922,31 @@ export class OrderService {
         return jsonString;
     }
 
-
     // Separate method for stock validation
     private async validateStock(cartItems: CartItem[]): Promise<void> {
         const variantIds = [
             ...new Set(
                 cartItems
-                    .map((item) => (item.variant ? String(item.variant.id) : null))
-                    .filter((id): id is string => typeof id === "string" && id.length > 0)
+                    .map((item) =>
+                        item.variant ? String(item.variant.id) : null,
+                    )
+                    .filter(
+                        (id): id is string =>
+                            typeof id === "string" && id.length > 0,
+                    ),
             ),
         ];
 
         const productIds = [
             ...new Set(
                 cartItems
-                    .map((item) => (!item.variant ? Number(item.product?.id) : null))
-                    .filter((id): id is number => typeof id === 'number' && Number.isFinite(id))
+                    .map((item) =>
+                        !item.variant ? Number(item.product?.id) : null,
+                    )
+                    .filter(
+                        (id): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
+                    ),
             ),
         ];
 
@@ -835,15 +959,22 @@ export class OrderService {
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(variants.map((v) => [String(v.id), v]));
-        const productsById = new Map<number, Product>(products.map((p) => [p.id, p]));
+        const variantsById = new Map<string, Variant>(
+            variants.map((v) => [String(v.id), v]),
+        );
+        const productsById = new Map<number, Product>(
+            products.map((p) => [p.id, p]),
+        );
 
         for (const item of cartItems) {
             if (item.variant) {
                 const variant = variantsById.get(String(item.variant.id));
 
                 if (!variant) {
-                    throw new APIError(404, `Variant not found for product: ${item.product?.name}`);
+                    throw new APIError(
+                        404,
+                        `Variant not found for product: ${item.product?.name}`,
+                    );
                 }
 
                 if (variant.stock < item.quantity) {
@@ -856,14 +987,17 @@ export class OrderService {
             const product = productsById.get(Number(item.product?.id));
 
             if (!product) {
-                throw new APIError(404, `Product not found for cart item ID: ${item.id}`);
+                throw new APIError(
+                    404,
+                    `Product not found for cart item ID: ${item.id}`,
+                );
             }
 
             if (!product.stock || product.stock < item.quantity) {
                 throw new APIError(
                     400,
                     `Insufficient stock for product "${product.name}". ` +
-                    `Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
                 );
             }
         }
@@ -872,16 +1006,26 @@ export class OrderService {
         const variantIds = [
             ...new Set(
                 orderItems
-                    .map((item: any) => (item.variantId ? String(item.variantId) : null))
-                    .filter((id: any): id is string => typeof id === "string" && id.length > 0)
+                    .map((item: any) =>
+                        item.variantId ? String(item.variantId) : null,
+                    )
+                    .filter(
+                        (id: any): id is string =>
+                            typeof id === "string" && id.length > 0,
+                    ),
             ),
         ];
 
         const productIds = [
             ...new Set(
                 orderItems
-                    .map((item: any) => (item.productId ? Number(item.productId) : null))
-                    .filter((id: any): id is number => typeof id === 'number' && Number.isFinite(id))
+                    .map((item: any) =>
+                        item.productId ? Number(item.productId) : null,
+                    )
+                    .filter(
+                        (id: any): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
+                    ),
             ),
         ];
 
@@ -894,8 +1038,12 @@ export class OrderService {
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(variants.map((v) => [String(v.id), v]));
-        const productsById = new Map<number, Product>(products.map((p) => [p.id, p]));
+        const variantsById = new Map<string, Variant>(
+            variants.map((v) => [String(v.id), v]),
+        );
+        const productsById = new Map<number, Product>(
+            products.map((p) => [p.id, p]),
+        );
 
         const variantsToSave = new Map<string, Variant>();
         const productsToSave = new Map<number, Product>();
@@ -904,7 +1052,10 @@ export class OrderService {
             if (item.variantId) {
                 const variant = variantsById.get(String(item.variantId));
                 if (!variant) {
-                    throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+                    throw new APIError(
+                        404,
+                        `Variant not found for order item ID: ${item.id}`,
+                    );
                 }
 
                 variant.stock += item.quantity;
@@ -912,8 +1063,8 @@ export class OrderService {
                     variant.stock <= 0
                         ? InventoryStatus.OUT_OF_STOCK
                         : variant.stock < 5
-                            ? InventoryStatus.LOW_STOCK
-                            : InventoryStatus.AVAILABLE;
+                          ? InventoryStatus.LOW_STOCK
+                          : InventoryStatus.AVAILABLE;
 
                 variantsToSave.set(String(variant.id), variant);
                 continue;
@@ -922,7 +1073,10 @@ export class OrderService {
             if (item.productId) {
                 const product = productsById.get(Number(item.productId));
                 if (!product) {
-                    throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                    throw new APIError(
+                        404,
+                        `Product not found for order item ID: ${item.id}`,
+                    );
                 }
 
                 product.stock += item.quantity;
@@ -930,14 +1084,17 @@ export class OrderService {
                     product.stock <= 0
                         ? InventoryStatus.OUT_OF_STOCK
                         : product.stock < 5
-                            ? InventoryStatus.LOW_STOCK
-                            : InventoryStatus.AVAILABLE;
+                          ? InventoryStatus.LOW_STOCK
+                          : InventoryStatus.AVAILABLE;
 
                 productsToSave.set(product.id, product);
                 continue;
             }
 
-            throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+            throw new APIError(
+                400,
+                `Order item ID: ${item.id} has neither productId nor variantId`,
+            );
         }
 
         if (variantsToSave.size) {
@@ -949,36 +1106,52 @@ export class OrderService {
         }
     }
 
-
     // Separate method for stock updates
     private async updateStock(orderItems: any[]): Promise<void> {
         const variantIds = [
             ...new Set(
                 orderItems
-                    .map((item: any) => (item.variantId ? String(item.variantId) : null))
-                    .filter((id: any): id is string => typeof id === "string" && id.length > 0)
+                    .map((item: any) =>
+                        item.variantId ? String(item.variantId) : null,
+                    )
+                    .filter(
+                        (id: any): id is string =>
+                            typeof id === "string" && id.length > 0,
+                    ),
             ),
         ];
 
         const productIds = [
             ...new Set(
                 orderItems
-                    .map((item: any) => (item.productId ? Number(item.productId) : null))
-                    .filter((id: any): id is number => typeof id === 'number' && Number.isFinite(id))
+                    .map((item: any) =>
+                        item.productId ? Number(item.productId) : null,
+                    )
+                    .filter(
+                        (id: any): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
+                    ),
             ),
         ];
 
         const [variants, products] = await Promise.all([
             variantIds.length
-                ? this.variantRepository.find({ where: { id: In(variantIds) }, relations: ["product"] })
+                ? this.variantRepository.find({
+                      where: { id: In(variantIds) },
+                      relations: ["product"],
+                  })
                 : Promise.resolve([]),
             productIds.length
                 ? this.productRepository.find({ where: { id: In(productIds) } })
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(variants.map((v) => [String(v.id), v]));
-        const productsById = new Map<number, Product>(products.map((p) => [p.id, p]));
+        const variantsById = new Map<string, Variant>(
+            variants.map((v) => [String(v.id), v]),
+        );
+        const productsById = new Map<number, Product>(
+            products.map((p) => [p.id, p]),
+        );
 
         const variantsToSave = new Map<string, Variant>();
         const productsToSave = new Map<number, Product>();
@@ -988,14 +1161,17 @@ export class OrderService {
                 const variant = variantsById.get(String(item.variantId));
 
                 if (!variant) {
-                    throw new APIError(404, `Variant not found for order item ID: ${item.id}`);
+                    throw new APIError(
+                        404,
+                        `Variant not found for order item ID: ${item.id}`,
+                    );
                 }
 
                 if (variant.stock < item.quantity) {
                     throw new APIError(
                         400,
                         `Insufficient stock for variant "${variant.sku || variant.id}" of product "${variant.product?.name || "Unknown"}". ` +
-                        `Available: ${variant.stock}, Requested: ${item.quantity}`
+                            `Available: ${variant.stock}, Requested: ${item.quantity}`,
                     );
                 }
 
@@ -1004,8 +1180,8 @@ export class OrderService {
                     variant.stock <= 0
                         ? InventoryStatus.OUT_OF_STOCK
                         : variant.stock < 5
-                            ? InventoryStatus.LOW_STOCK
-                            : InventoryStatus.AVAILABLE;
+                          ? InventoryStatus.LOW_STOCK
+                          : InventoryStatus.AVAILABLE;
 
                 variantsToSave.set(String(variant.id), variant);
                 continue;
@@ -1015,14 +1191,17 @@ export class OrderService {
                 const product = productsById.get(Number(item.productId));
 
                 if (!product) {
-                    throw new APIError(404, `Product not found for order item ID: ${item.id}`);
+                    throw new APIError(
+                        404,
+                        `Product not found for order item ID: ${item.id}`,
+                    );
                 }
 
                 if (!product.stock || product.stock < item.quantity) {
                     throw new APIError(
                         400,
                         `Insufficient stock for product "${product.name || product.id}". ` +
-                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`
+                            `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
                     );
                 }
 
@@ -1031,14 +1210,17 @@ export class OrderService {
                     product.stock <= 0
                         ? InventoryStatus.OUT_OF_STOCK
                         : product.stock < 5
-                            ? InventoryStatus.LOW_STOCK
-                            : InventoryStatus.AVAILABLE;
+                          ? InventoryStatus.LOW_STOCK
+                          : InventoryStatus.AVAILABLE;
 
                 productsToSave.set(product.id, product);
                 continue;
             }
 
-            throw new APIError(400, `Order item ID: ${item.id} has neither productId nor variantId`);
+            throw new APIError(
+                400,
+                `Order item ID: ${item.id} has neither productId nor variantId`,
+            );
         }
 
         if (variantsToSave.size) {
@@ -1049,7 +1231,9 @@ export class OrderService {
                 .map((v) => String(v.id));
 
             await Promise.allSettled(
-                depletedVariantIds.map((id) => this.removeItemFromCarts(id, true))
+                depletedVariantIds.map((id) =>
+                    this.removeItemFromCarts(id, true),
+                ),
             );
         }
 
@@ -1061,48 +1245,53 @@ export class OrderService {
                 .map((p) => p.id);
 
             await Promise.allSettled(
-                depletedProductIds.map((id) => this.removeItemFromCarts(id, false))
+                depletedProductIds.map((id) =>
+                    this.removeItemFromCarts(id, false),
+                ),
             );
         }
     }
 
-
-    private async removeItemFromCarts(itemId: string | number, isvariant: boolean) {
+    private async removeItemFromCarts(
+        itemId: string | number,
+        isvariant: boolean,
+    ) {
         const cartItemRepo = AppDataSource.getRepository(CartItem);
 
         if (isvariant) {
-            await cartItemRepo.delete({ variantId: Number(itemId) })
+            await cartItemRepo.delete({ variantId: Number(itemId) });
         } else {
-            await cartItemRepo.delete({ product: { id: Number(itemId) } })
+            await cartItemRepo.delete({ product: { id: Number(itemId) } });
         }
     }
 
-
-
-
-    async verifyPayment(orderId: number, transactionId: string, responseData: any): Promise<Order> {
+    async verifyPayment(
+        orderId: number,
+        transactionId: string,
+        responseData: any,
+    ): Promise<Order> {
         // Fetch order by ID and transaction ID, including all required relations
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
             ],
         });
 
         // If order doesn't exist, throw a 404 error
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         // Verify payment status using external payment service (e.g., Esewa/Khalti)
         const isSuccessful = await this.paymentService.verifyPayment(
             transactionId,
             orderId.toString(),
-            responseData
+            responseData,
         );
 
         if (isSuccessful) {
@@ -1112,15 +1301,20 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.UNPAID;
             order.status = OrderStatus.CANCELLED;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
-
         }
 
         // Save updated order info
         await this.orderRepository.save(order);
         if (isSuccessful) {
-            await this.notificationService.notifyPaymentSuccess(order.id, order.orderedById);
+            await this.notificationService.notifyPaymentSuccess(
+                order.id,
+                order.orderedById,
+            );
         } else {
-            await this.notificationService.notifyPaymentFailed(order.id, order.orderedById);
+            await this.notificationService.notifyPaymentFailed(
+                order.id,
+                order.orderedById,
+            );
         }
 
         if (isSuccessful) {
@@ -1134,9 +1328,6 @@ export class OrderService {
         return order;
     }
 
-
-
-
     /**
      * Handle payment cancellation scenario by marking the order as UNPAID.
      *
@@ -1145,14 +1336,18 @@ export class OrderService {
      * @access Public (called when a user cancels payment)
      */
     async handlePaymentCancel(orderId: number): Promise<void> {
-        console.log("payment cancel")
+        console.log("payment cancel");
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
-            relations: ['orderItems', 'orderItems.product', 'orderItems.variant'],
+            relations: [
+                "orderItems",
+                "orderItems.product",
+                "orderItems.variant",
+            ],
         });
 
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         // Restore stock
@@ -1166,15 +1361,15 @@ export class OrderService {
         order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
 
         await this.orderRepository.save(order);
-        await this.notificationService.notifyPaymentCancelled(order.id, order.orderedById);
+        await this.notificationService.notifyPaymentCancelled(
+            order.id,
+            order.orderedById,
+        );
     }
-
-
-
 
     /**
      * Calculates the total shipping fee based on the shipping address and vendor districts.
-     * 
+     *
      * @param {Address} shippingAddress - The user's provided shipping address.
      * @param {number} userId - ID of the user placing the order.
      * @param {CartItem[]} cartItems - List of cart items associated with the order.
@@ -1184,9 +1379,8 @@ export class OrderService {
     private async calculateShippingFee(
         shippingAddress: Address,
         userId: number,
-        cartItems: CartItem[]
+        cartItems: CartItem[],
     ): Promise<{ shippingFee: number; vendorIds: number[] }> {
-
         if (!shippingAddress) {
             throw new APIError(400, "Shipping address is missing");
         }
@@ -1199,7 +1393,10 @@ export class OrderService {
             const vendor = item.product?.vendor;
 
             if (!vendor || !vendor.district || !vendor.district.name) {
-                throw new APIError(400, `Vendor for product ${item.product.id} has no valid address`);
+                throw new APIError(
+                    400,
+                    `Vendor for product ${item.product.id} has no valid address`,
+                );
             }
 
             vendorDistrictSet.add(vendor.district.name);
@@ -1210,7 +1407,7 @@ export class OrderService {
         const userDistrict = shippingAddress.district;
 
         // Districts treated as same metro area
-        const sameDistrictGroup = ['Kathmandu', 'Bhaktapur', 'Lalitpur'];
+        const sameDistrictGroup = ["Kathmandu", "Bhaktapur", "Lalitpur"];
 
         let shippingFee = 0;
 
@@ -1218,7 +1415,8 @@ export class OrderService {
         for (const vendorDistrict of vendorDistrictSet) {
             const isSameCity =
                 userDistrict === vendorDistrict ||
-                (sameDistrictGroup.includes(userDistrict) && sameDistrictGroup.includes(vendorDistrict));
+                (sameDistrictGroup.includes(userDistrict) &&
+                    sameDistrictGroup.includes(vendorDistrict));
 
             shippingFee += isSameCity ? 100 : 200;
         }
@@ -1229,28 +1427,28 @@ export class OrderService {
         };
     }
 
-
-
-
     /**
      * Fetches all customer orders from the database.
-     * 
+     *
      * @returns {Promise<Order[]>} - A list of all orders with user, items, and shipping address populated.
      * @access Admin
      */
     async getCustomerOrders(): Promise<Order[]> {
         return this.orderRepository.find({
-            relations: ['orderedBy', 'orderItems', 'shippingAddress', 'orderItems.product', 'orderItems.variant'],
-            order: { createdAt: "desc" }
-        })
-    };
-
-
-
+            relations: [
+                "orderedBy",
+                "orderItems",
+                "shippingAddress",
+                "orderItems.product",
+                "orderItems.variant",
+            ],
+            order: { createdAt: "desc" },
+        });
+    }
 
     /**
      * Fetch a single order's detailed information by its ID.
-     * 
+     *
      * @param {number} orderId - The ID of the order to retrieve.
      * @returns {Promise<Order>} - The complete order with user, shipping address, products, and vendors included.
      * @throws {APIError} - Throws 404 error if the order is not found.
@@ -1288,7 +1486,7 @@ export class OrderService {
 
         // Handle case when order does not exist
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         return order;
@@ -1298,11 +1496,11 @@ export class OrderService {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
             ],
             select: {
                 id: true,
@@ -1357,28 +1555,20 @@ export class OrderService {
                         stock: true,
                         status: true,
                     },
-                }
+                },
             },
-        })
+        });
         // Handle case when order does not exist
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         return order;
     }
 
-
-
-
-
-
-
-
-
     /**
      * Update the shipping address for a specific pending order by the user.
-     * 
+     *
      * @param {number} userId - ID of the user who owns the order.
      * @param {number} orderId - ID of the order to update.
      * @param {IShippingAddressRequest} addressData - New shipping address data.
@@ -1389,7 +1579,7 @@ export class OrderService {
     async updateShippingAddress(
         userId: number,
         orderId: number,
-        addressData: IShippingAddressRequest
+        addressData: IShippingAddressRequest,
     ): Promise<Order> {
         // Find the pending order by orderId and userId
         const order = await this.orderRepository.findOne({
@@ -1397,31 +1587,38 @@ export class OrderService {
                 id: orderId,
                 orderedById: userId,
                 status: OrderStatus.CONFIRMED,
-                paymentStatus: PaymentStatus.UNPAID
+                paymentStatus: PaymentStatus.UNPAID,
             },
-            relations: ['orderedBy'],
+            relations: ["orderedBy"],
         });
 
         // If order not found or status not PENDING, throw 404
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         // Find existing address associated with the user (if any)
-        let shippingAddress = await this.addressRepository.findOne({ where: { userId } });
+        let shippingAddress = await this.addressRepository.findOne({
+            where: { userId },
+        });
 
         if (shippingAddress) {
             // Merge new address data into existing address entity
             this.addressRepository.merge(shippingAddress, addressData);
 
             // Save updated address to DB
-            shippingAddress = await this.addressRepository.save(shippingAddress);
+            shippingAddress =
+                await this.addressRepository.save(shippingAddress);
         } else {
             // No existing address: create a new one with userId attached
-            shippingAddress = this.addressRepository.create({ ...addressData, userId });
+            shippingAddress = this.addressRepository.create({
+                ...addressData,
+                userId,
+            });
 
             // Save new address entity to DB
-            shippingAddress = await this.addressRepository.save(shippingAddress);
+            shippingAddress =
+                await this.addressRepository.save(shippingAddress);
         }
 
         // Update order's shipping address reference with new or updated address
@@ -1435,23 +1632,21 @@ export class OrderService {
         const updatedOrder = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
             ],
         });
 
         // Defensive check to ensure updated order was retrieved
         if (!updatedOrder) {
-            throw new APIError(500, 'Failed to retrieve updated order');
+            throw new APIError(500, "Failed to retrieve updated order");
         }
 
         return updatedOrder;
     }
-
-
 
     /**
      * Retrieve all orders with related entities.
@@ -1463,12 +1658,12 @@ export class OrderService {
         // Fetch all orders with full relations for detailed info
         return await this.orderRepository.find({
             relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
-                'orderItems.variant',
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "orderItems.variant",
             ],
         });
     }
@@ -1486,25 +1681,23 @@ export class OrderService {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
-                'orderItems.variant',
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "orderItems.variant",
             ],
-
         });
 
         // Throw error if no order is found
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         // Return the found order with relations
         return order;
     }
-
 
     /**
      * Update the status of an existing order by ID.
@@ -1517,38 +1710,47 @@ export class OrderService {
      */
     async updateOrderStatus(
         orderId: number,
-        status: IUpdateOrderStatusRequest['status']
+        status: IUpdateOrderStatusRequest["status"],
     ): Promise<Order> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
-                'orderedBy',
-                'shippingAddress',
-                'orderItems',
-                'orderItems.product',
-                'orderItems.vendor',
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
             ],
         });
 
         if (!order) {
-            throw new APIError(404, 'Order not found');
+            throw new APIError(404, "Order not found");
         }
 
         const validTransition: Record<OrderStatus, OrderStatus[]> = {
-            [OrderStatus.CONFIRMED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED, OrderStatus.DELAYED],
+            [OrderStatus.CONFIRMED]: [
+                OrderStatus.SHIPPED,
+                OrderStatus.CANCELLED,
+                OrderStatus.DELAYED,
+            ],
             [OrderStatus.DELAYED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-            [OrderStatus.SHIPPED]: [OrderStatus.DELIVERED, OrderStatus.CANCELLED],
+            [OrderStatus.SHIPPED]: [
+                OrderStatus.DELIVERED,
+                OrderStatus.CANCELLED,
+            ],
             [OrderStatus.DELIVERED]: [OrderStatus.RETURNED],
             [OrderStatus.RETURNED]: [],
             [OrderStatus.CANCELLED]: [],
             [OrderStatus.PENDING]: [],
         };
 
-
-        if (order.status !== status && !validTransition[order.status].includes(status)) {
+        if (
+            order.status !== status &&
+            !validTransition[order.status].includes(status)
+        ) {
             throw new APIError(
                 400,
-                `Invalid status transition from ${order.status} to ${status}`
+                `Invalid status transition from ${order.status} to ${status}`,
             );
         }
 
@@ -1566,12 +1768,15 @@ export class OrderService {
         await this.orderRepository.save(order);
 
         if (order.orderedBy?.email) {
-            await sendOrderStatusEmail(order.orderedBy.email, order.id, order.status);
+            await sendOrderStatusEmail(
+                order.orderedBy.email,
+                order.id,
+                order.status,
+            );
         }
 
         return order;
     }
-
 
     /**
      * Search for an order by its ID, including related entities.
@@ -1583,10 +1788,15 @@ export class OrderService {
     async searchOrdersById(orderId: number): Promise<Order | null> {
         return await this.orderRepository.findOne({
             where: { id: orderId },
-            relations: ['orderedBy', 'shippingAddress', 'orderItems', 'orderItems.product', 'orderItems.vendor'],
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+            ],
         });
     }
-
 
     /**
      * Get all orders that include products sold by a specific vendor.
@@ -1595,19 +1805,35 @@ export class OrderService {
      * @returns {Promise<Order[]>} - List of orders containing vendor's products.
      * @access Vendor or Admin
      */
-    async getVendorOrders(vendorId: number): Promise<Order[]> {
+    async getVendorOrders(vendorId: number) {
         // Use QueryBuilder to join related tables and filter orders by vendorId in orderItems
-        return await this.orderRepository
-            .createQueryBuilder('order')
-            .leftJoinAndSelect('order.orderItems', 'orderItems') // Include order items
-            .leftJoinAndSelect('order.orderedBy', 'orderedBy') // Include user who placed order
-            .leftJoinAndSelect('order.shippingAddress', 'shippingAddress') // Include shipping address
-            .leftJoinAndSelect('orderItems.product', 'product') // Include products in order items
-            .leftJoinAndSelect('orderItems.vendor', 'vendor') // Include vendor info for order items
-            .leftJoinAndSelect('orderItems.variant', 'variant')
-            .where('orderItems.vendorId = :vendorId', { vendorId }) // Filter by vendorId
-            .orderBy('order.createdAt', 'DESC')
+        const orders = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems") // Include order items
+            .leftJoinAndSelect("order.orderedBy", "orderedBy") // Include user who placed order
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress") // Include shipping address
+            .leftJoinAndSelect("orderItems.product", "product") // Include products in order items
+            .leftJoinAndSelect("orderItems.vendor", "vendor") // Include vendor info for order items
+            .leftJoinAndSelect("vendor.district", "district")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .where("orderItems.vendorId = :vendorId", { vendorId }) // Filter by vendorId
+            .orderBy("order.createdAt", "DESC")
             .getMany(); // Get all matching orders
+
+        const sanitizedOrders = orders.map((o) => {
+            return {
+                ...o,
+                orderedBy: sanitizeUser(o.orderedBy),
+                orderItems: o.orderItems.map((oi) => {
+                    return {
+                        ...oi,
+                        vendor: sanitizeVendor(oi.vendor),
+                    };
+                }),
+            };
+        });
+
+        return sanitizedOrders;
     }
 
     /**
@@ -1620,35 +1846,39 @@ export class OrderService {
      * @throws {APIError} - Throws 404 if order not found or vendor not authorized.
      * @access Vendor
      */
-    async getVendorOrderDetails(vendorId: number, orderId: number): Promise<Order> {
+    async getVendorOrderDetails(
+        vendorId: number,
+        orderId: number,
+    ): Promise<Order> {
         // Query the order with all relevant relations and filter by orderId and vendorId
         const order = await this.orderRepository
-            .createQueryBuilder('order')
-            .leftJoinAndSelect('order.orderItems', 'orderItems') // Join order items
-            .leftJoinAndSelect('order.orderedBy', 'orderedBy') // Join user who placed order
-            .leftJoinAndSelect('order.shippingAddress', 'shippingAddress') // Join shipping address
-            .leftJoinAndSelect('orderItems.product', 'product') // Join products in order items
-            .leftJoinAndSelect('orderItems.vendor', 'vendor') // Join vendor info for order items
-            .leftJoinAndSelect('orderItems.variant', 'variant')
-            .where('order.id = :orderId', { orderId }) // Filter by order ID
-            .andWhere('orderItems.vendorId = :vendorId', { vendorId })
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems") // Join order items
+            .leftJoinAndSelect("order.orderedBy", "orderedBy") // Join user who placed order
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress") // Join shipping address
+            .leftJoinAndSelect("orderItems.product", "product") // Join products in order items
+            .leftJoinAndSelect("orderItems.vendor", "vendor") // Join vendor info for order items
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .where("order.id = :orderId", { orderId }) // Filter by order ID
+            .andWhere("orderItems.vendorId = :vendorId", { vendorId })
             .getOne();
 
         // Throw error if no such order exists or vendor is not authorized to view it
         if (!order) {
-            throw new APIError(404, 'Order not found or you are not authorized to view it');
+            throw new APIError(
+                404,
+                "Order not found or you are not authorized to view it",
+            );
         }
 
         return order;
     }
 
-
-
     /**
      * Retrieve the order history for a specific customer,
      * including order items, products, and shipping address,
      * ordered by most recent first.
-     * 
+     *
      * @param {number} userId - The ID of the customer.
      * @returns {Promise<Order[]>} - List of orders made by the customer.
      * @access Customer
@@ -1659,12 +1889,12 @@ export class OrderService {
         const orders = await this.orderRepository.find({
             where: { orderedById: userId },
             relations: [
-                'orderItems',
-                'orderItems.product',
-                'orderItems.variant',
-                'shippingAddress',
+                "orderItems",
+                "orderItems.product",
+                "orderItems.variant",
+                "shippingAddress",
             ],
-            order: { createdAt: 'DESC' }, // Sort orders by creation date descending
+            order: { createdAt: "DESC" }, // Sort orders by creation date descending
         });
 
         // console.log(orders);
@@ -1675,9 +1905,9 @@ export class OrderService {
     async getOrderDetailByMerchantTransactionId(mTransactionId: string) {
         const order = await this.orderRepository.findOne({
             where: {
-                mTransactionId: mTransactionId
-            }
-        })
+                mTransactionId: mTransactionId,
+            },
+        });
 
         return order;
     }

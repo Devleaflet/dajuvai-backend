@@ -90,7 +90,7 @@ export class ProductRecommendService {
         const productsBySubcategory = new Map<number, Product[]>();
         const allProducts = await this.productRepo.find({
             where: { subcategoryId: In(sortedSubcategoryIds) },
-            relations: ["subcategory", "brand", "variants"],
+            relations: ["subcategory", "variants"],
         });
 
         for (const product of allProducts) {

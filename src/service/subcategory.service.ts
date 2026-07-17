@@ -1,13 +1,16 @@
-import { Repository } from 'typeorm';
-import { Subcategory } from '../entities/subcategory.entity';
-import { Category } from '../entities/category.entity';
-import { User, UserRole } from '../entities/user.entity';
-import AppDataSource from '../config/db.config';
-import { CreateSubCategoryInput, UpdateSubCategoryInput } from '../utils/zod_validations/subcategory.zod';
-import { APIError } from '../utils/ApiError.utils';
-import { v2 as cloudinary } from 'cloudinary';
-import { Product } from '../entities/product.entity';
-import config from '../config/env.config';
+import { Repository } from "typeorm";
+import { Subcategory } from "../entities/subcategory.entity";
+import { Category } from "../entities/category.entity";
+import { User, UserRole } from "../entities/user.entity";
+import AppDataSource from "../config/db.config";
+import {
+    CreateSubCategoryInput,
+    UpdateSubCategoryInput,
+} from "../utils/zod_validations/subcategory.zod";
+import { APIError } from "../utils/ApiError.utils";
+import { v2 as cloudinary } from "cloudinary";
+import { Product } from "../entities/product.entity";
+import config from "../config/env.config";
 
 /**
  * Service for managing subcategory-related operations.
@@ -49,27 +52,38 @@ export class SubcategoryService {
      * @returns Updated subcategory with new image URL
      * @throws APIError if subcategory not found or upload fails
      */
-    async uploadSubcategoryImage(categoryId: number, subcategoryId: number, file: Express.Multer.File): Promise<Subcategory> {
+    async uploadSubcategoryImage(
+        categoryId: number,
+        subcategoryId: number,
+        file: Express.Multer.File,
+    ): Promise<Subcategory> {
         // Find subcategory by ID and category with relation
         const subcategory = await this.subcategoryRepository.findOne({
             where: { id: subcategoryId, category: { id: categoryId } },
-            relations: ['category'],
+            relations: ["category"],
         });
         if (!subcategory) {
-            throw new APIError(404, 'Subcategory not found in the specified category');
+            throw new APIError(
+                404,
+                "Subcategory not found in the specified category",
+            );
         }
 
         // Upload image buffer to Cloudinary using a promise wrapper for upload_stream
         const uploadResult = await new Promise<string>((resolve, reject) => {
-            cloudinary.uploader.upload_stream({ resource_type: 'image' }, (error, result) => {
-                if (error || !result) reject(new APIError(500, 'Image upload failed'));
-                else resolve(result.secure_url);
-            }).end(file.buffer);
+            cloudinary.uploader
+                .upload_stream({ resource_type: "image" }, (error, result) => {
+                    if (error || !result)
+                        reject(new APIError(500, "Image upload failed"));
+                    else resolve(result.secure_url);
+                })
+                .end(file.buffer);
         });
 
         // If previous image exists, delete it from Cloudinary
         if (subcategory.image) {
-            const publicId = subcategory.image.split('/').pop()?.split('.')[0] || '';
+            const publicId =
+                subcategory.image.split("/").pop()?.split(".")[0] || "";
             await cloudinary.uploader.destroy(publicId);
         }
 
@@ -88,27 +102,44 @@ export class SubcategoryService {
      * @returns Created subcategory
      * @throws APIError if category or user/admin validation fails or image upload fails
      */
-    async createSubcategory(dto: CreateSubCategoryInput, categoryId: number, userId: number, file?: Express.Multer.File): Promise<Subcategory> {
+    async createSubcategory(
+        dto: CreateSubCategoryInput,
+        categoryId: number,
+        userId: number,
+        file?: Express.Multer.File,
+    ): Promise<Subcategory> {
         // Check category existence
-        const category = await this.categoryRepository.findOne({ where: { id: categoryId } });
+        const category = await this.categoryRepository.findOne({
+            where: { id: categoryId },
+        });
         if (!category) {
-            throw new APIError(404, 'Category not found');
+            throw new APIError(404, "Category not found");
         }
 
         // Check if user exists and is admin
-        const user = await this.userRepository.findOne({ where: { id: userId, role: UserRole.ADMIN } });
+        const user = await this.userRepository.findOne({
+            where: { id: userId, role: UserRole.ADMIN },
+        });
         if (!user) {
-            throw new APIError(403, 'User not found or not an admin');
+            throw new APIError(403, "User not found or not an admin");
         }
 
         // Optional image upload
         let imageUrl: string | undefined;
         if (file) {
             imageUrl = await new Promise<string>((resolve, reject) => {
-                cloudinary.uploader.upload_stream({ resource_type: 'image' }, (error, result) => {
-                    if (error || !result) reject(new APIError(500, 'Image upload failed'));
-                    else resolve(result.secure_url);
-                }).end(file.buffer);
+                cloudinary.uploader
+                    .upload_stream(
+                        { resource_type: "image" },
+                        (error, result) => {
+                            if (error || !result)
+                                reject(
+                                    new APIError(500, "Image upload failed"),
+                                );
+                            else resolve(result.secure_url);
+                        },
+                    )
+                    .end(file.buffer);
             });
         }
 
@@ -132,8 +163,8 @@ export class SubcategoryService {
     async getSubcategoryByName(name: string) {
         return this.subcategoryRepository.findOne({
             where: {
-                name: name
-            }
+                name: name,
+            },
         });
     }
 
@@ -146,7 +177,7 @@ export class SubcategoryService {
         // Fetch all subcategories that belong to a category
         return this.subcategoryRepository.find({
             where: { category: { id: categoryId } },
-            relations: ['category', 'createdBy'],
+            relations: ["category"],
         });
     }
 
@@ -156,17 +187,20 @@ export class SubcategoryService {
      * @param categoryId - Category ID
      * @returns Subcategory with relations or null if not found
      */
-    async getSubcategoryById(id: number, categoryId: number): Promise<Subcategory | null> {
+    async getSubcategoryById(
+        id: number,
+        categoryId: number,
+    ): Promise<Subcategory | null> {
         return this.subcategoryRepository.findOne({
             where: { id, category: { id: categoryId } },
-            relations: ['category', 'createdBy'],
+            relations: ["category"],
         });
     }
 
     async handleGetSubcategoryById(id: number) {
         return this.subcategoryRepository.findOne({
             where: { id },
-        })
+        });
     }
 
     /**
@@ -179,24 +213,35 @@ export class SubcategoryService {
      * @returns Updated subcategory
      * @throws APIError if user not admin, subcategory not found, or image upload/delete fails
      */
-    async updateSubcategory(id: number, dto: UpdateSubCategoryInput, categoryId: number, userId: number, file?: Express.Multer.File): Promise<Subcategory> {
+    async updateSubcategory(
+        id: number,
+        dto: UpdateSubCategoryInput,
+        categoryId: number,
+        userId: number,
+        file?: Express.Multer.File,
+    ): Promise<Subcategory> {
         // Check if user is admin
-        const user = await this.userRepository.findOne({ where: { id: userId, role: UserRole.ADMIN } });
+        const user = await this.userRepository.findOne({
+            where: { id: userId, role: UserRole.ADMIN },
+        });
         if (!user) {
-            throw new APIError(403, 'User not found or not an admin');
+            throw new APIError(403, "User not found or not an admin");
         }
 
         // Find subcategory under the category
         const subcategory = await this.subcategoryRepository.findOne({
             where: {
                 id,
-                category: { id: categoryId }
+                category: { id: categoryId },
             },
-            relations: ['category']
+            relations: ["category"],
         });
 
         if (!subcategory) {
-            throw new APIError(404, 'Subcategory not found in the specified category');
+            throw new APIError(
+                404,
+                "Subcategory not found in the specified category",
+            );
         }
 
         // Prepare image URL to keep existing if no new image uploaded
@@ -205,30 +250,38 @@ export class SubcategoryService {
         if (file) {
             // Delete old image from Cloudinary if exists
             if (subcategory.image) {
-                const publicId = subcategory.image.split('/').pop()?.split('.')[0] || '';
+                const publicId =
+                    subcategory.image.split("/").pop()?.split(".")[0] || "";
                 try {
                     await cloudinary.uploader.destroy(publicId);
                 } catch {
-                    throw new APIError(500, 'Failed to delete existing image');
+                    throw new APIError(500, "Failed to delete existing image");
                 }
             }
 
             // Upload new image to Cloudinary
             try {
                 imageUrl = await new Promise<string>((resolve, reject) => {
-                    cloudinary.uploader.upload_stream(
-                        { resource_type: 'image' },
-                        (error, result) => {
-                            if (error || !result) {
-                                reject(new APIError(500, 'Image upload failed'));
-                            } else {
-                                resolve(result.secure_url);
-                            }
-                        }
-                    ).end(file.buffer);
+                    cloudinary.uploader
+                        .upload_stream(
+                            { resource_type: "image" },
+                            (error, result) => {
+                                if (error || !result) {
+                                    reject(
+                                        new APIError(
+                                            500,
+                                            "Image upload failed",
+                                        ),
+                                    );
+                                } else {
+                                    resolve(result.secure_url);
+                                }
+                            },
+                        )
+                        .end(file.buffer);
                 });
             } catch {
-                throw new APIError(500, 'Image upload failed');
+                throw new APIError(500, "Image upload failed");
             }
         }
 
@@ -241,11 +294,11 @@ export class SubcategoryService {
         // Fetch and return updated subcategory with relations
         const updatedSubcategory = await this.subcategoryRepository.findOne({
             where: { id },
-            relations: ['category', 'createdBy'],
+            relations: ["category", "createdBy"],
         });
 
         if (!updatedSubcategory) {
-            throw new APIError(500, 'Failed to retrieve updated subcategory');
+            throw new APIError(500, "Failed to retrieve updated subcategory");
         }
 
         return updatedSubcategory;
@@ -259,39 +312,51 @@ export class SubcategoryService {
      * @param userId - User ID (admin)
      * @throws APIError if user not admin, subcategory not found, or products exist, or image deletion fails
      */
-    async deleteSubcategory(id: number, categoryId: number, userId: number): Promise<void> {
+    async deleteSubcategory(
+        id: number,
+        categoryId: number,
+        userId: number,
+    ): Promise<void> {
         // Verify user is admin
-        const user = await this.userRepository.findOne({ where: { id: userId, role: UserRole.ADMIN } });
+        const user = await this.userRepository.findOne({
+            where: { id: userId, role: UserRole.ADMIN },
+        });
         if (!user) {
-            throw new APIError(403, 'User not found or not an admin');
+            throw new APIError(403, "User not found or not an admin");
         }
 
         // Verify subcategory exists in the specified category
         const subcategory = await this.subcategoryRepository.findOne({
             where: { id, category: { id: categoryId } },
-            relations: ['category']
+            relations: ["category"],
         });
         if (!subcategory) {
-            throw new APIError(404, 'Subcategory not found in the specified category');
+            throw new APIError(
+                404,
+                "Subcategory not found in the specified category",
+            );
         }
 
         // Check if subcategory contains products
-        const productCount = await this.productRepository.count(
-            {
-                where: { subcategory: { id } }
-            });
+        const productCount = await this.productRepository.count({
+            where: { subcategory: { id } },
+        });
 
         if (productCount > 0) {
-            throw new APIError(409, 'Cannot delete subcategory that contains products. Please delete all products first.');
+            throw new APIError(
+                409,
+                "Cannot delete subcategory that contains products. Please delete all products first.",
+            );
         }
 
         // Delete subcategory image from Cloudinary if exists
         if (subcategory.image) {
-            const publicId = subcategory.image.split('/').pop()?.split('.')[0] || '';
+            const publicId =
+                subcategory.image.split("/").pop()?.split(".")[0] || "";
             try {
                 await cloudinary.uploader.destroy(publicId);
             } catch {
-                throw new APIError(500, 'Failed to delete subcategory image');
+                throw new APIError(500, "Failed to delete subcategory image");
             }
         }
 

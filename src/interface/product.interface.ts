@@ -1,5 +1,3 @@
-
-
 // export interface IProductIdParams {
 //     categoryId: number;
 //     subcategoryId: number;
@@ -11,12 +9,12 @@
 // }
 
 export interface IProductQueryParams {
-    brandId?: number;
+    // brandId?: number;
     categoryId?: number;
     subcategoryId?: number;
     dealId?: number;
-    sort?: 'all' | 'low-to-high' | 'high-to-low';
-    bannerId?: number
+    sort?: "all" | "low-to-high" | "high-to-low";
+    bannerId?: number;
     page: number;
     limit: number;
     isAdmin?: boolean;
@@ -29,12 +27,18 @@ export interface IAdminProductQueryParams {
     limit?: number;
 
     // Sorting options
-    sort?: 'createdAt' | 'name' | 'oldest' | 'newest' | 'price_low_high' | 'price_high_low';
+    sort?:
+        | "createdAt"
+        | "name"
+        | "oldest"
+        | "newest"
+        | "price_low_high"
+        | "price_high_low";
 
     // Filtering options
-    filter?: 'out_of_stock';
+    filter?: "out_of_stock";
 
-    vendorId?: string
+    vendorId?: string;
     search?: string;
 }
 

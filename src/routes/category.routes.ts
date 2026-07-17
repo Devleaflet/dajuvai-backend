@@ -1,22 +1,38 @@
-import { Router } from 'express';
-import { ProductController } from '../controllers/product.controller';
-import { authMiddleware, combinedAuthMiddleware, isAdmin, isAdminOrStaff, isAdminOrVendor, isVendor, isVendorAccountOwnerOrAdminOrStaff, requireAdminStaffOrVendor, restrictToVendorOrAdmin, validateZod, vendorAuthMiddleware } from '../middlewares/auth.middleware';
-import { multerOptions, uploadMiddleware } from '../config/multer.config';
-import multer from 'multer';
-import { createCategorySchema, updateCategorySchema } from '../utils/zod_validations/category.zod';
-import { SubcategoryController } from '../controllers/subcategory.controller';
-import { CategoryController } from '../controllers/category.controller';
-import { createSubCategorySchema, updateSubcategorySchema } from '../utils/zod_validations/subcategory.zod';
-import AppDataSource from '../config/db.config';
-import { responseCache } from '../middlewares/responseCache.middleware';
+import { Router } from "express";
+import { ProductController } from "../controllers/product.controller";
+import {
+    authMiddleware,
+    combinedAuthMiddleware,
+    isAdmin,
+    isAdminOrStaff,
+    isAdminOrVendor,
+    isVendor,
+    isVendorAccountOwnerOrAdminOrStaff,
+    requireAdminStaffOrVendor,
+    restrictToVendorOrAdmin,
+    validateZod,
+    vendorAuthMiddleware,
+} from "../middlewares/auth.middleware";
+import { multerOptions, uploadMiddleware } from "../config/multer.config";
+import multer from "multer";
+import {
+    createCategorySchema,
+    updateCategorySchema,
+} from "../utils/zod_validations/category.zod";
+import { SubcategoryController } from "../controllers/subcategory.controller";
+import { CategoryController } from "../controllers/category.controller";
+import {
+    createSubCategorySchema,
+    updateSubcategorySchema,
+} from "../utils/zod_validations/subcategory.zod";
+import AppDataSource from "../config/db.config";
+import { responseCache } from "../middlewares/responseCache.middleware";
 
 const router = Router();
 const productController = new ProductController(AppDataSource);
 const categoryController = new CategoryController();
 const subcategoryController = new SubcategoryController();
 const upload = multer(multerOptions);
-
-
 
 // CATEGORY
 
@@ -96,8 +112,14 @@ const upload = multer(multerOptions);
  *       500:
  *         description: Internal server error
  */
-router.post('/', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(createCategorySchema), categoryController.createCategory.bind(categoryController));
-
+router.post(
+    "/",
+    authMiddleware,
+    isAdminOrStaff,
+    upload.single("image"),
+    validateZod(createCategorySchema),
+    categoryController.createCategory.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -161,7 +183,11 @@ router.post('/', authMiddleware, isAdminOrStaff, upload.single('image'), validat
  *         description: Internal server error
  */
 
-router.get('/', responseCache({ ttlSeconds: 300 }), categoryController.getCategories.bind(categoryController));
+router.get(
+    "/",
+    responseCache({ ttlSeconds: 300 }),
+    categoryController.getCategories.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -234,7 +260,11 @@ router.get('/', responseCache({ ttlSeconds: 300 }), categoryController.getCatego
  *         description: Internal server error
  */
 
-router.get('/:id', responseCache({ ttlSeconds: 300 }), categoryController.getCategoryById.bind(categoryController));
+router.get(
+    "/:id",
+    responseCache({ ttlSeconds: 300 }),
+    categoryController.getCategoryById.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -329,7 +359,14 @@ router.get('/:id', responseCache({ ttlSeconds: 300 }), categoryController.getCat
  *       500:
  *         description: Internal server error
  */
-router.put('/:id', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(updateCategorySchema), categoryController.updateCategory.bind(categoryController));
+router.put(
+    "/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    upload.single("image"),
+    validateZod(updateCategorySchema),
+    categoryController.updateCategory.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -472,7 +509,12 @@ router.put('/:id', authMiddleware, isAdminOrStaff, upload.single('image'), valid
  *                   type: string
  *                   example: Internal server error
  */
-router.get("/search/name", authMiddleware, isAdminOrStaff, categoryController.searchCategories.bind(categoryController));
+router.get(
+    "/search/name",
+    authMiddleware,
+    isAdminOrStaff,
+    categoryController.searchCategories.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -503,13 +545,12 @@ router.get("/search/name", authMiddleware, isAdminOrStaff, categoryController.se
  *         description: Internal server error
  */
 
-router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteCategory.bind(categoryController));
-
-
-
-
-
-
+router.delete(
+    "/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    categoryController.deleteCategory.bind(categoryController),
+);
 
 // SUBCATEGORY
 /**
@@ -605,7 +646,14 @@ router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteC
  *       500:
  *         description: Internal server error
  */
-router.post('/:categoryId/subcategories', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(createSubCategorySchema), subcategoryController.createSubcategory.bind(subcategoryController));
+router.post(
+    "/:categoryId/subcategories",
+    authMiddleware,
+    isAdminOrStaff,
+    upload.single("image"),
+    validateZod(createSubCategorySchema),
+    subcategoryController.createSubcategory.bind(subcategoryController),
+);
 
 /**
  * @swagger
@@ -673,7 +721,7 @@ router.post('/:categoryId/subcategories', authMiddleware, isAdminOrStaff, upload
  */
 
 router.get(
-    '/:categoryId/subcategories',
+    "/:categoryId/subcategories",
     responseCache({ ttlSeconds: 300 }),
     subcategoryController.getSubcategories.bind(subcategoryController),
 );
@@ -750,7 +798,7 @@ router.get(
  */
 
 router.get(
-    '/:categoryId/subcategories/:id',
+    "/:categoryId/subcategories/:id",
     responseCache({ ttlSeconds: 300 }),
     subcategoryController.getSubcategoryById.bind(subcategoryController),
 );
@@ -847,8 +895,14 @@ router.get(
  *       500:
  *         description: Internal server error
  */
-router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(updateSubcategorySchema), subcategoryController.updateSubcategory.bind(subcategoryController));
-
+router.put(
+    "/:categoryId/subcategories/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    upload.single("image"),
+    validateZod(updateSubcategorySchema),
+    subcategoryController.updateSubcategory.bind(subcategoryController),
+);
 
 /**
  * @swagger
@@ -896,13 +950,12 @@ router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upl
  *         description: Internal server error
  */
 
-router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, subcategoryController.deleteSubcategory.bind(subcategoryController));
-
-
-
-
-
-
+router.delete(
+    "/:categoryId/subcategories/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    subcategoryController.deleteSubcategory.bind(subcategoryController),
+);
 
 // PRODUCT
 
@@ -938,10 +991,17 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *               name:
  *                 type: string
  *                 example: T-Shirt
+ *               brand:
+ *                 type: string
+ *                 example: Nike
  *               description:
  *                 type: string
  *                 nullable: true
  *                 example: Premium Cotton T-shirt
+ *               keywords:
+ *                 type: string
+ *                 nullable: true
+ *                 example: "cotton,summer,t-shirt"
  *               basePrice:
  *                 type: number
  *                 nullable: true
@@ -1021,8 +1081,12 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *       400:
  *         description: Bad request (missing fields or no product images)
  */
-router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, productController.createProduct.bind(productController))
-
+router.post(
+    "/:categoryId/subcategories/:subcategoryId/products",
+    vendorAuthMiddleware,
+    isVendor,
+    productController.createProduct.bind(productController),
+);
 
 /**
  * @swagger
@@ -1035,12 +1099,6 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *       Results where the product name matches the search term are prioritized over description-only matches.
  *     tags: [Product]
  *     parameters:
- *       - in: query
- *         name: brandId
- *         schema:
- *           type: string
- *         description: Filter by brand ID (positive integer)
- *         example: "1"
  *       - in: query
  *         name: categoryId
  *         schema:
@@ -1100,9 +1158,9 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *         schema:
  *           type: string
  *         description: >
- *           Case-insensitive search across product name and description using ILIKE.
+ *           Case-insensitive search across product name, description, and brand using ILIKE.
  *           Performs partial matching using wildcard (%search%).
- *           Products with name matches are ranked higher than those matching only in description.
+ *           Products with name matches are ranked higher than those matching only in description or brand.
  *         example: "headphone"
  *       - in: query
  *         name: vendorId
@@ -1135,9 +1193,15 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                       name:
  *                         type: string
  *                         example: "Wireless Headphones"
+ *                       brand:
+ *                         type: string
+ *                         example: "Sony"
  *                       description:
  *                         type: string
  *                         example: "Noise cancelling over-ear headphones"
+ *                       keywords:
+ *                         type: string
+ *                         example: "tech,headphones,sony,original"
  *                       basePrice:
  *                         type: number
  *                         format: float
@@ -1186,15 +1250,6 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                         type: string
  *                         format: date-time
  *                         example: "2024-01-05T12:34:56Z"
- *                       brand:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                             example: 2
- *                           name:
- *                             type: string
- *                             example: "Sony"
  *                       vendor:
  *                         type: object
  *                         properties:
@@ -1237,7 +1292,11 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *       500:
  *         description: Internal server error
  */
-router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController.getAllProducts.bind(productController));
+router.get(
+    "/all/products",
+    responseCache({ ttlSeconds: 60 }),
+    productController.getAllProducts.bind(productController),
+);
 
 /**
  * @swagger
@@ -1285,9 +1344,15 @@ router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController
  *                     name:
  *                       type: string
  *                       example: "Bluetooth Speaker"
+ *                     brand:
+ *                       type: string
+ *                       example: "Boat"
  *                     description:
  *                       type: string
  *                       example: "Portable Bluetooth speaker with rich bass"
+ *                     keywords:
+ *                       type: string
+ *                       example: "tech,headphones,sony,original"
  *                     basePrice:
  *                       type: number
  *                       format: float
@@ -1361,7 +1426,7 @@ router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController
  */
 
 router.get(
-    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    "/:categoryId/subcategories/:subcategoryId/products/:id",
     responseCache({ ttlSeconds: 60 }),
     productController.getProductById.bind(productController),
 );
@@ -1411,10 +1476,18 @@ router.get(
  *                 type: string
  *                 description: Updated name of the product (optional)
  *                 example: Updated T-Shirt
+ *               brand:
+ *                 type: string
+ *                 description: Brand name of the product (optional)
+ *                 example: Nike
  *               description:
  *                 type: string
  *                 description: Updated description of the product (optional)
  *                 example: Premium Cotton T-shirt
+ *               keywords:
+ *                 type: string
+ *                 description: Updated keywords of the product (optional)
+ *                 example: "cotton,summer,t-shirt"
  *               basePrice:
  *                 type: number
  *                 description: Base price for non-variant products (optional, ignored if hasVariants is true)
@@ -1561,12 +1634,11 @@ router.get(
  *                   example: "Internal Server Error"
  */
 router.put(
-    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    "/:categoryId/subcategories/:subcategoryId/products/:id",
     combinedAuthMiddleware,
     isVendorAccountOwnerOrAdminOrStaff,
-    productController.updateProduct.bind(productController)
+    productController.updateProduct.bind(productController),
 );
-
 
 /**
  * @swagger
@@ -1656,5 +1728,10 @@ router.put(
  *       500:
  *         description: Internal server error
  */
-router.delete('/:categoryId/subcategories/:subcategoryId/products/:id/images', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, productController.deleteProductImage.bind(productController));
+router.delete(
+    "/:categoryId/subcategories/:subcategoryId/products/:id/images",
+    combinedAuthMiddleware,
+    isVendorAccountOwnerOrAdminOrStaff,
+    productController.deleteProductImage.bind(productController),
+);
 export default router;
