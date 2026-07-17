@@ -100,6 +100,8 @@ const AppDataSource = new DataSource({
         Rider,
         DeliveryAssignment,
         CommissionDocument,
+        DeviceToken,
+        NotificationDispatch,
     ],
     migrations: ["src/migrations/*.ts"],
     ssl: false,
