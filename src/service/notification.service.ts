@@ -5,13 +5,36 @@ import { Vendor } from "../entities/vendor.entity";
 import { Order } from "../entities/order.entity";
 import { APIError } from "../utils/ApiError.utils";
 import { User, UserRole } from "../entities/user.entity";
-import { sendPushNotification, sendPushToMultiple } from "../utils/fcm.utils";
+import { sendToTokens, PushPayload } from "../utils/fcm.utils";
+import { deviceTokenService, OwnerType } from "./deviceToken.service";
+import { DevicePlatform } from "../entities/deviceToken.entity";
+import { RegisterDeviceInput } from "../utils/zod_validations/push.zod";
 
 export class NotificationService {
     private notificationRepo = AppDataSource.getRepository(Notification);
     private vendorRepo = AppDataSource.getRepository(Vendor);
     private orderRepo = AppDataSource.getRepository(Order);
     private userRepo = AppDataSource.getRepository(User);
+
+    /**
+     * Sends and reaps dead tokens in one step. Every automated push in this
+     * service goes through here, so invalid tokens get retired no matter which
+     * business event triggered the send.
+     */
+    private async push(tokens: string[], payload: PushPayload): Promise<void> {
+        if (!tokens.length) return;
+        const result = await sendToTokens(tokens, payload);
+        await deviceTokenService.deactivateTokens(result.invalidTokens);
+    }
+
+    /** Active device tokens for every admin and staff account. */
+    private async adminTokens(): Promise<string[]> {
+        const admins = await this.userRepo.find({
+            where: [{ role: UserRole.ADMIN }, { role: UserRole.STAFF }],
+            select: { id: true },
+        });
+        return deviceTokenService.getTokensForUsers(admins.map((a) => a.id));
+    }
 
 
     async getNotifications(authEntity: User | Vendor): Promise<Notification[]> {
@@ -100,27 +123,18 @@ export class NotificationService {
         await this.notificationRepo.save(notifications);
 
         // --- Push Notifications ---
-        // Send to all admins
-        const admins = await this.userRepo.find({
-            where: [{ role: UserRole.ADMIN }, { role: UserRole.STAFF }],
-        });
-        const adminTokens = admins.map(a => a.fcmToken).filter(Boolean) as string[];
-        await sendPushToMultiple(adminTokens, "New Order Placed", `Order #${order.id} placed by ${fullName}`, {
-            type: "ORDER_PLACED",
-            orderId: String(order.id),
+        await this.push(await this.adminTokens(), {
+            title: "New Order Placed",
+            body: `Order #${order.id} placed by ${fullName}`,
+            data: { type: "ORDER_PLACED", orderId: String(order.id) },
         });
 
-        // Send to each vendor
-        for (const vendor of vendors) {
-            if (vendor.fcmToken) {
-                await sendPushNotification(
-                    vendor.fcmToken,
-                    "New Order Received",
-                    `You have received a new order #${order.id}`,
-                    { type: "ORDER_PLACED", orderId: String(order.id) }
-                );
-            }
-        }
+        // One batched send for all vendors on the order, not one per vendor.
+        await this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
+            title: "New Order Received",
+            body: `You have received a new order #${order.id}`,
+            data: { type: "ORDER_PLACED", orderId: String(order.id) },
+        });
     }
 
     async notifyOrderStatusUpdated(order: Order): Promise<void> {
@@ -172,49 +186,47 @@ export class NotificationService {
         await this.notificationRepo.save(notifications);
 
         // --- Push Notifications ---
-        // Send to all admins
-        const admins = await this.userRepo.find({
-            where: [{ role: UserRole.ADMIN }, { role: UserRole.STAFF }],
-        });
-        const adminTokens = admins.map(a => a.fcmToken).filter(Boolean) as string[];
-        await sendPushToMultiple(adminTokens, "Order Status Updated", statusMessage, {
-            type: "ORDER_STATUS_UPDATED",
-            orderId: String(order.id),
+        const data = { type: "ORDER_STATUS_UPDATED", orderId: String(order.id) };
+
+        await this.push(await this.adminTokens(), {
+            title: "Order Status Updated",
+            body: statusMessage,
+            data,
         });
 
-        // Send to vendors
-        const vendors = await this.vendorRepo.find({ where: { id: In(vendorIds) } });
-        for (const vendor of vendors) {
-            if (vendor.fcmToken) {
-                await sendPushNotification(
-                    vendor.fcmToken,
-                    "Order Status Changed",
-                    statusMessage,
-                    { type: "ORDER_STATUS_UPDATED", orderId: String(order.id) }
-                );
-            }
-        }
+        await this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
+            title: "Order Status Changed",
+            body: statusMessage,
+            data,
+        });
 
         // Send to the user who placed the order
-        if (order.orderedBy?.fcmToken) {
-            await sendPushNotification(
-                order.orderedBy.fcmToken,
-                "Your Order Status Updated",
-                statusMessage,
-                { type: "ORDER_STATUS_UPDATED", orderId: String(order.id) }
-            );
+        if (order.orderedBy) {
+            await this.push(await deviceTokenService.getTokensForUser(order.orderedBy.id), {
+                title: "Your Order Status Updated",
+                body: statusMessage,
+                data,
+            });
         }
     }
 
 
-    async notifyPaymentSuccess(orderId: number, userId: number): Promise<void> {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
+    /** Feed row + push for a payment outcome. The three payment states differ only in copy. */
+    private async notifyPaymentOutcome(
+        orderId: number,
+        userId: number,
+        title: string,
+        feedMessage: string,
+        pushBody: string,
+        dataType: string,
+    ): Promise<void> {
+        const user = await this.userRepo.findOne({ where: { id: userId }, select: { id: true } });
         if (!user) return;
 
         await this.notificationRepo.save(
             this.notificationRepo.create({
-                title: "Payment Successful",
-                message: `Your payment for Order #${orderId} was successful. Your order is confirmed!`,
+                title,
+                message: feedMessage,
                 type: NotificationType.ORDER_STATUS_UPDATED,
                 target: NotificationTarget.USER,
                 orderId,
@@ -222,96 +234,89 @@ export class NotificationService {
             })
         );
 
-        if (user.fcmToken) {
-            await sendPushNotification(
-                user.fcmToken,
-                "Payment Successful",
-                `Your payment for Order #${orderId} was successful!`,
-                { type: "PAYMENT_SUCCESS", orderId: String(orderId) }
-            );
-        }
+        await this.push(await deviceTokenService.getTokensForUser(userId), {
+            title,
+            body: pushBody,
+            data: { type: dataType, orderId: String(orderId) },
+        });
+    }
+
+    async notifyPaymentSuccess(orderId: number, userId: number): Promise<void> {
+        return this.notifyPaymentOutcome(
+            orderId,
+            userId,
+            "Payment Successful",
+            `Your payment for Order #${orderId} was successful. Your order is confirmed!`,
+            `Your payment for Order #${orderId} was successful!`,
+            "PAYMENT_SUCCESS",
+        );
     }
 
     async notifyPaymentFailed(orderId: number, userId: number): Promise<void> {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
-        if (!user) return;
-
-        await this.notificationRepo.save(
-            this.notificationRepo.create({
-                title: "Payment Failed",
-                message: `Your payment for Order #${orderId} failed. Please try again.`,
-                type: NotificationType.ORDER_STATUS_UPDATED,
-                target: NotificationTarget.USER,
-                orderId,
-                createdById: userId,
-            })
+        const message = `Your payment for Order #${orderId} failed. Please try again.`;
+        return this.notifyPaymentOutcome(
+            orderId,
+            userId,
+            "Payment Failed",
+            message,
+            message,
+            "PAYMENT_FAILED",
         );
-
-        if (user.fcmToken) {
-            await sendPushNotification(
-                user.fcmToken,
-                "Payment Failed",
-                `Your payment for Order #${orderId} failed. Please try again.`,
-                { type: "PAYMENT_FAILED", orderId: String(orderId) }
-            );
-        }
     }
 
     async notifyPaymentCancelled(orderId: number, userId: number): Promise<void> {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
-        if (!user) return;
-
-        await this.notificationRepo.save(
-            this.notificationRepo.create({
-                title: "Payment Cancelled",
-                message: `Your payment for Order #${orderId} was cancelled.`,
-                type: NotificationType.ORDER_STATUS_UPDATED,
-                target: NotificationTarget.USER,
-                orderId,
-                createdById: userId,
-            })
+        const message = `Your payment for Order #${orderId} was cancelled.`;
+        return this.notifyPaymentOutcome(
+            orderId,
+            userId,
+            "Payment Cancelled",
+            message,
+            message,
+            "PAYMENT_CANCELLED",
         );
-
-        if (user.fcmToken) {
-            await sendPushNotification(
-                user.fcmToken,
-                "Payment Cancelled",
-                `Your payment for Order #${orderId} was cancelled.`,
-                { type: "PAYMENT_CANCELLED", orderId: String(orderId) }
-            );
-        }
     }
 
     async notifyAddToCart(userId: number, productName: string): Promise<void> {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
-        if (!user?.fcmToken) return;
-
-        await sendPushNotification(
-            user.fcmToken,
-            "Added to Cart",
-            `${productName} has been added to your cart.`,
-            { type: "ADD_TO_CART" }
-        );
+        await this.push(await deviceTokenService.getTokensForUser(userId), {
+            title: "Added to Cart",
+            body: `${productName} has been added to your cart.`,
+            data: { type: "ADD_TO_CART" },
+        });
     }
 
     async notifyAddToWishlist(userId: number, productName: string): Promise<void> {
-        const user = await this.userRepo.findOne({ where: { id: userId } });
-        if (!user?.fcmToken) return;
-
-        await sendPushNotification(
-            user.fcmToken,
-            "Added to Wishlist",
-            `${productName} has been saved to your wishlist.`,
-            { type: "ADD_TO_WISHLIST" }
-        );
+        await this.push(await deviceTokenService.getTokensForUser(userId), {
+            title: "Added to Wishlist",
+            body: `${productName} has been saved to your wishlist.`,
+            data: { type: "ADD_TO_WISHLIST" },
+        });
     }
 
-    async saveFcmToken(userId: number, token: string, entityType: "user" | "vendor"): Promise<void> {
-        if (entityType === "user") {
-            await this.userRepo.update(userId, { fcmToken: token });
-        } else {
-            await this.vendorRepo.update(userId, { fcmToken: token });
-        }
+    /**
+     * Registers a device for push.
+     *
+     * The live Flutter app posts `{ token }` only. Those callers get a single
+     * synthetic device slot per account — identical to the old one-column
+     * behaviour, so nothing regresses. Clients that send deviceId + platform get
+     * real multi-device support.
+     */
+    async saveFcmToken(
+        ownerId: number,
+        ownerType: OwnerType,
+        input: Partial<RegisterDeviceInput> & { fcmToken: string },
+    ): Promise<void> {
+        await deviceTokenService.registerOrUpdate(ownerType, ownerId, {
+            fcmToken: input.fcmToken,
+            deviceId: input.deviceId ?? `legacy-${ownerType}-${ownerId}`,
+            platform: input.platform ?? DevicePlatform.ANDROID,
+            appVersion: input.appVersion,
+            deviceModel: input.deviceModel,
+            osVersion: input.osVersion,
+        });
+    }
+
+    async removeFcmDevice(ownerId: number, ownerType: OwnerType, deviceId: string): Promise<boolean> {
+        return deviceTokenService.deactivateDevice(ownerType, ownerId, deviceId);
     }
 
     async markAsRead(notificationId: string): Promise<void> {
@@ -322,5 +327,35 @@ export class NotificationService {
         return await this.notificationRepo.findOne({
             where: { id }
         })
+    }
+
+    /**
+     * Whether this caller is allowed to see/act on this notification.
+     *
+     * Mirrors the filters in getNotifications(). Without it, /:id is an IDOR —
+     * the row is fetched by primary key alone, so any authenticated account
+     * could read anyone else's notifications (and the ADMIN feed) by id.
+     */
+    canAccess(notification: Notification, authEntity: User | Vendor): boolean {
+        if (!authEntity) return false;
+
+        if (authEntity instanceof Vendor) {
+            return (
+                notification.target === NotificationTarget.VENDOR &&
+                notification.vendorId === authEntity.id
+            );
+        }
+
+        if (authEntity instanceof User) {
+            if (authEntity.role === UserRole.ADMIN || authEntity.role === UserRole.STAFF) {
+                return notification.target === NotificationTarget.ADMIN;
+            }
+            return (
+                notification.target === NotificationTarget.USER &&
+                notification.createdById === authEntity.id
+            );
+        }
+
+        return false;
     }
 }

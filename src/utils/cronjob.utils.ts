@@ -7,6 +7,7 @@ import { sendOrderStatusEmail } from "./nodemailer.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { NotificationService } from "../service/notification.service";
 import { Vendor } from "../entities/vendor.entity";
+import { deviceTokenService } from "../service/deviceToken.service";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
@@ -238,9 +239,21 @@ export const removeUnverifiedVendors = () => {
             });
 
             console.log(`Removed ${result.affected} unverified vendors.`);
-            
+
         } catch (error) {
             console.log(error)
         }
     })
 }
+
+// Retires FCM tokens not refreshed in 60 days, so send batches stay small.
+export const staleDeviceTokenCleanUp = () => {
+    // 2am daily — low traffic, and this touches a lot of rows.
+    cron.schedule("0 2 * * *", async () => {
+        try {
+            await deviceTokenService.cleanupStaleTokens();
+        } catch (error) {
+            console.log(error);
+        }
+    });
+};

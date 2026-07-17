@@ -1,6 +1,24 @@
 import { Router } from "express";
 import { NotificationController } from '../controllers/notification.controller';
-import { combinedAuthMiddleware } from "../middlewares/auth.middleware";
+import {
+    combinedAuthMiddleware,
+    authMiddleware,
+    isAdminOrStaff,
+    validateZod,
+} from "../middlewares/auth.middleware";
+import {
+    readLimiter,
+    generalNotificationLimiter,
+    multicastLimiter,
+    broadcastLimiter,
+    deviceRegistrationLimiter,
+} from "../middlewares/pushRateLimiter.middleware";
+import {
+    sendToUserSchema,
+    sendToUsersSchema,
+    sendToTopicSchema,
+    dispatchQuerySchema,
+} from "../utils/zod_validations/push.zod";
 
 const notificationRoutes = Router();
 const controller = new NotificationController();
@@ -91,9 +109,224 @@ notificationRoutes.get("/", combinedAuthMiddleware, controller.getNotificationCo
  *       401:
  *         description: Unauthorized
  */
-notificationRoutes.post("/fcm-token", combinedAuthMiddleware, controller.saveFcmTokenController.bind(controller));
+notificationRoutes.post(
+    "/fcm-token",
+    // Auth first: the limiter keys off req.user/req.vendor, which only exist
+    // once an auth middleware has run. Reversed, it silently falls back to IP.
+    combinedAuthMiddleware,
+    deviceRegistrationLimiter,
+    controller.saveFcmTokenController.bind(controller),
+);
 
+/**
+ * @swagger
+ * /api/notification/devices/{deviceId}:
+ *   delete:
+ *     summary: Unregister a device from push notifications (call on logout)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: deviceId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Device unregistered
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: Device not found
+ */
+notificationRoutes.delete(
+    "/devices/:deviceId",
+    combinedAuthMiddleware,
+    deviceRegistrationLimiter,
+    controller.removeFcmDeviceController.bind(controller),
+);
 
+// ── Admin push ───────────────────────────────────────────────────────────────
+// These must stay above the "/:id" routes below — Express matches in order, and
+// "/:id" would otherwise swallow "/admin/..." paths.
+
+/**
+ * @swagger
+ * /api/notification/admin/send/user:
+ *   post:
+ *     summary: Send a push notification to one user's devices (admin only)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [userId, title, body]
+ *             properties:
+ *               userId: { type: integer, example: 42 }
+ *               title: { type: string, maxLength: 200, example: "Flash sale" }
+ *               body: { type: string, maxLength: 1000, example: "50% off today only" }
+ *               imageUrl: { type: string, format: uri }
+ *               data:
+ *                 type: object
+ *                 additionalProperties: { type: string }
+ *               priority: { type: string, enum: [high, normal], default: high }
+ *     responses:
+ *       200:
+ *         description: Dispatch record with success/failure counts
+ *       400:
+ *         description: Validation failed
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Not an admin or staff
+ *       429:
+ *         description: Rate limit exceeded
+ */
+notificationRoutes.post(
+    "/admin/send/user",
+    authMiddleware,
+    generalNotificationLimiter,
+    isAdminOrStaff,
+    validateZod(sendToUserSchema),
+    controller.sendToUserController.bind(controller),
+);
+
+/**
+ * @swagger
+ * /api/notification/admin/send/multicast:
+ *   post:
+ *     summary: Send a push notification to many users at once (admin only)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [userIds, title, body]
+ *             properties:
+ *               userIds:
+ *                 type: array
+ *                 minItems: 1
+ *                 maxItems: 1000
+ *                 items: { type: integer }
+ *               title: { type: string, maxLength: 200 }
+ *               body: { type: string, maxLength: 1000 }
+ *               imageUrl: { type: string, format: uri }
+ *               data:
+ *                 type: object
+ *                 additionalProperties: { type: string }
+ *               priority: { type: string, enum: [high, normal], default: high }
+ *     responses:
+ *       200:
+ *         description: Dispatch record with success/failure counts
+ *       429:
+ *         description: Rate limit exceeded (10/min)
+ */
+notificationRoutes.post(
+    "/admin/send/multicast",
+    authMiddleware,
+    multicastLimiter,
+    isAdminOrStaff,
+    validateZod(sendToUsersSchema),
+    controller.sendToUsersController.bind(controller),
+);
+
+/**
+ * @swagger
+ * /api/notification/admin/send/topic:
+ *   post:
+ *     summary: Broadcast a push notification to a Firebase topic (admin only)
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [topic, title, body]
+ *             properties:
+ *               topic: { type: string, maxLength: 100, example: "all-users" }
+ *               title: { type: string, maxLength: 200 }
+ *               body: { type: string, maxLength: 1000 }
+ *               imageUrl: { type: string, format: uri }
+ *               data:
+ *                 type: object
+ *                 additionalProperties: { type: string }
+ *               priority: { type: string, enum: [high, normal], default: high }
+ *     responses:
+ *       200:
+ *         description: Dispatch accepted by FCM. Per-device counts are not available for topics.
+ *       429:
+ *         description: Rate limit exceeded (5/min)
+ */
+notificationRoutes.post(
+    "/admin/send/topic",
+    authMiddleware,
+    broadcastLimiter,
+    isAdminOrStaff,
+    validateZod(sendToTopicSchema),
+    controller.sendToTopicController.bind(controller),
+);
+
+/**
+ * @swagger
+ * /api/notification/admin/history:
+ *   get:
+ *     summary: Paginated history of admin push dispatches
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 20 } }
+ *       - { in: query, name: status, schema: { type: string, enum: [pending, sent, partial, failed] } }
+ *       - { in: query, name: type, schema: { type: string, enum: [single, multicast, topic] } }
+ *       - { in: query, name: targetUserId, schema: { type: integer } }
+ *       - { in: query, name: sentBy, schema: { type: integer } }
+ *       - { in: query, name: startDate, schema: { type: string, format: date-time } }
+ *       - { in: query, name: endDate, schema: { type: string, format: date-time } }
+ *     responses:
+ *       200:
+ *         description: Paginated dispatch records, newest first
+ */
+notificationRoutes.get(
+    "/admin/history",
+    authMiddleware,
+    readLimiter,
+    isAdminOrStaff,
+    validateZod(dispatchQuerySchema, "query"),
+    controller.getDispatchHistoryController.bind(controller),
+);
+
+/**
+ * @swagger
+ * /api/notification/admin/stats:
+ *   get:
+ *     summary: Push dashboard stats — active devices by platform, dispatch counts, success rate
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Combined device and dispatch statistics
+ */
+notificationRoutes.get(
+    "/admin/stats",
+    authMiddleware,
+    readLimiter,
+    isAdminOrStaff,
+    controller.getPushStatsController.bind(controller),
+);
 
 /**
  * @swagger
@@ -146,7 +379,7 @@ notificationRoutes.post("/fcm-token", combinedAuthMiddleware, controller.saveFcm
  *       500:
  *         description: Internal server error
  */
-notificationRoutes.get("/:id", controller.getNotificationByIdController.bind(controller));
+notificationRoutes.get("/:id", combinedAuthMiddleware, controller.getNotificationByIdController.bind(controller));
 
 
 
@@ -192,6 +425,6 @@ notificationRoutes.get("/:id", controller.getNotificationByIdController.bind(con
  *       500:
  *         description: Internal server error
  */
-notificationRoutes.patch("/:id", controller.markReadController.bind(controller));
+notificationRoutes.patch("/:id", combinedAuthMiddleware, controller.markReadController.bind(controller));
 
 export default notificationRoutes;

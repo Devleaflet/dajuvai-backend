@@ -25,6 +25,22 @@ const config = {
     FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
     USER_EMAIL: process.env.USER_EMAIL || "",
     PASS_EMAIL: process.env.PASS_EMAIL || "",
+    // Base64 of the whole Firebase service account JSON. Backend-only credential:
+    // it authorises SENDING push, and has nothing to do with a device's ability
+    // to receive (that comes from the app's own google-services.json).
+    FIREBASE_SERVICE_ACCOUNT_BASE64: process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || "",
+    // Optional guard: set this and startup will shout if the service account
+    // belongs to a different project than you expect.
+    FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || "",
+
+    // ── Push rate limits (requests per minute, per account) ──────────────────
+    // Tunable without a redeploy. Lower number = tighter. Ordered by blast
+    // radius: a read affects nobody, a broadcast reaches every subscriber.
+    PUSH_RATE_READ: parseNumber(process.env.PUSH_RATE_READ, 300),
+    PUSH_RATE_REGISTER: parseNumber(process.env.PUSH_RATE_REGISTER, 60),
+    PUSH_RATE_SEND: parseNumber(process.env.PUSH_RATE_SEND, 120),
+    PUSH_RATE_MULTICAST: parseNumber(process.env.PUSH_RATE_MULTICAST, 30),
+    PUSH_RATE_BROADCAST: parseNumber(process.env.PUSH_RATE_BROADCAST, 15),
     CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || "",
     CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || "",
     CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || "",
