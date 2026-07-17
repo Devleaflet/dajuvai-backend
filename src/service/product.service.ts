@@ -29,6 +29,7 @@ import { Variant } from "../entities/variant.entity";
 import config from "../config/env.config";
 import { DiscountType } from "../entities/product.enum";
 import { OrderStatus } from "../entities/order.entity";
+import { sanitizeVendor } from "../utils/sanitize.util";
 
 /**
  * Service class for handling product-related operations.
@@ -1021,11 +1022,7 @@ export class ProductService {
         return { finalPrice, vendorDiscount, dealDiscount };
     }
 
-    async getProductsByVendorId(
-        vendorId: number,
-        page: number,
-        limit: number,
-    ): Promise<{ products: Product[]; total: number }> {
+    async getProductsByVendorId(vendorId: number, page: number, limit: number) {
         // Verify vendor existence via vendor service
         const vendor = await this.vendorService.findVendorById(vendorId);
         if (!vendor) {
@@ -1043,7 +1040,16 @@ export class ProductService {
             take: limit,
         });
 
-        return { products, total };
+        const sanitzedProducts = products.map((p) => {
+            return {
+                ...p,
+                vendor: sanitizeVendor(p.vendor),
+            };
+        });
+
+        console.log(sanitzedProducts);
+
+        return { products: sanitzedProducts, total };
     }
 
     async deleteProductById(id: number) {

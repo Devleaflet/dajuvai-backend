@@ -1,17 +1,58 @@
-import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { OAuth2Client } from 'google-auth-library';
-import config from '../config/env.config';
-import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById, findvendorByvendorId } from '../service/user.service';
-import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
-import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput, UpdateStaffInput } from '../utils/zod_validations/user.zod';
-import { APIError } from '../utils/ApiError.utils';
-import { AuthProvider, User, UserRole } from '../entities/user.entity';
-import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
-import { sendVerificationEmail } from '../utils/nodemailer.utils';
-import AppDataSource from '../config/db.config';
-import { VendorService } from '../service/vendor.service';
+import { Request, Response } from "express";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { OAuth2Client } from "google-auth-library";
+import config from "../config/env.config";
+import {
+    fetchAllUser,
+    createUser,
+    findUserByEmail,
+    findUserByEmailLogin,
+    findUserByResetToken,
+    getUserByIdService,
+    updateUserService,
+    saveUser,
+    findVendorByEmail,
+    saveVendor,
+    findVendorByResetToken,
+    getAllStaff,
+    deleteStaffById,
+    findUserById,
+    updateStaffById,
+    findvendorByvendorId,
+} from "../service/user.service";
+import {
+    ISignupRequest,
+    ILoginRequest,
+    IVerificationTokenRequest,
+    IVerifyTokenRequest,
+    IResetPasswordRequest,
+    IChangeEmailRequest,
+    IVerifyEmailChangeRequest,
+    IUpdateUserRequest,
+} from "../interface/user.interface";
+import {
+    signupSchema,
+    loginSchema,
+    verificationTokenSchema,
+    verifyTokenSchema,
+    resetPasswordSchema,
+    changeEmailSchema,
+    verifyEmailChangeSchema,
+    updateUserSchema,
+    AdminResetPasswordInput,
+    UpdateStaffInput,
+} from "../utils/zod_validations/user.zod";
+import { APIError } from "../utils/ApiError.utils";
+import { AuthProvider, User, UserRole } from "../entities/user.entity";
+import {
+    AuthRequest,
+    CombinedAuthRequest,
+    isVendor,
+} from "../middlewares/auth.middleware";
+import { sendVerificationEmail } from "../utils/nodemailer.utils";
+import AppDataSource from "../config/db.config";
+import { VendorService } from "../service/vendor.service";
 
 const googleClient = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 
@@ -29,7 +70,6 @@ class TokenUtils {
     static generateToken(): string {
         return Math.floor(100000 + Math.random() * 900000).toString();
     }
-
 
     /**
      * @method hashToken
@@ -52,9 +92,9 @@ export class UserController {
     private vendorService: VendorService;
 
     /**
-      * @constructor
-      * @description Initializes the UserController with a JWT secret key from environment variables.
-      */
+     * @constructor
+     * @description Initializes the UserController with a JWT secret key from environment variables.
+     */
     constructor() {
         this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
@@ -68,12 +108,18 @@ export class UserController {
      * @param {Response} res - HTTP response object used to return status, token, and user data.
      * @returns {Promise<void>} Responds with the created user object and authentication token in a cookie.
      * @access Public (Admin Signup)
-    */
-    async adminSignup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+     */
+    async adminSignup(
+        req: AuthRequest<{}, {}, ISignupRequest>,
+        res: Response,
+    ): Promise<void> {
         //  Validate request body using Zod schema
         const parsed = signupSchema.safeParse(req.body);
         if (!parsed.success) {
-            res.status(400).json({ success: false, errors: parsed.error.errors });
+            res.status(400).json({
+                success: false,
+                errors: parsed.error.errors,
+            });
             return;
         }
 
@@ -87,7 +133,7 @@ export class UserController {
         // Check if user already exists by email
         const existingUser = await findUserByEmail(email);
         if (existingUser) {
-            throw new APIError(409, 'User with this email already exists');
+            throw new APIError(409, "User with this email already exists");
         }
 
         // Create user with verified status and ADMIN role
@@ -103,16 +149,21 @@ export class UserController {
 
         //  Generate JWT and set cookie
         const token = jwt.sign(
-            { id: user.id, email: user.email, username: user.username, role: user.role },
+            {
+                id: user.id,
+                email: user.email,
+                username: user.username,
+                role: user.role,
+            },
             this.jwtSecret,
-            { expiresIn: '2h' }
+            { expiresIn: "2h" },
         );
 
         // Set httpOnly cookie with token
-        res.cookie('token', token, {
+        res.cookie("token", token, {
             httpOnly: true,
-            secure: config.NODE_ENV === 'production',
-            sameSite: 'strict',
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
             maxAge: 2 * 60 * 60 * 1000,
         });
 
@@ -162,15 +213,24 @@ export class UserController {
 
         // Check user role is ADMIN, else forbid access
         if (user.role != UserRole.ADMIN) {
-            res.status(403).json({ success: false, message: "Access denied: not an admin" });
+            res.status(403).json({
+                success: false,
+                message: "Access denied: not an admin",
+            });
             return;
         }
 
         // Compare passwords
-        const isPasswordValid = await bcrypt.compare(password, user.password || "");
+        const isPasswordValid = await bcrypt.compare(
+            password,
+            user.password || "",
+        );
 
         if (!isPasswordValid) {
-            res.status(401).json({ success: false, message: "Invalid credentials" });
+            res.status(401).json({
+                success: false,
+                message: "Invalid credentials",
+            });
             return;
         }
 
@@ -196,7 +256,6 @@ export class UserController {
             maxAge: 15 * 60 * 1000,
         });
 
-
         // Set refresh token in separate httpOnly cookie
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
@@ -220,7 +279,6 @@ export class UserController {
         });
     }
 
-
     async getAllStaff(req: Request, res: Response) {
         const staff = await getAllStaff();
 
@@ -229,7 +287,6 @@ export class UserController {
             data: staff,
         });
     }
-
 
     async deleteStaff(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
         const id = req.params.id;
@@ -248,8 +305,10 @@ export class UserController {
         });
     }
 
-
-    async updateStaff(req: Request<{ id: string }, {}, UpdateStaffInput, {}>, res: Response) {
+    async updateStaff(
+        req: Request<{ id: string }, {}, UpdateStaffInput, {}>,
+        res: Response,
+    ) {
         const id = req.params.id;
 
         const staffExists = await findUserById(Number(id));
@@ -272,9 +331,10 @@ export class UserController {
         });
     }
 
-
-
-    async staffSignup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+    async staffSignup(
+        req: AuthRequest<{}, {}, ISignupRequest>,
+        res: Response,
+    ): Promise<void> {
         //  Body already validated by validateZod(signupSchema) middleware
         const { username, email, password } = req.body;
 
@@ -302,7 +362,12 @@ export class UserController {
 
         //  Generate JWT and set cookie
         const token = jwt.sign(
-            { id: user.id, email: user.email, username: user.username, role: user.role },
+            {
+                id: user.id,
+                email: user.email,
+                username: user.username,
+                role: user.role,
+            },
             this.jwtSecret,
             { expiresIn: "24h" },
         );
@@ -347,34 +412,40 @@ export class UserController {
      * @description Registers a new user, handles existing unverified users,
      * sends a verification email, hashes password and stores user info.
      * Issues JWT token on successful registration.
-     * 
+     *
      * @param {AuthRequest<{}, {}, ISignupRequest>} req - Express request with validated signup data
      * @param {Response} res - Express response object
      * @returns {Promise<void>} Resolves with user object and JWT or throws error
      * @access Public
      */
-    async signup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+    async signup(
+        req: AuthRequest<{}, {}, ISignupRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             //  Validate request body using Zod schema
             const parsed = signupSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
             //  Extract validated fields
             const { username, email, password } = parsed.data;
 
-
-            const loweredEmail = this.toLowerEmail(email)
+            const loweredEmail = this.toLowerEmail(email);
 
             // Check if a user with this email already exists
             let existingUser = await findUserByEmail(loweredEmail);
 
-            const existingAccount = await this.vendorService.findVendorByEmail(loweredEmail)
+            const existingAccount =
+                await this.vendorService.findVendorByEmail(loweredEmail);
 
             if (existingAccount) {
-                throw new APIError(400, "User already exists")
+                throw new APIError(400, "User already exists");
             }
 
             //  Prepare hashed password and verification token
@@ -386,7 +457,10 @@ export class UserController {
             if (existingUser) {
                 if (existingUser.isVerified) {
                     // User already verified — reject signup
-                    throw new APIError(409, 'User already exists and is verified');
+                    throw new APIError(
+                        409,
+                        "User already exists and is verified",
+                    );
                 }
 
                 // User exists but is not verified — update info and resend verification email
@@ -397,11 +471,16 @@ export class UserController {
 
                 // Save updated user and send verification email
                 await saveUser(existingUser);
-                await sendVerificationEmail(email, 'Email Verification', verificationToken);
+                await sendVerificationEmail(
+                    email,
+                    "Email Verification",
+                    verificationToken,
+                );
 
                 res.status(200).json({
                     success: true,
-                    message: 'Verification code resent. Please check your email.',
+                    message:
+                        "Verification code resent. Please check your email.",
                 });
                 return;
             }
@@ -414,24 +493,33 @@ export class UserController {
                 verificationCode: hashedToken,
                 verificationCodeExpire: expire,
                 role: UserRole.USER,
-                isVerified: true
+                isVerified: true,
             });
 
             //  Send email with raw verification code
-            await sendVerificationEmail(email, 'Email Verification', verificationToken);
+            await sendVerificationEmail(
+                email,
+                "Email Verification",
+                verificationToken,
+            );
 
             //  Generate JWT and set cookie
             const token = jwt.sign(
-                { id: user.id, email: user.email, username: user.username, role: user.role },
+                {
+                    id: user.id,
+                    email: user.email,
+                    username: user.username,
+                    role: user.role,
+                },
                 this.jwtSecret,
-                { expiresIn: '2h' }
+                { expiresIn: "2h" },
             );
 
             // Set secure cookie with token
-            res.cookie('token', token, {
+            res.cookie("token", token, {
                 httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
                 maxAge: 2 * 60 * 60 * 1000, // 2 hours
             });
 
@@ -446,38 +534,48 @@ export class UserController {
                 },
                 token,
             });
-
         } catch (error) {
             console.log(error);
             //  Error handling with meaningful status
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                console.error('Signup Error:', error);
-                throw new APIError(503, 'Registration service temporarily unavailable');
+                console.error("Signup Error:", error);
+                throw new APIError(
+                    503,
+                    "Registration service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method login
      * @route POST /auth/login
      * @description Authenticates a user or vendor, verifies credentials,
      * handles unverified users, issues JWT token and sets it in a secure cookie.
-     * 
+     *
      * @param {Request<{}, {}, ILoginRequest>} req - Express request with login credentials
      * @param {Response} res - Express response object
      * @returns {Promise<void>} Responds with user or vendor data and token
      * @access Public
      * @throws {APIError} If validation fails or credentials are incorrect
      */
-    async login(req: Request<{}, {}, ILoginRequest>, res: Response): Promise<void> {
+    async login(
+        req: Request<{}, {}, ILoginRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema
             const parsed = loginSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -493,12 +591,17 @@ export class UserController {
             }
 
             if (user.provider !== AuthProvider.LOCAL) {
-                throw new APIError(403, "This account was created with Google. Please log in using Google.");
+                throw new APIError(
+                    403,
+                    "This account was created with Google. Please log in using Google.",
+                );
             }
 
-
             if (!user.isVerified) {
-                throw new APIError(403, "Please verify your email before logging in");
+                throw new APIError(
+                    403,
+                    "Please verify your email before logging in",
+                );
             }
 
             // Compare password
@@ -511,14 +614,14 @@ export class UserController {
             const token = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: "15m" }
+                { expiresIn: "15m" },
             );
 
             // Generate refresh token (long-lived)
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 config.JWT_REFRESH_SECRET,
-                { expiresIn: "1d" }
+                { expiresIn: "1d" },
             );
 
             // Set access token cookie
@@ -543,13 +646,18 @@ export class UserController {
                 refreshToken,
                 data: { userId: user.id, email: user.email, role: user.role },
             });
-
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 console.error("Unexpected error during login:", error);
-                res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
+                res.status(503).json({
+                    success: false,
+                    message: "Authentication service temporarily unavailable",
+                });
             }
         }
     }
@@ -565,41 +673,51 @@ export class UserController {
             // Accept refresh token from: cookie, Authorization Bearer header
             const token =
                 req.cookies.refreshToken ||
-                req.headers.authorization?.split(' ')[1];
+                req.headers.authorization?.split(" ")[1];
 
             if (!token) {
-                res.status(401).json({ success: false, message: 'Refresh token missing' });
+                res.status(401).json({
+                    success: false,
+                    message: "Refresh token missing",
+                });
                 return;
             }
 
-            const decoded = jwt.verify(
-                token,
-                config.JWT_REFRESH_SECRET
-            ) as { id: number; email: string; role: string };
+            const decoded = jwt.verify(token, config.JWT_REFRESH_SECRET) as {
+                id: number;
+                email: string;
+                role: string;
+            };
 
             const userRepo = AppDataSource.getRepository(User);
             const user = await userRepo.findOneBy({ id: decoded.id });
             if (!user) {
-                res.status(401).json({ success: false, message: 'User not found' });
+                res.status(401).json({
+                    success: false,
+                    message: "User not found",
+                });
                 return;
             }
 
             const newAccessToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: '15m' }
+                { expiresIn: "15m" },
             );
 
-            res.cookie('token', newAccessToken, {
+            res.cookie("token", newAccessToken, {
                 httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
                 maxAge: 15 * 60 * 1000,
             });
 
             res.status(200).json({ success: true, token: newAccessToken });
         } catch (error) {
-            res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+            res.status(401).json({
+                success: false,
+                message: "Invalid or expired refresh token",
+            });
         }
     }
 
@@ -610,9 +728,12 @@ export class UserController {
      * @access Public
      */
     async logout(_req: Request, res: Response): Promise<void> {
-        res.clearCookie('token');
-        res.clearCookie('refreshToken');
-        res.status(200).json({ success: true, message: 'Logged out successfully' });
+        res.clearCookie("token");
+        res.clearCookie("refreshToken");
+        res.status(200).json({
+            success: true,
+            message: "Logged out successfully",
+        });
     }
 
     /**
@@ -628,7 +749,10 @@ export class UserController {
             const { idToken } = req.body;
 
             if (!idToken) {
-                res.status(400).json({ success: false, message: 'idToken is required' });
+                res.status(400).json({
+                    success: false,
+                    message: "idToken is required",
+                });
                 return;
             }
 
@@ -646,7 +770,10 @@ export class UserController {
 
             const payload = ticket.getPayload();
             if (!payload || !payload.email) {
-                res.status(401).json({ success: false, message: 'Invalid Google token' });
+                res.status(401).json({
+                    success: false,
+                    message: "Invalid Google token",
+                });
                 return;
             }
 
@@ -662,10 +789,14 @@ export class UserController {
 
                 if (user) {
                     // Existing local account — link Google ID to it
-                    if (user.provider !== AuthProvider.GOOGLE && user.provider !== AuthProvider.LOCAL) {
+                    if (
+                        user.provider !== AuthProvider.GOOGLE &&
+                        user.provider !== AuthProvider.LOCAL
+                    ) {
                         res.status(400).json({
                             success: false,
-                            message: 'This email is registered with a different provider.',
+                            message:
+                                "This email is registered with a different provider.",
                         });
                         return;
                     }
@@ -678,7 +809,7 @@ export class UserController {
                     user = userRepo.create({
                         googleId,
                         email,
-                        username: name || email.split('@')[0],
+                        username: name || email.split("@")[0],
                         isVerified: true,
                         provider: AuthProvider.GOOGLE,
                     });
@@ -690,13 +821,13 @@ export class UserController {
             const token = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 this.jwtSecret,
-                { expiresIn: '15m' }
+                { expiresIn: "15m" },
             );
 
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 config.JWT_REFRESH_SECRET,
-                { expiresIn: '7d' }
+                { expiresIn: "7d" },
             );
 
             res.status(200).json({
@@ -706,15 +837,17 @@ export class UserController {
                 data: { userId: user.id, email: user.email, role: user.role },
             });
         } catch (error) {
-            console.error('Google mobile login error:', error);
-            res.status(401).json({ success: false, message: 'Google authentication failed' });
+            console.error("Google mobile login error:", error);
+            res.status(401).json({
+                success: false,
+                message: "Google authentication failed",
+            });
         }
     }
 
     toLowerEmail(email: string): string {
-        return email.toLowerCase()
+        return email.toLowerCase();
     }
-
 
     /**
      * @method sendVerificationToken
@@ -722,27 +855,33 @@ export class UserController {
      * @description Sends a new email verification token to a user or vendor.
      * Implements rate limiting to avoid abuse, hashes token before storing,
      * and sends email with raw token.
-     * 
+     *
      * @param {Request<{}, {}, IVerificationTokenRequest>} req - Express request with email in body
      * @param {Response} res - Express response object
      * @returns {Promise<void>} Sends token or error response
      * @access Public
      * @throws {APIError} On validation failure, rate limit breach, or user/vendor not found
      */
-    async sendVerificationToken(req: Request<{}, {}, IVerificationTokenRequest>, res: Response): Promise<void> {
+    async sendVerificationToken(
+        req: Request<{}, {}, IVerificationTokenRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema to ensure correct structure and types
             const parsed = verificationTokenSchema.safeParse(req.body);
             if (!parsed.success) {
                 // Return 400 Bad Request if validation fails, including detailed errors
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
             // Extract email from validated data
             const { email } = parsed.data;
 
-            const loweredEmail = this.toLowerEmail(email)
+            const loweredEmail = this.toLowerEmail(email);
 
             // Attempt to find user by email
             let user = await findUserByEmail(loweredEmail);
@@ -755,7 +894,7 @@ export class UserController {
                 isVendor = true;
                 if (!vendor) {
                     // If neither user nor vendor exists, respond with 404 Not Found
-                    throw new APIError(404, 'User or vendor not found');
+                    throw new APIError(404, "User or vendor not found");
                 }
             }
 
@@ -766,10 +905,15 @@ export class UserController {
             // Check if the entity is currently blocked from resending verification tokens
             if (entity.resendBlockUntil && entity.resendBlockUntil > now) {
                 // Calculate remaining block time in minutes
-                const remainingSeconds = Math.ceil((entity.resendBlockUntil.getTime() - now.getTime()) / 1000);
+                const remainingSeconds = Math.ceil(
+                    (entity.resendBlockUntil.getTime() - now.getTime()) / 1000,
+                );
                 const remainingMinutes = Math.ceil(remainingSeconds / 60);
                 // Respond with 429 Too Many Requests and inform about the cooldown period
-                throw new APIError(429, `Too many verification attempts. Please try again in ${remainingMinutes} minute(s).`);
+                throw new APIError(
+                    429,
+                    `Too many verification attempts. Please try again in ${remainingMinutes} minute(s).`,
+                );
             }
 
             // Reset resend count and block if the resend limit has been reached
@@ -800,24 +944,33 @@ export class UserController {
             await (isVendor ? saveVendor(vendor) : saveUser(user));
 
             // Send verification email containing the raw token to the user's or vendor's email address
-            await sendVerificationEmail(entity.email, 'Email Verification', verificationToken);
+            await sendVerificationEmail(
+                entity.email,
+                "Email Verification",
+                verificationToken,
+            );
 
             // Respond with HTTP 202 Accepted to indicate the token has been sent
             res.status(202).json({
                 success: true,
-                message: 'Verification token sent',
+                message: "Verification token sent",
             });
         } catch (error) {
             // Handle known APIError with appropriate status and message
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(503, 'Verification service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Verification service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method verifyToken
@@ -831,13 +984,19 @@ export class UserController {
      * @throws {APIError} For validation issues, expired/invalid tokens, or missing entities.
      * @access Public
      */
-    async verifyToken(req: Request<{}, {}, IVerifyTokenRequest>, res: Response): Promise<void> {
+    async verifyToken(
+        req: Request<{}, {}, IVerifyTokenRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema to ensure email and token are correctly provided
             const parsed = verifyTokenSchema.safeParse(req.body);
             if (!parsed.success) {
                 // Return 400 Bad Request if validation fails, including detailed errors
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -855,7 +1014,7 @@ export class UserController {
                 isVendor = true;
                 if (!vendor) {
                     // If neither user nor vendor exists, token is no longer valid
-                    throw new APIError(410, 'Token no longer valid');
+                    throw new APIError(410, "Token no longer valid");
                 }
             }
 
@@ -864,19 +1023,22 @@ export class UserController {
 
             // Check if verification token and its expiration exist for the entity
             if (!entity.verificationCode || !entity.verificationCodeExpire) {
-                throw new APIError(410, 'Token no longer valid');
+                throw new APIError(410, "Token no longer valid");
             }
 
             // Check if the token has expired
             if (entity.verificationCodeExpire < new Date()) {
-                throw new APIError(410, 'Token expired');
+                throw new APIError(410, "Token expired");
             }
 
             // Compare provided token with the hashed token stored in the database
-            const isMatch = await bcrypt.compare(token, entity.verificationCode);
+            const isMatch = await bcrypt.compare(
+                token,
+                entity.verificationCode,
+            );
             if (!isMatch) {
                 // If token does not match, respond with 400 Bad Request
-                throw new APIError(400, 'Invalid token');
+                throw new APIError(400, "Invalid token");
             }
 
             // Token is valid: reset verification-related fields and mark entity as verified
@@ -892,19 +1054,24 @@ export class UserController {
             // Respond with 200 OK and success message
             res.status(200).json({
                 success: true,
-                message: 'Email verified successfully',
+                message: "Email verified successfully",
             });
         } catch (error) {
             // Handle known APIError with appropriate status and message
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(503, 'Verification service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Verification service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method forgotPassword
@@ -918,13 +1085,19 @@ export class UserController {
      * @throws {APIError} On validation failure, user/vendor not found, or internal issues.
      * @access Public
      */
-    async forgotPassword(req: Request<{}, {}, IVerificationTokenRequest>, res: Response): Promise<void> {
+    async forgotPassword(
+        req: Request<{}, {}, IVerificationTokenRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema to ensure email is provided and correctly formatted
             const parsed = verificationTokenSchema.safeParse(req.body);
             if (!parsed.success) {
                 // Respond with 400 Bad Request if validation fails, including detailed error information
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -936,7 +1109,10 @@ export class UserController {
 
             if (user) {
                 if (user.provider === AuthProvider.GOOGLE) {
-                    throw new APIError(400, "Google login users cannot change password.");
+                    throw new APIError(
+                        400,
+                        "Google login users cannot change password.",
+                    );
                 }
             }
 
@@ -949,7 +1125,7 @@ export class UserController {
                 isVendor = true;
                 if (!vendor) {
                     // If neither user nor vendor exists, respond with 404 Not Found
-                    throw new APIError(404, 'User or vendor not found');
+                    throw new APIError(404, "User or vendor not found");
                 }
             }
 
@@ -968,25 +1144,30 @@ export class UserController {
             await (isVendor ? saveVendor(vendor) : saveUser(user));
 
             // Send an email to the user or vendor with the reset token and instructions
-            await sendVerificationEmail(entity.email, 'Reset Password', token);
+            await sendVerificationEmail(entity.email, "Reset Password", token);
 
             // Respond with 202 Accepted indicating the reset email has been sent successfully
             res.status(202).json({
                 success: true,
-                message: 'Password reset request sent',
+                message: "Password reset request sent",
             });
         } catch (error) {
-            console.log(error)
+            console.log(error);
             // Handle expected API errors with their respective status and message
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(503, 'Password reset service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Password reset service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method resetPassword
@@ -1000,13 +1181,19 @@ export class UserController {
      * @throws {APIError} For invalid or expired token, user/vendor not found, or unexpected errors.
      * @access Public
      */
-    async resetPassword(req: Request<{}, {}, IResetPasswordRequest>, res: Response): Promise<void> {
+    async resetPassword(
+        req: Request<{}, {}, IResetPasswordRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema to ensure newPass and token are provided and valid
             const parsed = resetPasswordSchema.safeParse(req.body);
             if (!parsed.success) {
                 // Respond with 400 Bad Request if validation fails, including error details
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -1024,7 +1211,7 @@ export class UserController {
                 isVendor = true;
                 if (!vendor) {
                     // If neither user nor vendor found, respond with 410 Gone (token no longer valid)
-                    throw new APIError(410, 'Reset token no longer valid');
+                    throw new APIError(410, "Reset token no longer valid");
                 }
             }
 
@@ -1047,21 +1234,29 @@ export class UserController {
             // Respond with 200 OK indicating password reset was successful
             res.status(200).json({
                 success: true,
-                message: 'Password reset successfully',
+                message: "Password reset successfully",
             });
         } catch (error) {
             // Handle known API errors with their specific status and message
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // Handle unexpected errors with generic 503 Service Unavailable
-                throw new APIError(503, 'Password reset service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Password reset service temporarily unavailable",
+                );
             }
         }
     }
 
-
-    async adminChangeVendorPassword(req: Request<{ vendorId: number }, {}, AdminResetPasswordInput, {}>, res: Response) {
+    async adminChangeVendorPassword(
+        req: Request<{ vendorId: number }, {}, AdminResetPasswordInput, {}>,
+        res: Response,
+    ) {
         try {
             const vendorId = req.params.vendorId;
 
@@ -1070,7 +1265,7 @@ export class UserController {
 
             const vendor = await findvendorByvendorId(vendorId);
             if (!vendor) {
-                throw new APIError(404, 'Vendor not found');
+                throw new APIError(404, "Vendor not found");
             }
 
             const hashedPassword = await bcrypt.hash(newPass, 10);
@@ -1080,20 +1275,21 @@ export class UserController {
 
             res.status(200).json({
                 success: true,
-                message: 'Vendor password updated by admin',
+                message: "Vendor password updated by admin",
             });
-
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                throw new APIError(503, 'Service temporarily unavailable');
+                throw new APIError(503, "Service temporarily unavailable");
             }
         }
     }
 
-
-    /** 
+    /**
      * @method getUserById
      * @route GET /users/:id
      * @description Retrieves a user by their unique ID. Returns 404 if not found.
@@ -1104,18 +1300,21 @@ export class UserController {
      * @throws {APIError} For invalid ID, user not found, or service errors.
      * @access Admin
      */
-    async getUserById(req: Request<{ id: string }>, res: Response): Promise<void> {
+    async getUserById(
+        req: Request<{ id: string }>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Parse and validate user ID from request parameters
             const id = parseInt(req.params.id, 10);
             if (isNaN(id)) {
-                throw new APIError(400, 'Invalid user ID');
+                throw new APIError(400, "Invalid user ID");
             }
 
             // Retrieve user data using service layer
             const user = await getUserByIdService(id);
             if (!user) {
-                throw new APIError(404, 'User not found');
+                throw new APIError(404, "User not found");
             }
 
             // Return success response with user data
@@ -1126,10 +1325,13 @@ export class UserController {
         } catch (error) {
             // Handle known API errors with specific status codes
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // Handle unexpected errors with generic service unavailable response
-                throw new APIError(503, 'User service temporarily unavailable');
+                throw new APIError(503, "User service temporarily unavailable");
             }
         }
     }
@@ -1148,46 +1350,49 @@ export class UserController {
      */
     async updateUser(
         req: AuthRequest<{ id: string }, {}, IUpdateUserRequest>,
-        res: Response
+        res: Response,
     ): Promise<void> {
         try {
             // Validate request body using Zod schema
             const parsed = updateUserSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
-            console.log(req.body)
+            console.log(req.body);
 
             // Validate and parse user ID from URL parameters
             const id = parseInt(req.params.id, 10);
             if (isNaN(id)) {
-                throw new APIError(400, 'Invalid user ID');
+                throw new APIError(400, "Invalid user ID");
             }
 
             const userExists = await findUserById(id);
 
             if (!userExists) {
-                throw new APIError(404, "USer does not existsf")
+                throw new APIError(404, "USer does not existsf");
             }
 
             // Enforce role update restrictions: only admins can change roles
             if (parsed.data.role && req.user?.role !== UserRole.ADMIN) {
-                throw new APIError(403, 'Only admins can change roles');
+                throw new APIError(403, "Only admins can change roles");
             }
 
             // Proceed to update user data with validated input
             const updateData = parsed.data;
             const user = await updateUserService(id, updateData, userExists);
             if (!user) {
-                throw new APIError(404, 'User not found');
+                throw new APIError(404, "User not found");
             }
 
             // Respond with success and updated user info summary
             res.status(200).json({
                 success: true,
-                message: 'User updated successfully',
+                message: "User updated successfully",
                 data: {
                     id: user.id,
                     fullName: user.fullName,
@@ -1202,51 +1407,57 @@ export class UserController {
                 },
             });
         } catch (error) {
-            console.log("------------Error----------------")
-            console.log(error)
+            console.log("------------Error----------------");
+            console.log(error);
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                throw new APIError(503, 'User update service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "User update service temporarily unavailable",
+                );
             }
         }
     }
 
-
-
     /**
-    * @method updateEmail
-    * @route POST /auth/update-email
-    * @description Initiates an email change request for an authenticated user or vendor.
-    * Sends a verification token to the new email and returns a signed emailChangeToken JWT.
-    *
-    * @param {CombinedAuthRequest<{}, {}, IChangeEmailRequest>} req - Request with new email in body and authenticated user/vendor.
-    * @param {Response} res - Express response object.
-    * @returns {Promise<void>} Responds with success message and emailChangeToken.
-    * @throws {APIError} For validation, authentication, or duplicate email.
-    * @access Authenticated
-    */
+     * @method updateEmail
+     * @route POST /auth/update-email
+     * @description Initiates an email change request for an authenticated user or vendor.
+     * Sends a verification token to the new email and returns a signed emailChangeToken JWT.
+     *
+     * @param {CombinedAuthRequest<{}, {}, IChangeEmailRequest>} req - Request with new email in body and authenticated user/vendor.
+     * @param {Response} res - Express response object.
+     * @returns {Promise<void>} Responds with success message and emailChangeToken.
+     * @throws {APIError} For validation, authentication, or duplicate email.
+     * @access Authenticated
+     */
     async updateEmail(
         req: CombinedAuthRequest<{}, {}, IChangeEmailRequest>,
-        res: Response
+        res: Response,
     ): Promise<void> {
         try {
-            console.log(req.user)
-            console.log(req.body)
+            console.log(req.user);
+            console.log(req.body);
             // Validate request body using Zod schema
             const parsed = changeEmailSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
-
 
             // Verify user or vendor authentication
             const { newEmail } = parsed.data;
             const user = req.user;
             const vendor = req.vendor;
             if (!user && !vendor) {
-                throw new APIError(401, 'Unauthorized. Please log in.');
+                throw new APIError(401, "Unauthorized. Please log in.");
             }
             // Check if new email is already in use
             const existingUser = await findUserByEmail(newEmail);
@@ -1257,18 +1468,17 @@ export class UserController {
             const entity = isVendor ? existingVendor : existingUser;
 
             if (existingUser || existingVendor) {
-                throw new APIError(409, 'Email already in use.');
+                throw new APIError(409, "Email already in use.");
             }
-
 
             // Generate verification token and JWT for email change
             const verificationToken = TokenUtils.generateToken();
             const hashedToken = await TokenUtils.hashToken(verificationToken);
             const expire = new Date(Date.now() + 15 * 60 * 1000);
             const emailChangeToken = jwt.sign(
-                { id: entity.id, newEmail, type: isVendor ? 'vendor' : 'user' },
+                { id: entity.id, newEmail, type: isVendor ? "vendor" : "user" },
                 this.jwtSecret,
-                { expiresIn: '15m' }
+                { expiresIn: "15m" },
             );
 
             // Update user or vendor with verification token
@@ -1277,23 +1487,32 @@ export class UserController {
             await (isVendor ? saveVendor(vendor) : saveUser(user));
 
             // Send verification email to new address
-            await sendVerificationEmail(newEmail, 'Verify New Email', verificationToken);
+            await sendVerificationEmail(
+                newEmail,
+                "Verify New Email",
+                verificationToken,
+            );
 
             res.status(202).json({
                 success: true,
-                message: 'Verification email sent to new email address.',
+                message: "Verification email sent to new email address.",
                 emailChangeToken,
             });
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                console.log(error)
-                throw new APIError(503, 'Email change service temporarily unavailable');
+                console.log(error);
+                throw new APIError(
+                    503,
+                    "Email change service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method deleteUserHandler
@@ -1311,7 +1530,10 @@ export class UserController {
             const userId = parseInt(req.params.id);
 
             if (isNaN(userId)) {
-                res.status(400).json({ success: false, message: "Invalid user ID" });
+                res.status(400).json({
+                    success: false,
+                    message: "Invalid user ID",
+                });
                 return;
             }
 
@@ -1320,20 +1542,27 @@ export class UserController {
             const user = await userRepo.findOneBy({ id: userId });
 
             if (!user) {
-                res.status(404).json({ success: false, message: "User not found" });
+                res.status(404).json({
+                    success: false,
+                    message: "User not found",
+                });
                 return;
             }
 
             await userRepo.remove(user);
 
-            res.status(200).json({ success: true, message: "User deleted successfully" });
-
+            res.status(200).json({
+                success: true,
+                message: "User deleted successfully",
+            });
         } catch (error) {
             console.error("Delete user error:", error);
-            res.status(500).json({ success: false, message: "Internal server error" });
+            res.status(500).json({
+                success: false,
+                message: "Internal server error",
+            });
         }
     }
-
 
     /**
      * @method verifyEmailChange
@@ -1346,12 +1575,22 @@ export class UserController {
      * @throws {APIError} For token mismatch, expiry, conflict, or malformed JWT.
      * @access Authenticated
      */
-    async verifyEmailChange(req: CombinedAuthRequest<{}, {}, IVerifyEmailChangeRequest & { emailChangeToken: string }>, res: Response): Promise<void> {
+    async verifyEmailChange(
+        req: CombinedAuthRequest<
+            {},
+            {},
+            IVerifyEmailChangeRequest & { emailChangeToken: string }
+        >,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema
             const parsed = verifyEmailChangeSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -1360,7 +1599,7 @@ export class UserController {
             const user = req.user;
             const vendor = req.vendor;
             if (!user && !vendor) {
-                throw new APIError(401, 'Unauthorized. Please log in.');
+                throw new APIError(401, "Unauthorized. Please log in.");
             }
 
             const isVendor = !!vendor;
@@ -1368,14 +1607,17 @@ export class UserController {
 
             // Check for valid verification token
             if (!entity.verificationCode || !entity.verificationCodeExpire) {
-                throw new APIError(410, 'No email change request found.');
+                throw new APIError(410, "No email change request found.");
             }
             if (entity.verificationCodeExpire < new Date()) {
-                throw new APIError(410, 'Token expired.');
+                throw new APIError(410, "Token expired.");
             }
-            const isMatch = await bcrypt.compare(token, entity.verificationCode);
+            const isMatch = await bcrypt.compare(
+                token,
+                entity.verificationCode,
+            );
             if (!isMatch) {
-                throw new APIError(400, 'Invalid token.');
+                throw new APIError(400, "Invalid token.");
             }
 
             // Verify email change JWT
@@ -1387,19 +1629,28 @@ export class UserController {
                     type: string;
                 };
             } catch (error) {
-                throw new APIError(400, 'Invalid or expired email change token.');
+                throw new APIError(
+                    400,
+                    "Invalid or expired email change token.",
+                );
             }
 
             // Ensure user ID and type match
-            if (decoded.id !== entity.id || decoded.type !== (isVendor ? 'vendor' : 'user')) {
-                throw new APIError(400, 'Invalid token: User or type mismatch.');
+            if (
+                decoded.id !== entity.id ||
+                decoded.type !== (isVendor ? "vendor" : "user")
+            ) {
+                throw new APIError(
+                    400,
+                    "Invalid token: User or type mismatch.",
+                );
             }
 
             // Check if new email is already in use
             const existingUser = await findUserByEmail(decoded.newEmail);
             const existingVendor = await findVendorByEmail(decoded.newEmail);
             if (existingUser || existingVendor) {
-                throw new APIError(409, 'Email already in use.');
+                throw new APIError(409, "Email already in use.");
             }
 
             // Update user or vendor email and clear verification data
@@ -1410,18 +1661,27 @@ export class UserController {
 
             res.status(200).json({
                 success: true,
-                message: 'Email updated successfully.',
+                message: "Email updated successfully.",
             });
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                throw new APIError(503, 'Email verification service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Email verification service temporarily unavailable",
+                );
             }
         }
     }
 
-    async checkEmailExists(req: Request<{}, {}, {}, { email: string }>, res: Response): Promise<void> {
+    async checkEmailExists(
+        req: Request<{}, {}, {}, { email: string }>,
+        res: Response,
+    ): Promise<void> {
         if (!req.query.email) {
             res.status(400).json({ success: false, message: "Invalid Email" });
             return;
@@ -1433,7 +1693,10 @@ export class UserController {
                 : await this.vendorService.findVendorByEmail(req.query.email);
             res.json({ success: true, exists: !!(userExists || vendorExists) });
         } catch (error) {
-            res.status(503).json({ success: false, message: 'Email verification service temporarily unavailable' });
+            res.status(503).json({
+                success: false,
+                message: "Email verification service temporarily unavailable",
+            });
         }
     }
 }

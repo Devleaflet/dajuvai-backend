@@ -5,11 +5,11 @@ import { generateContactEmailHTML } from "./emailTemplate.utils";
 
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
 const transporter = nodemailer.createTransport({
-  service: "Gmail",
-  auth: {
-    user: config.USER_EMAIL, // Your Gmail email address
-    pass: config.PASS_EMAIL  // App password or actual password (prefer app password for security)
-  }
+    service: "Gmail",
+    auth: {
+        user: config.USER_EMAIL, // Your Gmail email address
+        pass: config.PASS_EMAIL, // App password or actual password (prefer app password for security)
+    },
 });
 
 /**
@@ -17,16 +17,16 @@ const transporter = nodemailer.createTransport({
  * @param dto - ContactInput object validated by Zod with form data (name, email, subject, message)
  */
 export const sendContactEmail = async (dto: ContactInput) => {
-  // Email options including recipient, subject, and HTML body generated from dto
-  const mailOptions = {
-    from: `${dto.email}`, // sender address with friendly name
-    to: `${config.USER_EMAIL}`,                       // support or admin email address
-    subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
-    html: generateContactEmailHTML(dto),                // formatted HTML content of the message
-  };
+    // Email options including recipient, subject, and HTML body generated from dto
+    const mailOptions = {
+        from: `${dto.email}`, // sender address with friendly name
+        to: `${config.USER_EMAIL}`, // support or admin email address
+        subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
+        html: generateContactEmailHTML(dto), // formatted HTML content of the message
+    };
 
-  // Send mail asynchronously
-  await transporter.sendMail(mailOptions);
+    // Send mail asynchronously
+    await transporter.sendMail(mailOptions);
 };
 
 /**
@@ -35,20 +35,27 @@ export const sendContactEmail = async (dto: ContactInput) => {
  * @param sub - Subject line for the verification email
  * @param token - Verification code to include in the email body
  */
-export const sendVerificationEmail = async (to: string, sub: string, token?: string) => {
-  const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login"
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject: sub,
-    html: `
+export const sendVerificationEmail = async (
+    to: string,
+    sub: string,
+    token?: string,
+) => {
+    const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login";
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: sub,
+        html: `
         <div>
-            ${token ? `
+            ${
+                token
+                    ? `
                 <h2>Email Verification</h2>
                 <p>Your 6-digit verification code is:</p>
                 <h3>${token}</h3>
                 <p>This code will expire in 2 minutes</p>
-            ` : `
+            `
+                    : `
                 <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
                     <h2 style="color: #2E7D32; text-align: center;">Vendor Approved ✅</h2>
                     <p style="font-size: 16px; text-align: center;">
@@ -62,123 +69,130 @@ export const sendVerificationEmail = async (to: string, sub: string, token?: str
                         If you did not expect this email, please contact our support team immediately.
                     </p>
                 </div>
-            `}
+            `
+            }
         </div>
-    `
-  };
+    `,
+    };
 
-
-  // Send the verification email
-  await transporter.sendMail(mailOptions);
+    // Send the verification email
+    await transporter.sendMail(mailOptions);
 };
 
 export const sendCustomerOrderEmail = async (
-  to: string,
-  orderId: number,
-  items: {
-    name: string;
-    sku?: string | null;
-    quantity: number;
-    price: number;
-    variantAttributes?: Record<string, string> | null;
-    vendorDistrict?: string | null;
-    vendorName?: string | null; // optional if you want vendor name
-  }[],
-  userDistrict?: string | null,
-  subject = "Your Order Has Been Placed"
+    to: string,
+    orderId: number,
+    totalPrice: number,
+    shippingFee: number,
+    items: {
+        name: string;
+        sku?: string | null;
+        quantity: number;
+        price: number;
+        variantAttributes?: Record<string, string> | null;
+        vendorDistrict?: string | null;
+        vendorName?: string | null; // optional if you want vendor name
+    }[],
+    userDistrict?: string | null,
+    subject = "Your Order Has Been Placed",
 ) => {
-  const total = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const OrderTotal = totalPrice + shippingFee;
 
-  // Group items by vendorDistrict
-  const groupedByVendor: Record<string, typeof items> = {};
-  for (const item of items) {
-    const vendorKey = item.vendorDistrict || "Unknown District";
-    if (!groupedByVendor[vendorKey]) {
-      groupedByVendor[vendorKey] = [];
-    }
-    groupedByVendor[vendorKey].push(item);
-  }
-
-  // Generate vendor sections
-  const vendorSections = Object.entries(groupedByVendor).map(
-    ([vendorDistrict, vendorItems]) => {
-      const rows = vendorItems.map((item) => {
-        console.log("Comparing districts ->", {
-          userDistrict,
-          vendorDistrict: item.vendorDistrict,
-        });
-
-        let deliveryEstimate = "3-5 days";
-        if (userDistrict && item.vendorDistrict) {
-          if (
-            userDistrict.trim().toLowerCase() ===
-            item.vendorDistrict.trim().toLowerCase()
-          ) {
-            deliveryEstimate = "2-3 days";
-          }
+    // Group items by vendorDistrict
+    const groupedByVendor: Record<string, typeof items> = {};
+    for (const item of items) {
+        const vendorKey = item.vendorDistrict || "Unknown District";
+        if (!groupedByVendor[vendorKey]) {
+            groupedByVendor[vendorKey] = [];
         }
-
-        return `
-          <tr>
-            <td style="padding:8px; border:1px solid #ddd;">
-              <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
-              ${item.variantAttributes
-            ? `<br>${Object.entries(item.variantAttributes)
-              .map(([key, val]) => `${key}: ${val}`)
-              .join(", ")}`
-            : ""
-          }
-            </td>
-            <td style="padding:8px; border:1px solid #ddd; text-align:center;">${item.quantity
-          }</td>
-            <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${item.price
-          }</td>
-            <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(
-            item.price * item.quantity
-          ).toFixed(2)}</td>
-            <td style="padding:8px; border:1px solid #ddd; text-align:center;">${deliveryEstimate}</td>
-          </tr>
-        `;
-      });
-
-      const vendorSubtotal = vendorItems.reduce(
-        (sum, i) => sum + i.price * i.quantity,
-        0
-      );
-
-      return `
-        <h4 style="margin-top:20px;">Vendor District: ${vendorDistrict}</h4>
-        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:20px;">
-          <thead>
-            <tr style="background-color:#f0f0f0;">
-              <th style="padding:8px; border:1px solid #ddd; text-align:left;">Product</th>
-              <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
-              <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
-              <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
-              <th style="padding:8px; border:1px solid #ddd; text-align:center;">Delivery</th>
-            </tr>
-          </thead>
-          <tbody>
-            ${rows.join("")}
-          </tbody>
-          <tfoot>
-            <tr>
-              <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Vendor Subtotal:</td>
-              <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${vendorSubtotal.toFixed(
-        2
-      )}</td>
-            </tr>
-          </tfoot>
-        </table>
-      `;
+        groupedByVendor[vendorKey].push(item);
     }
-  );
 
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject,
-    html: `
+    // Generate vendor sections
+    const vendorSections = Object.entries(groupedByVendor).map(
+        ([vendorDistrict, vendorItems]) => {
+            const rows = vendorItems.map((item) => {
+                console.log("Comparing districts ->", {
+                    userDistrict,
+                    vendorDistrict: item.vendorDistrict,
+                });
+
+                let deliveryEstimate = "3-5 days";
+                if (userDistrict && item.vendorDistrict) {
+                    if (
+                        userDistrict.trim().toLowerCase() ===
+                        item.vendorDistrict.trim().toLowerCase()
+                    ) {
+                        deliveryEstimate = "2-3 days";
+                    }
+                }
+
+                return `
+                      <tr>
+                        <td style="padding:8px; border:1px solid #ddd;">
+                          <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
+                          ${
+                              item.variantAttributes
+                                  ? `<br>${Object.entries(
+                                        item.variantAttributes,
+                                    )
+                                        .map(([key, val]) => `${key}: ${val}`)
+                                        .join(", ")}`
+                                  : ""
+                          }
+                        </td>
+                        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${
+                            item.quantity
+                        }</td>
+                        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${
+                            item.price
+                        }</td>
+                        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(
+                            item.price * item.quantity
+                        ).toFixed(2)}</td>
+                        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${deliveryEstimate}</td>
+                      </tr>
+                    `;
+            });
+
+            const vendorSubtotal = vendorItems.reduce(
+                (sum, i) => sum + i.price * i.quantity,
+                0,
+            );
+
+            return `
+                  <h4 style="margin-top:20px;">Vendor District: ${vendorDistrict}</h4>
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:20px;">
+                    <thead>
+                      <tr style="background-color:#f0f0f0;">
+                        <th style="padding:8px; border:1px solid #ddd; text-align:left;">Product</th>
+                        <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
+                        <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
+                        <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
+                        <th style="padding:8px; border:1px solid #ddd; text-align:center;">Delivery</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${rows.join("")}
+                    </tbody>
+                    <tfoot>
+                      <tr>
+                        <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Vendor Subtotal:</td>
+                        <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${vendorSubtotal.toFixed(
+                            2,
+                        )}</td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                `;
+        },
+    );
+
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
       <body style="margin:0; padding:0; font-family: Arial, sans-serif; background-color:#f9f9f9;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
@@ -200,8 +214,16 @@ export const sendCustomerOrderEmail = async (
                     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
                       <tfoot>
                         <tr>
+                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Subtotal:</td>
+                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${totalPrice.toFixed(2)}</td>
+                        </tr>
+                        <tr>
+                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Shipping Fee:</td>
+                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${shippingFee.toFixed(2)}</td>
+                        </tr>
+                        <tr>
                           <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
-                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${total.toFixed(2)}</td>
+                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${OrderTotal.toFixed(2)}</td>
                         </tr>
                       </tfoot>
                     </table>
@@ -225,51 +247,53 @@ export const sendCustomerOrderEmail = async (
         </table>
       </body>
     `,
-  };
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 };
 
-
 interface VendorOrderItem {
-  name: string;
-  sku?: string | null;
-  quantity: number;
-  price: number;
-  variantAttributes?: Record<string, string> | null;
+    name: string;
+    sku?: string | null;
+    quantity: number;
+    price: number;
+    variantAttributes?: Record<string, string> | null;
 }
 
 interface CustomerInfo {
-  name: string;
-  phone: string;
-  email?: string;
-  city?: string;
-  district?: string;
-  localAddress?: string;
-  landmark?: string;
+    name: string;
+    phone: string;
+    email?: string;
+    city?: string;
+    district?: string;
+    localAddress?: string;
+    landmark?: string;
 }
 
 export const sendVendorOrderEmail = async (
-  to: string,
-  paymentMethod: string,
-  orderId: number,
-  products: VendorOrderItem[],
-  customer: CustomerInfo,
-  subject = "New Order Received"
+    to: string,
+    paymentMethod: string,
+    orderId: number,
+    totalPrice: number,
+    shippingFee: number,
+    products: VendorOrderItem[],
+    customer: CustomerInfo,
+    subject = "New Order Received",
 ) => {
-  // Generate HTML rows for each product
-  const productList = products.map(item => {
-    let variantAttributes = "";
-    if (item.variantAttributes) {
-      variantAttributes =
-        " (" +
-        Object.entries(item.variantAttributes)
-          .map(([key, val]) => `${key}: ${val}`)
-          .join(", ") +
-        ")";
-    }
+    // Generate HTML rows for each product
+    const productList = products
+        .map((item) => {
+            let variantAttributes = "";
+            if (item.variantAttributes) {
+                variantAttributes =
+                    " (" +
+                    Object.entries(item.variantAttributes)
+                        .map(([key, val]) => `${key}: ${val}`)
+                        .join(", ") +
+                    ")";
+            }
 
-    return `
+            return `
       <tr>
         <td style="padding: 8px; border: 1px solid #ddd;">${item.name}${variantAttributes}</td>
         <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.sku || "-"}</td>
@@ -277,23 +301,27 @@ export const sendVendorOrderEmail = async (
         <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${item.price}</td>
       </tr>
     `;
-  }).join("");
+        })
+        .join("");
 
-  // Calculate total price
-  const totalPrice = products.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const vendorTotal = products.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0,
+    );
+    const orderTotal = vendorTotal + shippingFee;
 
-  // Combine address fields into a single string
-  const fullAddress = [
-    customer.localAddress,
-    customer.landmark,
-    customer.city,
-    customer.district
-  ]
-    .filter(Boolean)
-    .join(", ");
+    // Combine address fields into a single string
+    const fullAddress = [
+        customer.localAddress,
+        customer.landmark,
+        customer.city,
+        customer.district,
+    ]
+        .filter(Boolean)
+        .join(", ");
 
-  // Email HTML
-  const mailHtml = `
+    // Email HTML
+    const mailHtml = `
     <div style="font-family: Arial, sans-serif; max-width: 650px; margin: auto; padding: 20px; background: #ffffff; border-radius: 8px; border: 1px solid #e0e0e0;">
       
       <!-- Header -->
@@ -328,10 +356,21 @@ export const sendVendorOrderEmail = async (
         </tbody>
       </table>
 
-      <!-- Total -->
-      <p style="text-align: right; font-size: 16px; margin-bottom: 30px;">
-        <strong>Total: Rs ${totalPrice.toFixed(2)}</strong>
-      </p>
+      <!-- Totals -->
+      <table style="width: 100%; margin-bottom: 20px; font-size: 15px;">
+        <tr>
+          <td style="text-align: right; padding: 4px 0; color: #555;">Subtotal:</td>
+          <td style="text-align: right; padding: 4px 0; width: 120px;">Rs ${vendorTotal.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="text-align: right; padding: 4px 0; color: #555;">Shipping fee:</td>
+          <td style="text-align: right; padding: 4px 0;">Rs ${shippingFee.toFixed(2)}</td>
+        </tr>
+        <tr>
+          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Total:</strong></td>
+          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Rs ${orderTotal.toFixed(2)}</strong></td>
+        </tr>
+      </table>
 
       <!-- Footer -->
       <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
@@ -341,27 +380,26 @@ export const sendVendorOrderEmail = async (
     </div>
   `;
 
-  // Send email
-  await transporter.sendMail({
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject,
-    html: mailHtml
-  });
+    // Send email
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: mailHtml,
+    });
 };
 
-
 export const sendOrderStatusEmail = async (
-  to: string,
-  orderId: number,
-  status: string,
-  subject = "Your Order Status Has Been Updated"
+    to: string,
+    orderId: number,
+    status: string,
+    subject = "Your Order Status Has Been Updated",
 ) => {
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject,
-    html: `
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
       <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #e3f2fd;">
         <h2 style="color: #1976d2; text-align: center;">Order Update 📦</h2>
         
@@ -385,13 +423,11 @@ export const sendOrderStatusEmail = async (
           If you have any questions, please contact our support team.
         </p>
       </div>
-    `
-  };
+    `,
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 };
-
-
 
 export const userOrderCancelledEmail = (userName: string, orderId: number) => `
   <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
