@@ -29,7 +29,10 @@ export class Notification {
     id: string;
 
     // Notification title (e.g. "New Order Placed")
-    @Column({ type: "varchar", length: 20 })
+    // 255, not 20: "Order Status Updated" is exactly 20 chars, so the old width
+    // threw on insert for any admin-authored title. Must stay in step with
+    // migration 1775385055807 — shrinking this would truncate live rows.
+    @Column({ type: "varchar", length: 255 })
     title: string;
 
     //  Message body (e.g. "Order #123 has been placed by John Doe")

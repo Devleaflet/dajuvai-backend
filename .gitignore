@@ -2,4 +2,9 @@ node_modules
 logger
 .env
 src/config/firebase-service-account.json
-./dist
+
+# Firebase service account keys — private keys, never commit.
+# Broad patterns so a re-downloaded key with a new hash suffix stays ignored.
+*firebase-adminsdk*.json
+*serviceAccount*.json
+firebase-service-account.json
