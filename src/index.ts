@@ -53,6 +53,8 @@ import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
 import homecategoryRoutes from "./routes/home.category.routes";
+import merchandisingRoutes from "./routes/merchandising.routes";
+import merchandisingAdminRouter from "./routes/admin/merchandising.admin.routes";
 import notificationRoutes from "./routes/notification.routes";
 import commissionRoutes from "./routes/commission.routes";
 import checkoutRouter from "./routes/mobile.checkout.routes";
@@ -135,6 +137,7 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/placements", merchandisingRoutes);
 app.use("/api/vendors", vendorRoutes);
 app.use("/api/cart", cartRouter);
 app.use("/api/wishlist", wishlistRoutes);
@@ -150,6 +153,7 @@ app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/admin/vendors", adminVendorsRouter);
 app.use("/api/admin/orders", adminOrdersRouter);
 app.use("/api/admin/users", adminUsersRouter);
+app.use("/api/admin/placements", merchandisingAdminRouter);
 
 // admin delivery
 app.use("/api/admin/delivery", deliveryAdminRouter);
