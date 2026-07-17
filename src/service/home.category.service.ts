@@ -1,40 +1,33 @@
-import AppDataSource from "../config/db.config";
-import { Category } from "../entities/category.entity";
-import { HomeCategory } from "../entities/home.category";
+import { merchandisingService } from "./merchandising.service";
+
+/**
+ * Legacy homepage-category endpoint, now a thin adapter over the HOMEPAGE
+ * placement. The response shape is frozen: storefront and admin clients still
+ * consume it, so this must keep returning [{ id, category: { … } }].
+ *
+ * New work should call /api/placements/HOMEPAGE/categories instead.
+ */
+const HOMEPAGE = "HOMEPAGE";
 
 export class HomeCategoryService {
-    private homecategoryRepo = AppDataSource.getRepository(HomeCategory);
-
     async handleCreateHomeCategory(id: number[]) {
-        await this.homecategoryRepo.clear();
-
-        const newHomeCategories = id.map((id) =>
-            this.homecategoryRepo.create({
-                category: { id }
-            })
-        );
-
-        return this.homecategoryRepo.save(newHomeCategories);
+        await merchandisingService.replacePlacementSet("category", HOMEPAGE, id);
+        return this.getHomeCategory();
     }
-
 
     async getHomeCategory() {
-        const categories = await this.homecategoryRepo
-            .createQueryBuilder("homeCategory")
-            .leftJoinAndSelect("homeCategory.category", "category")
-            .leftJoinAndSelect("category.subcategories", "subcategory")
-            .select([
-                "homeCategory.id",
-                "category.id",
-                "category.name",
-                "category.image",
-                "subcategory.id",
-                "subcategory.name",
-                "subcategory.image"
-            ])
-            .getMany();
+        const rows = await merchandisingService.getPublicCategories(HOMEPAGE);
 
-        return categories;
+        return rows.map((row) => ({
+            // The legacy id was the homecategory row id. Nothing reads it as a
+            // key beyond React list rendering, so the category id serves.
+            id: row.categoryId,
+            category: {
+                id: row.categoryId,
+                name: row.name,
+                image: row.image,
+                subcategories: row.subcategories,
+            },
+        }));
     }
-
 }
