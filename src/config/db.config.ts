@@ -27,6 +27,8 @@ import { VendorPaymentOption } from "../entities/vendorPaymentOption";
 import { Rider } from "../entities/rider.entity";
 import { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 import { CommissionDocument } from "../entities/commissionDocument.entity";
+import { DeviceToken } from "../entities/deviceToken.entity";
+import { NotificationDispatch } from "../entities/notificationDispatch.entity";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",

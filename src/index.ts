@@ -45,6 +45,7 @@ import vendorOrdersRouter from "./routes/vendor/vendor.orders.routes";
 import {
   orderCleanUp,
   removeUnverifiedVendors,
+  staleDeviceTokenCleanUp,
   startOrderCleanupJob,
   tokenCleanUp,
 } from "./utils/cronjob.utils";
@@ -187,6 +188,7 @@ AppDataSource.initialize()
     orderCleanUp();
     startOrderCleanupJob();
     removeUnverifiedVendors();
+    staleDeviceTokenCleanUp();
     // await updateAllProductPrices(AppDataSource)
 
     // Start Express + WebSocket server

@@ -499,7 +499,16 @@ export const validateZod = (
 ) => {
   return async (req: Request, res: Response, next: NextFunction) => {
     try {
-      req[property] = await schema.parseAsync(req[property]);
+      const parsed = await schema.parseAsync(req[property]);
+      // Express 5 exposes req.query as a getter-only prototype property, so a
+      // plain assignment silently no-ops and the coerced/defaulted values are
+      // lost. defineProperty writes an own property that shadows the getter.
+      Object.defineProperty(req, property, {
+        value: parsed,
+        writable: true,
+        configurable: true,
+        enumerable: true,
+      });
       return next();
     } catch (error) {
       if (error instanceof ZodError) {
