@@ -9,13 +9,13 @@ import { merchandisingService } from "./merchandising.service";
  */
 const HOMEPAGE = "HOMEPAGE";
 
-export class HomeCategoryService {
-    async handleCreateHomeCategory(id: number[]) {
-        await merchandisingService.replacePlacementSet("category", HOMEPAGE, id);
-        return this.getHomeCategory();
+export class HomepageCategoryService {
+    async replaceHomepageCategories(categoryIds: number[]) {
+        await merchandisingService.replacePlacementSet("category", HOMEPAGE, categoryIds);
+        return this.getHomepageCategories();
     }
 
-    async getHomeCategory() {
+    async getHomepageCategories() {
         const rows = await merchandisingService.getPublicCategories(HOMEPAGE);
 
         return rows.map((row) => ({

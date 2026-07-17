@@ -52,7 +52,7 @@ import {
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
-import homecategoryRoutes from "./routes/home.category.routes";
+import homepageCategoryRoutes from "./routes/homepageCategory.routes";
 import merchandisingRoutes from "./routes/merchandising.routes";
 import merchandisingAdminRouter from "./routes/admin/merchandising.admin.routes";
 import notificationRoutes from "./routes/notification.routes";
@@ -166,7 +166,7 @@ app.use("/api/vendor/orders", vendorOrdersRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
 app.use("/api/image", imageRouter);
-app.use("/api/home/category/section", homecategoryRoutes);
+app.use("/api/home/category/section", homepageCategoryRoutes);
 app.use("/api/notification", notificationRoutes);
 app.use("/api/commission", commissionRoutes);
 app.use("/api/checkout", checkoutRouter);

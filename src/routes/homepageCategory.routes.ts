@@ -1,8 +1,8 @@
 import { Router } from "express";
-import { HomeCategoryController } from "../controllers/home.category.controller";
+import { HomepageCategoryController } from "../controllers/homepageCategory.controller";
 
-const homecategoryRoutes = Router();
-const homecategoryController = new HomeCategoryController();
+const homepageCategoryRoutes = Router();
+const homepageCategoryController = new HomepageCategoryController();
 
 /**
  * @swagger
@@ -94,7 +94,7 @@ const homecategoryController = new HomeCategoryController();
  *       500:
  *         description: Internal server error
  */
-homecategoryRoutes.post("/", homecategoryController.createCategoryCatalog.bind(homecategoryController));
+homepageCategoryRoutes.post("/", homepageCategoryController.setHomepageCategories.bind(homepageCategoryController));
 
 /**
  * @swagger
@@ -146,6 +146,6 @@ homecategoryRoutes.post("/", homecategoryController.createCategoryCatalog.bind(h
  *       500:
  *         description: Internal server error
  */
-homecategoryRoutes.get("/", homecategoryController.getHomePageCategory.bind(homecategoryController));
+homepageCategoryRoutes.get("/", homepageCategoryController.getHomepageCategories.bind(homepageCategoryController));
 
-export default homecategoryRoutes;
+export default homepageCategoryRoutes;
