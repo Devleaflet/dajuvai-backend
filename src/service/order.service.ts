@@ -39,7 +39,12 @@ import { PromoType } from "../entities/promo.entity";
 import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
 import config from "../config/env.config";
-import { sanitizeUser, sanitizeVendor } from "../utils/sanitize.util";
+import {
+    sanitizeUser,
+    sanitizeVendor,
+    sanitizeOrderFull,
+    SanitizedOrderFull,
+} from "../utils/sanitize.util";
 
 /**
  * Service class responsible for managing orders.
@@ -1269,7 +1274,7 @@ export class OrderService {
         orderId: number,
         transactionId: string,
         responseData: any,
-    ): Promise<Order> {
+    ): Promise<SanitizedOrderFull> {
         // Fetch order by ID and transaction ID, including all required relations
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
@@ -1325,7 +1330,7 @@ export class OrderService {
         }
 
         // Return updated order
-        return order;
+        return sanitizeOrderFull(order);
     }
 
     /**
@@ -1472,9 +1477,6 @@ export class OrderService {
                 "orderedBy.email",
                 "orderedBy.phoneNumber",
                 "orderedBy.role",
-                "orderedBy.addressId",
-                "orderedBy.googleId",
-                "orderedBy.facebookId",
                 "orderedBy.provider",
                 "orderedBy.isVerified",
                 "orderedBy.createdAt",
@@ -1580,7 +1582,7 @@ export class OrderService {
         userId: number,
         orderId: number,
         addressData: IShippingAddressRequest,
-    ): Promise<Order> {
+    ): Promise<any> {
         // Find the pending order by orderId and userId
         const order = await this.orderRepository.findOne({
             where: {
@@ -1645,7 +1647,7 @@ export class OrderService {
             throw new APIError(500, "Failed to retrieve updated order");
         }
 
-        return updatedOrder;
+        return sanitizeOrderFull(updatedOrder) as any;
     }
 
     /**
@@ -1654,9 +1656,9 @@ export class OrderService {
      * @returns {Promise<Order[]>} - List of all orders including user, shipping address, order items, products, and vendors.
      * @access Admin or authorized roles
      */
-    async getAllOrders(): Promise<Order[]> {
+    async getAllOrders(): Promise<SanitizedOrderFull[]> {
         // Fetch all orders with full relations for detailed info
-        return await this.orderRepository.find({
+        const orders = await this.orderRepository.find({
             relations: [
                 "orderedBy",
                 "shippingAddress",
@@ -1666,6 +1668,7 @@ export class OrderService {
                 "orderItems.variant",
             ],
         });
+        return orders.map(sanitizeOrderFull);
     }
 
     /**
@@ -1676,7 +1679,7 @@ export class OrderService {
      * @throws {APIError} - Throws 404 error if the order is not found.
      * @access Admin or authorized roles
      */
-    async getOrderDetails(orderId: number): Promise<Order> {
+    async getOrderDetails(orderId: number): Promise<SanitizedOrderFull> {
         // Find the order by ID with all related entities loaded
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
@@ -1696,7 +1699,7 @@ export class OrderService {
         }
 
         // Return the found order with relations
-        return order;
+        return sanitizeOrderFull(order);
     }
 
     /**
@@ -1711,7 +1714,7 @@ export class OrderService {
     async updateOrderStatus(
         orderId: number,
         status: IUpdateOrderStatusRequest["status"],
-    ): Promise<Order> {
+    ): Promise<SanitizedOrderFull> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
@@ -1775,7 +1778,7 @@ export class OrderService {
             );
         }
 
-        return order;
+        return sanitizeOrderFull(order);
     }
 
     /**
@@ -1785,8 +1788,8 @@ export class OrderService {
      * @returns {Promise<Order | null>} - The order if found, otherwise null.
      * @access Admin or authorized users
      */
-    async searchOrdersById(orderId: number): Promise<Order | null> {
-        return await this.orderRepository.findOne({
+    async searchOrdersById(orderId: number): Promise<SanitizedOrderFull | null> {
+        const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
                 "orderedBy",
@@ -1796,6 +1799,7 @@ export class OrderService {
                 "orderItems.vendor",
             ],
         });
+        return order ? sanitizeOrderFull(order) : null;
     }
 
     /**
@@ -1849,7 +1853,7 @@ export class OrderService {
     async getVendorOrderDetails(
         vendorId: number,
         orderId: number,
-    ): Promise<Order> {
+    ): Promise<SanitizedOrderFull> {
         // Query the order with all relevant relations and filter by orderId and vendorId
         const order = await this.orderRepository
             .createQueryBuilder("order")
@@ -1871,7 +1875,7 @@ export class OrderService {
             );
         }
 
-        return order;
+        return sanitizeOrderFull(order);
     }
 
     /**
@@ -1883,7 +1887,7 @@ export class OrderService {
      * @returns {Promise<Order[]>} - List of orders made by the customer.
      * @access Customer
      */
-    async getOrderHistoryForCustomer(userId: number): Promise<Order[]> {
+    async getOrderHistoryForCustomer(userId: number): Promise<SanitizedOrderFull[]> {
         // Find all orders where orderedById matches the userId
         // Include relations: orderItems, the products within those items, and shipping address
         const orders = await this.orderRepository.find({
@@ -1897,9 +1901,7 @@ export class OrderService {
             order: { createdAt: "DESC" }, // Sort orders by creation date descending
         });
 
-        // console.log(orders);
-
-        return orders;
+        return orders.map(sanitizeOrderFull);
     }
 
     async getOrderDetailByMerchantTransactionId(mTransactionId: string) {

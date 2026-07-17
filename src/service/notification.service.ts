@@ -123,7 +123,7 @@ export class NotificationService {
         }
     }
 
-    async notifyOrderStatusUpdated(order: Order): Promise<void> {
+    async notifyOrderStatusUpdated(order: any): Promise<void> {
         const notifications: Notification[] = [];
 
         const statusMessage = `Order #${order.id} status updated to ${order.status}`;
@@ -140,7 +140,7 @@ export class NotificationService {
         );
 
         // Vendor notifications
-        const vendorIds = [...new Set(order.orderItems.map(item => item.vendorId))];
+        const vendorIds = [...new Set(order.orderItems.map((item: any) => item.vendorId ?? item.vendor?.id).filter(Boolean))] as number[];
 
         for (const vendorId of vendorIds) {
             notifications.push(

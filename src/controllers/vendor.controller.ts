@@ -3,6 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { AuthRequest, VendorAuthRequest } from "../middlewares/auth.middleware";
 import { sendVerificationEmail } from "../utils/nodemailer.utils";
+import { sanitizeVendor } from "../utils/sanitize.util";
 import { VendorService } from "../service/vendor.service";
 import {
     IVendorSignupRequest,
@@ -66,7 +67,10 @@ export class VendorController {
         _next: NextFunction,
     ): Promise<void> {
         const vendors = await this.vendorService.fetchAllVendors();
-        res.status(200).json({ success: true, data: vendors });
+        res.status(200).json({
+            success: true,
+            data: vendors.map((v) => sanitizeVendor(v)),
+        });
     }
 
     async getPartialVendors(
@@ -154,7 +158,11 @@ export class VendorController {
             maxAge: 2 * 60 * 60 * 1000,
         });
 
-        res.status(201).json({ success: true, vendor, token });
+        res.status(201).json({
+            success: true,
+            vendor: sanitizeVendor(vendor),
+            token,
+        });
     }
 
     async login(
@@ -421,7 +429,10 @@ export class VendorController {
         const vendor = await this.vendorService.getVendorByIdService(id);
         if (!vendor) throw new NotFoundError("Vendor");
 
-        res.status(200).json({ success: true, data: vendor });
+        res.status(200).json({
+            success: true,
+            data: { ...vendor, password: null },
+        });
     }
 
     async authVendor(
@@ -433,7 +444,10 @@ export class VendorController {
         const getVendor = await this.vendorService.findVendorById(vendor.id);
         if (!getVendor) throw new NotFoundError("Vendor");
 
-        res.status(200).json({ success: true, vendor: getVendor });
+        res.status(200).json({
+            success: true,
+            vendor: { ...getVendor, password: null },
+        });
     }
 
     async updateVendor(
@@ -639,7 +653,7 @@ export class VendorController {
         res.status(200).json({
             success: true,
             message: "Vendor updated successfully",
-            data: updatedVendor,
+            data: sanitizeVendor(updatedVendor),
         });
     }
 
@@ -664,7 +678,10 @@ export class VendorController {
         res.status(200).json({
             success: true,
             message: "Payment option updated successfully",
-            data: updated,
+            data: (() => {
+                const { vendor: _v, ...safe } = updated;
+                return safe;
+            })(),
         });
     }
 }
