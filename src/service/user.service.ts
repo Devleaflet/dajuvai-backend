@@ -268,19 +268,17 @@ export const findVendorByResetToken = async (
 };
 
 export const deleteUserDataByFacebookId = async (user_id: string) => {
-    const userId = await userDB.findOne({
+    const user = await userDB.findOne({
         where: {
             facebookId: user_id,
         },
     });
 
-    if (!userId) {
+    if (!user) {
         throw new APIError(404, "User not found");
     }
 
-    const userid = Number(userId);
-
-    const deleteUser = await userDB.delete(userid);
+    const deleteUser = await userDB.remove(user);
 
     console.log(deleteUser);
 

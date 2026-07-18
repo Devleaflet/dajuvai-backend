@@ -1,4 +1,4 @@
-import { Repository } from "typeorm";
+import { Repository, MoreThan } from "typeorm";
 import { Vendor } from "../entities/vendor.entity";
 import AppDataSource from "../config/db.config";
 import {
@@ -147,7 +147,10 @@ export class VendorService {
     async findVendorByResetToken(token: string): Promise<Vendor | null> {
         // Used in password reset flows to find vendor by token
         return await this.vendorRepository.findOne({
-            where: { resetToken: token },
+            where: {
+                resetToken: token,
+                resetTokenExpire: MoreThan(new Date()),
+            },
         });
     }
 
@@ -197,6 +200,9 @@ export class VendorService {
             },
         });
 
+        if (!vendorWithProduct || !vendorWithProduct.products) {
+            return false;
+        }
         return vendorWithProduct.products.length > 0;
     }
 
@@ -225,10 +231,8 @@ export class VendorService {
             ...updateData,
             district: district,
         };
-        const updateDistrict = this.vendorRepository.update(
-            id,
-            updateFinalData,
-        );
+
+        await this.vendorRepository.update(id, updateFinalData);
 
         return this.vendorRepository.findOne({ where: { id } });
     }
@@ -351,131 +355,143 @@ export class VendorService {
     ): Promise<Vendor> {
         const queryRunner =
             this.vendorRepository.manager.connection.createQueryRunner();
+
+        // If connect() throws, there's nothing to release yet, so this stays outside the try/finally.
         await queryRunner.connect();
-        await queryRunner.startTransaction();
 
         try {
-            const vendor = await queryRunner.manager.findOne(Vendor, {
-                where: { id },
-                relations: {
-                    paymentOptions: true,
-                },
-            });
+            await queryRunner.startTransaction();
 
-            if (!vendor) throw new APIError(404, "Vendor not found");
-
-            // Handle district update
-            if (updateData.district) {
-                const districtEntity = await queryRunner.manager.findOne(
-                    District,
-                    {
-                        where: { name: updateData.district },
+            try {
+                const vendor = await queryRunner.manager.findOne(Vendor, {
+                    where: { id },
+                    relations: {
+                        paymentOptions: true,
                     },
-                );
+                });
 
-                if (!districtEntity)
-                    throw new APIError(404, "District does not exist");
+                if (!vendor) throw new APIError(404, "Vendor not found");
 
-                vendor.district = districtEntity;
-                vendor.districtId = districtEntity.id;
-            }
+                // Handle district update
+                if (updateData.district) {
+                    const districtEntity = await queryRunner.manager.findOne(
+                        District,
+                        {
+                            where: { name: updateData.district },
+                        },
+                    );
 
-            // Update scalar fields safely - INCLUDING profilePicture
-            Object.assign(vendor, {
-                businessName: updateData.businessName ?? vendor.businessName,
-                phoneNumber: updateData.phoneNumber ?? vendor.phoneNumber,
-                telePhone: updateData.telePhone ?? vendor.telePhone,
-                taxNumber: updateData.taxNumber ?? vendor.taxNumber,
-                taxDocuments: updateData.taxDocuments ?? vendor.taxDocuments,
-                citizenshipDocuments:
-                    updateData.citizenshipDocuments ??
-                    vendor.citizenshipDocuments,
-                // FIX: Handle profilePicture updates
-                ...(updateData.profilePicture !== undefined && {
-                    profilePicture: updateData.profilePicture,
-                }),
-            });
+                    if (!districtEntity)
+                        throw new APIError(404, "District does not exist");
 
-            await queryRunner.manager.save(vendor);
-
-            if (updateData.paymentOptions) {
-                const existingOptions = vendor.paymentOptions;
-
-                const existingMap = new Map(
-                    existingOptions.map((opt) => [opt.paymentType, opt]),
-                );
-
-                const incomingMap = new Map(
-                    updateData.paymentOptions.map((opt) => [
-                        opt.paymentType,
-                        opt,
-                    ]),
-                );
-
-                const toUpdate: VendorPaymentOption[] = [];
-                const toCreate: VendorPaymentOption[] = [];
-                const toDelete: VendorPaymentOption[] = [];
-
-                // UPDATE OR CREATE
-                for (const [
-                    paymentType,
-                    incomingOption,
-                ] of incomingMap.entries()) {
-                    const existingOption = existingMap.get(paymentType);
-
-                    if (existingOption) {
-                        existingOption.details = incomingOption.details;
-
-                        if (incomingOption.qrCodeImage !== undefined) {
-                            existingOption.qrCodeImage =
-                                incomingOption.qrCodeImage;
-                        }
-
-                        if (incomingOption.isActive !== undefined) {
-                            existingOption.isActive = incomingOption.isActive;
-                        }
-
-                        toUpdate.push(existingOption);
-                    } else {
-                        const newOption = queryRunner.manager.create(
-                            VendorPaymentOption,
-                            {
-                                paymentType: incomingOption.paymentType,
-                                details: incomingOption.details,
-                                qrCodeImage: incomingOption.qrCodeImage ?? null,
-                                isActive: incomingOption.isActive ?? true,
-                                vendor: vendor,
-                            },
-                        );
-
-                        toCreate.push(newOption);
-                    }
+                    vendor.district = districtEntity;
+                    vendor.districtId = districtEntity.id;
                 }
 
-                // DELETE REMOVED
-                for (const [
-                    paymentType,
-                    existingOption,
-                ] of existingMap.entries()) {
-                    if (!incomingMap.has(paymentType)) {
-                        toDelete.push(existingOption);
+                // Update scalar fields safely - INCLUDING profilePicture
+                Object.assign(vendor, {
+                    businessName:
+                        updateData.businessName ?? vendor.businessName,
+                    phoneNumber: updateData.phoneNumber ?? vendor.phoneNumber,
+                    telePhone: updateData.telePhone ?? vendor.telePhone,
+                    taxNumber: updateData.taxNumber ?? vendor.taxNumber,
+                    taxDocuments:
+                        updateData.taxDocuments ?? vendor.taxDocuments,
+                    citizenshipDocuments:
+                        updateData.citizenshipDocuments ??
+                        vendor.citizenshipDocuments,
+                    // FIX: Handle profilePicture updates
+                    ...(updateData.profilePicture !== undefined && {
+                        profilePicture: updateData.profilePicture,
+                    }),
+                });
+
+                await queryRunner.manager.save(vendor);
+
+                if (updateData.paymentOptions) {
+                    const existingOptions = vendor.paymentOptions;
+
+                    const existingMap = new Map(
+                        existingOptions.map((opt) => [opt.paymentType, opt]),
+                    );
+
+                    const incomingMap = new Map(
+                        updateData.paymentOptions.map((opt) => [
+                            opt.paymentType,
+                            opt,
+                        ]),
+                    );
+
+                    const toUpdate: VendorPaymentOption[] = [];
+                    const toCreate: VendorPaymentOption[] = [];
+                    const toDelete: VendorPaymentOption[] = [];
+
+                    // UPDATE OR CREATE
+                    for (const [
+                        paymentType,
+                        incomingOption,
+                    ] of incomingMap.entries()) {
+                        const existingOption = existingMap.get(paymentType);
+
+                        if (existingOption) {
+                            existingOption.details = incomingOption.details;
+
+                            if (incomingOption.qrCodeImage !== undefined) {
+                                existingOption.qrCodeImage =
+                                    incomingOption.qrCodeImage;
+                            }
+
+                            if (incomingOption.isActive !== undefined) {
+                                existingOption.isActive =
+                                    incomingOption.isActive;
+                            }
+
+                            toUpdate.push(existingOption);
+                        } else {
+                            const newOption = queryRunner.manager.create(
+                                VendorPaymentOption,
+                                {
+                                    paymentType: incomingOption.paymentType,
+                                    details: incomingOption.details,
+                                    qrCodeImage:
+                                        incomingOption.qrCodeImage ?? null,
+                                    isActive: incomingOption.isActive ?? true,
+                                    vendor: vendor,
+                                },
+                            );
+
+                            toCreate.push(newOption);
+                        }
                     }
+
+                    // DELETE REMOVED
+                    for (const [
+                        paymentType,
+                        existingOption,
+                    ] of existingMap.entries()) {
+                        if (!incomingMap.has(paymentType)) {
+                            toDelete.push(existingOption);
+                        }
+                    }
+
+                    if (toUpdate.length)
+                        await queryRunner.manager.save(toUpdate);
+                    if (toCreate.length)
+                        await queryRunner.manager.save(toCreate);
+                    if (toDelete.length)
+                        await queryRunner.manager.remove(toDelete);
                 }
 
-                if (toUpdate.length) await queryRunner.manager.save(toUpdate);
-                if (toCreate.length) await queryRunner.manager.save(toCreate);
-                if (toDelete.length) await queryRunner.manager.remove(toDelete);
+                await queryRunner.commitTransaction();
+
+                return await queryRunner.manager.findOne(Vendor, {
+                    where: { id },
+                    relations: ["paymentOptions", "district"],
+                });
+            } catch (error) {
+                await queryRunner.rollbackTransaction();
+                throw error;
             }
-
-            await queryRunner.commitTransaction();
-
-            return await queryRunner.manager.findOne(Vendor, {
-                where: { id },
-                relations: ["paymentOptions", "district"],
-            });
-        } catch (error) {
-            await queryRunner.rollbackTransaction();
-            throw error;
         } finally {
             await queryRunner.release();
         }

@@ -17,7 +17,7 @@ export class VendorDashboardController {
 
     async vendorSalesReport(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
         const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
-        const report = await this.dashboardService.getTotalSales(7, startDate, endDate);
+        const report = await this.dashboardService.getTotalSales(req.vendor.id, startDate, endDate);
         res.status(200).json(report);
     }
 

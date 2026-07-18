@@ -1763,6 +1763,28 @@ export class OrderService {
 
         order.status = status;
 
+        if (status === OrderStatus.CANCELLED) {
+            for (const item of order.orderItems) {
+                if (item.variantId) {
+                    const variant = await this.variantRepository.findOne({
+                        where: { id: item.variantId },
+                    });
+                    if (variant) {
+                        variant.stock += item.quantity;
+                        await this.variantRepository.save(variant);
+                    }
+                } else {
+                    const product = await this.productRepository.findOne({
+                        where: { id: item.productId },
+                    });
+                    if (product) {
+                        product.stock += item.quantity;
+                        await this.productRepository.save(product);
+                    }
+                }
+            }
+        }
+
         // Handle COD payment update on delivery
         if (
             status === OrderStatus.DELIVERED &&
@@ -1833,6 +1855,9 @@ export class OrderService {
         const sanitizedOrders = orders.map((o) => {
             return {
                 ...o,
+                totalPrice: o.orderItems.reduce((acc, item) => {
+                    return acc + item.price * item.quantity;
+                }, 0),
                 orderedBy: sanitizeUser(o.orderedBy),
                 orderItems: o.orderItems.map((oi) => {
                     return {

@@ -308,7 +308,7 @@ export const sendVendorOrderEmail = async (
         (sum, item) => sum + item.price * item.quantity,
         0,
     );
-    const orderTotal = vendorTotal + shippingFee;
+    // const orderTotal = vendorTotal + shippingFee;
 
     // Combine address fields into a single string
     const fullAddress = [
@@ -358,17 +358,10 @@ export const sendVendorOrderEmail = async (
 
       <!-- Totals -->
       <table style="width: 100%; margin-bottom: 20px; font-size: 15px;">
-        <tr>
-          <td style="text-align: right; padding: 4px 0; color: #555;">Subtotal:</td>
-          <td style="text-align: right; padding: 4px 0; width: 120px;">Rs ${vendorTotal.toFixed(2)}</td>
-        </tr>
-        <tr>
-          <td style="text-align: right; padding: 4px 0; color: #555;">Shipping fee:</td>
-          <td style="text-align: right; padding: 4px 0;">Rs ${shippingFee.toFixed(2)}</td>
-        </tr>
+        
         <tr>
           <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Total:</strong></td>
-          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Rs ${orderTotal.toFixed(2)}</strong></td>
+          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Rs ${vendorTotal.toFixed(2)}</strong></td>
         </tr>
       </table>
 
