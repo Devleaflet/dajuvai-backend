@@ -7,82 +7,21 @@ const controller = new MerchandisingController();
 
 /**
  * @swagger
- * /api/admin/placements/{code}/categories:
+ * /api/admin/placements/{slug}/items:
  *   get:
- *     summary: Every category, merged with its config for this placement
- *     description: |
- *       Returns all categories. Assigned ones come first in placement order and
- *       carry inPlacement=true; unassigned ones follow, alphabetically, so the
- *       admin can add them.
+ *     summary: All items in a placement (nested for mega-menu, flat for others)
  *     tags:
- *       - Admin Merchandising
+ *       - Admin Placements
  *     security:
  *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: code
- *         required: true
- *         schema:
- *           type: string
  *     responses:
  *       200:
- *         description: Merged category list
- *       403:
- *         description: Staff or admin access required
- */
-merchandisingAdminRouter.get(
-    "/:code/categories",
-    authMiddleware,
-    isAdminOrStaff,
-    controller.getAdminCategories.bind(controller),
-);
-
-/**
- * @swagger
- * /api/admin/placements/{code}/categories/reorder:
- *   patch:
- *     summary: Apply a whole ordering to a placement
- *     description: |
- *       One transaction. Every categoryId must already be in the placement; a
- *       payload naming an unknown id writes nothing.
- *     tags:
- *       - Admin Merchandising
- *     security:
- *       - bearerAuth: []
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: array
- *             items:
- *               type: object
- *               properties:
- *                 categoryId:
- *                   type: integer
- *                 displayOrder:
- *                   type: integer
- *     responses:
- *       200:
- *         description: Updated list
- *       400:
- *         description: An id in the payload is not in the placement
- */
-// Declared before /:code/categories/:targetId so "reorder" is not swallowed as an id.
-merchandisingAdminRouter.patch(
-    "/:code/categories/reorder",
-    authMiddleware,
-    isAdminOrStaff,
-    controller.reorderCategories.bind(controller),
-);
-
-/**
- * @swagger
- * /api/admin/placements/{code}/categories:
+ *         description: Items
  *   post:
- *     summary: Add a category to a placement (appended last)
+ *     summary: Add one or more items to a placement (appended last)
+ *     description: Unknown or already-present items are silently skipped.
  *     tags:
- *       - Admin Merchandising
+ *       - Admin Placements
  *     security:
  *       - bearerAuth: []
  *     requestBody:
@@ -92,38 +31,49 @@ merchandisingAdminRouter.patch(
  *           schema:
  *             type: object
  *             properties:
- *               categoryId:
- *                 type: integer
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     entityType:
+ *                       type: string
+ *                       enum: [category, subcategory]
+ *                     entityId:
+ *                       type: integer
  *     responses:
  *       201:
  *         description: Added
- *       409:
- *         description: Already in this placement
  */
+merchandisingAdminRouter.get(
+    "/:slug/items",
+    authMiddleware,
+    isAdminOrStaff,
+    controller.getItems.bind(controller),
+);
 merchandisingAdminRouter.post(
-    "/:code/categories",
+    "/:slug/items",
     authMiddleware,
     isAdmin,
-    controller.addCategory.bind(controller),
+    controller.addItems.bind(controller),
 );
 
 /**
  * @swagger
- * /api/admin/placements/{code}/categories/{targetId}:
+ * /api/admin/placements/{slug}/items/{itemId}:
  *   patch:
- *     summary: Toggle visible, featured or pinned
+ *     summary: Toggle visibility of a single item
  *     tags:
- *       - Admin Merchandising
+ *       - Admin Placements
  *     security:
  *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Updated
  *   delete:
- *     summary: Remove a category from a placement
- *     description: Deletes the placement row only. The category itself is untouched.
+ *     summary: Remove an item from a placement (the catalog row is untouched)
  *     tags:
- *       - Admin Merchandising
+ *       - Admin Placements
  *     security:
  *       - bearerAuth: []
  *     responses:
@@ -131,60 +81,86 @@ merchandisingAdminRouter.post(
  *         description: Removed
  */
 merchandisingAdminRouter.patch(
-    "/:code/categories/:targetId",
+    "/:slug/items/:itemId",
     authMiddleware,
     isAdminOrStaff,
-    controller.updateCategory.bind(controller),
+    controller.updateVisibility.bind(controller),
 );
 merchandisingAdminRouter.delete(
-    "/:code/categories/:targetId",
+    "/:slug/items/:itemId",
     authMiddleware,
     isAdmin,
-    controller.removeCategory.bind(controller),
+    controller.removeItem.bind(controller),
 );
 
 /**
  * @swagger
- * /api/admin/placements/{code}/subcategories:
- *   get:
- *     summary: Every subcategory, merged with its config for this placement
+ * /api/admin/placements/{slug}/reorder:
+ *   put:
+ *     summary: Apply a whole ordering to a placement in one transaction
+ *     description: An itemId not already in the placement causes the whole request to write nothing.
  *     tags:
- *       - Admin Merchandising
+ *       - Admin Placements
  *     security:
  *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     itemId:
+ *                       type: integer
+ *                     displayOrder:
+ *                       type: integer
  *     responses:
  *       200:
- *         description: Merged subcategory list
+ *         description: Order updated
+ *       400:
+ *         description: An id in the payload is not in the placement
+ */
+merchandisingAdminRouter.put(
+    "/:slug/reorder",
+    authMiddleware,
+    isAdminOrStaff,
+    controller.reorder.bind(controller),
+);
+
+/**
+ * @swagger
+ * /api/admin/placements/{slug}/available-items:
+ *   get:
+ *     summary: Items not yet in this placement, for the Add Items picker
+ *     tags:
+ *       - Admin Placements
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: entityType
+ *         schema:
+ *           type: string
+ *           enum: [category, subcategory]
+ *       - in: query
+ *         name: categoryId
+ *         schema:
+ *           type: integer
+ *         description: Scopes mega-menu's subcategory picker to one category
+ *     responses:
+ *       200:
+ *         description: Available items
  */
 merchandisingAdminRouter.get(
-    "/:code/subcategories",
+    "/:slug/available-items",
     authMiddleware,
     isAdminOrStaff,
-    controller.getAdminSubcategories.bind(controller),
-);
-merchandisingAdminRouter.patch(
-    "/:code/subcategories/reorder",
-    authMiddleware,
-    isAdminOrStaff,
-    controller.reorderSubcategories.bind(controller),
-);
-merchandisingAdminRouter.post(
-    "/:code/subcategories",
-    authMiddleware,
-    isAdmin,
-    controller.addSubcategory.bind(controller),
-);
-merchandisingAdminRouter.patch(
-    "/:code/subcategories/:targetId",
-    authMiddleware,
-    isAdminOrStaff,
-    controller.updateSubcategory.bind(controller),
-);
-merchandisingAdminRouter.delete(
-    "/:code/subcategories/:targetId",
-    authMiddleware,
-    isAdmin,
-    controller.removeSubcategory.bind(controller),
+    controller.availableItems.bind(controller),
 );
 
 export default merchandisingAdminRouter;

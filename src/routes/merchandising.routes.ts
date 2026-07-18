@@ -8,83 +8,35 @@ const controller = new MerchandisingController();
  * @swagger
  * /api/placements:
  *   get:
- *     summary: List active placements
- *     description: Surfaces where catalog items can be merchandised (mega menu, homepage, …).
+ *     summary: List placements
  *     tags:
- *       - Merchandising
+ *       - Placements
  *     responses:
  *       200:
- *         description: Active placements
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       code:
- *                         type: string
- *                         example: MEGA_MENU
- *                       label:
- *                         type: string
- *                         example: Mega Menu
- *                       sortOrder:
- *                         type: integer
- *                         example: 1
+ *         description: All placements
  */
 merchandisingRoutes.get("/", controller.listPlacements.bind(controller));
 
 /**
  * @swagger
- * /api/placements/{code}/categories:
+ * /api/placements/{slug}:
  *   get:
- *     summary: Categories in a placement
- *     description: |
- *       Visible categories for the placement, sorted pinned first then by
- *       display order. Each row carries its subcategories.
+ *     summary: Single placement info
  *     tags:
- *       - Merchandising
+ *       - Placements
  *     parameters:
  *       - in: path
- *         name: code
+ *         name: slug
  *         required: true
  *         schema:
  *           type: string
- *           example: HOMEPAGE
+ *           example: mega-menu
  *     responses:
  *       200:
- *         description: Visible categories in placement order
+ *         description: Placement info
  *       404:
- *         description: Unknown or inactive placement
+ *         description: Placement not found
  */
-merchandisingRoutes.get("/:code/categories", controller.getPublicCategories.bind(controller));
-
-/**
- * @swagger
- * /api/placements/{code}/subcategories:
- *   get:
- *     summary: Subcategories in a placement
- *     tags:
- *       - Merchandising
- *     parameters:
- *       - in: path
- *         name: code
- *         required: true
- *         schema:
- *           type: string
- *           example: MEGA_MENU
- *     responses:
- *       200:
- *         description: Visible subcategories in placement order
- *       404:
- *         description: Unknown or inactive placement
- */
-merchandisingRoutes.get("/:code/subcategories", controller.getPublicSubcategories.bind(controller));
+merchandisingRoutes.get("/:slug", controller.getPlacement.bind(controller));
 
 export default merchandisingRoutes;

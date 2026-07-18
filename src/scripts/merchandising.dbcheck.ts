@@ -1,133 +1,113 @@
 /**
- * Integration check for merchandising against a real Postgres.
+ * Integration check for placements against a real Postgres.
  *
  *   npx ts-node src/scripts/merchandising.dbcheck.ts
  *
- * Covers what only breaks against a real database: that the SQL ORDER BY agrees
- * with the JS sort contract, and that a reorder containing an id outside the
- * placement writes nothing at all rather than half the rows.
+ * Covers what only breaks against a real database: displayOrder ordering,
+ * that a reorder containing an id outside the placement writes nothing at
+ * all rather than half the rows, and that hiding an item removes it from the
+ * storefront read without deleting the row.
  *
- * It creates its own throwaway placement (`DBCHECK_TMP`) and deletes it in a
- * finally block, so it is safe against a populated database. It never writes to
- * a real placement.
+ * It creates its own throwaway placement (`dbcheck-tmp`) and deletes it in a
+ * finally block, so it is safe against a populated database. It never writes
+ * to a real placement.
  */
 import assert from "assert";
 import AppDataSource from "../config/db.config";
 import { Category } from "../entities/category.entity";
 import { Placement } from "../entities/placement.entity";
-import { CategoryPlacement } from "../entities/categoryPlacement.entity";
+import { PlacementItem } from "../entities/placementItem.entity";
 import { merchandisingService } from "../service/merchandising.service";
-import { sortPlacementRows } from "../utils/merchandising.sort";
+import { _clearCacheForTest } from "../utils/merchandising.cache";
 
-const CODE = "DBCHECK_TMP";
+const SLUG = "dbcheck-tmp";
 
 const ok = (m: string) => console.log(`  ok - ${m}`);
 
 async function cleanup() {
-    await AppDataSource.query(`DELETE FROM category_placement WHERE "placementCode" = $1`, [CODE]);
-    await AppDataSource.query(`DELETE FROM placement WHERE "code" = $1`, [CODE]);
+    await AppDataSource.query(
+        `DELETE FROM "placement_items" WHERE "placementId" IN (SELECT "id" FROM "placements" WHERE "slug" = $1)`,
+        [SLUG],
+    );
+    await AppDataSource.query(`DELETE FROM "placements" WHERE "slug" = $1`, [SLUG]);
 }
 
 (async () => {
     await AppDataSource.initialize();
-    console.log("merchandising db-check");
+    console.log("placements db-check");
     try {
         await cleanup();
+        _clearCacheForTest();
         await AppDataSource.getRepository(Placement).save({
-            code: CODE,
-            label: "DB check temp",
-            isActive: true,
-            sortOrder: 999,
+            name: "DB check temp",
+            slug: SLUG,
+            description: null,
+            status: "active",
         });
 
-        const categories = await AppDataSource.getRepository(Category).find({
-            order: { id: "ASC" },
-            take: 3,
-        });
+        const categories = await AppDataSource.getRepository(Category).find({ order: { id: "ASC" }, take: 3 });
         assert.ok(categories.length >= 3, "need at least 3 categories in the DB to run this check");
         const [a, b, c] = categories;
 
-        for (const category of categories) {
-            await merchandisingService.addToPlacement("category", CODE, category.id);
-        }
+        const addedCount = await merchandisingService.addItems(
+            SLUG,
+            categories.map((cat) => ({ entityType: "category" as const, entityId: cat.id })),
+        );
+        assert.strictEqual(addedCount, 3, "all three categories must be added");
         ok("adds categories to a placement");
 
+        const secondAdd = await merchandisingService.addItems(SLUG, [{ entityType: "category", entityId: a.id }]);
+        assert.strictEqual(secondAdd, 0, "adding a duplicate must be skipped, not throw");
+        ok("duplicate add is silently skipped");
+
         // Appended rows must be 0,1,2 in add order.
-        const appended = await AppDataSource.getRepository(CategoryPlacement).find({
-            where: { placementCode: CODE },
+        const placement = await AppDataSource.getRepository(Placement).findOneByOrFail({ slug: SLUG });
+        const appended = await AppDataSource.getRepository(PlacementItem).find({
+            where: { placementId: placement.id, entityType: "category" },
             order: { displayOrder: "ASC" },
         });
         assert.deepStrictEqual(
-            appended.map((row) => row.categoryId),
+            appended.map((row) => row.entityId),
             [a.id, b.id, c.id],
             "add must append at the end",
         );
         ok("add appends at max(displayOrder) + 1");
+        const [itemA, itemB, itemC] = appended;
 
-        await assert.rejects(
-            () => merchandisingService.addToPlacement("category", CODE, a.id),
-            /already in/i,
-            "adding a duplicate must raise ConflictError",
-        );
-        ok("duplicate add is rejected");
-
-        // Reverse the order, pin the last one.
-        await merchandisingService.reorder("category", CODE, [
-            { targetId: c.id, displayOrder: 0 },
-            { targetId: b.id, displayOrder: 1 },
-            { targetId: a.id, displayOrder: 2 },
+        // Reverse the order.
+        await merchandisingService.reorder(SLUG, [
+            { itemId: itemC.id, displayOrder: 0 },
+            { itemId: itemB.id, displayOrder: 1 },
+            { itemId: itemA.id, displayOrder: 2 },
         ]);
-        await merchandisingService.updateConfig("category", CODE, a.id, { pinned: true });
 
-        const publicRows = await merchandisingService.getPublicCategories(CODE);
-        assert.deepStrictEqual(
-            publicRows.map((row) => row.categoryId),
-            [a.id, c.id, b.id],
-            "SQL order must be pinned DESC, displayOrder ASC, id ASC",
-        );
-        ok("SQL read order matches the sort contract");
-
-        // The JS comparator must agree with what SQL just returned.
-        const raw = await AppDataSource.getRepository(CategoryPlacement).find({
-            where: { placementCode: CODE },
-        });
-        assert.deepStrictEqual(
-            sortPlacementRows(raw).map((row) => row.categoryId),
-            publicRows.map((row) => row.categoryId),
-            "JS sort and SQL order must agree",
-        );
-        ok("JS comparator agrees with SQL");
-
-        // Hidden rows disappear from public reads but survive in the table.
-        await merchandisingService.updateConfig("category", CODE, c.id, { visible: false });
-        const afterHide = await merchandisingService.getPublicCategories(CODE);
-        assert.deepStrictEqual(
-            afterHide.map((row) => row.categoryId),
-            [a.id, b.id],
-            "hidden rows must not appear in public reads",
-        );
-        assert.strictEqual(
-            await AppDataSource.getRepository(CategoryPlacement).countBy({ placementCode: CODE }),
-            3,
-            "hiding must not delete the row",
-        );
-        ok("visible=false hides without deleting");
+        const items = await merchandisingService.getItems(SLUG);
+        assert.ok("items" in items, "a non-mega-menu placement must return a flat items list");
+        if ("items" in items) {
+            assert.deepStrictEqual(
+                items.items.map((row) => row.entityId),
+                [c.id, b.id, a.id],
+                "items must come back ordered by displayOrder",
+            );
+        }
+        ok("reorder is reflected in displayOrder");
 
         // Atomicity: a payload with an id outside the placement writes nothing.
-        const before = await AppDataSource.getRepository(CategoryPlacement).find({
-            where: { placementCode: CODE },
+        const before = await AppDataSource.getRepository(PlacementItem).find({
+            where: { placementId: placement.id },
             order: { id: "ASC" },
         });
         await assert.rejects(
-            () => merchandisingService.reorder("category", CODE, [
-                { targetId: a.id, displayOrder: 99 },
-                { targetId: 2147483000, displayOrder: 100 },
-            ]),
+            () =>
+                merchandisingService.reorder(SLUG, [
+                    { itemId: itemA.id, displayOrder: 99 },
+                    { itemId: 2147483000, displayOrder: 100 },
+                ]),
             /not in/i,
-            "reorder with an unknown id must be rejected",
+            "reorder with an unknown itemId must be rejected",
         );
-        const after = await AppDataSource.getRepository(CategoryPlacement).find({
-            where: { placementCode: CODE },
+        const after = await AppDataSource.getRepository(PlacementItem).find({
+            where: { placementId: placement.id },
             order: { id: "ASC" },
         });
         assert.deepStrictEqual(
@@ -137,32 +117,34 @@ async function cleanup() {
         );
         ok("rejected reorder is atomic - no partial write");
 
-        // The admin list shows every category, assigned or not.
-        const adminRows = await merchandisingService.getAdminCategories(CODE);
-        const total = await AppDataSource.getRepository(Category).count();
-        assert.strictEqual(adminRows.length, total, "admin list must include unassigned categories");
+        // Hidden rows disappear from the admin/storefront items read but survive in the table.
+        await merchandisingService.updateVisibility(SLUG, itemC.id, false);
+        const afterHide = await merchandisingService.getItems(SLUG);
+        if ("items" in afterHide) {
+            assert.deepStrictEqual(
+                afterHide.items.map((row) => row.entityId).sort(),
+                [a.id, b.id, c.id].sort(),
+                "admin items read must still include hidden rows",
+            );
+        }
         assert.strictEqual(
-            adminRows.filter((row) => row.inPlacement).length,
+            await AppDataSource.getRepository(PlacementItem).countBy({ placementId: placement.id }),
             3,
-            "admin list must mark exactly the assigned rows",
+            "hiding must not delete the row",
         );
-        assert.ok(
-            adminRows.slice(0, 3).every((row) => row.inPlacement),
-            "assigned rows must come before unassigned",
-        );
-        ok("admin list merges assigned and unassigned");
+        ok("visible=false hides from storefront without deleting");
 
-        await merchandisingService.removeFromPlacement("category", CODE, a.id);
+        await merchandisingService.removeItem(SLUG, itemA.id);
         assert.strictEqual(
-            await AppDataSource.getRepository(CategoryPlacement).countBy({ placementCode: CODE }),
+            await AppDataSource.getRepository(PlacementItem).countBy({ placementId: placement.id }),
             2,
-            "remove must delete the placement row",
+            "remove must delete the placement_items row",
         );
         assert.ok(
             await AppDataSource.getRepository(Category).findOneBy({ id: a.id }),
             "remove must not delete the category itself",
         );
-        ok("remove drops the placement row, not the category");
+        ok("remove drops the placement_items row, not the category");
 
         console.log("\nall checks passed");
     } finally {

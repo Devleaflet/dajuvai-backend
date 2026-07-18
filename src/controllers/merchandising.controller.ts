@@ -1,172 +1,106 @@
 import { Request, Response, NextFunction } from "express";
 import { AuthRequest } from "../middlewares/auth.middleware";
-import { merchandisingService, PlacementTarget } from "../service/merchandising.service";
+import { merchandisingService } from "../service/merchandising.service";
 import { BadRequestError, ValidationError } from "../errors";
 import {
-    placementCodeSchema,
-    addCategoryToPlacementSchema,
-    addSubcategoryToPlacementSchema,
-    updatePlacementConfigSchema,
-    reorderCategoriesSchema,
-    reorderSubcategoriesSchema,
+    placementSlugSchema,
+    addItemsSchema,
+    updateVisibilitySchema,
+    reorderSchema,
+    availableItemsQuerySchema,
 } from "../utils/zod_validations/merchandising.zod";
 
-type CodeParams = { code: string };
-type TargetParams = CodeParams & { targetId: string };
+type SlugParams = { slug: string };
+type ItemParams = SlugParams & { itemId: string };
 
 const zodErrors = (error: { errors: { path: (string | number)[]; message: string }[] }) =>
     error.errors.map((issue) => ({ field: issue.path.join("."), message: issue.message }));
 
 export class MerchandisingController {
-    /** Placement codes arrive from the URL; normalise and validate before use. */
-    private code(raw: string): string {
-        const parsed = placementCodeSchema.safeParse(raw?.toUpperCase());
-        if (!parsed.success) throw new BadRequestError("Invalid placement code");
+    private slug(raw: string): string {
+        const parsed = placementSlugSchema.safeParse(raw);
+        if (!parsed.success) throw new BadRequestError("Invalid placement slug");
         return parsed.data;
     }
 
-    private targetId(raw: string): number {
+    private itemId(raw: string): number {
         const id = Number(raw);
-        if (!Number.isInteger(id) || id <= 0) throw new BadRequestError("Invalid id");
+        if (!Number.isInteger(id) || id <= 0) throw new BadRequestError("Invalid item id");
         return id;
     }
 
-    async listPlacements(_req: Request, res: Response, _next: NextFunction): Promise<void> {
-        const placements = await merchandisingService.listPlacements();
-        res.status(200).json({
-            success: true,
-            data: placements.map((placement) => ({
-                code: placement.code,
-                label: placement.label,
-                sortOrder: placement.sortOrder,
-            })),
-        });
-    }
-
-    async getPublicCategories(req: Request<CodeParams>, res: Response, _next: NextFunction): Promise<void> {
-        const data = await merchandisingService.getPublicCategories(this.code(req.params.code));
+    async listPlacements(_req: Request, res: Response): Promise<void> {
+        const data = await merchandisingService.listPlacements();
         res.status(200).json({ success: true, data });
     }
 
-    async getPublicSubcategories(req: Request<CodeParams>, res: Response, _next: NextFunction): Promise<void> {
-        const data = await merchandisingService.getPublicSubcategories(this.code(req.params.code));
+    async getPlacement(req: Request<SlugParams>, res: Response): Promise<void> {
+        const data = await merchandisingService.getPlacementBySlug(this.slug(req.params.slug));
         res.status(200).json({ success: true, data });
     }
 
-    async getAdminCategories(req: AuthRequest<CodeParams>, res: Response, _next: NextFunction): Promise<void> {
-        const data = await merchandisingService.getAdminCategories(this.code(req.params.code));
+    async getItems(req: AuthRequest<SlugParams>, res: Response): Promise<void> {
+        const data = await merchandisingService.getItems(this.slug(req.params.slug));
         res.status(200).json({ success: true, data });
     }
 
-    async getAdminSubcategories(req: AuthRequest<CodeParams>, res: Response, _next: NextFunction): Promise<void> {
-        const data = await merchandisingService.getAdminSubcategories(this.code(req.params.code));
+    async getStorefrontMegaMenu(_req: Request, res: Response): Promise<void> {
+        const data = await merchandisingService.getStorefront("mega-menu");
         res.status(200).json({ success: true, data });
     }
 
-    private async add(
-        target: PlacementTarget,
-        code: string,
-        body: unknown,
-        next: NextFunction,
-    ): Promise<boolean> {
-        const schema = target === "category" ? addCategoryToPlacementSchema : addSubcategoryToPlacementSchema;
-        const parsed = schema.safeParse(body);
-        if (!parsed.success) {
-            next(new ValidationError("Validation failed", zodErrors(parsed.error)));
-            return false;
-        }
-        const targetId =
-            target === "category"
-                ? (parsed.data as { categoryId: number }).categoryId
-                : (parsed.data as { subcategoryId: number }).subcategoryId;
-        await merchandisingService.addToPlacement(target, code, targetId);
-        return true;
+    async getStorefrontCategoryGrid(_req: Request, res: Response): Promise<void> {
+        const data = await merchandisingService.getStorefront("category-grid");
+        res.status(200).json({ success: true, data });
     }
 
-    async addCategory(req: AuthRequest<CodeParams>, res: Response, next: NextFunction): Promise<void> {
-        const code = this.code(req.params.code);
-        if (await this.add("category", code, req.body, next)) {
-            res.status(201).json({ success: true, data: await merchandisingService.getAdminCategories(code) });
-        }
+    async addItems(req: AuthRequest<SlugParams>, res: Response, next: NextFunction): Promise<void> {
+        const parsed = addItemsSchema.safeParse(req.body);
+        if (!parsed.success) return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
+
+        // zod's inferred output type marks these fields optional despite the
+        // schema requiring them (coerce + enum quirk); the values are always
+        // present after a successful parse, so this reconstructs plain
+        // required-field objects for the service call.
+        const items = parsed.data.items.map((item) => ({
+            entityType: item.entityType as "category" | "subcategory",
+            entityId: item.entityId as number,
+        }));
+        const addedCount = await merchandisingService.addItems(this.slug(req.params.slug), items);
+        res.status(201).json({ success: true, addedCount });
     }
 
-    async addSubcategory(req: AuthRequest<CodeParams>, res: Response, next: NextFunction): Promise<void> {
-        const code = this.code(req.params.code);
-        if (await this.add("subcategory", code, req.body, next)) {
-            res.status(201).json({ success: true, data: await merchandisingService.getAdminSubcategories(code) });
-        }
+    async updateVisibility(req: AuthRequest<ItemParams>, res: Response, next: NextFunction): Promise<void> {
+        const parsed = updateVisibilitySchema.safeParse(req.body);
+        if (!parsed.success) return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
+
+        const itemId = this.itemId(req.params.itemId);
+        await merchandisingService.updateVisibility(this.slug(req.params.slug), itemId, parsed.data.visible);
+        res.status(200).json({ success: true, item: { itemId, visible: parsed.data.visible } });
     }
 
-    async removeCategory(req: AuthRequest<TargetParams>, res: Response, _next: NextFunction): Promise<void> {
-        await merchandisingService.removeFromPlacement(
-            "category",
-            this.code(req.params.code),
-            this.targetId(req.params.targetId),
-        );
-        res.status(200).json({ success: true, message: "Removed from placement" });
+    async removeItem(req: AuthRequest<ItemParams>, res: Response): Promise<void> {
+        await merchandisingService.removeItem(this.slug(req.params.slug), this.itemId(req.params.itemId));
+        res.status(200).json({ success: true });
     }
 
-    async removeSubcategory(req: AuthRequest<TargetParams>, res: Response, _next: NextFunction): Promise<void> {
-        await merchandisingService.removeFromPlacement(
-            "subcategory",
-            this.code(req.params.code),
-            this.targetId(req.params.targetId),
-        );
-        res.status(200).json({ success: true, message: "Removed from placement" });
+    async reorder(req: AuthRequest<SlugParams>, res: Response, next: NextFunction): Promise<void> {
+        const parsed = reorderSchema.safeParse(req.body);
+        if (!parsed.success) return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
+
+        const items = parsed.data.items.map((item) => ({
+            itemId: item.itemId as number,
+            displayOrder: item.displayOrder as number,
+        }));
+        await merchandisingService.reorder(this.slug(req.params.slug), items);
+        res.status(200).json({ success: true, message: "Order updated successfully" });
     }
 
-    private async update(
-        target: PlacementTarget,
-        req: AuthRequest<TargetParams>,
-        res: Response,
-        next: NextFunction,
-    ): Promise<void> {
-        const parsed = updatePlacementConfigSchema.safeParse(req.body);
-        if (!parsed.success) {
-            return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
-        }
-        await merchandisingService.updateConfig(
-            target,
-            this.code(req.params.code),
-            this.targetId(req.params.targetId),
-            parsed.data,
-        );
-        res.status(200).json({ success: true, message: "Placement updated" });
-    }
+    async availableItems(req: AuthRequest<SlugParams>, res: Response, next: NextFunction): Promise<void> {
+        const parsed = availableItemsQuerySchema.safeParse(req.query);
+        if (!parsed.success) return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
 
-    async updateCategory(req: AuthRequest<TargetParams>, res: Response, next: NextFunction): Promise<void> {
-        await this.update("category", req, res, next);
-    }
-
-    async updateSubcategory(req: AuthRequest<TargetParams>, res: Response, next: NextFunction): Promise<void> {
-        await this.update("subcategory", req, res, next);
-    }
-
-    async reorderCategories(req: AuthRequest<CodeParams>, res: Response, next: NextFunction): Promise<void> {
-        const parsed = reorderCategoriesSchema.safeParse(req.body);
-        if (!parsed.success) {
-            return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
-        }
-        const code = this.code(req.params.code);
-        await merchandisingService.reorder(
-            "category",
-            code,
-            parsed.data.map((item) => ({ targetId: item.categoryId, displayOrder: item.displayOrder })),
-        );
-        res.status(200).json({ success: true, data: await merchandisingService.getAdminCategories(code) });
-    }
-
-    async reorderSubcategories(req: AuthRequest<CodeParams>, res: Response, next: NextFunction): Promise<void> {
-        const parsed = reorderSubcategoriesSchema.safeParse(req.body);
-        if (!parsed.success) {
-            return next(new ValidationError("Validation failed", zodErrors(parsed.error)));
-        }
-        const code = this.code(req.params.code);
-        await merchandisingService.reorder(
-            "subcategory",
-            code,
-            parsed.data.map((item) => ({ targetId: item.subcategoryId, displayOrder: item.displayOrder })),
-        );
-        res.status(200).json({ success: true, data: await merchandisingService.getAdminSubcategories(code) });
+        const data = await merchandisingService.availableItems(this.slug(req.params.slug), parsed.data);
+        res.status(200).json({ success: true, data });
     }
 }

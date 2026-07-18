@@ -1,25 +1,24 @@
-import { Entity, Column, PrimaryColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from "typeorm";
 
-/**
- * A surface where catalog items can be shown (mega menu, homepage, …).
- *
- * Deliberately a table and not a TS enum: a new placement must be an INSERT,
- * never a deploy. The primary key IS the code, so placement rows reference a
- * readable string rather than an opaque id.
- */
-@Entity("placement")
+export type PlacementStatus = "active" | "inactive";
+
+/** A surface where catalog items can be arranged (mega menu, category grid, ...). */
+@Entity("placements")
 export class Placement {
-    @PrimaryColumn({ type: "varchar", length: 64 })
-    code: string;
+    @PrimaryGeneratedColumn()
+    id: number;
 
-    @Column({ type: "varchar", length: 128 })
-    label: string;
+    @Column({ type: "varchar", length: 100 })
+    name: string;
 
-    @Column({ type: "boolean", default: true })
-    isActive: boolean;
+    @Column({ type: "varchar", length: 100, unique: true })
+    slug: string;
 
-    @Column({ type: "int", default: 0 })
-    sortOrder: number;
+    @Column({ type: "varchar", length: 255, nullable: true })
+    description: string | null;
+
+    @Column({ type: "varchar", length: 20, default: "active" })
+    status: PlacementStatus;
 
     @CreateDateColumn()
     createdAt: Date;

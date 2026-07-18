@@ -30,8 +30,7 @@ import { CommissionDocument } from "../entities/commissionDocument.entity";
 import { DeviceToken } from "../entities/deviceToken.entity";
 import { NotificationDispatch } from "../entities/notificationDispatch.entity";
 import { Placement } from "../entities/placement.entity";
-import { CategoryPlacement } from "../entities/categoryPlacement.entity";
-import { SubcategoryPlacement } from "../entities/subcategoryPlacement.entity";
+import { PlacementItem } from "../entities/placementItem.entity";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -106,8 +105,7 @@ const AppDataSource = new DataSource({
         DeviceToken,
         NotificationDispatch,
         Placement,
-        CategoryPlacement,
-        SubcategoryPlacement,
+        PlacementItem,
     ],
     migrations: ["src/migrations/*.ts"],
     ssl: false,

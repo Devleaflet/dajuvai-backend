@@ -1,100 +1,107 @@
 /**
- * Self-check for the merchandising sort contract and request schemas.
+ * Self-check for placement request schemas and the storefront cache.
  * No DB, no test framework.
  *
  *   npx ts-node src/scripts/merchandising.selfcheck.ts
  *
- * The sort contract (pinned DESC, displayOrder ASC, id ASC) is duplicated in
- * SQL (public reads) and in JS (the admin merged list). This checks the JS half
- * — merchandising.dbcheck.ts checks that SQL agrees.
+ * merchandising.dbcheck.ts covers what only breaks against a real database
+ * (ordering, atomicity, visibility) - this covers the pure-JS contracts.
  */
 import assert from "assert";
-import { sortPlacementRows } from "../utils/merchandising.sort";
 import {
-    reorderCategoriesSchema,
-    updatePlacementConfigSchema,
-    placementCodeSchema,
+    placementSlugSchema,
+    addItemsSchema,
+    updateVisibilitySchema,
+    reorderSchema,
+    availableItemsQuerySchema,
 } from "../utils/zod_validations/merchandising.zod";
+import { cacheGet, cacheSet, cacheInvalidate, _clearCacheForTest } from "../utils/merchandising.cache";
 
 const ok = (name: string) => console.log(`  ok - ${name}`);
 
-function checkSortContract() {
-    const rows = [
-        { id: 4, displayOrder: 2, pinned: false },
-        { id: 1, displayOrder: 5, pinned: true },
-        { id: 3, displayOrder: 1, pinned: false },
-        { id: 2, displayOrder: 5, pinned: true },
-    ];
-    const sorted = sortPlacementRows(rows);
+function checkSchemas() {
+    assert.strictEqual(placementSlugSchema.parse("mega-menu"), "mega-menu");
+    assert.throws(() => placementSlugSchema.parse("Mega Menu"), "spaces/uppercase must be rejected");
+    assert.throws(() => placementSlugSchema.parse("mega--menu"), "double hyphen must be rejected");
+    ok("placement slug accepts lower-kebab-case only");
 
-    assert.deepStrictEqual(
-        sorted.map((r) => r.id),
-        [1, 2, 3, 4],
-        "pinned rows must precede unpinned regardless of displayOrder",
+    const added = addItemsSchema.parse({ items: [{ entityType: "subcategory", entityId: "22" }] });
+    assert.deepStrictEqual(added, { items: [{ entityType: "subcategory", entityId: 22 }] });
+    ok("addItems coerces string entityId to number");
+    assert.throws(() => addItemsSchema.parse({ items: [] }), "empty items must be rejected");
+    ok("addItems rejects an empty items array");
+    assert.throws(
+        () => addItemsSchema.parse({ items: [{ entityType: "product", entityId: 1 }] }),
+        "unknown entityType must be rejected",
     );
-    ok("pinned rows float above unpinned");
+    ok("addItems rejects an entityType outside category/subcategory");
 
-    const byOrder = sortPlacementRows([
-        { id: 9, displayOrder: 3, pinned: false },
-        { id: 8, displayOrder: 0, pinned: false },
-    ]);
-    assert.deepStrictEqual(byOrder.map((r) => r.id), [8, 9], "displayOrder must sort ascending");
-    ok("displayOrder sorts ascending within a group");
+    assert.deepStrictEqual(updateVisibilitySchema.parse({ visible: false }), { visible: false });
+    assert.throws(() => updateVisibilitySchema.parse({}), "missing visible must be rejected");
+    ok("updateVisibility requires the visible field");
 
-    // Equal displayOrder is common right after a bulk insert; without the id
-    // tiebreak the order would be nondeterministic between requests.
-    const tie = sortPlacementRows([
-        { id: 7, displayOrder: 1, pinned: false },
-        { id: 2, displayOrder: 1, pinned: false },
-    ]);
-    assert.deepStrictEqual(tie.map((r) => r.id), [2, 7], "equal displayOrder must break by id");
-    ok("equal displayOrder breaks by id ascending");
+    const reordered = reorderSchema.parse({
+        items: [
+            { itemId: "5", displayOrder: "0" },
+            { itemId: 6, displayOrder: 1 },
+        ],
+    });
+    assert.deepStrictEqual(reordered, {
+        items: [
+            { itemId: 5, displayOrder: 0 },
+            { itemId: 6, displayOrder: 1 },
+        ],
+    });
+    ok("reorder coerces string ids to numbers");
+    assert.throws(
+        () =>
+            reorderSchema.parse({
+                items: [
+                    { itemId: 5, displayOrder: 0 },
+                    { itemId: 5, displayOrder: 1 },
+                ],
+            }),
+        "duplicate itemId must be rejected",
+    );
+    ok("reorder rejects duplicate itemIds");
+    assert.throws(() => reorderSchema.parse({ items: [] }), "empty reorder payload must be rejected");
+    ok("reorder rejects an empty items array");
 
-    const input = [{ id: 1, displayOrder: 0, pinned: false }];
-    const result = sortPlacementRows(input);
-    assert.notStrictEqual(result, input, "sortPlacementRows must not mutate its argument");
-    ok("sortPlacementRows returns a new array");
+    assert.deepStrictEqual(availableItemsQuerySchema.parse({}), {});
+    assert.deepStrictEqual(availableItemsQuerySchema.parse({ categoryId: "5" }), { categoryId: 5 });
+    ok("available-items query accepts an optional categoryId");
 }
 
-function checkSchemas() {
-    assert.strictEqual(placementCodeSchema.parse("MEGA_MENU"), "MEGA_MENU");
-    assert.throws(() => placementCodeSchema.parse("mega menu"), "lowercase/spaces must be rejected");
-    ok("placement code accepts SCREAMING_SNAKE only");
+function checkCache() {
+    _clearCacheForTest();
 
-    const reorder = reorderCategoriesSchema.parse([
-        { categoryId: "3", displayOrder: "0" },
-        { categoryId: 5, displayOrder: 1 },
-    ]);
-    assert.deepStrictEqual(reorder, [
-        { categoryId: 3, displayOrder: 0 },
-        { categoryId: 5, displayOrder: 1 },
-    ], "reorder payload must coerce string ids");
-    ok("reorder coerces string ids to numbers");
+    assert.strictEqual(cacheGet("storefront:mega-menu"), undefined, "empty cache misses");
+    ok("cache miss on unset key");
 
-    assert.throws(
-        () => reorderCategoriesSchema.parse([
-            { categoryId: 3, displayOrder: 0 },
-            { categoryId: 3, displayOrder: 1 },
-        ]),
-        "duplicate categoryId must be rejected",
-    );
-    ok("reorder rejects duplicate ids");
+    cacheSet("storefront:mega-menu", { categories: [] });
+    assert.deepStrictEqual(cacheGet("storefront:mega-menu"), { categories: [] });
+    ok("cache hit returns the stored value");
 
-    assert.throws(() => reorderCategoriesSchema.parse([]), "empty reorder payload must be rejected");
-    ok("reorder rejects an empty payload");
+    cacheInvalidate("storefront:mega-menu");
+    assert.strictEqual(cacheGet("storefront:mega-menu"), undefined, "invalidate must clear the key");
+    ok("invalidate clears the key");
 
+    cacheSet("storefront:category-grid", { items: ["a"] });
+    cacheInvalidate("storefront:mega-menu");
     assert.deepStrictEqual(
-        updatePlacementConfigSchema.parse({ visible: false }),
-        { visible: false },
+        cacheGet("storefront:category-grid"),
+        { items: ["a"] },
+        "invalidating one placement's cache must not touch another",
     );
-    assert.throws(() => updatePlacementConfigSchema.parse({}), "empty patch must be rejected");
-    ok("config patch requires at least one field");
+    ok("invalidate only clears its own key");
+
+    _clearCacheForTest();
 }
 
 (async () => {
     console.log("merchandising self-check");
-    checkSortContract();
     checkSchemas();
+    checkCache();
     console.log("\nall checks passed");
 })().catch((error) => {
     console.error("\nFAILED:", error.message);

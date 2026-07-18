@@ -3,390 +3,473 @@ import AppDataSource from "../config/db.config";
 import { Category } from "../entities/category.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { Placement } from "../entities/placement.entity";
-import { CategoryPlacement } from "../entities/categoryPlacement.entity";
-import { SubcategoryPlacement } from "../entities/subcategoryPlacement.entity";
-import { BadRequestError, ConflictError, NotFoundError } from "../errors";
-import { sortPlacementRows } from "../utils/merchandising.sort";
+import { PlacementItem, PlacementEntityType } from "../entities/placementItem.entity";
+import { BadRequestError, NotFoundError } from "../errors";
+import { cacheGet, cacheSet, cacheInvalidate } from "../utils/merchandising.cache";
 
-export type PlacementTarget = "category" | "subcategory";
-
-export interface PlacementConfigPatch {
-    visible?: boolean;
-    featured?: boolean;
-    pinned?: boolean;
-}
+const MEGA_MENU_SLUG = "mega-menu";
 
 export interface ReorderItem {
-    targetId: number;
+    itemId: number;
     displayOrder: number;
 }
 
-export interface PublicSubcategorySummary {
+export interface NewItem {
+    entityType: PlacementEntityType;
+    entityId: number;
+}
+
+interface EntityRow {
     id: number;
     name: string;
     image: string | null;
+    categoryId?: number;
 }
 
-export interface PublicCategoryRow {
-    categoryId: number;
-    name: string;
-    image: string | null;
+/** Base fields every item row carries, regardless of placement shape. */
+interface ItemRowBase {
+    itemId: number;
+    entityId: number;
     displayOrder: number;
-    featured: boolean;
-    pinned: boolean;
-    subcategories: PublicSubcategorySummary[];
-}
-
-export interface PublicSubcategoryRow {
-    subcategoryId: number;
+    visible: boolean;
     name: string;
     image: string | null;
+}
+
+export interface MegaMenuSubcategoryRow extends ItemRowBase {}
+
+export interface MegaMenuCategoryRow extends ItemRowBase {
+    subcategories: MegaMenuSubcategoryRow[];
+}
+
+export interface FlatItemRow extends ItemRowBase {
+    entityType: PlacementEntityType;
     categoryId: number | null;
-    displayOrder: number;
-    featured: boolean;
-    pinned: boolean;
-}
-
-export interface AdminCategoryRow {
-    categoryId: number;
-    name: string;
-    image: string | null;
-    inPlacement: boolean;
-    displayOrder: number;
-    visible: boolean;
-    featured: boolean;
-    pinned: boolean;
-}
-
-export interface AdminSubcategoryRow {
-    subcategoryId: number;
-    name: string;
-    image: string | null;
     categoryName: string | null;
-    inPlacement: boolean;
-    displayOrder: number;
-    visible: boolean;
-    featured: boolean;
-    pinned: boolean;
+}
+
+export type PlacementItemsResult = { categories: MegaMenuCategoryRow[] } | { items: FlatItemRow[] };
+
+export interface PlacementSummary {
+    id: number;
+    name: string;
+    slug: string;
+    description: string | null;
+    status: string;
 }
 
 /**
- * Merchandising: where catalog items appear, in what order, and how.
- *
- * Both targets (category, subcategory) have identical placement semantics, so
- * the write paths are shared and keyed off a small target descriptor rather
- * than duplicated. Read paths differ (categories carry subcategories) and stay
- * separate.
+ * Placements: where catalog items appear, in what order, and whether they're
+ * visible. Categories and subcategories carry no ordering or visibility of
+ * their own - that state lives entirely in placement_items, keyed by a
+ * polymorphic (entityType, entityId) pair rather than a separate join table
+ * per catalog type.
  */
 export class MerchandisingService {
     private placementRepo = AppDataSource.getRepository(Placement);
-    private categoryPlacementRepo = AppDataSource.getRepository(CategoryPlacement);
-    private subcategoryPlacementRepo = AppDataSource.getRepository(SubcategoryPlacement);
+    private itemRepo = AppDataSource.getRepository(PlacementItem);
 
-    private descriptor(target: PlacementTarget) {
-        return target === "category"
-            ? {
-                  placementEntity: CategoryPlacement,
-                  catalogEntity: Category,
-                  fk: "categoryId" as const,
-                  label: "Category",
-              }
-            : {
-                  placementEntity: SubcategoryPlacement,
-                  catalogEntity: Subcategory,
-                  fk: "subcategoryId" as const,
-                  label: "Subcategory",
-              };
+    async listPlacements(): Promise<PlacementSummary[]> {
+        const placements = await this.placementRepo.find({ order: { id: "ASC" } });
+        return placements.map((p) => ({
+            id: p.id,
+            name: p.name,
+            slug: p.slug,
+            description: p.description,
+            status: p.status,
+        }));
     }
 
-    /** Throws NotFoundError unless the placement exists and is active. */
-    private async assertPlacement(code: string): Promise<Placement> {
-        const placement = await this.placementRepo.findOneBy({ code, isActive: true });
-        if (!placement) throw new NotFoundError(`Placement ${code}`);
+    async getPlacementBySlug(slug: string): Promise<PlacementSummary> {
+        const placement = await this.placementRepo.findOneBy({ slug });
+        if (!placement) throw new NotFoundError(`Placement ${slug}`);
+        return {
+            id: placement.id,
+            name: placement.name,
+            slug: placement.slug,
+            description: placement.description,
+            status: placement.status,
+        };
+    }
+
+    /** Throws NotFoundError unless the placement exists. Returns the row (id needed by callers). */
+    private async assertPlacement(slug: string): Promise<Placement> {
+        const placement = await this.placementRepo.findOneBy({ slug });
+        if (!placement) throw new NotFoundError(`Placement ${slug}`);
         return placement;
     }
 
-    async listPlacements(): Promise<Placement[]> {
-        return this.placementRepo.find({
-            where: { isActive: true },
-            order: { sortOrder: "ASC", code: "ASC" },
-        });
-    }
-
-    async getPublicCategories(code: string): Promise<PublicCategoryRow[]> {
-        await this.assertPlacement(code);
-
-        const rows = await this.categoryPlacementRepo
-            .createQueryBuilder("cp")
-            .innerJoinAndSelect("cp.category", "category")
-            .leftJoinAndSelect("category.subcategories", "subcategory")
-            .where("cp.placementCode = :code", { code })
-            .andWhere("cp.visible = true")
-            .orderBy("cp.pinned", "DESC")
-            .addOrderBy("cp.displayOrder", "ASC")
-            .addOrderBy("cp.id", "ASC")
-            .getMany();
-
-        return rows.map((row) => ({
-            categoryId: row.categoryId,
-            name: row.category.name,
-            image: row.category.image ?? null,
-            displayOrder: row.displayOrder,
-            featured: row.featured,
-            pinned: row.pinned,
-            subcategories: (row.category.subcategories ?? []).map((subcategory) => ({
-                id: subcategory.id,
-                name: subcategory.name,
-                image: subcategory.image ?? null,
-            })),
-        }));
-    }
-
-    async getPublicSubcategories(code: string): Promise<PublicSubcategoryRow[]> {
-        await this.assertPlacement(code);
-
-        const rows = await this.subcategoryPlacementRepo
-            .createQueryBuilder("sp")
-            .innerJoinAndSelect("sp.subcategory", "subcategory")
-            .leftJoinAndSelect("subcategory.category", "category")
-            .where("sp.placementCode = :code", { code })
-            .andWhere("sp.visible = true")
-            .orderBy("sp.pinned", "DESC")
-            .addOrderBy("sp.displayOrder", "ASC")
-            .addOrderBy("sp.id", "ASC")
-            .getMany();
-
-        return rows.map((row) => ({
-            subcategoryId: row.subcategoryId,
-            name: row.subcategory.name,
-            image: row.subcategory.image ?? null,
-            categoryId: row.subcategory.category?.id ?? null,
-            displayOrder: row.displayOrder,
-            featured: row.featured,
-            pinned: row.pinned,
-        }));
-    }
-
-    async getAdminCategories(code: string): Promise<AdminCategoryRow[]> {
-        await this.assertPlacement(code);
-
-        const categories = await AppDataSource.getRepository(Category).find({
-            order: { name: "ASC" },
-        });
-        const placementRows = await this.categoryPlacementRepo.findBy({ placementCode: code });
-        const byCategoryId = new Map(placementRows.map((row) => [row.categoryId, row]));
-
-        const assigned = sortPlacementRows(placementRows)
-            .map((row) => {
-                const category = categories.find((item) => item.id === row.categoryId);
-                if (!category) return null;
-                return {
-                    categoryId: row.categoryId,
-                    name: category.name,
-                    image: category.image ?? null,
-                    inPlacement: true,
-                    displayOrder: row.displayOrder,
-                    visible: row.visible,
-                    featured: row.featured,
-                    pinned: row.pinned,
-                };
-            })
-            .filter((row): row is AdminCategoryRow => row !== null);
-
-        const unassigned = categories
-            .filter((category) => !byCategoryId.has(category.id))
-            .map((category) => ({
-                categoryId: category.id,
-                name: category.name,
-                image: category.image ?? null,
-                inPlacement: false,
-                displayOrder: 0,
-                visible: false,
-                featured: false,
-                pinned: false,
-            }));
-
-        return [...assigned, ...unassigned];
-    }
-
-    async getAdminSubcategories(code: string): Promise<AdminSubcategoryRow[]> {
-        await this.assertPlacement(code);
-
-        const subcategories = await AppDataSource.getRepository(Subcategory).find({
+    private async lookupEntities(
+        entityType: PlacementEntityType,
+        ids: number[],
+    ): Promise<Map<number, EntityRow>> {
+        if (ids.length === 0) return new Map();
+        if (entityType === "category") {
+            const rows = await AppDataSource.getRepository(Category).find({ where: { id: In(ids) } });
+            return new Map(rows.map((r) => [r.id, { id: r.id, name: r.name, image: r.image ?? null }]));
+        }
+        const rows = await AppDataSource.getRepository(Subcategory).find({
+            where: { id: In(ids) },
             relations: { category: true },
-            order: { name: "ASC" },
         });
-        const placementRows = await this.subcategoryPlacementRepo.findBy({ placementCode: code });
-        const bySubcategoryId = new Map(placementRows.map((row) => [row.subcategoryId, row]));
-
-        const assigned = sortPlacementRows(placementRows)
-            .map((row) => {
-                const subcategory = subcategories.find((item) => item.id === row.subcategoryId);
-                if (!subcategory) return null;
-                return {
-                    subcategoryId: row.subcategoryId,
-                    name: subcategory.name,
-                    image: subcategory.image ?? null,
-                    categoryName: subcategory.category?.name ?? null,
-                    inPlacement: true,
-                    displayOrder: row.displayOrder,
-                    visible: row.visible,
-                    featured: row.featured,
-                    pinned: row.pinned,
-                };
-            })
-            .filter((row): row is AdminSubcategoryRow => row !== null);
-
-        const unassigned = subcategories
-            .filter((subcategory) => !bySubcategoryId.has(subcategory.id))
-            .map((subcategory) => ({
-                subcategoryId: subcategory.id,
-                name: subcategory.name,
-                image: subcategory.image ?? null,
-                categoryName: subcategory.category?.name ?? null,
-                inPlacement: false,
-                displayOrder: 0,
-                visible: false,
-                featured: false,
-                pinned: false,
-            }));
-
-        return [...assigned, ...unassigned];
-    }
-
-    async addToPlacement(target: PlacementTarget, code: string, targetId: number): Promise<void> {
-        await this.assertPlacement(code);
-        const { placementEntity, catalogEntity, fk, label } = this.descriptor(target);
-
-        const exists = await AppDataSource.getRepository(catalogEntity).findOneBy({ id: targetId });
-        if (!exists) throw new NotFoundError(label);
-
-        const repo = AppDataSource.getRepository(placementEntity);
-        const already = await repo.findOneBy({ [fk]: targetId, placementCode: code } as any);
-        if (already) throw new ConflictError(`${label} is already in placement ${code}`);
-
-        const last = await repo.findOne({
-            where: { placementCode: code } as any,
-            order: { displayOrder: "DESC" },
-        });
-
-        await repo.save(
-            repo.create({
-                [fk]: targetId,
-                placementCode: code,
-                displayOrder: last ? last.displayOrder + 1 : 0,
-                visible: true,
-                featured: false,
-                pinned: false,
-            } as any),
+        return new Map(
+            rows.map((r) => [
+                r.id,
+                { id: r.id, name: r.name, image: r.image ?? null, categoryId: r.category?.id },
+            ]),
         );
     }
 
-    async removeFromPlacement(target: PlacementTarget, code: string, targetId: number): Promise<void> {
-        await this.assertPlacement(code);
-        const { placementEntity, fk, label } = this.descriptor(target);
+    /**
+     * Admin+storefront share this builder. onlyVisible=true is the storefront
+     * contract: an empty/all-hidden placement renders nothing rather than
+     * falling back to the full catalog.
+     */
+    private async buildItems(placement: Placement, onlyVisible: boolean): Promise<PlacementItemsResult> {
+        const where: Record<string, unknown> = { placementId: placement.id };
+        if (onlyVisible) where.visible = true;
 
-        const result = await AppDataSource.getRepository(placementEntity).delete({
-            [fk]: targetId,
-            placementCode: code,
-        } as any);
+        const rows = await this.itemRepo.find({
+            where: where as any,
+            order: { displayOrder: "ASC", id: "ASC" },
+        });
 
-        if (!result.affected) throw new NotFoundError(`${label} in placement ${code}`);
+        if (placement.slug === MEGA_MENU_SLUG) {
+            const categoryRows = rows.filter((r) => r.entityType === "category");
+            const subcategoryRows = rows.filter((r) => r.entityType === "subcategory");
+
+            const categoryEntities = await this.lookupEntities("category", categoryRows.map((r) => r.entityId));
+            const subcategoryEntities = await this.lookupEntities(
+                "subcategory",
+                subcategoryRows.map((r) => r.entityId),
+            );
+
+            const categories: MegaMenuCategoryRow[] = categoryRows
+                .map((row) => {
+                    const entity = categoryEntities.get(row.entityId);
+                    if (!entity) return null;
+                    return {
+                        itemId: row.id,
+                        entityId: row.entityId,
+                        displayOrder: row.displayOrder,
+                        visible: row.visible,
+                        name: entity.name,
+                        image: entity.image,
+                        subcategories: [] as MegaMenuSubcategoryRow[],
+                    };
+                })
+                .filter((row): row is MegaMenuCategoryRow => row !== null);
+
+            const byCategoryEntityId = new Map(categories.map((c) => [c.entityId, c]));
+            for (const row of subcategoryRows) {
+                const entity = subcategoryEntities.get(row.entityId);
+                if (!entity || entity.categoryId === undefined) continue;
+                const parent = byCategoryEntityId.get(entity.categoryId);
+                if (!parent) continue;
+                parent.subcategories.push({
+                    itemId: row.id,
+                    entityId: row.entityId,
+                    displayOrder: row.displayOrder,
+                    visible: row.visible,
+                    name: entity.name,
+                    image: entity.image,
+                });
+            }
+
+            return { categories };
+        }
+
+        const categoryEntities = await this.lookupEntities(
+            "category",
+            rows.filter((r) => r.entityType === "category").map((r) => r.entityId),
+        );
+        const subcategoryEntities = await this.lookupEntities(
+            "subcategory",
+            rows.filter((r) => r.entityType === "subcategory").map((r) => r.entityId),
+        );
+
+        const parentNames = new Map<number, string>();
+        for (const entity of subcategoryEntities.values()) {
+            if (entity.categoryId !== undefined && !parentNames.has(entity.categoryId)) {
+                const parentCategory = await AppDataSource.getRepository(Category).findOneBy({
+                    id: entity.categoryId,
+                });
+                if (parentCategory) parentNames.set(entity.categoryId, parentCategory.name);
+            }
+        }
+
+        const items: FlatItemRow[] = rows
+            .map((row) => {
+                const entity =
+                    row.entityType === "category"
+                        ? categoryEntities.get(row.entityId)
+                        : subcategoryEntities.get(row.entityId);
+                if (!entity) return null;
+                return {
+                    itemId: row.id,
+                    entityId: row.entityId,
+                    entityType: row.entityType,
+                    displayOrder: row.displayOrder,
+                    visible: row.visible,
+                    name: entity.name,
+                    image: entity.image,
+                    categoryId: entity.categoryId ?? null,
+                    categoryName: entity.categoryId !== undefined ? parentNames.get(entity.categoryId) ?? null : null,
+                };
+            })
+            .filter((row): row is FlatItemRow => row !== null);
+
+        return { items };
     }
 
-    async updateConfig(
-        target: PlacementTarget,
-        code: string,
-        targetId: number,
-        patch: PlacementConfigPatch,
-    ): Promise<void> {
-        await this.assertPlacement(code);
-        const { placementEntity, fk, label } = this.descriptor(target);
+    async getItems(slug: string): Promise<PlacementItemsResult> {
+        const placement = await this.assertPlacement(slug);
+        return this.buildItems(placement, false);
+    }
 
-        const repo = AppDataSource.getRepository(placementEntity);
-        const row = await repo.findOneBy({ [fk]: targetId, placementCode: code } as any);
-        if (!row) throw new NotFoundError(`${label} in placement ${code}`);
+    async getStorefront(slug: string): Promise<PlacementItemsResult> {
+        const cacheKey = `storefront:${slug}`;
+        const cached = cacheGet<PlacementItemsResult>(cacheKey);
+        if (cached) return cached;
 
-        await repo.save(repo.merge(row, patch as any));
+        const placement = await this.assertPlacement(slug);
+        const result = await this.buildItems(placement, true);
+        cacheSet(cacheKey, result);
+        return result;
+    }
+
+    async addItems(slug: string, newItems: NewItem[]): Promise<number> {
+        const placement = await this.assertPlacement(slug);
+
+        const maxByType = new Map<PlacementEntityType, number>();
+        let addedCount = 0;
+
+        for (const { entityType, entityId } of newItems) {
+            const entity = (await this.lookupEntities(entityType, [entityId])).get(entityId);
+            if (!entity) continue; // unknown category/subcategory: silently skipped, like a duplicate
+
+            const already = await this.itemRepo.findOneBy({
+                placementId: placement.id,
+                entityType,
+                entityId,
+            });
+            if (already) continue;
+
+            if (!maxByType.has(entityType)) {
+                const last = await this.itemRepo.findOne({
+                    where: { placementId: placement.id, entityType },
+                    order: { displayOrder: "DESC" },
+                });
+                maxByType.set(entityType, last ? last.displayOrder + 1 : 0);
+            }
+            const nextOrder = maxByType.get(entityType)!;
+            maxByType.set(entityType, nextOrder + 1);
+
+            await this.itemRepo.save(
+                this.itemRepo.create({
+                    placementId: placement.id,
+                    entityType,
+                    entityId,
+                    displayOrder: nextOrder,
+                    visible: true,
+                }),
+            );
+            addedCount += 1;
+        }
+
+        if (addedCount > 0) cacheInvalidate(`storefront:${slug}`);
+        return addedCount;
+    }
+
+    async updateVisibility(slug: string, itemId: number, visible: boolean): Promise<void> {
+        const placement = await this.assertPlacement(slug);
+        const row = await this.itemRepo.findOneBy({ id: itemId, placementId: placement.id });
+        if (!row) throw new NotFoundError(`Item ${itemId} in placement ${slug}`);
+
+        row.visible = visible;
+        await this.itemRepo.save(row);
+        cacheInvalidate(`storefront:${slug}`);
+    }
+
+    /** Deletes the placement row only; leaves gaps in displayOrder, which sort correctly. */
+    async removeItem(slug: string, itemId: number): Promise<void> {
+        const placement = await this.assertPlacement(slug);
+        const result = await this.itemRepo.delete({ id: itemId, placementId: placement.id });
+        if (!result.affected) throw new NotFoundError(`Item ${itemId} in placement ${slug}`);
+        cacheInvalidate(`storefront:${slug}`);
     }
 
     /**
-     * Applies a whole ordering in one transaction. Every id must already be in
-     * the placement: a payload naming an id that is not writes nothing, rather
-     * than reordering the half it recognised and leaving the list scrambled.
+     * Applies a whole ordering in one transaction. An itemId that isn't in
+     * this placement writes nothing, rather than reordering the half it
+     * recognised and leaving the list scrambled.
      */
-    async reorder(target: PlacementTarget, code: string, items: ReorderItem[]): Promise<void> {
-        await this.assertPlacement(code);
-        const { placementEntity, fk, label } = this.descriptor(target);
+    async reorder(slug: string, items: ReorderItem[]): Promise<void> {
+        const placement = await this.assertPlacement(slug);
 
         await AppDataSource.transaction(async (manager) => {
-            const repo = manager.getRepository(placementEntity);
-            const existing = await repo.findBy({ placementCode: code } as any);
-            const known = new Set(existing.map((row: any) => row[fk] as number));
+            const repo = manager.getRepository(PlacementItem);
+            const existing = await repo.findBy({ placementId: placement.id });
+            const known = new Set(existing.map((row) => row.id));
 
-            const unknown = items.filter((item) => !known.has(item.targetId));
+            const unknown = items.filter((item) => !known.has(item.itemId));
             if (unknown.length > 0) {
                 throw new BadRequestError(
-                    `${label} ${unknown.map((item) => item.targetId).join(", ")} not in placement ${code}`,
+                    `Item ids ${unknown.map((item) => item.itemId).join(", ")} not in placement ${slug}`,
                 );
             }
 
             for (const item of items) {
                 await repo.update(
-                    { [fk]: item.targetId, placementCode: code } as any,
-                    { displayOrder: item.displayOrder } as any,
+                    { id: item.itemId, placementId: placement.id },
+                    { displayOrder: item.displayOrder },
                 );
             }
         });
+
+        cacheInvalidate(`storefront:${slug}`);
     }
 
     /**
-     * Replaces the whole set for a placement, ordered by array position. Backs
-     * the legacy /api/home/category/section POST.
+     * Items not yet in this placement, for the admin "Add Items" picker.
+     * Category Grid: subcategories, grouped by parent category. Mega Menu: a
+     * flat list of categories, or (with categoryId) the subcategories of one
+     * category - both scoped to what's not already placed.
      */
-    async replacePlacementSet(
-        target: PlacementTarget,
-        code: string,
-        targetIds: number[],
-    ): Promise<void> {
-        await this.assertPlacement(code);
-        const { placementEntity, catalogEntity, fk, label } = this.descriptor(target);
+    async availableItems(
+        slug: string,
+        opts: { entityType?: PlacementEntityType; categoryId?: number },
+    ): Promise<
+        | { groups: { categoryId: number; categoryName: string; subcategories: EntityRow[] }[] }
+        | { items: EntityRow[] }
+    > {
+        const placement = await this.assertPlacement(slug);
 
-        if (targetIds.length > 0) {
-            const found = await AppDataSource.getRepository(catalogEntity).findBy({
-                id: In(targetIds),
+        const placedIds = async (entityType: PlacementEntityType) => {
+            const rows = await this.itemRepo.find({ where: { placementId: placement.id, entityType } });
+            return new Set(rows.map((r) => r.entityId));
+        };
+
+        if (slug !== MEGA_MENU_SLUG || opts.entityType === "subcategory" || (!opts.entityType && opts.categoryId)) {
+            // category-grid, or mega-menu scoped to one category's subcategories
+            const placed = await placedIds("subcategory");
+            const subcategories = await AppDataSource.getRepository(Subcategory).find({
+                relations: { category: true },
+                order: { name: "ASC" },
             });
-            if (found.length !== new Set(targetIds).size) throw new NotFoundError(label);
+            const available = subcategories.filter((sc) => !placed.has(sc.id));
+
+            if (opts.categoryId) {
+                const scoped = available.filter((sc) => sc.category?.id === opts.categoryId);
+                return {
+                    items: scoped.map((sc) => ({ id: sc.id, name: sc.name, image: sc.image ?? null })),
+                };
+            }
+
+            const groups = new Map<number, { categoryId: number; categoryName: string; subcategories: EntityRow[] }>();
+            for (const sc of available) {
+                if (!sc.category) continue;
+                if (!groups.has(sc.category.id)) {
+                    groups.set(sc.category.id, {
+                        categoryId: sc.category.id,
+                        categoryName: sc.category.name,
+                        subcategories: [],
+                    });
+                }
+                groups.get(sc.category.id)!.subcategories.push({ id: sc.id, name: sc.name, image: sc.image ?? null });
+            }
+            return { groups: [...groups.values()].sort((a, b) => a.categoryName.localeCompare(b.categoryName)) };
+        }
+
+        // mega-menu, categories not yet placed
+        const placed = await placedIds("category");
+        const categories = await AppDataSource.getRepository(Category).find({ order: { name: "ASC" } });
+        return {
+            items: categories
+                .filter((c) => !placed.has(c.id))
+                .map((c) => ({ id: c.id, name: c.name, image: c.image ?? null })),
+        };
+    }
+
+    /**
+     * Replaces the whole category set for a placement, ordered by array
+     * position. Exists only to back the legacy /api/home/category/section
+     * endpoint (see homepageCategory.service.ts) - the new Arrangements UI
+     * uses add/remove/reorder instead.
+     */
+    async replaceCategorySet(slug: string, categoryIds: number[]): Promise<void> {
+        const placement = await this.assertPlacement(slug);
+
+        if (categoryIds.length > 0) {
+            const found = await AppDataSource.getRepository(Category).find({ where: { id: In(categoryIds) } });
+            if (found.length !== new Set(categoryIds).size) throw new NotFoundError("Category");
         }
 
         await AppDataSource.transaction(async (manager) => {
-            const repo = manager.getRepository(placementEntity);
-            // Existing rows carry visible/featured/pinned the caller cannot send,
-            // so keep them and only rewrite membership and order.
-            const existing = await repo.findBy({ placementCode: code } as any);
-            const byTargetId = new Map(existing.map((row: any) => [row[fk] as number, row]));
+            const repo = manager.getRepository(PlacementItem);
+            const existing = await repo.findBy({ placementId: placement.id, entityType: "category" });
+            const byEntityId = new Map(existing.map((row) => [row.entityId, row]));
 
-            const removed = existing.filter((row: any) => !targetIds.includes(row[fk]));
+            const removed = existing.filter((row) => !categoryIds.includes(row.entityId));
             if (removed.length > 0) await repo.remove(removed);
 
-            const rows = targetIds.map((targetId, index) => {
-                const row = byTargetId.get(targetId);
+            const rows = categoryIds.map((entityId, index) => {
+                const row = byEntityId.get(entityId);
                 if (row) {
-                    (row as any).displayOrder = index;
+                    row.displayOrder = index;
                     return row;
                 }
                 return repo.create({
-                    [fk]: targetId,
-                    placementCode: code,
+                    placementId: placement.id,
+                    entityType: "category" as const,
+                    entityId,
                     displayOrder: index,
                     visible: true,
-                    featured: false,
-                    pinned: false,
-                } as any);
+                });
             });
 
             if (rows.length > 0) await repo.save(rows);
         });
+
+        cacheInvalidate(`storefront:${slug}`);
+    }
+
+    /**
+     * Categories in a placement, each with its FULL subcategory list (not
+     * filtered by placement membership). Backs the legacy homepage-category
+     * endpoint, whose response shape predates per-subcategory placement.
+     */
+    async getCategoriesWithSubcategories(slug: string): Promise<
+        { categoryId: number; name: string; image: string | null; subcategories: EntityRow[] }[]
+    > {
+        const placement = await this.assertPlacement(slug);
+        const rows = await this.itemRepo.find({
+            where: { placementId: placement.id, entityType: "category" },
+            order: { displayOrder: "ASC", id: "ASC" },
+        });
+
+        const categories = await AppDataSource.getRepository(Category).find({
+            where: { id: In(rows.map((r) => r.entityId)) },
+            relations: { subcategories: true },
+        });
+        const byId = new Map(categories.map((c) => [c.id, c]));
+
+        return rows
+            .map((row) => {
+                const category = byId.get(row.entityId);
+                if (!category) return null;
+                return {
+                    categoryId: category.id,
+                    name: category.name,
+                    image: category.image ?? null,
+                    subcategories: (category.subcategories ?? []).map((sc) => ({
+                        id: sc.id,
+                        name: sc.name,
+                        image: sc.image ?? null,
+                    })),
+                };
+            })
+            .filter((row): row is NonNullable<typeof row> => row !== null);
     }
 }
 
