@@ -70,6 +70,8 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "check:fcm": "ts-node src/scripts/fcm.selfcheck.ts",
     "check:fcm:db": "ts-node src/scripts/fcm.dbcheck.ts",
+    "check:merch": "ts-node src/scripts/merchandising.selfcheck.ts",
+    "check:merch:db": "ts-node src/scripts/merchandising.dbcheck.ts",
     "dev": "ts-node src/index.ts",
     "start": "nodemon src/index.ts",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js --dataSource src/data-source.ts",
