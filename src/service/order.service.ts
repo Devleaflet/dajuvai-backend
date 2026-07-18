@@ -175,6 +175,8 @@ export class OrderService {
             ],
         });
 
+        console.log(cart);
+
         // If cart not found or cart has no items, throw an error indicating cart is empty
         if (!cart || !cart.items.length)
             throw new APIError(400, "Cart is empty");
@@ -1438,8 +1440,8 @@ export class OrderService {
      * @returns {Promise<Order[]>} - A list of all orders with user, items, and shipping address populated.
      * @access Admin
      */
-    async getCustomerOrders(): Promise<Order[]> {
-        return this.orderRepository.find({
+    async getCustomerOrders(): Promise<SanitizedOrderFull[]> {
+        const orders = await this.orderRepository.find({
             relations: [
                 "orderedBy",
                 "orderItems",
@@ -1449,6 +1451,8 @@ export class OrderService {
             ],
             order: { createdAt: "desc" },
         });
+
+        return orders.map((order) => sanitizeOrderFull(order));
     }
 
     /**
@@ -1788,7 +1792,9 @@ export class OrderService {
      * @returns {Promise<Order | null>} - The order if found, otherwise null.
      * @access Admin or authorized users
      */
-    async searchOrdersById(orderId: number): Promise<SanitizedOrderFull | null> {
+    async searchOrdersById(
+        orderId: number,
+    ): Promise<SanitizedOrderFull | null> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
@@ -1887,7 +1893,9 @@ export class OrderService {
      * @returns {Promise<Order[]>} - List of orders made by the customer.
      * @access Customer
      */
-    async getOrderHistoryForCustomer(userId: number): Promise<SanitizedOrderFull[]> {
+    async getOrderHistoryForCustomer(
+        userId: number,
+    ): Promise<SanitizedOrderFull[]> {
         // Find all orders where orderedById matches the userId
         // Include relations: orderItems, the products within those items, and shipping address
         const orders = await this.orderRepository.find({
