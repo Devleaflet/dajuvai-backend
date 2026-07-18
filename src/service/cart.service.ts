@@ -62,7 +62,7 @@ export class CartService {
         // Handle variant product
         if (variantId) {
             const variant = await this.variantRepository.findOne({
-                where: { id: variantId.toString(), productId: productId.toString() },
+                where: { id: variantId, productId },
             });
             if (!variant) throw new APIError(404, 'Variant not found');
             console.log("---------------Variant------------------")
@@ -111,7 +111,7 @@ export class CartService {
             // Update quantity if already in cart
             cartItem.quantity += quantity;
             if (variantId) {
-                const variant = await this.variantRepository.findOne({ where: { id: variantId.toString() } });
+                const variant = await this.variantRepository.findOne({ where: { id: variantId } });
                 if (variant && cartItem.quantity > variant.stock) {
                     throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${variant.stock} available`);
                 }
@@ -134,7 +134,7 @@ export class CartService {
                 description,
                 image,
                 variantId: variantId || null,
-                variant: variantId ? await this.variantRepository.findOne({ where: { id: variantId.toString() } }) : undefined,
+                variant: variantId ? await this.variantRepository.findOne({ where: { id: variantId } }) : undefined,
             });
             await this.cartItemRepository.save(cartItem);
             cart.items.push(cartItem);
@@ -184,7 +184,7 @@ export class CartService {
 
         // Validate stock for the associated product or variant
         if (cartItem.variantId) {
-            const variant = await this.variantRepository.findOne({ where: { id: cartItem.variantId.toString() } });
+            const variant = await this.variantRepository.findOne({ where: { id: cartItem.variantId } });
             if (!variant) throw new APIError(404, 'Associated variant not found');
         } else {
             const product = await this.productRepository.findOne({ where: { id: cartItem.product.id } });
@@ -232,7 +232,7 @@ export class CartService {
 
                 if (item.variantId) {
                     // Check variant stock
-                    const variant = await this.variantRepository.findOne({ where: { id: item.variantId.toString() } });
+                    const variant = await this.variantRepository.findOne({ where: { id: item.variantId } });
                     if (!variant) {
                         warningMessage = 'Associated variant no longer exists';
                     } else if (variant.status !== 'AVAILABLE') {

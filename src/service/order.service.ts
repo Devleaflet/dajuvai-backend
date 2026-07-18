@@ -98,7 +98,7 @@ export class OrderService {
 
         this.promoService = new PromoService();
 
-        this.variantRepository = AppDataSource.getTreeRepository(Variant);
+        this.variantRepository = AppDataSource.getRepository(Variant);
 
         this.vendorService = new VendorService();
         this.notificationService = new NotificationService();
@@ -130,6 +130,50 @@ export class OrderService {
         }
 
         return basePrice;
+    }
+
+    private determineInventoryStatus(stock: number): InventoryStatus {
+        if (stock <= 0) return InventoryStatus.OUT_OF_STOCK;
+        if (stock < 5) return InventoryStatus.LOW_STOCK;
+        return InventoryStatus.AVAILABLE;
+    }
+
+    private async syncVariantParentProducts(variants: Variant[]): Promise<void> {
+        const productIds = [
+            ...new Set(
+                variants
+                    .map((variant) => Number(variant.productId))
+                    .filter((id) => Number.isFinite(id)),
+            ),
+        ];
+
+        if (!productIds.length) return;
+
+        const products = await this.productRepository.find({
+            where: { id: In(productIds) },
+            relations: ["variants"],
+        });
+
+        for (const product of products) {
+            const totalStock = (product.variants || []).reduce(
+                (total, variant) => total + Number(variant.stock || 0),
+                0,
+            );
+            const hasLowVariant = (product.variants || []).some((variant) => {
+                const stock = Number(variant.stock || 0);
+                return stock > 0 && stock < 5;
+            });
+
+            product.stock = totalStock;
+            product.status =
+                totalStock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : totalStock < 5 || hasLowVariant
+                      ? InventoryStatus.LOW_STOCK
+                      : InventoryStatus.AVAILABLE;
+        }
+
+        await this.productRepository.save(products);
     }
 
     /**
@@ -564,6 +608,21 @@ export class OrderService {
                 );
                 // Save order first before initiating online payment
                 order = await this.orderRepository.save(order);
+                order = await this.orderRepository.findOne({
+                    where: { id: order.id },
+                    relations: [
+                        "orderItems",
+                        "orderItems.product",
+                        "orderItems.variant",
+                    ],
+                });
+
+                if (!order) {
+                    throw new APIError(500, "Failed to create order");
+                }
+
+                await this.updateStock(order.orderItems);
+
                 if (paymentMethod === PaymentMethod.ESEWA) {
                     esewaRedirectUrl = await this.initateEsewaPayment(order);
                     console.log("Respose of Esewa", esewaRedirectUrl);
@@ -928,11 +987,11 @@ export class OrderService {
             ...new Set(
                 cartItems
                     .map((item) =>
-                        item.variant ? String(item.variant.id) : null,
+                        item.variant ? Number(item.variant.id) : null,
                     )
                     .filter(
-                        (id): id is string =>
-                            typeof id === "string" && id.length > 0,
+                        (id): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
                     ),
             ),
         ];
@@ -959,8 +1018,8 @@ export class OrderService {
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(
-            variants.map((v) => [String(v.id), v]),
+        const variantsById = new Map<number, Variant>(
+            variants.map((v) => [v.id, v]),
         );
         const productsById = new Map<number, Product>(
             products.map((p) => [p.id, p]),
@@ -968,7 +1027,7 @@ export class OrderService {
 
         for (const item of cartItems) {
             if (item.variant) {
-                const variant = variantsById.get(String(item.variant.id));
+                const variant = variantsById.get(Number(item.variant.id));
 
                 if (!variant) {
                     throw new APIError(
@@ -1007,11 +1066,11 @@ export class OrderService {
             ...new Set(
                 orderItems
                     .map((item: any) =>
-                        item.variantId ? String(item.variantId) : null,
+                        item.variantId ? Number(item.variantId) : null,
                     )
                     .filter(
-                        (id: any): id is string =>
-                            typeof id === "string" && id.length > 0,
+                        (id: any): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
                     ),
             ),
         ];
@@ -1038,19 +1097,19 @@ export class OrderService {
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(
-            variants.map((v) => [String(v.id), v]),
+        const variantsById = new Map<number, Variant>(
+            variants.map((v) => [v.id, v]),
         );
         const productsById = new Map<number, Product>(
             products.map((p) => [p.id, p]),
         );
 
-        const variantsToSave = new Map<string, Variant>();
+        const variantsToSave = new Map<number, Variant>();
         const productsToSave = new Map<number, Product>();
 
         for (const item of orderItems) {
             if (item.variantId) {
-                const variant = variantsById.get(String(item.variantId));
+                const variant = variantsById.get(Number(item.variantId));
                 if (!variant) {
                     throw new APIError(
                         404,
@@ -1059,14 +1118,9 @@ export class OrderService {
                 }
 
                 variant.stock += item.quantity;
-                variant.status =
-                    variant.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : variant.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                variant.status = this.determineInventoryStatus(variant.stock);
 
-                variantsToSave.set(String(variant.id), variant);
+                variantsToSave.set(variant.id, variant);
                 continue;
             }
 
@@ -1080,12 +1134,7 @@ export class OrderService {
                 }
 
                 product.stock += item.quantity;
-                product.status =
-                    product.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : product.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                product.status = this.determineInventoryStatus(product.stock);
 
                 productsToSave.set(product.id, product);
                 continue;
@@ -1098,7 +1147,10 @@ export class OrderService {
         }
 
         if (variantsToSave.size) {
-            await this.variantRepository.save([...variantsToSave.values()]);
+            const savedVariants = await this.variantRepository.save([
+                ...variantsToSave.values(),
+            ]);
+            await this.syncVariantParentProducts(savedVariants);
         }
 
         if (productsToSave.size) {
@@ -1112,11 +1164,11 @@ export class OrderService {
             ...new Set(
                 orderItems
                     .map((item: any) =>
-                        item.variantId ? String(item.variantId) : null,
+                        item.variantId ? Number(item.variantId) : null,
                     )
                     .filter(
-                        (id: any): id is string =>
-                            typeof id === "string" && id.length > 0,
+                        (id: any): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
                     ),
             ),
         ];
@@ -1146,19 +1198,19 @@ export class OrderService {
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(
-            variants.map((v) => [String(v.id), v]),
+        const variantsById = new Map<number, Variant>(
+            variants.map((v) => [v.id, v]),
         );
         const productsById = new Map<number, Product>(
             products.map((p) => [p.id, p]),
         );
 
-        const variantsToSave = new Map<string, Variant>();
+        const variantsToSave = new Map<number, Variant>();
         const productsToSave = new Map<number, Product>();
 
         for (const item of orderItems) {
             if (item.variantId) {
-                const variant = variantsById.get(String(item.variantId));
+                const variant = variantsById.get(Number(item.variantId));
 
                 if (!variant) {
                     throw new APIError(
@@ -1176,14 +1228,9 @@ export class OrderService {
                 }
 
                 variant.stock -= item.quantity;
-                variant.status =
-                    variant.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : variant.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                variant.status = this.determineInventoryStatus(variant.stock);
 
-                variantsToSave.set(String(variant.id), variant);
+                variantsToSave.set(variant.id, variant);
                 continue;
             }
 
@@ -1206,12 +1253,7 @@ export class OrderService {
                 }
 
                 product.stock -= item.quantity;
-                product.status =
-                    product.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : product.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                product.status = this.determineInventoryStatus(product.stock);
 
                 productsToSave.set(product.id, product);
                 continue;
@@ -1224,11 +1266,14 @@ export class OrderService {
         }
 
         if (variantsToSave.size) {
-            await this.variantRepository.save([...variantsToSave.values()]);
+            const savedVariants = await this.variantRepository.save([
+                ...variantsToSave.values(),
+            ]);
+            await this.syncVariantParentProducts(savedVariants);
 
             const depletedVariantIds = [...variantsToSave.values()]
                 .filter((v) => v.stock <= 0)
-                .map((v) => String(v.id));
+                .map((v) => v.id);
 
             await Promise.allSettled(
                 depletedVariantIds.map((id) =>
@@ -1278,6 +1323,7 @@ export class OrderService {
                 "shippingAddress",
                 "orderItems",
                 "orderItems.product",
+                "orderItems.variant",
                 "orderItems.vendor",
             ],
         });
@@ -1298,6 +1344,7 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.PAID;
             order.status = OrderStatus.CONFIRMED;
         } else {
+            await this.restoreStock(order.orderItems);
             order.paymentStatus = PaymentStatus.UNPAID;
             order.status = OrderStatus.CANCELLED;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
@@ -1318,10 +1365,7 @@ export class OrderService {
         }
 
         if (isSuccessful) {
-            // Clear cart after successful payment (currently clears only first item, can be extended)
-            await this.cartService.removeFromCart(order.orderedById, {
-                cartItemId: order.orderItems[0].id,
-            });
+            await this.cartService.clearCart(order.orderedById);
         }
 
         // Return updated order
@@ -1350,8 +1394,13 @@ export class OrderService {
             throw new APIError(404, "Order not found");
         }
 
-        // Restore stock
-        await this.restoreStock(order.orderItems);
+        const shouldRestoreStock =
+            order.status !== OrderStatus.CANCELLED &&
+            order.deliveryStatus !== DeliveryStatus.DELIVERY_FAILED;
+
+        if (shouldRestoreStock) {
+            await this.restoreStock(order.orderItems);
+        }
 
         // Mark payment as UNPAID
         order.paymentStatus = PaymentStatus.UNPAID;

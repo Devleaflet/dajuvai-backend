@@ -74,7 +74,7 @@ export class WishlistService {
             if (variantId) {
                 variant = await variantRepository.findOne({
                     where: {
-                        id: variantId.toString(), productId: productId.toString()
+                        id: variantId, productId
                     }
                 })
 

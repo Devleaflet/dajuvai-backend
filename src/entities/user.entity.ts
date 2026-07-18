@@ -9,7 +9,6 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from "typeorm";
-import { Product } from "./product.entity";
 import { Address } from "./address.entity";
 import { Order } from "./order.entity";
 // import { Session } from "./session.entity";
@@ -54,8 +53,6 @@ export class User {
     })
     role: UserRole;
 
-    @OneToMany(() => Product, (product) => product.vendor)
-    products: Product[];
     @OneToOne(() => Address, (address) => address.user, {
         cascade: true,
         eager: true,

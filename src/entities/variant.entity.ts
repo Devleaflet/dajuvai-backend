@@ -1,11 +1,11 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryColumn, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { DiscountType, InventoryStatus } from "./product.enum";
 import { Product } from "./product.entity";
 
 @Entity('variants')
 export class Variant {
     @PrimaryGeneratedColumn()
-    id: string;
+    id: number;
 
     @Column({ type: 'varchar', length: 100 })
     sku: string;
@@ -34,8 +34,8 @@ export class Variant {
     @Column({ type: 'enum', enum: InventoryStatus, default: InventoryStatus.AVAILABLE, nullable: true })
     status?: InventoryStatus;
 
-    @Column({ type: 'varchar', length: 255 })
-    productId: string;
+    @Column({ name: 'product_id' })
+    productId: number;
 
     @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
     created_at: Date;

@@ -1,4 +1,4 @@
-import { DataSource, Repository, Not } from "typeorm";
+import { DataSource, Repository, Not, In } from "typeorm";
 import { Product } from "../entities/product.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { User, UserRole } from "../entities/user.entity";
@@ -126,6 +126,223 @@ export class ProductService {
         return DiscountType.NONE;
     }
 
+    private parseNumber(
+        value: unknown,
+        field: string,
+        options: { required?: boolean; integer?: boolean; positive?: boolean } = {},
+    ): number {
+        if (value === undefined || value === null || value === "") {
+            if (options.required) {
+                throw new APIError(400, `${field} is required`);
+            }
+            return 0;
+        }
+
+        const parsed = Number(value);
+
+        if (!Number.isFinite(parsed)) {
+            throw new APIError(400, `${field} must be a valid number`);
+        }
+
+        if (options.integer && !Number.isInteger(parsed)) {
+            throw new APIError(400, `${field} must be a whole number`);
+        }
+
+        if (options.positive ? parsed <= 0 : parsed < 0) {
+            throw new APIError(
+                400,
+                `${field} must be ${options.positive ? "greater than zero" : "non-negative"}`,
+            );
+        }
+
+        return parsed;
+    }
+
+    private normalizeImageUrls(value: unknown, field: string): string[] {
+        if (value === undefined || value === null) return [];
+        if (!Array.isArray(value)) {
+            throw new APIError(400, `${field} must be an array`);
+        }
+
+        return value
+            .map((image, index) => {
+                const url =
+                    typeof image === "string"
+                        ? image
+                        : image && typeof image === "object"
+                          ? (image as any).url || (image as any).imageUrl
+                          : "";
+
+                if (typeof url !== "string" || !url.trim()) {
+                    throw new APIError(
+                        400,
+                        `${field}[${index}] must be a valid image URL`,
+                    );
+                }
+
+                return url.trim();
+            })
+            .filter(Boolean);
+    }
+
+    private normalizeAttributes(value: unknown): Record<string, string> {
+        if (!value) return {};
+
+        if (!Array.isArray(value) && typeof value === "object") {
+            return Object.entries(value as Record<string, unknown>).reduce(
+                (acc, [key, rawValue]) => {
+                    if (key.trim() && rawValue !== undefined && rawValue !== null) {
+                        acc[key.trim().toLowerCase()] = String(rawValue).trim();
+                    }
+                    return acc;
+                },
+                {} as Record<string, string>,
+            );
+        }
+
+        if (!Array.isArray(value)) {
+            throw new APIError(400, "Variant attributes must be an object or array");
+        }
+
+        return value.reduce((acc, attribute: any) => {
+            const key = String(
+                attribute?.type || attribute?.attributeType || attribute?.name || "",
+            )
+                .trim()
+                .toLowerCase();
+
+            const valueFromArray = Array.isArray(attribute?.values)
+                ? attribute.values[0]?.value
+                : Array.isArray(attribute?.attributeValues)
+                  ? attribute.attributeValues[0]
+                  : attribute?.value;
+
+            if (key && valueFromArray !== undefined && valueFromArray !== null) {
+                acc[key] = String(valueFromArray).trim();
+            }
+
+            return acc;
+        }, {} as Record<string, string>);
+    }
+
+    private normalizeDiscount(
+        basePrice: number,
+        discount: unknown,
+        discountType: unknown,
+        fieldPrefix = "Discount",
+    ): { discount: number; discountType: DiscountType } {
+        const normalizedDiscount = this.parseNumber(
+            discount ?? 0,
+            fieldPrefix,
+        );
+        const normalizedDiscountType =
+            normalizedDiscount > 0
+                ? this.sanitizeDiscountType(
+                      discountType ?? DiscountType.PERCENTAGE,
+                  )
+                : this.sanitizeDiscountType(discountType);
+
+        if (normalizedDiscountType === DiscountType.NONE) {
+            return { discount: 0, discountType: DiscountType.NONE };
+        }
+
+        if (
+            normalizedDiscountType === DiscountType.PERCENTAGE &&
+            normalizedDiscount > 100
+        ) {
+            throw new APIError(400, `${fieldPrefix} cannot exceed 100%`);
+        }
+
+        if (
+            normalizedDiscountType === DiscountType.FLAT &&
+            normalizedDiscount > basePrice
+        ) {
+            throw new APIError(
+                400,
+                `${fieldPrefix} cannot exceed base price`,
+            );
+        }
+
+        return {
+            discount: normalizedDiscount,
+            discountType: normalizedDiscountType,
+        };
+    }
+
+    private normalizeVariantInput(
+        variant: any,
+        index: number,
+        hasDeal: boolean,
+        deal: Deal | null,
+    ) {
+        const sku = String(variant?.sku || "").trim();
+        if (!sku) throw new APIError(400, `Variant ${index + 1} SKU is required`);
+
+        const base = this.parseNumber(
+            variant?.basePrice ?? variant?.price,
+            `Variant ${index + 1} base price`,
+            { required: true, positive: true },
+        );
+        const stock = this.parseNumber(variant?.stock, `Variant ${index + 1} stock`, {
+            required: true,
+            integer: true,
+        });
+
+        const { discount, discountType } = hasDeal
+            ? { discount: 0, discountType: DiscountType.NONE }
+            : this.normalizeDiscount(
+                  base,
+                  variant?.discount,
+                  variant?.discountType,
+                  `Variant ${index + 1} discount`,
+              );
+
+        const priceAfterDiscount = this.calculateFinalPrice(
+            base,
+            discount,
+            discountType,
+        );
+
+        return {
+            id: Number.isFinite(Number(variant?.id)) ? Number(variant.id) : undefined,
+            sku,
+            basePrice: base,
+            discount,
+            discountType,
+            attributes: this.normalizeAttributes(variant?.attributes),
+            variantImages: this.normalizeImageUrls(
+                variant?.variantImages ?? variant?.images ?? [],
+                `Variant ${index + 1} images`,
+            ),
+            stock,
+            status: this.determineOrderStatus(stock),
+            finalPrice: this.applyDealPrice(priceAfterDiscount, deal),
+        };
+    }
+
+    private aggregateVariantInventory(
+        variants: Array<{ stock?: number | string }>,
+    ): { stock: number; status: InventoryStatus } {
+        const totalStock = variants.reduce(
+            (total, variant) => total + Number(variant.stock || 0),
+            0,
+        );
+        const hasLowVariant = variants.some((variant) => {
+            const stock = Number(variant.stock || 0);
+            return stock > 0 && stock < 5;
+        });
+
+        return {
+            stock: totalStock,
+            status:
+                totalStock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : totalStock < 5 || hasLowVariant
+                      ? InventoryStatus.LOW_STOCK
+                      : InventoryStatus.AVAILABLE,
+        };
+    }
+
     async createProduct(
         data: Partial<ProductInterface>,
         categoryId: number,
@@ -149,6 +366,10 @@ export class ProductService {
         } = data;
 
         const isVariantProduct = hasVariants === true || hasVariants === "true";
+        const normalizedProductImages = this.normalizeImageUrls(
+            productImages,
+            "Product images",
+        );
 
         // ─────────────────────────────────────────────
         // Validation
@@ -175,7 +396,7 @@ export class ProductService {
                     "Base price and stock are required for non-variant products",
                 );
             }
-            if (!productImages || productImages.length === 0) {
+            if (normalizedProductImages.length === 0) {
                 throw new APIError(
                     400,
                     "At least one product image is required",
@@ -206,15 +427,34 @@ export class ProductService {
         // Deal + Discount Normalization
         // ─────────────────────────────────────────────
         const hasDeal = !!dealId;
+        const deal = dealValidation;
 
-        const deal = hasDeal
-            ? await this.dealService.getDealById(Number(dealId))
-            : null;
-
-        const normalizedDiscount = hasDeal ? 0 : Number(discount || 0);
-        const normalizedDiscountType = hasDeal
-            ? DiscountType.NONE
-            : this.sanitizeDiscountType(discountType);
+        const normalizedBasePrice = isVariantProduct
+            ? null
+            : this.parseNumber(basePrice, "Base price", {
+                  required: true,
+                  positive: true,
+              });
+        const normalizedStock = isVariantProduct
+            ? null
+            : this.parseNumber(stock, "Stock", {
+                  required: true,
+                  integer: true,
+              });
+        const normalizedProductDiscount = hasDeal
+            ? { discount: 0, discountType: DiscountType.NONE }
+            : this.normalizeDiscount(
+                  Number(normalizedBasePrice || 0),
+                  discount,
+                  discountType,
+              );
+        const normalizedVariants = isVariantProduct
+            ? variants!.map((variant, index) =>
+                  this.normalizeVariantInput(variant, index, hasDeal, deal),
+              )
+            : [];
+        const variantInventory =
+            this.aggregateVariantInventory(normalizedVariants);
 
         // ─────────────────────────────────────────────
         // Product Final Price (non-variant only)
@@ -223,9 +463,9 @@ export class ProductService {
 
         if (!isVariantProduct) {
             const priceAfterDiscount = this.calculateFinalPrice(
-                Number(basePrice),
-                normalizedDiscount,
-                normalizedDiscountType,
+                Number(normalizedBasePrice),
+                normalizedProductDiscount.discount,
+                normalizedProductDiscount.discountType,
             );
 
             finalPrice = this.applyDealPrice(priceAfterDiscount, deal);
@@ -239,20 +479,20 @@ export class ProductService {
             brand,
             description,
             keywords,
-            basePrice: isVariantProduct ? null : Number(basePrice),
-            discount: normalizedDiscount,
-            discountType: normalizedDiscountType,
-            stock: isVariantProduct ? null : Number(stock),
+            basePrice: isVariantProduct ? null : normalizedBasePrice,
+            discount: normalizedProductDiscount.discount,
+            discountType: normalizedProductDiscount.discountType,
+            stock: isVariantProduct ? variantInventory.stock : normalizedStock,
             status: isVariantProduct
-                ? InventoryStatus.OUT_OF_STOCK
-                : this.determineOrderStatus(Number(stock)),
+                ? variantInventory.status
+                : this.determineOrderStatus(Number(normalizedStock)),
             subcategoryId,
             vendorId,
             finalPrice,
             // brandId: data.brandId ? Number(data.brandId) : null,
             dealId: dealId ? Number(dealId) : null,
             bannerId: bannerId ? Number(bannerId) : null,
-            productImages: isVariantProduct ? [] : productImages,
+            productImages: normalizedProductImages,
             hasVariants: isVariantProduct,
         });
 
@@ -265,42 +505,19 @@ export class ProductService {
 
         if (isVariantProduct) {
             savedVariants = await Promise.all(
-                variants.map(async (variant) => {
-                    const base = Number(variant.basePrice);
-
-                    const vDiscount = hasDeal
-                        ? 0
-                        : Number(variant.discount || 0);
-
-                    const vDiscountType = hasDeal
-                        ? DiscountType.NONE
-                        : this.sanitizeDiscountType(variant.discountType);
-
-                    const priceAfterDiscount = this.calculateFinalPrice(
-                        base,
-                        vDiscount,
-                        vDiscountType,
-                    );
-
-                    const finalVariantPrice = this.applyDealPrice(
-                        priceAfterDiscount,
-                        deal,
-                    );
-
+                normalizedVariants.map(async (variant) => {
                     const newVariant = this.variantRepository.create({
                         sku: variant.sku,
-                        basePrice: base,
-                        discount: vDiscount,
-                        discountType: vDiscountType,
+                        basePrice: variant.basePrice,
+                        discount: variant.discount,
+                        discountType: variant.discountType,
                         attributes: variant.attributes,
-                        variantImages: variant.variantImages || [],
-                        stock: Number(variant.stock),
-                        status: this.determineOrderStatus(
-                            Number(variant.stock),
-                        ),
-                        productId: savedProduct.id.toString(),
+                        variantImages: variant.variantImages,
+                        stock: variant.stock,
+                        status: variant.status,
+                        productId: savedProduct.id,
                         product: savedProduct,
-                        finalPrice: finalVariantPrice,
+                        finalPrice: variant.finalPrice,
                     });
 
                     return this.variantRepository.save(newVariant);
@@ -424,6 +641,8 @@ export class ProductService {
                 : hasVariants === false || hasVariants === "false"
                   ? false
                   : undefined;
+        const originalHadVariants = product.hasVariants;
+        const effectiveHasVariants = hasVariantsBool ?? product.hasVariants;
 
         product.name = name ?? product.name;
         product.brand = brand ?? product.brand;
@@ -431,31 +650,48 @@ export class ProductService {
         product.keywords = keywords ?? product.keywords;
         product.subcategoryId = subcategoryId;
 
-        product.discount = hasDeal
-            ? 0
-            : discount !== undefined
-              ? parseFloat(discount.toString())
-              : product.discount;
-
-        product.discountType = hasDeal
-            ? DiscountType.NONE
-            : (discountType ?? product.discountType);
-
-        if (!hasVariantsBool) {
-            product.basePrice =
+        if (!effectiveHasVariants) {
+            const resolvedBasePrice =
                 basePrice !== undefined
-                    ? parseFloat(basePrice.toString())
+                    ? this.parseNumber(basePrice, "Base price", {
+                          required: true,
+                          positive: true,
+                      })
                     : product.basePrice;
-
-            product.stock =
+            const resolvedStock =
                 stock !== undefined
-                    ? parseInt(stock.toString())
+                    ? this.parseNumber(stock, "Stock", {
+                          required: true,
+                          integer: true,
+                      })
                     : product.stock;
 
+            if (resolvedBasePrice === undefined || resolvedBasePrice === null) {
+                throw new APIError(400, "Base price is required");
+            }
+            if (resolvedStock === undefined || resolvedStock === null) {
+                throw new APIError(400, "Stock is required");
+            }
+
+            const productDiscount = hasDeal
+                ? { discount: 0, discountType: DiscountType.NONE }
+                : this.normalizeDiscount(
+                      Number(resolvedBasePrice),
+                      discount !== undefined ? discount : product.discount,
+                      discountType !== undefined
+                          ? discountType
+                          : product.discountType,
+                  );
+
+            product.basePrice = resolvedBasePrice;
+            product.stock = resolvedStock;
+            product.discount = productDiscount.discount;
+            product.discountType = productDiscount.discountType;
             product.status = this.determineOrderStatus(Number(product.stock));
         } else {
             product.basePrice = null;
-            product.stock = null;
+            product.discount = 0;
+            product.discountType = DiscountType.NONE;
         }
 
         if (bannerId === null) {
@@ -471,21 +707,22 @@ export class ProductService {
         //     product.brandId = Number(brandId);
         // }
 
-        if (hasVariantsBool !== undefined) {
-            product.hasVariants = hasVariantsBool;
-        }
+        if (productImages !== undefined) {
+            const normalizedProductImages = this.normalizeImageUrls(
+                productImages,
+                "Product images",
+            );
 
-        if (productImages && Array.isArray(productImages)) {
-            if (productImages.length === 0 && !hasVariantsBool) {
+            if (normalizedProductImages.length === 0 && !effectiveHasVariants) {
                 throw new APIError(
                     400,
                     "At least one product image is required",
                 );
             }
-            product.productImages = productImages;
+            product.productImages = normalizedProductImages;
         }
 
-        if (!hasVariantsBool && product.basePrice !== null) {
+        if (!effectiveHasVariants && product.basePrice !== null) {
             const priceAfterProductDiscount = this.calculateFinalPrice(
                 product.basePrice,
                 product.discount ?? 0,
@@ -498,7 +735,12 @@ export class ProductService {
             );
         }
 
-        if (hasVariantsBool && variants) {
+        if (!effectiveHasVariants && originalHadVariants) {
+            await this.variantRepository.delete({ productId });
+            product.variants = [];
+        }
+
+        if (effectiveHasVariants && variants) {
             if (!Array.isArray(variants) || variants.length === 0) {
                 throw new APIError(
                     400,
@@ -506,70 +748,54 @@ export class ProductService {
                 );
             }
 
-            if (!product.hasVariants) {
-                await this.variantRepository.delete({
-                    productId: productId.toString(),
-                });
-            }
+            const normalizedVariants = variants.map((variant, index) =>
+                this.normalizeVariantInput(variant, index, hasDeal, product.deal ?? null),
+            );
 
             const savedVariants = await Promise.all(
-                variants.map(async (variant) => {
-                    const existingVariant =
-                        await this.variantRepository.findOne({
+                normalizedVariants.map(async (variant) => {
+                    let existingVariant = variant.id
+                        ? await this.variantRepository.findOne({
+                              where: {
+                                  id: variant.id,
+                                  productId,
+                              },
+                          })
+                        : null;
+
+                    if (!existingVariant) {
+                        existingVariant = await this.variantRepository.findOne({
                             where: {
                                 sku: variant.sku,
-                                productId: productId.toString(),
+                                productId,
                             },
                         });
-
-                    const base = Number(variant.basePrice);
-                    const vDiscount = hasDeal
-                        ? 0
-                        : Number(variant.discount || 0);
-                    const vDiscountType = hasDeal
-                        ? DiscountType.NONE
-                        : variant.discountType || DiscountType.NONE;
-
-                    const priceAfterProductDiscount = this.calculateFinalPrice(
-                        base,
-                        vDiscount,
-                        vDiscountType,
-                    );
-
-                    const finalPrice = this.applyDealPrice(
-                        priceAfterProductDiscount,
-                        product.deal,
-                    );
+                    }
 
                     if (existingVariant) {
-                        existingVariant.basePrice = base;
-                        existingVariant.discount = vDiscount;
-                        existingVariant.discountType = vDiscountType;
-                        existingVariant.finalPrice = finalPrice;
+                        existingVariant.basePrice = variant.basePrice;
+                        existingVariant.discount = variant.discount;
+                        existingVariant.discountType = variant.discountType;
+                        existingVariant.finalPrice = variant.finalPrice;
                         existingVariant.attributes = variant.attributes;
-                        existingVariant.variantImages =
-                            variant.variantImages || [];
-                        existingVariant.stock = Number(variant.stock);
-                        existingVariant.status = this.determineOrderStatus(
-                            Number(variant.stock),
-                        );
+                        existingVariant.variantImages = variant.variantImages;
+                        existingVariant.stock = variant.stock;
+                        existingVariant.status = variant.status;
 
                         return this.variantRepository.save(existingVariant);
                     }
 
                     const newVariant = this.variantRepository.create({
                         sku: variant.sku,
-                        basePrice: base,
-                        discount: vDiscount,
-                        discountType: vDiscountType,
-                        finalPrice,
+                        basePrice: variant.basePrice,
+                        discount: variant.discount,
+                        discountType: variant.discountType,
+                        finalPrice: variant.finalPrice,
                         attributes: variant.attributes,
-                        variantImages: variant.variantImages || [],
-                        stock: Number(variant.stock),
-                        status: this.determineOrderStatus(
-                            Number(variant.stock),
-                        ),
-                        productId: productId.toString(),
+                        variantImages: variant.variantImages,
+                        stock: variant.stock,
+                        status: variant.status,
+                        productId,
                         product,
                     });
 
@@ -579,6 +805,39 @@ export class ProductService {
 
             product.variants = savedVariants;
             product.hasVariants = true;
+
+            const savedVariantIds = savedVariants.map((variant) => variant.id);
+            if (savedVariantIds.length > 0) {
+                await this.variantRepository.delete({
+                    productId,
+                    id: Not(In(savedVariantIds)),
+                });
+            }
+
+            const inventory = this.aggregateVariantInventory(savedVariants);
+            product.stock = inventory.stock;
+            product.status = inventory.status;
+        }
+
+        if (effectiveHasVariants && !variants) {
+            const existingVariants = await this.variantRepository.find({
+                where: { productId },
+            });
+            if (existingVariants.length === 0) {
+                throw new APIError(
+                    400,
+                    "Variants are required for variant products",
+                );
+            }
+            product.variants = existingVariants;
+            const inventory = this.aggregateVariantInventory(existingVariants);
+            product.stock = inventory.stock;
+            product.status = inventory.status;
+            product.hasVariants = true;
+        }
+
+        if (hasVariantsBool !== undefined) {
+            product.hasVariants = hasVariantsBool;
         }
 
         return await this.productRepository.save(product);
@@ -620,7 +879,7 @@ export class ProductService {
             ])
             .leftJoinAndSelect("product.deal", "deal")
             .leftJoinAndSelect("product.variants", "variants")
-            .where("(product.stock > 0 OR variants.stock > 0)");
+            .where("1 = 1");
 
         if (bannerId) {
             const banner = await this.bannerRepository.findOne({
