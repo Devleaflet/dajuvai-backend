@@ -29,7 +29,7 @@ import { Variant } from "../entities/variant.entity";
 import config from "../config/env.config";
 import { DiscountType } from "../entities/product.enum";
 import { OrderStatus } from "../entities/order.entity";
-import { sanitizeVendor } from "../utils/sanitize.util";
+import { sanitizeVendor, SanitizedVendor } from "../utils/sanitize.util";
 
 /**
  * Service class for handling product-related operations.
@@ -84,19 +84,22 @@ export class ProductService {
         });
     }
 
-    async getAlllProducts(
-        page: number = 1,
-        limit: number = 50,
-    ): Promise<Product[]> {
-        return this.productRepository.find({
+    async getAlllProducts(page: number = 1, limit: number = 50) {
+        const products = await this.productRepository.find({
             relations: ["subcategory", "vendor", "deal", "reviews"],
             order: { createdAt: "DESC" },
             skip: (page - 1) * limit,
             take: limit,
         });
+        const sanitizedProducts = products.map((p) => ({
+            ...p,
+            vendor: p.vendor ? sanitizeVendor(p.vendor) : null,
+        }));
+
+        return sanitizedProducts;
     }
 
-    async getProductDetailsById(productId: number): Promise<Product> {
+    async getProductDetailsById(productId: number) {
         const product = await this.productRepository.findOne({
             where: { id: productId },
             relations: ["vendor", "variants", "reviews", "deal"],
@@ -106,7 +109,11 @@ export class ProductService {
             throw new APIError(404, `Product does not exist`);
         }
 
-        return product;
+        const sanitizedProduct = {
+            ...product,
+            vendor: product.vendor ? sanitizeVendor(product.vendor) : null,
+        };
+        return sanitizedProduct;
     }
 
     private determineOrderStatus(stock: number) {

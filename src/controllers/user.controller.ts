@@ -53,6 +53,7 @@ import {
 import { sendVerificationEmail } from "../utils/nodemailer.utils";
 import AppDataSource from "../config/db.config";
 import { VendorService } from "../service/vendor.service";
+import { sanitizeUser } from "../utils/sanitize.util";
 
 const googleClient = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 

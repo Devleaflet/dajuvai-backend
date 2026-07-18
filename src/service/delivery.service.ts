@@ -211,7 +211,7 @@ export class DeliveryService {
             select: ["collectedAtWarehouse"],
         });
 
-        const ready = allOrderItems.every(item => item.collectedAtWarehouse);
+        const ready = allOrderItems.every((item) => item.collectedAtWarehouse);
 
         if (ready) {
             const order = await this.orderRepository.findOne({
@@ -222,7 +222,10 @@ export class DeliveryService {
                 throw new APIError(404, "Order not found for this order item");
             }
 
-            this.validateAndTransition(order, DeliveryStatus.READY_FOR_DELIVERY);
+            this.validateAndTransition(
+                order,
+                DeliveryStatus.READY_FOR_DELIVERY,
+            );
             await this.orderRepository.save(order);
         }
     }
@@ -395,7 +398,9 @@ export class DeliveryService {
             assignment.pickedUpAt = new Date();
             await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
+            const rider = await manager.findOne(Rider, {
+                where: { id: riderId },
+            });
             if (rider) {
                 rider.onDelivery = true;
                 await manager.save(rider);
@@ -435,7 +440,9 @@ export class DeliveryService {
             assignment.deliveredAt = new Date();
             await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
+            const rider = await manager.findOne(Rider, {
+                where: { id: riderId },
+            });
             if (rider) {
                 rider.onDelivery = false;
                 await manager.save(rider);
@@ -478,7 +485,9 @@ export class DeliveryService {
             assignment.failureReason = data.failedReason;
             await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
+            const rider = await manager.findOne(Rider, {
+                where: { id: riderId },
+            });
             if (rider) {
                 rider.onDelivery = false;
                 await manager.save(rider);
