@@ -25,11 +25,10 @@ const fail = (m: string, e: unknown) =>
     console.log(`  FAIL - ${m}\n         ${e instanceof Error ? e.message.split("\n")[0] : e}`);
 
 async function cleanup() {
-    await AppDataSource.createQueryBuilder()
-        .delete()
-        .from(DeviceToken)
-        .where('"deviceId" LIKE :p', { p: `${PREFIX}%` })
-        .execute();
+    // Raw query rather than the DeleteQueryBuilder: `.from(Entity)` blows up with
+    // "this.subQuery is not a function" on this TypeORM version.
+    await AppDataSource.query(`DELETE FROM device_tokens WHERE "deviceId" LIKE $1`, [`${PREFIX}%`]);
+    await AppDataSource.query(`DELETE FROM notifications WHERE title LIKE $1`, [`${PREFIX}%`]);
 }
 
 (async () => {
