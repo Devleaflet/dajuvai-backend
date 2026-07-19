@@ -30,6 +30,7 @@ import config from "../config/env.config";
 import { DiscountType } from "../entities/product.enum";
 import { OrderStatus } from "../entities/order.entity";
 import { sanitizeVendor } from "../utils/sanitize.util";
+import { calculatePriceSnapshot } from "../utils/pricing.utils";
 
 /**
  * Service class for handling product-related operations.
@@ -535,17 +536,11 @@ export class ProductService {
         discount = 0,
         discountType: DiscountType = DiscountType.PERCENTAGE,
     ): number {
-        if (!basePrice || basePrice <= 0) return 0;
-
-        if (discountType === DiscountType.NONE || !discount || discount <= 0) {
-            return basePrice;
-        }
-
-        if (discountType === DiscountType.FLAT) {
-            return Math.max(0, basePrice - discount);
-        }
-
-        return Math.max(0, basePrice - (basePrice * discount) / 100);
+        return calculatePriceSnapshot({
+            basePrice,
+            discount,
+            discountType,
+        }).finalPrice;
     }
 
     public applyDealPrice(
@@ -556,11 +551,11 @@ export class ProductService {
             return priceAfterProductDiscount;
         }
 
-        return Math.max(
-            0,
-            priceAfterProductDiscount -
-                (priceAfterProductDiscount * deal.discountPercentage) / 100,
-        );
+        return calculatePriceSnapshot({
+            basePrice: priceAfterProductDiscount,
+            discount: deal.discountPercentage,
+            discountType: DiscountType.PERCENTAGE,
+        }).finalPrice;
     }
 
     async updateProduct(
@@ -1256,29 +1251,6 @@ export class ProductService {
             where: { id, subcategory: { id: subcategoryId } },
             relations: ["subcategory", "vendor", "variants"],
         });
-    }
-
-    async calculateProductPrice(product: Product): Promise<{
-        finalPrice: number;
-        vendorDiscount: number;
-        dealDiscount: number;
-    }> {
-        const vendorDiscount = product.discount || 0;
-        let dealDiscount = 0;
-
-        if (
-            product.dealId &&
-            product.deal &&
-            product.deal.status === DealStatus.ENABLED
-        ) {
-            dealDiscount = product.deal.discountPercentage;
-        }
-
-        const finalDiscount = vendorDiscount + dealDiscount;
-        const finalPrice =
-            product.basePrice - (product.basePrice * finalDiscount) / 100;
-
-        return { finalPrice, vendorDiscount, dealDiscount };
     }
 
     async getProductsByVendorId(vendorId: number, page: number, limit: number) {

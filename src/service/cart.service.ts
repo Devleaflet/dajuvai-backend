@@ -5,9 +5,10 @@ import { Product } from '../entities/product.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
-import { DiscountType, InventoryStatus } from '../entities/product.enum';
 import { Variant } from '../entities/variant.entity';
 import { NotificationService } from './notification.service';
+import { calculatePriceSnapshot } from '../utils/pricing.utils';
+import { emitCartUpdate } from '../socket/socket';
 
 /**
  * Service class for managing shopping cart operations.
@@ -43,9 +44,6 @@ export class CartService {
     async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
         const { productId, quantity, variantId } = data;
 
-        console.log("---------------Variant id -----------------")
-        console.log(variantId);
-
         // Validate product
         const product = await this.productRepository.findOne({
             where: { id: productId },
@@ -65,13 +63,15 @@ export class CartService {
                 where: { id: variantId, productId },
             });
             if (!variant) throw new APIError(404, 'Variant not found');
-            console.log("---------------Variant------------------")
-            console.log(variant)
             if (variant.status === 'OUT_OF_STOCK'  || variant.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${variant.stock} available for this variant`);
             }
 
-            price = this.calculateDiscountedPrice(variant.basePrice, variant.discount || 0, variant.discountType || DiscountType.PERCENTAGE);
+            price = calculatePriceSnapshot({
+                basePrice: variant.basePrice,
+                discount: variant.discount,
+                discountType: variant.discountType,
+            }).finalPrice;
             if (variant.attributes?.name) name = `${product.name} - ${variant.attributes.name}`;
             if (variant.variantImages?.length) image = variant.variantImages[0];
         } else {
@@ -87,7 +87,11 @@ export class CartService {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${product.stock} available`);
             }
 
-            price = this.calculateDiscountedPrice(product.basePrice, product.discount || 0, product.discountType || DiscountType.PERCENTAGE);
+            price = calculatePriceSnapshot({
+                basePrice: product.basePrice,
+                discount: product.discount,
+                discountType: product.discountType,
+            }).finalPrice;
         }
 
         // Get or create cart
@@ -168,8 +172,6 @@ export class CartService {
 
         decreaseOnly = Boolean(decreaseOnly);
 
-        console.log("---------------------Decrease only ---------------------")
-        console.log(decreaseOnly)
         // Fetch cart with items and their product and variant relations
         const cart = await this.cartRepository.findOne({
             where: { userId },
@@ -294,26 +296,12 @@ export class CartService {
         cart.items = [];
 
         await this.cartRepository.save(cart);
+
+        // Order-success paths (COD/eSewa/NPX) all clear the cart server-side
+        // via this method but don't otherwise touch the socket — without this,
+        // the cart badge stays stale until the user navigates to /cart or
+        // reloads. Push it live instead.
+        emitCartUpdate(userId, cart);
     }
 
-    /**
-     * Calculates the price of a product after applying discount.
-     *
-     * @param basePrice {number} - Original product price
-     * @param discount {number} - Discount value
-     * @param discountType {string} - Discount type (PERCENTAGE or FLAT)
-     * @returns {number} - Final price after discount (rounded to 2 decimals)
-     * @access Internal
-     */
-    private calculateDiscountedPrice(basePrice: number, discount: number, discountType: string): number {
-        let finalPrice = basePrice;
-
-        if (discountType === DiscountType.PERCENTAGE) {
-            finalPrice = basePrice - (basePrice * discount / 100);
-        } else if (discountType === DiscountType.FLAT) {
-            finalPrice = Math.max(0, basePrice - discount);
-        }
-
-        return Math.round(finalPrice * 100) / 100;
-    }
 }

@@ -96,6 +96,11 @@ export const sendCustomerOrderEmail = async (
     userDistrict?: string | null,
     subject = "Your Order Has Been Placed",
 ) => {
+    // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
+    // as strings — coerce here or `.toFixed()` throws and `+` silently
+    // string-concatenates instead of adding.
+    totalPrice = Number(totalPrice) || 0;
+    shippingFee = Number(shippingFee) || 0;
     const OrderTotal = totalPrice + shippingFee;
 
     // Group items by vendorDistrict
@@ -274,8 +279,8 @@ export const sendVendorOrderEmail = async (
     to: string,
     paymentMethod: string,
     orderId: number,
-    totalPrice: number,
-    shippingFee: number,
+    // Shipping fee is not vendor revenue and is intentionally not shown here —
+    // customer/admin emails carry the full shipping breakdown instead.
     products: VendorOrderItem[],
     customer: CustomerInfo,
     subject = "New Order Received",
@@ -308,7 +313,6 @@ export const sendVendorOrderEmail = async (
         (sum, item) => sum + item.price * item.quantity,
         0,
     );
-    const orderTotal = vendorTotal + shippingFee;
 
     // Combine address fields into a single string
     const fullAddress = [
@@ -356,19 +360,11 @@ export const sendVendorOrderEmail = async (
         </tbody>
       </table>
 
-      <!-- Totals -->
+      <!-- Totals (vendor payout basis — shipping is not vendor revenue) -->
       <table style="width: 100%; margin-bottom: 20px; font-size: 15px;">
         <tr>
-          <td style="text-align: right; padding: 4px 0; color: #555;">Subtotal:</td>
-          <td style="text-align: right; padding: 4px 0; width: 120px;">Rs ${vendorTotal.toFixed(2)}</td>
-        </tr>
-        <tr>
-          <td style="text-align: right; padding: 4px 0; color: #555;">Shipping fee:</td>
-          <td style="text-align: right; padding: 4px 0;">Rs ${shippingFee.toFixed(2)}</td>
-        </tr>
-        <tr>
-          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Total:</strong></td>
-          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Rs ${orderTotal.toFixed(2)}</strong></td>
+          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Your Total:</strong></td>
+          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px; width: 120px;"><strong>Rs ${vendorTotal.toFixed(2)}</strong></td>
         </tr>
       </table>
 

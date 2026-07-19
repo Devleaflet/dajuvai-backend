@@ -29,6 +29,7 @@ import AppDataSource from "../config/db.config";
 import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
 import { NotificationService } from "../service/notification.service";
+import config from "../config/env.config";
 
 /**
  * @class OrderController
@@ -84,6 +85,18 @@ export class OrderController {
                 relations: ["district"],
             });
 
+            const customerEmailItems = order.orderItems.map((item) => {
+                const vendor = vendors.find((v) => v.id === item.vendorId);
+                return {
+                    name: item?.product?.name,
+                    sku: item.variant?.sku || null,
+                    quantity: item.quantity,
+                    price: item.price,
+                    variantAttributes: item.variant?.attributes || null,
+                    vendorDistrict: vendor?.district?.name || null,
+                };
+            });
+
             // wrap in try catch so that if email fails, order wont fail
             try {
                 await sendCustomerOrderEmail(
@@ -91,23 +104,28 @@ export class OrderController {
                     order.id,
                     order.totalPrice,
                     order.shippingFee,
-                    order.orderItems.map((item) => {
-                        const vendor = vendors.find(
-                            (v) => v.id === item.vendorId,
-                        );
-                        return {
-                            name: item?.product?.name,
-                            sku: item.variant?.sku || null,
-                            quantity: item.quantity,
-                            price: item.price,
-                            variantAttributes: item.variant?.attributes || null,
-                            vendorDistrict: vendor?.district?.name || null,
-                        };
-                    }),
+                    customerEmailItems,
                     userDistrict,
                 );
             } catch (error) {
                 console.log("Failed to send customer order email:", error);
+            }
+
+            // Admin copy — full breakdown including shipping, same as the customer email.
+            if (config.USER_EMAIL) {
+                try {
+                    await sendCustomerOrderEmail(
+                        config.USER_EMAIL,
+                        order.id,
+                        order.totalPrice,
+                        order.shippingFee,
+                        customerEmailItems,
+                        userDistrict,
+                        `New Order Placed - #${order.id}`,
+                    );
+                } catch (error) {
+                    console.log("Failed to send admin order email:", error);
+                }
             }
 
             const orderItems = order.orderItems;
@@ -133,8 +151,6 @@ export class OrderController {
                         vendor.email,
                         order.paymentMethod,
                         order.id,
-                        order.totalPrice,
-                        order.shippingFee,
                         itemsForVendor,
                         {
                             name: userexists.fullName,
