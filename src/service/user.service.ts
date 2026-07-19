@@ -1,13 +1,14 @@
-import { DataSource, MoreThan } from 'typeorm';
-import bcrypt from 'bcryptjs';
-import AppDataSource from '../config/db.config';
-import { User, UserRole } from '../entities/user.entity';
-import { Vendor } from '../entities/vendor.entity';
-import { APIError } from '../utils/ApiError.utils';
-import { waitForDebugger } from 'inspector';
-import { IUpdateUserRequest } from '../interface/user.interface';
-import { Address } from '../entities/address.entity';
-import { add } from 'winston';
+import { DataSource, MoreThan } from "typeorm";
+import bcrypt from "bcryptjs";
+import AppDataSource from "../config/db.config";
+import { User, UserRole } from "../entities/user.entity";
+import { Vendor } from "../entities/vendor.entity";
+import { APIError } from "../utils/ApiError.utils";
+import { waitForDebugger } from "inspector";
+import { IUpdateUserRequest } from "../interface/user.interface";
+import { Address } from "../entities/address.entity";
+import { add } from "winston";
+import { SanitizedUser, sanitizeUser } from "../utils/sanitize.util";
 
 /**
  * User repository instance for database operations.
@@ -24,7 +25,20 @@ const vendorDB = AppDataSource.getRepository(Vendor);
  * @returns Promise<User[]> - Array of all users
  */
 export const fetchAllUser = async (): Promise<User[]> => {
-    return await userDB.find();
+    return await userDB.find({
+        select: [
+            "id",
+            "fullName",
+            "username",
+            "email",
+            "phoneNumber",
+            "role",
+            "isVerified",
+            "createdAt",
+            "updatedAt",
+            "profilePicture",
+        ],
+    });
 };
 
 /**
@@ -47,15 +61,17 @@ export const findUserByEmail = async (email: string): Promise<User | null> => {
 };
 
 export const findUserById = async (id: number): Promise<User> => {
-    return await userDB.findOneBy({ id })
-}
+    return await userDB.findOneBy({ id });
+};
 
 /**
  * Finds a user by email or username (for login).
  * @param email - Email or username string
  * @returns Promise<User | null> - User entity if found, else null
  */
-export const findUserByEmailLogin = async (email: string): Promise<User | null> => {
+export const findUserByEmailLogin = async (
+    email: string,
+): Promise<User | null> => {
     return await userDB.findOne({
         where: [{ email }, { username: email }],
         select: {
@@ -64,8 +80,8 @@ export const findUserByEmailLogin = async (email: string): Promise<User | null> 
             role: true,
             provider: true,
             isVerified: true,
-            password: true
-        }
+            password: true,
+        },
     });
 };
 
@@ -74,7 +90,9 @@ export const findUserByEmailLogin = async (email: string): Promise<User | null> 
  * @param token - Password reset token string
  * @returns Promise<User | null> - User entity if found, else null
  */
-export const findUserByResetToken = async (token: string): Promise<User | null> => {
+export const findUserByResetToken = async (
+    token: string,
+): Promise<User | null> => {
     return await userDB.findOne({
         where: {
             resetToken: token,
@@ -88,22 +106,21 @@ export const findUserByResetToken = async (token: string): Promise<User | null> 
  * @param id - User ID
  * @returns Promise<User | null> - User entity if found, else null
  */
-export const getUserByIdService = async (id: number): Promise<User | null> => {
+export const getUserByIdService = async (
+    id: number,
+): Promise<SanitizedUser | null> => {
     const user = await userDB.findOne({
         where: { id: id },
-        relations: ['address']
-    })
+        relations: ["address"],
+    });
 
-    console.log("----------------User------------------------")
-    console.log(user)
-    return user;
-    // return await userDB.findOneBy({ id });
+    return user ? sanitizeUser(user) : null;
 };
 
 export const getAllStaff = async () => {
     return await userDB.find({
         where: {
-            role: UserRole.STAFF
+            role: UserRole.STAFF,
         },
         // Exclude password hash and other sensitive/internal fields from the list response
         select: [
@@ -117,14 +134,12 @@ export const getAllStaff = async () => {
             "createdAt",
             "updatedAt",
         ],
-    })
-}
-
+    });
+};
 
 export const deleteStaffById = async (id: number) => {
-    return await userDB.delete(id)
-}
-
+    return await userDB.delete(id);
+};
 
 export const updateStaffById = async (id: number, data: any) => {
     const { confirmPassword, password, ...rest } = data;
@@ -134,19 +149,32 @@ export const updateStaffById = async (id: number, data: any) => {
         updateData.password = await bcrypt.hash(password, 10);
     }
 
-    await userDB.update({
-        id,
-        role: UserRole.STAFF
-    },
-        updateData
-    )
+    await userDB.update(
+        {
+            id,
+            role: UserRole.STAFF,
+        },
+        updateData,
+    );
 
     const updateStaff = await userDB.findOne({
-        where: { id }
-    })
+        where: { id },
+        select: [
+            "id",
+            "fullName",
+            "username",
+            "email",
+            "phoneNumber",
+            "role",
+            "isVerified",
+            "createdAt",
+            "updatedAt",
+            "profilePicture",
+        ],
+    });
 
-    return updateStaff
-}
+    return updateStaff;
+};
 
 /**
  * Updates user data for a given user ID.
@@ -154,10 +182,14 @@ export const updateStaffById = async (id: number, data: any) => {
  * @param data - Partial user data to update
  * @returns Promise<User | null> - Updated user entity if found, else null
  */
-export const updateUserService = async (id: number, data: IUpdateUserRequest, user: User): Promise<User | null> => {
-    const addressDb = AppDataSource.getRepository(Address)
+export const updateUserService = async (
+    id: number,
+    data: IUpdateUserRequest,
+    user: User,
+): Promise<User | null> => {
+    const addressDb = AppDataSource.getRepository(Address);
 
-    // update address 
+    // update address
     if (data.address) {
         const existingAddress = await addressDb.findOne({
             where: { user: { id: user.id } },
@@ -175,11 +207,11 @@ export const updateUserService = async (id: number, data: IUpdateUserRequest, us
     }
 
     const { address, ...userData } = data;
-    await userDB.update(id, userData)
+    await userDB.update(id, userData);
 
     return await userDB.findOne({
         where: { id },
-        relations: ["address"]
+        relations: ["address"],
     });
 };
 
@@ -197,17 +229,19 @@ export const saveUser = async (user: User): Promise<User> => {
  * @param email - Vendor's email
  * @returns Promise<Vendor | null> - Vendor entity if found, else null
  */
-export const findVendorByEmail = async (email: string): Promise<Vendor | null> => {
+export const findVendorByEmail = async (
+    email: string,
+): Promise<Vendor | null> => {
     return await vendorDB.findOne({ where: { email } });
 };
 
-
-
-export const findvendorByvendorId = async (vendorId: number): Promise<Vendor | null> => {
+export const findvendorByvendorId = async (
+    vendorId: number,
+): Promise<Vendor | null> => {
     return await vendorDB.findOne({
-        where: { id: vendorId }
-    })
-}
+        where: { id: vendorId },
+    });
+};
 /**
  * Saves a vendor entity.
  * @param vendor - Vendor entity instance
@@ -222,7 +256,9 @@ export const saveVendor = async (vendor: Vendor): Promise<Vendor> => {
  * @param token - Password reset token string
  * @returns Promise<Vendor | null> - Vendor entity if found, else null
  */
-export const findVendorByResetToken = async (token: string): Promise<Vendor | null> => {
+export const findVendorByResetToken = async (
+    token: string,
+): Promise<Vendor | null> => {
     return await vendorDB.findOne({
         where: {
             resetToken: token,
@@ -231,23 +267,22 @@ export const findVendorByResetToken = async (token: string): Promise<Vendor | nu
     });
 };
 
-
 export const deleteUserDataByFacebookId = async (user_id: string) => {
     const userId = await userDB.findOne({
         where: {
-            facebookId: user_id
-        }
-    })
+            facebookId: user_id,
+        },
+    });
 
     if (!userId) {
-        throw new APIError(404, "User not found")
+        throw new APIError(404, "User not found");
     }
 
     const userid = Number(userId);
 
     const deleteUser = await userDB.delete(userid);
 
-    console.log(deleteUser)
+    console.log(deleteUser);
 
     return deleteUser;
-}
+};
