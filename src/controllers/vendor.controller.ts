@@ -3,7 +3,7 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { AuthRequest, VendorAuthRequest } from "../middlewares/auth.middleware";
 import { sendVerificationEmail } from "../utils/nodemailer.utils";
-import { sanitizeVendor } from "../utils/sanitize.util";
+import { sanitizeVendor, sanitizeVendorForAdmin } from "../utils/sanitize.util";
 import { VendorService } from "../service/vendor.service";
 import {
     IVendorSignupRequest,
@@ -67,9 +67,12 @@ export class VendorController {
         _next: NextFunction,
     ): Promise<void> {
         const vendors = await this.vendorService.fetchAllVendors();
+
+        const vendorForAdmin = vendors.map((v) => sanitizeVendorForAdmin(v));
+
         res.status(200).json({
             success: true,
-            data: vendors.map((v) => sanitizeVendor(v)),
+            data: vendorForAdmin,
         });
     }
 

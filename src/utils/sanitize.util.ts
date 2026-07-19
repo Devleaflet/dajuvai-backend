@@ -47,6 +47,56 @@ export const sanitizeVendor = (vendor: Vendor): SanitizedVendor => ({
     })),
 });
 
+export interface SanitizedVendorForAdmin {
+    id: number;
+    businessName: string;
+    email: string;
+    phoneNumber: string;
+    profilePicture: string | null;
+    districtId: number;
+    district: { id: number; name: string } | null;
+    paymentOptions: {
+        id: number;
+        paymentType: PaymentOption;
+        details: Record<string, any>;
+        qrCodeImage: string | null;
+        isActive: boolean;
+    }[];
+    isApproved: boolean;
+    taxDocuments: string[];
+    isVerified: boolean;
+    businessRegNumber: string;
+    taxNumber: string;
+    citizenshipDocuments: string[];
+}
+
+export const sanitizeVendorForAdmin = (
+    vendor: Vendor,
+): SanitizedVendorForAdmin => ({
+    id: vendor.id,
+    businessName: vendor.businessName,
+    email: vendor.email,
+    phoneNumber: vendor.phoneNumber,
+    profilePicture: vendor.profilePicture ?? null,
+    districtId: vendor.districtId,
+    district: vendor.district
+        ? { id: vendor.district.id, name: vendor.district.name }
+        : null,
+    paymentOptions: (vendor.paymentOptions ?? []).map((po) => ({
+        id: po.id,
+        paymentType: po.paymentType,
+        details: po.details,
+        qrCodeImage: po.qrCodeImage,
+        isActive: po.isActive,
+    })),
+    isApproved: vendor.isApproved,
+    taxDocuments: vendor.taxDocuments,
+    isVerified: vendor.isVerified,
+    businessRegNumber: vendor.businessRegNumber,
+    taxNumber: vendor.taxNumber,
+    citizenshipDocuments: vendor.citizenshipDocuments,
+});
+
 export interface SanitizedUser {
     id: number;
     fullName: string;

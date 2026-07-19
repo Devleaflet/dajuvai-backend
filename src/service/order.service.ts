@@ -2298,14 +2298,36 @@ export class OrderService {
 
     const previousStatus = order.status;
 
-    if (
-      previousStatus !== status &&
-      !ORDER_STATUS_TRANSITIONS[previousStatus].includes(status)
-    ) {
-      throw new InvalidOrderStatusTransitionError(
-        `Order cannot move from ${previousStatus} to ${status}.`,
-      );
-    }
+        if (status === OrderStatus.CANCELLED) {
+            for (const item of order.orderItems) {
+                if (item.variantId) {
+                    const variant = await this.variantRepository.findOne({
+                        where: { id: item.variantId },
+                    });
+                    if (variant) {
+                        variant.stock += item.quantity;
+                        await this.variantRepository.save(variant);
+                    }
+                } else {
+                    const product = await this.productRepository.findOne({
+                        where: { id: item.productId },
+                    });
+                    if (product) {
+                        product.stock += item.quantity;
+                        await this.productRepository.save(product);
+                    }
+                }
+            }
+        }
+
+        // Handle COD payment update on delivery
+        if (
+            status === OrderStatus.DELIVERED &&
+            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
+            order.paymentStatus !== PaymentStatus.PAID
+        ) {
+            order.paymentStatus = PaymentStatus.PAID;
+        }
 
     if (status === OrderStatus.CANCELLED) {
       for (const item of order.orderItems) {
