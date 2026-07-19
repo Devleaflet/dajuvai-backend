@@ -1,14 +1,23 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
-import { Product } from './product.entity';
-import { OrderItem } from './orderItems.entity';
-import { District } from './district.entity';
-import { VendorPaymentOption } from './vendorPaymentOption';
+import {
+    Entity,
+    Column,
+    PrimaryGeneratedColumn,
+    CreateDateColumn,
+    UpdateDateColumn,
+    OneToMany,
+    ManyToOne,
+    JoinColumn,
+} from "typeorm";
+import { Product } from "./product.entity";
+import { OrderItem } from "./orderItems.entity";
+import { District } from "./district.entity";
+import { VendorPaymentOption } from "./vendorPaymentOption";
 
 export enum PaymentOption {
-    ESEWA = 'ESEWA',
-    KHALTI = 'KHALTI',
+    ESEWA = "ESEWA",
+    KHALTI = "KHALTI",
     NPS = "NPS",
-    BANK = "BANK"
+    BANK = "BANK",
 }
 
 @Entity()
@@ -31,8 +40,8 @@ export class Vendor {
     @Column({ nullable: true })
     telePhone: string;
 
-    @ManyToOne(() => District, district => district.vendors, { eager: true })
-    @JoinColumn({ name: 'districtId' })
+    @ManyToOne(() => District, (district) => district.vendors, { eager: true })
+    @JoinColumn({ name: "districtId" })
     district: District;
 
     @Column({ nullable: true })
@@ -51,7 +60,7 @@ export class Vendor {
     citizenshipDocuments: string[];
 
     @Column({ type: "varchar", nullable: true })
-    chequePhoto: string;// hataune 
+    chequePhoto: string; // hataune
 
     @Column({ type: "varchar", nullable: true })
     accountName: string;

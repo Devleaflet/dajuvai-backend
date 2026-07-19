@@ -1,6 +1,9 @@
 import { ContactInput } from "./zod_validations/contact.zod";
 
-export const generateVerificationEmailHTML = (verificationLink: string, token: number) => {
+export const generateVerificationEmailHTML = (
+    verificationLink: string,
+    token: number,
+) => {
     return `
         <!DOCTYPE html>
         <html lang="en">
@@ -54,7 +57,6 @@ export const generateVerificationEmailHTML = (verificationLink: string, token: n
     `;
 };
 
-
 export const generateContactEmailHTML = (dto: ContactInput) => {
     return `
     <div style="max-width: 650px; margin: 20px auto; background-color: #ffffff; border-radius: 12px; overflow: hidden; box-shadow: 0 6px 18px rgba(0,0,0,0.08); font-family: Arial, sans-serif;">
@@ -81,14 +83,15 @@ export const generateContactEmailHTML = (dto: ContactInput) => {
               <td style="padding: 10px; font-weight: bold; color: #222;">Email:</td>
               <td style="padding: 10px; color: #555;">${dto.email}</td>
             </tr>
-            ${dto.phone
-            ? `
+            ${
+                dto.phone
+                    ? `
             <tr style="background-color: #f9f9f9;">
               <td style="padding: 10px; font-weight: bold; color: #222;">Phone:</td>
               <td style="padding: 10px; color: #555;">${dto.phone}</td>
             </tr>`
-            : ""
-        }
+                    : ""
+            }
             <tr>
               <td style="padding: 10px; font-weight: bold; color: #222;">Subject:</td>
               <td style="padding: 10px; color: #555;">${dto.subject}</td>
