@@ -2172,7 +2172,9 @@ export class OrderService {
 
     const idRows = await idQuery
       .distinct(true)
+      .addSelect(sortColumn, "sortValue")
       .orderBy(sortColumn, sortDirection)
+      .addOrderBy("order.id", sortDirection)
       .offset((page - 1) * limit)
       .limit(limit)
       .getRawMany<{ id: number }>();
@@ -2303,6 +2305,30 @@ export class OrderService {
       throw new InvalidOrderStatusTransitionError(
         `Order cannot move from ${previousStatus} to ${status}.`,
       );
+    }
+
+    if (status === OrderStatus.CANCELLED) {
+      for (const item of order.orderItems) {
+        if (item.variantId) {
+          const variant = await this.variantRepository.findOne({
+            where: { id: item.variantId },
+          });
+          if (variant) {
+            variant.stock += item.quantity;
+            variant.status = this.determineInventoryStatus(variant.stock);
+            await this.variantRepository.save(variant);
+          }
+        } else {
+          const product = await this.productRepository.findOne({
+            where: { id: item.productId },
+          });
+          if (product) {
+            product.stock += item.quantity;
+            product.status = this.determineInventoryStatus(product.stock);
+            await this.productRepository.save(product);
+          }
+        }
+      }
     }
 
     order.status = status;
