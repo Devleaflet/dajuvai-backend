@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { uploadMiddleware } from "../config/multer.config";
-import { ImageService } from "../service/image.service";
 import { ImageController } from "../controllers/image.controller";
+import { authMiddleware } from "../middlewares/auth.middleware";
 
 const imageRouter = Router();
 const imageController = new ImageController()
@@ -75,6 +75,6 @@ const imageController = new ImageController()
  *                   type: string
  *                   example: Error uploading image
  */
-imageRouter.post("/", uploadMiddleware, imageController.uplaodSingle.bind(imageController))
+imageRouter.post("/", authMiddleware, uploadMiddleware, imageController.uplaodSingle.bind(imageController))
 
 export default imageRouter;

@@ -59,6 +59,9 @@ export class Product {
     @Column({ nullable: true })
     stock?: number;
 
+    @Column({ type: "integer", default: 0 })
+    stockReserved: number;
+
     @ManyToOne(() => Subcategory, { onDelete: "SET NULL" })
     @JoinColumn({ name: "subcategoryId" })
     subcategory: Subcategory;

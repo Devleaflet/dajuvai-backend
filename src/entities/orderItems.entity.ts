@@ -63,6 +63,18 @@ export class OrderItem {
     @Column({ nullable: true })
     variantId?: number;
 
+    @Column({ nullable: true })
+    productNameSnapshot?: string;
+
+    @Column({ nullable: true })
+    skuSnapshot?: string;
+
+    @Column({ nullable: true })
+    imageSnapshot?: string;
+
+    @Column("decimal", { precision: 8, scale: 2, nullable: true })
+    unitPriceSnapshot?: number;
+
     // did this item reach warehouse from vendor
     @Column({ default: false })
     collectedAtWarehouse: boolean;

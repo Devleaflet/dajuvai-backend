@@ -9,6 +9,7 @@ import {
     IOrderCreateRequest,
     IShippingAddressRequest,
     IUpdateOrderStatusRequest,
+    IUpdateVendorOrderStatusRequest,
 } from "../interface/order.interface";
 import {
     BadRequestError,
@@ -24,12 +25,14 @@ import {
 } from "../utils/nodemailer.utils";
 import { VendorService } from "../service/vendor.service";
 import { PaymentService } from "../service/payment.service";
-import { PaymentMethod } from "../entities/order.entity";
+import { Order, PaymentMethod } from "../entities/order.entity";
+import { OrderStatusChangedByRole } from "../entities/orderStatusHistory.entity";
 import AppDataSource from "../config/db.config";
 import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
 import { NotificationService } from "../service/notification.service";
 import config from "../config/env.config";
+import { sanitizeOrderFull, sanitizeOrderForVendor } from "../utils/sanitize.util";
 
 /**
  * @class OrderController
@@ -48,6 +51,29 @@ export class OrderController {
         this.vendorService = new VendorService();
         this.vendorRepository = AppDataSource.getRepository(Vendor);
         this.notificationService = new NotificationService();
+    }
+
+    private buildOrderSummary(order: Order) {
+        const toNumber = (value: unknown) => {
+            const numeric = Number(value ?? 0);
+            return Number.isFinite(numeric) ? numeric : 0;
+        };
+
+        return {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            subtotal: toNumber(order.merchandiseSubtotal),
+            shippingTotal: toNumber(order.shippingFee),
+            discountTotal: toNumber(order.discountTotal),
+            taxTotal: toNumber(order.taxTotal),
+            grandTotal: toNumber(order.totalPrice),
+            itemCount: (order.orderItems || []).reduce(
+                (sum, item) => sum + toNumber(item.quantity),
+                0,
+            ),
+        };
     }
 
     /**
@@ -71,9 +97,14 @@ export class OrderController {
         const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
             await this.orderService.createOrder(req.user.id, data);
 
-        await this.notificationService.notifyOrderPlaced(order);
+        const orderSummary = this.buildOrderSummary(order);
+
+        void this.notificationService.notifyOrderPlaced(order).catch((error) => {
+            console.log("Failed to send order placed notification:", error);
+        });
 
         if (order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+            void (async () => {
             const shippingAddress = order.shippingAddress || null;
             const userDistrict = shippingAddress?.district || null;
 
@@ -170,17 +201,46 @@ export class OrderController {
                     );
                 }
             }
+            })().catch((error) => {
+                console.log("Failed to send COD order emails:", error);
+            });
         }
 
         if (esewaRedirectUrl) {
             res.status(200).json({
                 success: true,
                 data: order,
+                orderSummary,
+                ...orderSummary,
                 esewaRedirectUrl,
             });
         } else {
-            res.status(201).json({ success: true, data: order });
+            res.status(201).json({
+                success: true,
+                data: order,
+                orderSummary,
+                ...orderSummary,
+            });
         }
+    }
+
+    /**
+     * @desc Preview checkout totals (merchandise subtotal, per-vendor shipping
+     * breakdown, discount, grand total) without placing an order. Read-only —
+     * the frontend must render these numbers instead of recomputing shipping
+     * itself.
+     * @route POST /orders/estimate
+     * @access Authenticated User
+     */
+    async estimateCheckout(
+        req: AuthRequest<{}, {}, IOrderCreateRequest>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.user) throw new AuthError("User not authenticated");
+
+        const estimate = await this.orderService.estimateCheckout(req.user.id, req.body);
+        res.status(200).json({ success: true, data: estimate });
     }
 
     /**
@@ -262,18 +322,20 @@ export class OrderController {
         const order = await this.orderService.getCustomerOrderDetails(orderId);
 
         if (user.role === UserRole.ADMIN || order.orderedById === user.id) {
-            res.status(200).json({ success: true, data: order });
+            res.status(200).json({ success: true, data: sanitizeOrderFull(order) });
             return;
         }
 
         if (req.vendor) {
             const vendorId = req.vendor.id;
             const hasProductFromVendor = order.orderItems.some(
-                (item) => item.product.vendor.id === vendorId,
+                (item) => item.vendorId === vendorId,
             );
 
             if (hasProductFromVendor) {
-                res.status(200).json({ success: true, data: order });
+                // Vendor-scoped: never leak another vendor's items, shipping
+                // fee, or the order's grand total to this vendor.
+                res.status(200).json({ success: true, data: sanitizeOrderForVendor(order, vendorId) });
                 return;
             }
         }
@@ -324,12 +386,25 @@ export class OrderController {
      * @access Admin or authorized
      */
     async getAllOrders(
-        _req: AuthRequest,
+        req: AuthRequest<{}, {}, {}, Record<string, string>>,
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const orders = await this.orderService.getAllOrders();
-        res.status(200).json({ success: true, data: orders });
+        const q = req.query;
+        const result = await this.orderService.getAllOrders({
+            page: q.page ? Number(q.page) : undefined,
+            limit: q.limit ? Number(q.limit) : undefined,
+            search: q.search,
+            status: q.status as any,
+            paymentStatus: q.paymentStatus as any,
+            vendorId: q.vendorId ? Number(q.vendorId) : undefined,
+            startDate: q.startDate,
+            endDate: q.endDate,
+            minPrice: q.minPrice ? Number(q.minPrice) : undefined,
+            maxPrice: q.maxPrice ? Number(q.maxPrice) : undefined,
+            sort: q.sort as any,
+        });
+        res.status(200).json({ success: true, data: result.items, pagination: result.pagination });
     }
 
     /**
@@ -361,16 +436,43 @@ export class OrderController {
     ): Promise<void> {
         const orderId = parseInt(req.params.orderId, 10);
         if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+        if (!req.user) throw new AuthError("User not authenticated");
 
-        const { status } = req.body as IUpdateOrderStatusRequest;
+        const { status, expectedCurrentStatus, reason, note } = req.body as IUpdateOrderStatusRequest;
         const updatedOrder = await this.orderService.updateOrderStatus(
             orderId,
             status,
+            {
+                expectedCurrentStatus,
+                reason,
+                note,
+                changedByUserId: req.user.id,
+                // This route is admin/staff-only (see order.routes.ts) — vendor
+                // status changes go through a separate vendor endpoint.
+                changedByRole: OrderStatusChangedByRole.ADMIN,
+            },
         );
 
         await this.notificationService.notifyOrderStatusUpdated(updatedOrder);
 
         res.status(200).json({ success: true, data: updatedOrder });
+    }
+
+    /**
+     * @desc Get the status-change timeline for an order
+     * @route GET /orders/admin/:orderId/status-history
+     * @access Admin or authorized users
+     */
+    async getOrderStatusHistory(
+        req: AuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const orderId = parseInt(req.params.orderId, 10);
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+
+        const history = await this.orderService.getOrderStatusHistory(orderId);
+        res.status(200).json({ success: true, data: history });
     }
 
     /**
@@ -451,6 +553,32 @@ export class OrderController {
         const order = await this.orderService.getVendorOrderDetails(
             req.vendor.id,
             orderId,
+        );
+        res.status(200).json({ success: true, data: order });
+    }
+
+    /**
+     * @desc Vendor updates its own fulfillment stage for an order (never the
+     * parent order's overall status, and never another vendor's row).
+     * @route PUT /vendor/:orderId/status
+     * @access Vendor
+     */
+    async updateVendorOrderStatus(
+        req: VendorAuthRequest<{ orderId: string }, {}, IUpdateVendorOrderStatusRequest>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
+
+        const orderId = parseInt(req.params.orderId, 10);
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+
+        const { status, reason, note } = req.body;
+        const order = await this.orderService.updateVendorOrderStatus(
+            req.vendor.id,
+            orderId,
+            status,
+            { reason, note },
         );
         res.status(200).json({ success: true, data: order });
     }

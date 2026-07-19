@@ -530,7 +530,11 @@ export class VendorController {
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const vendorId = req.params.id || 46;
+        const vendorId = req.params.id;
+
+        if (!vendorId) {
+            throw new BadRequestError("Vendor ID is required");
+        }
 
         const vendorExists = await this.vendorService.findVendorById(
             Number(vendorId),

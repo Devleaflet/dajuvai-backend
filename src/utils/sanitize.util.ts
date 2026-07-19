@@ -113,8 +113,12 @@ export interface SanitizedOrderItem {
     productId: number;
     quantity: number;
     price: number;
-    variantId: string | null;
+    variantId: number | null;
     collectedAtWarehouse: boolean;
+    productNameSnapshot?: string | null;
+    skuSnapshot?: string | null;
+    imageSnapshot?: string | null;
+    unitPriceSnapshot?: number | null;
     product: {
         id: number;
         name: string;
@@ -126,7 +130,7 @@ export interface SanitizedOrderItem {
         vendorId: number;
     } | null;
     variant: {
-        id: string;
+        id: number;
         sku: string;
         attributes: any;
         finalPrice: number | null;
@@ -145,6 +149,10 @@ export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => ({
     price: item.price,
     variantId: item.variantId ?? null,
     collectedAtWarehouse: item.collectedAtWarehouse,
+    productNameSnapshot: item.productNameSnapshot ?? null,
+    skuSnapshot: item.skuSnapshot ?? null,
+    imageSnapshot: item.imageSnapshot ?? null,
+    unitPriceSnapshot: item.unitPriceSnapshot ?? null,
     product: item.product
         ? {
               id: item.product.id,
@@ -168,14 +176,30 @@ export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => ({
               variantImages: item.variant.variantImages ?? [],
           }
         : null,
-    vendorId: item.vendorId ?? item.product.vendorId,
+    vendorId: item.vendorId ?? item.product?.vendorId,
     vendor: item.vendor ? sanitizeVendor(item.vendor) : null,
 });
 
+export interface SanitizedVendorShipping {
+    vendorId: number;
+    vendorName: string;
+    vendorDistrict: string;
+    customerDistrict: string;
+    shippingZone: string;
+    shippingFee: number;
+    subtotal: number;
+    itemCount: number;
+    vendorTotal: number;
+}
+
 export interface SanitizedOrderFull {
     id: number;
+    orderNumber: string;
     totalPrice: number;
     shippingFee: number;
+    merchandiseSubtotal: number;
+    discountTotal: number;
+    taxTotal: number;
     serviceCharge: number;
     status: OrderStatus;
     deliveryStatus: DeliveryStatus;
@@ -189,12 +213,48 @@ export interface SanitizedOrderFull {
     orderedBy: SanitizedUser | null;
     shippingAddress: Address | null;
     orderItems: SanitizedOrderItem[];
+    vendorShippingBreakdown: SanitizedVendorShipping[];
+}
+
+/**
+ * Builds the per-vendor shipping breakdown strictly from the immutable
+ * `OrderVendorShipping` rows persisted at checkout — never recomputed from
+ * the (possibly since-changed) live vendor/customer district data. Requires
+ * the `vendorShippings` relation to be loaded on `order`.
+ */
+function buildVendorShippingBreakdown(order: Order): SanitizedVendorShipping[] {
+    const itemsByVendor = new Map<number, { subtotal: number; itemCount: number }>();
+    for (const item of order.orderItems ?? []) {
+        const existing = itemsByVendor.get(item.vendorId) ?? { subtotal: 0, itemCount: 0 };
+        existing.subtotal += Number(item.price) * item.quantity;
+        existing.itemCount += item.quantity;
+        itemsByVendor.set(item.vendorId, existing);
+    }
+
+    return (order.vendorShippings ?? []).map((vs) => {
+        const items = itemsByVendor.get(vs.vendorId) ?? { subtotal: 0, itemCount: 0 };
+        return {
+            vendorId: vs.vendorId,
+            vendorName: vs.vendorNameSnapshot || `Vendor #${vs.vendorId}`,
+            vendorDistrict: vs.vendorDistrictSnapshot || "",
+            customerDistrict: vs.customerDistrictSnapshot || "",
+            shippingZone: vs.shippingZone,
+            shippingFee: Number(vs.shippingFee),
+            subtotal: items.subtotal,
+            itemCount: items.itemCount,
+            vendorTotal: Number(vs.vendorTotal),
+        };
+    });
 }
 
 export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => ({
     id: order.id,
+    orderNumber: order.orderNumber,
     totalPrice: order.totalPrice,
     shippingFee: order.shippingFee,
+    merchandiseSubtotal: order.merchandiseSubtotal,
+    discountTotal: order.discountTotal,
+    taxTotal: order.taxTotal,
     serviceCharge: order.serviceCharge,
     status: order.status,
     deliveryStatus: order.deliveryStatus,
@@ -208,4 +268,75 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => ({
     orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
     shippingAddress: order.shippingAddress ?? null,
     orderItems: (order.orderItems ?? []).map(sanitizeOrderItem),
+    vendorShippingBreakdown: buildVendorShippingBreakdown(order),
 });
+
+export interface SanitizedVendorOrderView {
+    id: number;
+    orderNumber: string;
+    status: OrderStatus;
+    deliveryStatus: DeliveryStatus;
+    paymentStatus: PaymentStatus;
+    paymentMethod: PaymentMethod;
+    createdAt: Date;
+    orderedBy: SanitizedUser | null;
+    // The customer's delivery address — every vendor on the order needs
+    // this for fulfillment; it is not the sensitive part (other vendors'
+    // shipping fees and the order grand total are what stay hidden).
+    shippingAddress: Address | null;
+    orderItems: SanitizedOrderItem[];
+    itemsSubtotal: number;
+    discountAllocation: number;
+    vendorPayable: number;
+    /** Only present so a vendor responsible for fulfillment can see the fee
+     * for its own shipment — never the order's other-vendor fees or total. */
+    ownShippingFee: number | null;
+    ownShippingZone: string | null;
+    /** This vendor's own fulfillment stage (OrderVendorShipping.status) —
+     * separate from the parent order's overall `status` above. */
+    fulfillmentStatus: string | null;
+}
+
+/**
+ * Vendor-facing order view: scoped to a single vendor's own items only.
+ * Deliberately omits the order's grand total, other vendors' items, and the
+ * cross-vendor shipping breakdown — a vendor must never see another
+ * vendor's shipping or settlement information.
+ */
+export const sanitizeOrderForVendor = (
+    order: Order,
+    vendorId: number,
+): SanitizedVendorOrderView => {
+    const vendorItems = (order.orderItems ?? []).filter((i) => i.vendorId === vendorId);
+    const itemsSubtotal = vendorItems.reduce(
+        (sum, item) => sum + Number(item.price) * item.quantity,
+        0,
+    );
+
+    const orderMerchandiseSubtotal = Number(order.merchandiseSubtotal) || 0;
+    const discountAllocation =
+        orderMerchandiseSubtotal > 0
+            ? Number(order.discountTotal || 0) * (itemsSubtotal / orderMerchandiseSubtotal)
+            : 0;
+
+    const ownShipping = (order.vendorShippings ?? []).find((vs) => vs.vendorId === vendorId);
+
+    return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+        deliveryStatus: order.deliveryStatus,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        createdAt: order.createdAt,
+        orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
+        shippingAddress: order.shippingAddress ?? null,
+        orderItems: vendorItems.map(sanitizeOrderItem),
+        itemsSubtotal,
+        discountAllocation: Number(discountAllocation.toFixed(2)),
+        vendorPayable: Number((itemsSubtotal - discountAllocation).toFixed(2)),
+        ownShippingFee: ownShipping ? Number(ownShipping.shippingFee) : null,
+        ownShippingZone: ownShipping?.shippingZone ?? null,
+        fulfillmentStatus: ownShipping?.status ?? null,
+    };
+};

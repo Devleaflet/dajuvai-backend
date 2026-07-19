@@ -167,8 +167,7 @@ passport.use(
     {
       clientID: config.FACEBOOK_APP_ID, // Facebook app ID from env
       clientSecret: config.FACEBOOK_APP_SECRET, // Facebook app secret from env
-      // callbackURL: "https://leafletdv.onrender.com/api/auth/facebook/callback", // URL Facebook redirects to after login
-      callbackURL: "https://leafletdv.onrender.com/api/auth/facebook/callback", // URL Facebook redirects to after login
+      callbackURL: config.FACEBOOK_CALLBACK_URL || config.GOOGLE_CALLBACK_URL.replace('google', 'facebook'),
       profileFields: ["id", "displayName", "photos", "email"], // Specific data to retrieve from Facebook
     },
     async (accessToken, refreshToken, profile, done) => {

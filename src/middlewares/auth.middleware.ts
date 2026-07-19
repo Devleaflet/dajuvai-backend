@@ -5,7 +5,6 @@ import jwt, {
 } from "jsonwebtoken";
 import { User, UserRole } from "../entities/user.entity";
 import AppDataSource from "../config/db.config";
-import { ZodError, ZodSchema } from "zod";
 import { Vendor } from "../entities/vendor.entity";
 import { Product } from "../entities/product.entity";
 import { OrderItem } from "../entities/orderItems.entity";
@@ -19,7 +18,6 @@ import {
   ForbiddenError,
   NotFoundError,
   TokenExpiredError,
-  ValidationError,
 } from "../errors";
 
 /**
@@ -488,40 +486,13 @@ export const isAdminOrVendor = async (
 };
 
 /**
- * Validates request body/query/params using a Zod schema.
- * Forwards a ValidationError to the global error handler on failure.
- * @param schema - Zod schema to validate against
- * @param property - Target request property ('body' | 'query' | 'params'), defaults to 'body'
+ * @deprecated Import from "./validation.middleware" instead. Generic request
+ * validation doesn't belong in an authentication middleware file — kept
+ * here only so the ~20 existing route files that import validateZod from
+ * this module don't all need touching in the same change. New code should
+ * import directly from validation.middleware.ts.
  */
-export const validateZod = (
-  schema: ZodSchema,
-  property: "body" | "query" | "params" = "body",
-) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const parsed = await schema.parseAsync(req[property]);
-      // Express 5 exposes req.query as a getter-only prototype property, so a
-      // plain assignment silently no-ops and the coerced/defaulted values are
-      // lost. defineProperty writes an own property that shadows the getter.
-      Object.defineProperty(req, property, {
-        value: parsed,
-        writable: true,
-        configurable: true,
-        enumerable: true,
-      });
-      return next();
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const fields = error.errors.map((e) => ({
-          field: e.path.join("."),
-          message: e.message,
-        }));
-        return next(new ValidationError("Validation failed", fields));
-      }
-      return next(error);
-    }
-  };
-};
+export { validateZod } from "./validation.middleware";
 
 export const canReviewProduct = async (
   req: AuthRequest<{}, {}, { productId: string }, {}>,
