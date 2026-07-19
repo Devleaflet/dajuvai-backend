@@ -100,9 +100,11 @@ export const sanitizeVendorForAdmin = (
 export interface SanitizedUser {
     id: number;
     fullName: string;
+    name: string;
     username?: string;
     email: string;
     phoneNumber: string;
+    phone: string;
     role: UserRole;
     isVerified: boolean;
     profilePicture?: string;
@@ -117,11 +119,14 @@ export interface SanitizedUser {
 }
 
 export const sanitizeUser = (user: User): SanitizedUser => {
+    const fullName = user.fullName || user.username || "Unknown Customer";
     return {
         id: user.id,
         fullName: user.fullName,
+        name: fullName,
         username: user.username || undefined,
         phoneNumber: user.phoneNumber,
+        phone: user.phoneNumber || "",
         email: user.email,
         role: user.role,
         isVerified: user.isVerified,

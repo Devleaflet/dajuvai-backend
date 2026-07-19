@@ -61,14 +61,18 @@ const ProductBaseSchema = z.object({
             return [...keywords].join(",");
         })
         .optional(),
-    basePrice: z.number().min(0, "Base price must be non-negative").optional(),
+    basePrice: z
+        .preprocess(
+            (value) => (value === "" || value === undefined ? undefined : Number(value)),
+            z.number().positive("Base price must be greater than zero").optional(),
+        ),
     discount: z
-        .number()
-        .min(0, "Discount must be non-negative")
-        .max(100, "Discount cannot exceed 100")
-        .optional(),
+        .preprocess(
+            (value) => (value === "" || value === undefined ? undefined : Number(value)),
+            z.number().min(0, "Discount must be non-negative").optional(),
+        ),
     discountType: z
-        .enum([DiscountType.PERCENTAGE, DiscountType.FLAT])
+        .enum([DiscountType.NONE, DiscountType.PERCENTAGE, DiscountType.FLAT])
         .optional(),
     status: z
         .enum([
@@ -77,48 +81,68 @@ const ProductBaseSchema = z.object({
             InventoryStatus.LOW_STOCK,
         ])
         .optional(),
-    stock: z.number().int().min(0, "Stock must be non-negative").optional(),
-    hasVariants: z.boolean().optional(),
+    stock: z
+        .preprocess(
+            (value) => (value === "" || value === undefined ? undefined : Number(value)),
+            z.number().int().min(0, "Stock must be non-negative").optional(),
+        ),
+    hasVariants: z
+        .preprocess(
+            (value) =>
+                value === "true" ? true : value === "false" ? false : value,
+            z.boolean().optional(),
+        ),
     variants: z
         .array(
             z.object({
                 sku: z.string().min(1, "SKU is required"),
-                price: z.number().min(0, "Price must be non-negative"),
-                stock: z.number().int().min(0, "Stock must be non-negative"),
-                status: z.enum([
-                    InventoryStatus.AVAILABLE,
-                    InventoryStatus.OUT_OF_STOCK,
-                    InventoryStatus.LOW_STOCK,
-                ]),
-                attributes: z
-                    .array(
-                        z.object({
-                            attributeType: z
-                                .string()
-                                .min(1, "Attribute type is required"),
-                            attributeValues: z
-                                .array(
-                                    z
-                                        .string()
-                                        .min(1, "Attribute value is required"),
-                                )
-                                .min(
-                                    1,
-                                    "At least one attribute value is required",
-                                ),
-                        }),
-                    )
+                id: z.number().int().positive().optional(),
+                basePrice: z
+                    .preprocess(
+                        (value) =>
+                            value === "" || value === undefined
+                                ? undefined
+                                : Number(value),
+                        z.number().positive("Variant base price must be greater than zero").optional(),
+                    ),
+                price: z
+                    .preprocess(
+                        (value) =>
+                            value === "" || value === undefined
+                                ? undefined
+                                : Number(value),
+                        z.number().positive("Variant price must be greater than zero").optional(),
+                    ),
+                discount: z
+                    .preprocess(
+                        (value) =>
+                            value === "" || value === undefined
+                                ? undefined
+                                : Number(value),
+                        z.number().min(0, "Variant discount must be non-negative").optional(),
+                    ),
+                discountType: z
+                    .enum([DiscountType.NONE, DiscountType.PERCENTAGE, DiscountType.FLAT])
                     .optional(),
-                images: z
-                    .array(
-                        z.object({ url: z.string().url("Invalid image URL") }),
-                    )
+                stock: z.preprocess(
+                    (value) => Number(value),
+                    z.number().int().min(0, "Stock must be non-negative"),
+                ),
+                status: z
+                    .enum([
+                        InventoryStatus.AVAILABLE,
+                        InventoryStatus.OUT_OF_STOCK,
+                        InventoryStatus.LOW_STOCK,
+                    ])
                     .optional(),
+                attributes: z.union([z.record(z.string()), z.array(z.any())]).optional(),
+                variantImages: z.array(z.string().min(1)).optional(),
+                images: z.array(z.union([z.string().min(1), z.object({ url: z.string().min(1) })])).optional(),
             }),
         )
         .optional(),
     productImages: z
-        .array(z.object({ url: z.string().url("Invalid image URL") }))
+        .array(z.union([z.string().min(1), z.object({ url: z.string().min(1) })]))
         .optional(),
     subcategoryId: z
         .number()
@@ -161,9 +185,10 @@ export const ProductCreateSchema = ProductBaseSchema.refine(
     .refine(
         (data) => {
             if (
+                data.hasVariants !== true &&
                 data.discount !== undefined &&
-                (data.discountType === undefined ||
-                    data.basePrice === undefined)
+                data.discount > 0 &&
+                data.basePrice === undefined
             ) {
                 return false;
             }
@@ -182,15 +207,16 @@ export const ProductCreateSchema = ProductBaseSchema.refine(
                 return data.variants.every(
                     (variant) =>
                         variant.sku &&
-                        variant.price !== undefined &&
+                        (variant.basePrice !== undefined ||
+                            variant.price !== undefined) &&
                         variant.stock !== undefined &&
-                        variant.status,
+                        variant.stock >= 0,
                 );
             }
             return true;
         },
         {
-            message: "Each variant must have SKU, price, stock, and status.",
+            message: "Each variant must have SKU, basePrice/price, and stock.",
             path: ["variants"],
         },
     );

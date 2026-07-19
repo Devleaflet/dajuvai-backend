@@ -22,7 +22,7 @@ export interface IOrderCreateRequest {
     // buy now 
     isBuyNow?: boolean;   
     productId?: number;   
-    variantId?: string;   
+    variantId?: number;   
     quantity?: number;    
 }
 

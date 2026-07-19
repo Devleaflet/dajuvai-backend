@@ -61,7 +61,7 @@ export class OrderItem {
     variant?: Variant;
 
     @Column({ nullable: true })
-    variantId?: string;
+    variantId?: number;
 
     // did this item reach warehouse from vendor
     @Column({ default: false })

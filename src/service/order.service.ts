@@ -1,4 +1,4 @@
-import { In, Not, Repository } from "typeorm";
+import { EntityManager, In, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import {
@@ -26,6 +26,7 @@ import { PromoService } from "./promo.service";
 import { DiscountType, InventoryStatus } from "../entities/product.enum";
 import { Variant } from "../entities/variant.entity";
 import { findUserById } from "./user.service";
+import { calculatePriceSnapshot } from "../utils/pricing.utils";
 import {
     sendCustomerOrderEmail,
     sendOrderStatusEmail,
@@ -103,7 +104,7 @@ export class OrderService {
 
         this.promoService = new PromoService();
 
-        this.variantRepository = AppDataSource.getTreeRepository(Variant);
+        this.variantRepository = AppDataSource.getRepository(Variant);
 
         this.vendorService = new VendorService();
         this.notificationService = new NotificationService();
@@ -124,17 +125,62 @@ export class OrderService {
         const discountType = item?.product?.discountType;
 
         if (!Number.isFinite(basePrice)) return 0;
-        if (!discount || discount <= 0 || !discountType) return basePrice;
+        return calculatePriceSnapshot({
+            basePrice,
+            discount,
+            discountType,
+        }).finalPrice;
+    }
 
-        if (discountType === DiscountType.PERCENTAGE) {
-            return Math.max(0, basePrice - (basePrice * discount) / 100);
+    private determineInventoryStatus(stock: number): InventoryStatus {
+        if (stock <= 0) return InventoryStatus.OUT_OF_STOCK;
+        if (stock < 5) return InventoryStatus.LOW_STOCK;
+        return InventoryStatus.AVAILABLE;
+    }
+
+    private async syncVariantParentProducts(
+        variants: Variant[],
+        manager?: EntityManager,
+    ): Promise<void> {
+        const productIds = [
+            ...new Set(
+                variants
+                    .map((variant) => Number(variant.productId))
+                    .filter((id) => Number.isFinite(id)),
+            ),
+        ];
+
+        if (!productIds.length) return;
+
+        const productRepo = manager
+            ? manager.getRepository(Product)
+            : this.productRepository;
+
+        const products = await productRepo.find({
+            where: { id: In(productIds) },
+            relations: ["variants"],
+        });
+
+        for (const product of products) {
+            const totalStock = (product.variants || []).reduce(
+                (total, variant) => total + Number(variant.stock || 0),
+                0,
+            );
+            const hasLowVariant = (product.variants || []).some((variant) => {
+                const stock = Number(variant.stock || 0);
+                return stock > 0 && stock < 5;
+            });
+
+            product.stock = totalStock;
+            product.status =
+                totalStock <= 0
+                    ? InventoryStatus.OUT_OF_STOCK
+                    : totalStock < 5 || hasLowVariant
+                      ? InventoryStatus.LOW_STOCK
+                      : InventoryStatus.AVAILABLE;
         }
 
-        if (discountType === DiscountType.FLAT) {
-            return Math.max(0, basePrice - discount);
-        }
-
-        return basePrice;
+        await productRepo.save(products);
     }
 
     /**
@@ -315,8 +361,6 @@ export class OrderService {
             const linePrice = this.calculateLineItemPrice(item);
             return sum + linePrice * item.quantity;
         }, 0);
-        console.log("--------------subtotal------------------");
-        console.log(subtotal);
 
         // apply promo code if provided
         let discountAmount = 0;
@@ -372,7 +416,6 @@ export class OrderService {
 
     async checkAvailablePromocode(promoCode: string, userId: number) {
         const promo = await this.promoService.findPromoByCode(promoCode);
-        console.log(promo);
         if (!promo) {
             return null;
         }
@@ -452,9 +495,6 @@ export class OrderService {
                 quantity,
             } = orderData;
 
-            console.log("-----------------Order data-------------------");
-            console.log(orderData);
-
             await this.updateUserDetail(userId, fullName, phoneNumber);
 
             // Fetch user and district (always needed)
@@ -471,9 +511,6 @@ export class OrderService {
                     where: { id: productId },
                     relations: ["variants", "vendor", "vendor.district"],
                 });
-
-                console.log("------------------Product------------------");
-                console.log(product);
 
                 if (!product) throw new APIError(404, "Product not found");
 
@@ -497,9 +534,6 @@ export class OrderService {
                 items = cart.items;
             }
 
-            console.log("----------------items-------------------");
-            console.log(items);
-
             // Check stock before creating the order
             await this.validateStock(items);
 
@@ -509,9 +543,6 @@ export class OrderService {
                 shippingAddress,
                 user,
             );
-
-            console.log("-----------saved address----------------");
-            console.log(address);
 
             // Calculate total shipping fee based on items and destination address
             const shippingFee = await this.calculateShippingFee(
@@ -536,26 +567,15 @@ export class OrderService {
                 shippingFee.shippingFee,
                 orderData,
             );
-            console.log(order);
 
             // let redirectUrl: string | undefined;
             let esewaRedirectUrl;
             // Handle different payment methods
             if (paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
-                order = await this.orderRepository.save(order);
-
-                order = await this.orderRepository.findOne({
-                    where: { id: order.id },
-                    relations: [
-                        "orderItems",
-                        "orderItems.product",
-                        "orderItems.variant",
-                    ],
-                });
-
-                console.log(order.orderItems);
-
-                await this.updateStock(order.orderItems);
+                // Row-locked: stock is revalidated and decremented in the
+                // same transaction as the order save, so a concurrent
+                // checkout for the last unit can't oversell.
+                order = await this.reserveStockAndSaveOrder(order);
 
                 // 🔹 Only clear cart if it's not Buy Now
                 if (!isBuyNow) {
@@ -566,14 +586,13 @@ export class OrderService {
                 paymentMethod === PaymentMethod.ESEWA ||
                 paymentMethod === PaymentMethod.NPX
             ) {
-                console.log(
-                    "------------Order saving after payment is initated for online payment-------- ",
-                );
-                // Save order first before initiating online payment
-                order = await this.orderRepository.save(order);
+                // Reserve stock + save order atomically, THEN contact the
+                // payment gateway — never hold the DB transaction open across
+                // an external network call.
+                order = await this.reserveStockAndSaveOrder(order);
+
                 if (paymentMethod === PaymentMethod.ESEWA) {
                     esewaRedirectUrl = await this.initateEsewaPayment(order);
-                    console.log("Respose of Esewa", esewaRedirectUrl);
                 }
             } else {
                 throw new APIError(400, "Invalid payment method");
@@ -586,7 +605,7 @@ export class OrderService {
                 useremail,
             };
         } catch (error) {
-            console.log(error);
+            console.error("Failed to create order:", error);
             throw error instanceof APIError
                 ? error
                 : new APIError(500, "Failed to create order");
@@ -598,9 +617,11 @@ export class OrderService {
             let object = JSON.parse(
                 Buffer.from(token, "base64").toString("ascii"),
             );
-            console.log("This is the object after decoding", object);
 
             if (object.status !== "COMPLETE") {
+                // Release the stock reserved at order creation — otherwise a
+                // non-complete eSewa callback leaves it locked up forever.
+                await this.esewaFailed(orderId);
                 throw new APIError(400, "Payment not completed");
             }
 
@@ -612,7 +633,7 @@ export class OrderService {
 
             return { success: true };
         } catch (err) {
-            console.log("Error", err);
+            console.error("Esewa payment verification failed:", err);
             throw new APIError(500, "Esewa payment verification failed");
         }
     }
@@ -714,6 +735,18 @@ export class OrderService {
             relations: ["district"],
         });
 
+        const customerEmailItems = order.orderItems.map((item) => {
+            const vendor = vendors.find((v) => v.id === item.vendorId);
+            return {
+                name: item.product.name,
+                sku: item.variant?.sku || null,
+                quantity: item.quantity,
+                price: item.price,
+                variantAttributes: item.variant?.attributes || null,
+                vendorDistrict: vendor?.district?.name || null,
+            };
+        });
+
         // Send customer email
         try {
             await sendCustomerOrderEmail(
@@ -721,21 +754,28 @@ export class OrderService {
                 order.id,
                 order.totalPrice,
                 order.shippingFee,
-                order.orderItems.map((item) => {
-                    const vendor = vendors.find((v) => v.id === item.vendorId);
-                    return {
-                        name: item.product.name,
-                        sku: item.variant?.sku || null,
-                        quantity: item.quantity,
-                        price: item.price,
-                        variantAttributes: item.variant?.attributes || null,
-                        vendorDistrict: vendor?.district?.name || null,
-                    };
-                }),
+                customerEmailItems,
                 user.address.district || null,
             );
         } catch (error) {
-            console.log("Failed to send customer order email:", error);
+            console.error("Failed to send customer order email:", error);
+        }
+
+        // Admin copy — full breakdown including shipping, same as the customer email.
+        if (config.USER_EMAIL) {
+            try {
+                await sendCustomerOrderEmail(
+                    config.USER_EMAIL,
+                    order.id,
+                    order.totalPrice,
+                    order.shippingFee,
+                    customerEmailItems,
+                    user.address.district || null,
+                    `New Order Placed - #${order.id}`,
+                );
+            } catch (error) {
+                console.error("Failed to send admin order email:", error);
+            }
         }
 
         // Send emails to vendors
@@ -760,8 +800,6 @@ export class OrderService {
                     vendor.email,
                     order.paymentMethod,
                     order.id,
-                    order.totalPrice,
-                    order.shippingFee,
                     itemsForVendor,
                     {
                         name: user.fullName,
@@ -774,7 +812,7 @@ export class OrderService {
                     },
                 );
             } catch (error) {
-                console.log(
+                console.error(
                     "Failed to send email to vendor, vendor id: ",
                     vendorId,
                     error,
@@ -787,22 +825,41 @@ export class OrderService {
         try {
             const order = await this.orderRepository.findOne({
                 where: { id: orderId },
+                relations: [
+                    "orderItems",
+                    "orderItems.product",
+                    "orderItems.variant",
+                ],
             });
             if (!order) {
                 throw new APIError(404, "Order not found");
             }
 
+            // Idempotency guard: a duplicate failure callback for an order
+            // that's already terminal must not restore stock a second time.
+            const alreadyTerminal =
+                order.status === OrderStatus.CANCELLED ||
+                order.deliveryStatus === DeliveryStatus.DELIVERY_FAILED;
+
+            if (!alreadyTerminal) {
+                await this.restoreStock(order.orderItems);
+            }
+
             // Update order status
             order.status = OrderStatus.CANCELLED;
+            order.paymentStatus = PaymentStatus.UNPAID;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
             await this.orderRepository.save(order);
-            await this.notificationService.notifyPaymentFailed(
-                order.id,
-                order.orderedById,
-            );
+
+            if (!alreadyTerminal) {
+                await this.notificationService.notifyPaymentFailed(
+                    order.id,
+                    order.orderedById,
+                );
+            }
             return { success: true };
         } catch (err) {
-            console.log("Error", err);
+            console.error("Esewa payment failure handling failed:", err);
             throw new APIError(500, "Esewa payment verification failed");
         }
     }
@@ -828,21 +885,15 @@ export class OrderService {
 
             return order;
         } catch (err) {
-            console.log(err);
+            console.error("Failed to confirm order:", err);
             throw new APIError(500, "Failed to confirm order");
         }
     }
 
     private async initateEsewaPayment(order: Order) {
-        console.log("------------Order to Initiate Esewa payment-------------");
-        console.log(order);
         const transaction_uuid = crypto.randomUUID();
 
         const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${config.ESEWA_MERCHANT}`;
-
-        console.log("-------------Data after order---------------------");
-        console.log(data);
-        console.log("----------------------------------");
 
         const esewaSignature = this.generateHmacSha256Hash(
             data,
@@ -882,8 +933,6 @@ export class OrderService {
                 reqPayment.status === 200 &&
                 reqPayment.request?.res?.responseUrl
             ) {
-                console.log("---------re payment responseurl ");
-                console.log(reqPayment.request.res.responseUrl);
                 return {
                     url: reqPayment.request.res.responseUrl,
                 };
@@ -897,9 +946,6 @@ export class OrderService {
     }
 
     private generateHmacSha256Hash(data: string, secret: string) {
-        console.log("Generated Hash");
-        console.log("data", data);
-        console.log("Secret", secret);
         if (!data || !secret) {
             throw new Error(
                 "Both data and secret are required to generate a hash.",
@@ -935,11 +981,11 @@ export class OrderService {
             ...new Set(
                 cartItems
                     .map((item) =>
-                        item.variant ? String(item.variant.id) : null,
+                        item.variant ? Number(item.variant.id) : null,
                     )
                     .filter(
-                        (id): id is string =>
-                            typeof id === "string" && id.length > 0,
+                        (id): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
                     ),
             ),
         ];
@@ -966,8 +1012,8 @@ export class OrderService {
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(
-            variants.map((v) => [String(v.id), v]),
+        const variantsById = new Map<number, Variant>(
+            variants.map((v) => [v.id, v]),
         );
         const productsById = new Map<number, Product>(
             products.map((p) => [p.id, p]),
@@ -975,7 +1021,7 @@ export class OrderService {
 
         for (const item of cartItems) {
             if (item.variant) {
-                const variant = variantsById.get(String(item.variant.id));
+                const variant = variantsById.get(Number(item.variant.id));
 
                 if (!variant) {
                     throw new APIError(
@@ -1009,16 +1055,32 @@ export class OrderService {
             }
         }
     }
-    private async restoreStock(orderItems: any[]): Promise<void> {
+    /**
+     * Restore (add back) stock for cancelled/failed order items.
+     * Runs inside its own row-locked transaction unless an outer transaction
+     * manager is supplied, so concurrent restores of the same rows serialize
+     * instead of racing.
+     */
+    private async restoreStock(
+        orderItems: any[],
+        manager?: EntityManager,
+    ): Promise<void> {
+        if (!manager) {
+            await AppDataSource.transaction((txManager) =>
+                this.restoreStock(orderItems, txManager),
+            );
+            return;
+        }
+
         const variantIds = [
             ...new Set(
                 orderItems
                     .map((item: any) =>
-                        item.variantId ? String(item.variantId) : null,
+                        item.variantId ? Number(item.variantId) : null,
                     )
                     .filter(
-                        (id: any): id is string =>
-                            typeof id === "string" && id.length > 0,
+                        (id: any): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
                     ),
             ),
         ];
@@ -1036,28 +1098,39 @@ export class OrderService {
             ),
         ];
 
+        const variantRepo = manager.getRepository(Variant);
+        const productRepo = manager.getRepository(Product);
+
         const [variants, products] = await Promise.all([
             variantIds.length
-                ? this.variantRepository.find({ where: { id: In(variantIds) } })
+                ? variantRepo
+                      .createQueryBuilder("variant")
+                      .setLock("pessimistic_write")
+                      .where("variant.id IN (:...ids)", { ids: variantIds })
+                      .getMany()
                 : Promise.resolve([]),
             productIds.length
-                ? this.productRepository.find({ where: { id: In(productIds) } })
+                ? productRepo
+                      .createQueryBuilder("product")
+                      .setLock("pessimistic_write")
+                      .where("product.id IN (:...ids)", { ids: productIds })
+                      .getMany()
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(
-            variants.map((v) => [String(v.id), v]),
+        const variantsById = new Map<number, Variant>(
+            variants.map((v) => [v.id, v]),
         );
         const productsById = new Map<number, Product>(
             products.map((p) => [p.id, p]),
         );
 
-        const variantsToSave = new Map<string, Variant>();
+        const variantsToSave = new Map<number, Variant>();
         const productsToSave = new Map<number, Product>();
 
         for (const item of orderItems) {
             if (item.variantId) {
-                const variant = variantsById.get(String(item.variantId));
+                const variant = variantsById.get(Number(item.variantId));
                 if (!variant) {
                     throw new APIError(
                         404,
@@ -1066,14 +1139,9 @@ export class OrderService {
                 }
 
                 variant.stock += item.quantity;
-                variant.status =
-                    variant.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : variant.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                variant.status = this.determineInventoryStatus(variant.stock);
 
-                variantsToSave.set(String(variant.id), variant);
+                variantsToSave.set(variant.id, variant);
                 continue;
             }
 
@@ -1087,12 +1155,7 @@ export class OrderService {
                 }
 
                 product.stock += item.quantity;
-                product.status =
-                    product.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : product.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                product.status = this.determineInventoryStatus(product.stock);
 
                 productsToSave.set(product.id, product);
                 continue;
@@ -1105,25 +1168,79 @@ export class OrderService {
         }
 
         if (variantsToSave.size) {
-            await this.variantRepository.save([...variantsToSave.values()]);
+            const savedVariants = await variantRepo.save([
+                ...variantsToSave.values(),
+            ]);
+            await this.syncVariantParentProducts(savedVariants, manager);
         }
 
         if (productsToSave.size) {
-            await this.productRepository.save([...productsToSave.values()]);
+            await productRepo.save([...productsToSave.values()]);
         }
     }
 
-    // Separate method for stock updates
-    private async updateStock(orderItems: any[]): Promise<void> {
+    /**
+     * Persist a freshly-created order and decrement its stock atomically.
+     * Both the order insert and the stock lock+decrement happen in one
+     * transaction: if stock turns out insufficient (a concurrent checkout
+     * won the race), the order insert rolls back too, so no PENDING order
+     * is left behind with unreserved inventory.
+     */
+    private async reserveStockAndSaveOrder(order: Order): Promise<Order> {
+        return await AppDataSource.transaction(async (manager) => {
+            const orderRepo = manager.getRepository(Order);
+
+            let savedOrder = await orderRepo.save(order);
+            savedOrder = await orderRepo.findOne({
+                where: { id: savedOrder.id },
+                relations: [
+                    "orderItems",
+                    "orderItems.product",
+                    "orderItems.variant",
+                ],
+            });
+
+            if (!savedOrder) {
+                throw new APIError(500, "Failed to create order");
+            }
+
+            await this.updateStock(savedOrder.orderItems, manager);
+
+            return savedOrder;
+        });
+    }
+
+    /**
+     * Decrement stock for the given order items.
+     *
+     * Authoritative and race-safe: when called without an outer transaction
+     * manager it opens its own transaction; row locks (`pessimistic_write`)
+     * are held on every affected product/variant row for the duration, so
+     * concurrent checkouts for the same item serialize instead of both
+     * reading stale stock and overselling. `reserveStockAndSaveOrder` passes
+     * its own manager so the order row and the stock decrement commit/rollback
+     * together atomically.
+     */
+    private async updateStock(
+        orderItems: any[],
+        manager?: EntityManager,
+    ): Promise<void> {
+        if (!manager) {
+            await AppDataSource.transaction((txManager) =>
+                this.updateStock(orderItems, txManager),
+            );
+            return;
+        }
+
         const variantIds = [
             ...new Set(
                 orderItems
                     .map((item: any) =>
-                        item.variantId ? String(item.variantId) : null,
+                        item.variantId ? Number(item.variantId) : null,
                     )
                     .filter(
-                        (id: any): id is string =>
-                            typeof id === "string" && id.length > 0,
+                        (id: any): id is number =>
+                            typeof id === "number" && Number.isFinite(id),
                     ),
             ),
         ];
@@ -1141,31 +1258,40 @@ export class OrderService {
             ),
         ];
 
+        const variantRepo = manager.getRepository(Variant);
+        const productRepo = manager.getRepository(Product);
+
         const [variants, products] = await Promise.all([
             variantIds.length
-                ? this.variantRepository.find({
-                      where: { id: In(variantIds) },
-                      relations: ["product"],
-                  })
+                ? variantRepo
+                      .createQueryBuilder("variant")
+                      .setLock("pessimistic_write")
+                      .leftJoinAndSelect("variant.product", "product")
+                      .where("variant.id IN (:...ids)", { ids: variantIds })
+                      .getMany()
                 : Promise.resolve([]),
             productIds.length
-                ? this.productRepository.find({ where: { id: In(productIds) } })
+                ? productRepo
+                      .createQueryBuilder("product")
+                      .setLock("pessimistic_write")
+                      .where("product.id IN (:...ids)", { ids: productIds })
+                      .getMany()
                 : Promise.resolve([]),
         ]);
 
-        const variantsById = new Map<string, Variant>(
-            variants.map((v) => [String(v.id), v]),
+        const variantsById = new Map<number, Variant>(
+            variants.map((v) => [v.id, v]),
         );
         const productsById = new Map<number, Product>(
             products.map((p) => [p.id, p]),
         );
 
-        const variantsToSave = new Map<string, Variant>();
+        const variantsToSave = new Map<number, Variant>();
         const productsToSave = new Map<number, Product>();
 
         for (const item of orderItems) {
             if (item.variantId) {
-                const variant = variantsById.get(String(item.variantId));
+                const variant = variantsById.get(Number(item.variantId));
 
                 if (!variant) {
                     throw new APIError(
@@ -1183,14 +1309,9 @@ export class OrderService {
                 }
 
                 variant.stock -= item.quantity;
-                variant.status =
-                    variant.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : variant.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                variant.status = this.determineInventoryStatus(variant.stock);
 
-                variantsToSave.set(String(variant.id), variant);
+                variantsToSave.set(variant.id, variant);
                 continue;
             }
 
@@ -1213,12 +1334,7 @@ export class OrderService {
                 }
 
                 product.stock -= item.quantity;
-                product.status =
-                    product.stock <= 0
-                        ? InventoryStatus.OUT_OF_STOCK
-                        : product.stock < 5
-                          ? InventoryStatus.LOW_STOCK
-                          : InventoryStatus.AVAILABLE;
+                product.status = this.determineInventoryStatus(product.stock);
 
                 productsToSave.set(product.id, product);
                 continue;
@@ -1231,11 +1347,14 @@ export class OrderService {
         }
 
         if (variantsToSave.size) {
-            await this.variantRepository.save([...variantsToSave.values()]);
+            const savedVariants = await variantRepo.save([
+                ...variantsToSave.values(),
+            ]);
+            await this.syncVariantParentProducts(savedVariants, manager);
 
             const depletedVariantIds = [...variantsToSave.values()]
                 .filter((v) => v.stock <= 0)
-                .map((v) => String(v.id));
+                .map((v) => v.id);
 
             await Promise.allSettled(
                 depletedVariantIds.map((id) =>
@@ -1245,7 +1364,7 @@ export class OrderService {
         }
 
         if (productsToSave.size) {
-            await this.productRepository.save([...productsToSave.values()]);
+            await productRepo.save([...productsToSave.values()]);
 
             const depletedProductIds = [...productsToSave.values()]
                 .filter((p) => p.stock <= 0)
@@ -1285,6 +1404,7 @@ export class OrderService {
                 "shippingAddress",
                 "orderItems",
                 "orderItems.product",
+                "orderItems.variant",
                 "orderItems.vendor",
             ],
         });
@@ -1305,6 +1425,7 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.PAID;
             order.status = OrderStatus.CONFIRMED;
         } else {
+            await this.restoreStock(order.orderItems);
             order.paymentStatus = PaymentStatus.UNPAID;
             order.status = OrderStatus.CANCELLED;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
@@ -1325,10 +1446,7 @@ export class OrderService {
         }
 
         if (isSuccessful) {
-            // Clear cart after successful payment (currently clears only first item, can be extended)
-            await this.cartService.removeFromCart(order.orderedById, {
-                cartItemId: order.orderItems[0].id,
-            });
+            await this.cartService.clearCart(order.orderedById);
         }
 
         // Return updated order
@@ -1343,7 +1461,6 @@ export class OrderService {
      * @access Public (called when a user cancels payment)
      */
     async handlePaymentCancel(orderId: number): Promise<void> {
-        console.log("payment cancel");
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
@@ -1357,8 +1474,13 @@ export class OrderService {
             throw new APIError(404, "Order not found");
         }
 
-        // Restore stock
-        await this.restoreStock(order.orderItems);
+        const shouldRestoreStock =
+            order.status !== OrderStatus.CANCELLED &&
+            order.deliveryStatus !== DeliveryStatus.DELIVERY_FAILED;
+
+        if (shouldRestoreStock) {
+            await this.restoreStock(order.orderItems);
+        }
 
         // Mark payment as UNPAID
         order.paymentStatus = PaymentStatus.UNPAID;
@@ -1431,6 +1553,107 @@ export class OrderService {
         return {
             shippingFee,
             vendorIds: Array.from(vendorIdsSet),
+        };
+    }
+
+    private getShippingFeeForVendorDistrict(
+        userDistrict: string,
+        vendorDistrict: string,
+    ): number {
+        const sameDistrictGroup = ["Kathmandu", "Bhaktapur", "Lalitpur"];
+        const isSameCity =
+            userDistrict === vendorDistrict ||
+            (sameDistrictGroup.includes(userDistrict) &&
+                sameDistrictGroup.includes(vendorDistrict));
+
+        return isSameCity ? 100 : 200;
+    }
+
+    private buildVendorShippingBreakdown(order: Order) {
+        const userDistrict = order.shippingAddress?.district;
+        const chargedShipping = Number(order.shippingFee ?? 0);
+        const vendorMap = new Map<
+            number,
+            {
+                vendorId: number;
+                vendorName: string;
+                vendorDistrict: string;
+                itemCount: number;
+                itemSubtotal: number;
+                shippingFee: number;
+            }
+        >();
+
+        if (!userDistrict || !order.orderItems?.length) {
+            return {
+                total: chargedShipping,
+                vendors: [],
+            };
+        }
+
+        for (const item of order.orderItems) {
+            const vendor = item.vendor;
+            if (!vendor) continue;
+
+            const vendorDistrict = vendor.district?.name || "";
+            const existing = vendorMap.get(vendor.id);
+            const quantity = Number(item.quantity || 0);
+            const unitPrice = Number(item.price || 0);
+            const lineTotal = unitPrice * quantity;
+
+            if (existing) {
+                existing.itemCount += quantity;
+                existing.itemSubtotal += lineTotal;
+                continue;
+            }
+
+            vendorMap.set(vendor.id, {
+                vendorId: vendor.id,
+                vendorName: vendor.businessName || "Vendor",
+                vendorDistrict,
+                itemCount: quantity,
+                itemSubtotal: lineTotal,
+                shippingFee: vendorDistrict
+                    ? this.getShippingFeeForVendorDistrict(
+                          userDistrict,
+                          vendorDistrict,
+                      )
+                    : 0,
+            });
+        }
+
+        const vendors = [...vendorMap.values()];
+        const calculatedTotal = vendors.reduce(
+            (sum, vendor) => sum + vendor.shippingFee,
+            0,
+        );
+
+        if (
+            chargedShipping > 0 &&
+            calculatedTotal > 0 &&
+            calculatedTotal !== chargedShipping
+        ) {
+            let assignedTotal = 0;
+            vendors.forEach((vendor, index) => {
+                if (index === vendors.length - 1) {
+                    vendor.shippingFee = Number(
+                        (chargedShipping - assignedTotal).toFixed(2),
+                    );
+                    return;
+                }
+                vendor.shippingFee = Number(
+                    (
+                        (vendor.shippingFee / calculatedTotal) *
+                        chargedShipping
+                    ).toFixed(2),
+                );
+                assignedTotal += vendor.shippingFee;
+            });
+        }
+
+        return {
+            total: chargedShipping || calculatedTotal,
+            vendors,
         };
     }
 
@@ -1929,6 +2152,8 @@ export class OrderService {
                 "orderItems",
                 "orderItems.product",
                 "orderItems.variant",
+                "orderItems.vendor",
+                "orderItems.vendor.district",
                 "shippingAddress",
             ],
             order: { createdAt: "DESC" }, // Sort orders by creation date descending
