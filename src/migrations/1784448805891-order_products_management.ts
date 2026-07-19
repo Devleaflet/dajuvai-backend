@@ -1,0 +1,121 @@
+import { MigrationInterface, QueryRunner } from "typeorm";
+
+export class OrderProductsManagement1784448805891 implements MigrationInterface {
+    name = 'OrderProductsManagement1784448805891'
+
+    public async up(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "device_tokens" DROP CONSTRAINT "FK_device_tokens_user"`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" DROP CONSTRAINT "FK_device_tokens_vendor"`);
+        await queryRunner.query(`ALTER TABLE "placement_items" DROP CONSTRAINT "FK_placement_items_placement"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_device_tokens_is_active"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_device_tokens_user_active"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_device_tokens_user_device"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_device_tokens_vendor_active"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_device_tokens_vendor_device"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_notification_dispatches_created_at"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_notification_dispatches_sent_by"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_notification_dispatches_status"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_notification_dispatches_target_user"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_notification_dispatches_type"`);
+        await queryRunner.query(`ALTER TABLE "placements" DROP CONSTRAINT "CHK_placements_status"`);
+        await queryRunner.query(`ALTER TABLE "placement_items" DROP CONSTRAINT "CHK_placement_items_entity_type"`);
+        await queryRunner.query(`ALTER TABLE "variants" DROP COLUMN "productId"`);
+        await queryRunner.query(`ALTER TABLE "variants" ADD "stockReserved" integer NOT NULL DEFAULT '0'`);
+        await queryRunner.query(`ALTER TABLE "products" ADD "stockReserved" integer NOT NULL DEFAULT '0'`);
+        await queryRunner.query(`ALTER TABLE "order_items" ADD "productNameSnapshot" character varying`);
+        await queryRunner.query(`ALTER TABLE "order_items" ADD "skuSnapshot" character varying`);
+        await queryRunner.query(`ALTER TABLE "order_items" ADD "imageSnapshot" character varying`);
+        await queryRunner.query(`ALTER TABLE "order_items" ADD "unitPriceSnapshot" numeric(8,2)`);
+        await queryRunner.query(`ALTER TABLE "orders" ADD "orderNumber" character varying`);
+        await queryRunner.query(`UPDATE "orders" SET "orderNumber" = 'DJV-' || UPPER(SUBSTR(MD5(RANDOM()::TEXT), 1, 8)) || '-' || UPPER(SUBSTR(MD5(RANDOM()::TEXT), 1, 4))`);
+        await queryRunner.query(`ALTER TABLE "orders" ALTER COLUMN "orderNumber" SET NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "orders" ADD CONSTRAINT "UQ_59b0c3b34ea0fa5562342f24143" UNIQUE ("orderNumber")`);
+        await queryRunner.query(`ALTER TABLE "orders" ADD "idempotencyKey" character varying`);
+        await queryRunner.query(`ALTER TABLE "variants" DROP CONSTRAINT "FK_a9625f5484e6b6941d401ec101c"`);
+        await queryRunner.query(`DELETE FROM "variants" WHERE "product_id" IS NULL`);
+        await queryRunner.query(`ALTER TABLE "variants" ALTER COLUMN "product_id" SET NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "wishlist_items" DROP CONSTRAINT "FK_754a9ecec7627d432c2134dd00e"`);
+        await queryRunner.query(`ALTER TABLE "wishlist_items" ALTER COLUMN "wishlist_id" SET NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" DROP CONSTRAINT "UQ_device_tokens_fcm_token"`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ALTER COLUMN "lastSeenAt" SET DEFAULT now()`);
+        await queryRunner.query(`CREATE UNIQUE INDEX "IDX_1881ab845832ad82c4e45f5fe3" ON "orders" ("idempotencyKey") `);
+        await queryRunner.query(`CREATE UNIQUE INDEX "IDX_59b0c3b34ea0fa5562342f2414" ON "orders" ("orderNumber") `);
+        await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS "IDX_wishlists_user_unique" ON "wishlists" ("userId") `);
+        await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS "IDX_wishlist_items_variant_unique" ON "wishlist_items" ("wishlist_id", "productId", "variantId") WHERE "variantId" IS NOT NULL`);
+        await queryRunner.query(`CREATE UNIQUE INDEX IF NOT EXISTS "IDX_wishlist_items_product_unique" ON "wishlist_items" ("wishlist_id", "productId") WHERE "variantId" IS NULL`);
+        await queryRunner.query(`CREATE UNIQUE INDEX "IDX_1140451a0ae3de0d57e9be4878" ON "device_tokens" ("fcmToken") `);
+        await queryRunner.query(`CREATE INDEX "IDX_619d48b7cedf9a5e2397cbb13e" ON "device_tokens" ("isActive") `);
+        await queryRunner.query(`CREATE INDEX "IDX_2ca84048a1eec3c18b37c7285a" ON "device_tokens" ("vendorId", "deviceId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_0856542c3fa826e85cefb73b45" ON "device_tokens" ("userId", "deviceId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_adcc78f3acef0212d0f1e96dc8" ON "device_tokens" ("vendorId", "isActive") `);
+        await queryRunner.query(`CREATE INDEX "IDX_ab216c59aea2c95cd309288a97" ON "device_tokens" ("userId", "isActive") `);
+        await queryRunner.query(`CREATE INDEX "IDX_e37d6e013f2b8d388922162ac9" ON "notification_dispatches" ("type") `);
+        await queryRunner.query(`CREATE INDEX "IDX_6672a9ab2832fe26f47c519cb8" ON "notification_dispatches" ("targetUserId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_88e1ad0ade81623e8312f80f2c" ON "notification_dispatches" ("status") `);
+        await queryRunner.query(`CREATE INDEX "IDX_e5b0967de20ffbbd377b546ac0" ON "notification_dispatches" ("sentBy") `);
+        await queryRunner.query(`CREATE INDEX "IDX_59fd5444a36f9a1f30e4eca600" ON "notification_dispatches" ("createdAt") `);
+        await queryRunner.query(`ALTER TABLE "reviews" ADD CONSTRAINT "CHK_e87bbcfbe3ea0dda3d626010ee" CHECK ("rating" >= 1 AND "rating" <= 5)`);
+        await queryRunner.query(`ALTER TABLE "variants" ADD CONSTRAINT "FK_a9625f5484e6b6941d401ec101c" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "wishlist_items" ADD CONSTRAINT "FK_754a9ecec7627d432c2134dd00e" FOREIGN KEY ("wishlist_id") REFERENCES "wishlists"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ADD CONSTRAINT "FK_511957e3e8443429dc3fb00120c" FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ADD CONSTRAINT "FK_10cba45ef4e1078787dbe4a4a00" FOREIGN KEY ("vendorId") REFERENCES "vendor"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "placement_items" ADD CONSTRAINT "FK_d4370ae346f6471c849531539f4" FOREIGN KEY ("placementId") REFERENCES "placements"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+    }
+
+    public async down(queryRunner: QueryRunner): Promise<void> {
+        await queryRunner.query(`ALTER TABLE "placement_items" DROP CONSTRAINT "FK_d4370ae346f6471c849531539f4"`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" DROP CONSTRAINT "FK_10cba45ef4e1078787dbe4a4a00"`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" DROP CONSTRAINT "FK_511957e3e8443429dc3fb00120c"`);
+        await queryRunner.query(`ALTER TABLE "wishlist_items" DROP CONSTRAINT "FK_754a9ecec7627d432c2134dd00e"`);
+        await queryRunner.query(`ALTER TABLE "variants" DROP CONSTRAINT "FK_a9625f5484e6b6941d401ec101c"`);
+        await queryRunner.query(`ALTER TABLE "reviews" DROP CONSTRAINT "CHK_e87bbcfbe3ea0dda3d626010ee"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_59fd5444a36f9a1f30e4eca600"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_e5b0967de20ffbbd377b546ac0"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_88e1ad0ade81623e8312f80f2c"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_6672a9ab2832fe26f47c519cb8"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_e37d6e013f2b8d388922162ac9"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_ab216c59aea2c95cd309288a97"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_adcc78f3acef0212d0f1e96dc8"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_0856542c3fa826e85cefb73b45"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_2ca84048a1eec3c18b37c7285a"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_619d48b7cedf9a5e2397cbb13e"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_1140451a0ae3de0d57e9be4878"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_wishlist_items_product_unique"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_wishlist_items_variant_unique"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_wishlists_user_unique"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_59b0c3b34ea0fa5562342f2414"`);
+        await queryRunner.query(`DROP INDEX "public"."IDX_1881ab845832ad82c4e45f5fe3"`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ALTER COLUMN "lastSeenAt" SET DEFAULT CURRENT_TIMESTAMP`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ADD CONSTRAINT "UQ_device_tokens_fcm_token" UNIQUE ("fcmToken")`);
+        await queryRunner.query(`ALTER TABLE "wishlist_items" ALTER COLUMN "wishlist_id" DROP NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "wishlist_items" ADD CONSTRAINT "FK_754a9ecec7627d432c2134dd00e" FOREIGN KEY ("wishlist_id") REFERENCES "wishlists"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "variants" ALTER COLUMN "product_id" DROP NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "variants" ADD CONSTRAINT "FK_a9625f5484e6b6941d401ec101c" FOREIGN KEY ("product_id") REFERENCES "products"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "orders" DROP COLUMN "idempotencyKey"`);
+        await queryRunner.query(`ALTER TABLE "orders" DROP CONSTRAINT "UQ_59b0c3b34ea0fa5562342f24143"`);
+        await queryRunner.query(`ALTER TABLE "orders" DROP COLUMN "orderNumber"`);
+        await queryRunner.query(`ALTER TABLE "order_items" DROP COLUMN "unitPriceSnapshot"`);
+        await queryRunner.query(`ALTER TABLE "order_items" DROP COLUMN "imageSnapshot"`);
+        await queryRunner.query(`ALTER TABLE "order_items" DROP COLUMN "skuSnapshot"`);
+        await queryRunner.query(`ALTER TABLE "order_items" DROP COLUMN "productNameSnapshot"`);
+        await queryRunner.query(`ALTER TABLE "products" DROP COLUMN "stockReserved"`);
+        await queryRunner.query(`ALTER TABLE "variants" DROP COLUMN "stockReserved"`);
+        await queryRunner.query(`ALTER TABLE "variants" ADD "productId" character varying(255) NOT NULL`);
+        await queryRunner.query(`ALTER TABLE "placement_items" ADD CONSTRAINT "CHK_placement_items_entity_type" CHECK ((("entityType")::text = ANY ((ARRAY['category'::character varying, 'subcategory'::character varying])::text[])))`);
+        await queryRunner.query(`ALTER TABLE "placements" ADD CONSTRAINT "CHK_placements_status" CHECK (((status)::text = ANY ((ARRAY['active'::character varying, 'inactive'::character varying])::text[])))`);
+        await queryRunner.query(`CREATE INDEX "IDX_notification_dispatches_type" ON "notification_dispatches" ("type") `);
+        await queryRunner.query(`CREATE INDEX "IDX_notification_dispatches_target_user" ON "notification_dispatches" ("targetUserId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_notification_dispatches_status" ON "notification_dispatches" ("status") `);
+        await queryRunner.query(`CREATE INDEX "IDX_notification_dispatches_sent_by" ON "notification_dispatches" ("sentBy") `);
+        await queryRunner.query(`CREATE INDEX "IDX_notification_dispatches_created_at" ON "notification_dispatches" ("createdAt") `);
+        await queryRunner.query(`CREATE INDEX "IDX_device_tokens_vendor_device" ON "device_tokens" ("deviceId", "vendorId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_device_tokens_vendor_active" ON "device_tokens" ("isActive", "vendorId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_device_tokens_user_device" ON "device_tokens" ("deviceId", "userId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_device_tokens_user_active" ON "device_tokens" ("isActive", "userId") `);
+        await queryRunner.query(`CREATE INDEX "IDX_device_tokens_is_active" ON "device_tokens" ("isActive") `);
+        await queryRunner.query(`ALTER TABLE "placement_items" ADD CONSTRAINT "FK_placement_items_placement" FOREIGN KEY ("placementId") REFERENCES "placements"("id") ON DELETE CASCADE ON UPDATE CASCADE`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ADD CONSTRAINT "FK_device_tokens_vendor" FOREIGN KEY ("vendorId") REFERENCES "vendor"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+        await queryRunner.query(`ALTER TABLE "device_tokens" ADD CONSTRAINT "FK_device_tokens_user" FOREIGN KEY ("userId") REFERENCES "user"("id") ON DELETE CASCADE ON UPDATE NO ACTION`);
+    }
+
+}

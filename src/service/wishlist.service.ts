@@ -69,12 +69,12 @@ export class WishlistService {
             }
 
             // if variant provided
-            let variant: Variant;
+            let variant: Variant | null = null;
 
             if (variantId) {
                 variant = await variantRepository.findOne({
                     where: {
-                        id: variantId.toString(), productId: productId.toString()
+                        id: variantId, productId
                     }
                 })
 
@@ -99,20 +99,30 @@ export class WishlistService {
             }
 
             // Check if product is already in wishlist to prevent duplicates
-            const exists = wishlist.items.some((item) => item.productId === productId && item.variantId === (variantId || null));
-            if (exists) {
-                throw new APIError(400, 'Product already in wishlist');
+            const existingItem = wishlist.items.find(
+                (item) =>
+                    item.productId === productId &&
+                    item.variantId === (variantId || null),
+            );
+
+            if (existingItem) {
+                return wishlist;
             }
 
             // Create wishlist item and associate with wishlist and product
             const wishlistItem = wishlistItemRepository.create({
                 wishlist,
+                wishlistId: wishlist.id,
                 product,
                 productId,
                 variant: variant || null,
                 variantId: variantId || null
             });
-            await wishlistItemRepository.save(wishlistItem);
+            try {
+                await wishlistItemRepository.save(wishlistItem);
+            } catch (error: any) {
+                if (error?.code !== "23505") throw error;
+            }
 
             // Reload wishlist to get updated items relation
             wishlist = await wishlistRepository.findOne({
@@ -158,13 +168,13 @@ export class WishlistService {
                 relations: ['items', 'items.product', 'items.variant'],
             });
             if (!wishlist) {
-                throw new APIError(404, 'Wishlist not found');
+                return wishlistRepository.create({ userId, items: [] });
             }
 
             // Find the item to remove
             const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
             if (!wishlistItem) {
-                throw new APIError(404, 'Wishlist item not found');
+                return wishlist;
             }
 
             // Delete the item
@@ -173,12 +183,6 @@ export class WishlistService {
             // Remove it from the local array
             wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
 
-
-            wishlist.items = wishlist.items.filter((item) => {
-                if (!item.product) return false;
-                if (item.variant) return item.variant.stock > 0;
-                return item.product.stock && item.product.stock > 0;
-            });
 
             return wishlist;
         });
@@ -201,18 +205,9 @@ export class WishlistService {
             return null;
         }
 
-        // Filter out wishlist items where product is missing or stock is zero
+        // Keep wishlist entries visible even when products become unavailable.
         wishlist.items = wishlist.items.filter((item) => {
-            // Keep if product exists
-            if (!item.product) return false;
-
-            // If product has variants, check variant stock
-            if (item.variant) {
-                return item.variant.stock > 0;
-            }
-
-            // If product has no variants, check product stock
-            return item.product.stock && item.product.stock > 0;
+            return Boolean(item.product);
         });
 
 
@@ -259,13 +254,6 @@ export class WishlistService {
         // Remove from wishlist
         wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
         await this.wishlistItemRepository.delete(wishlistItemId);
-
-        // Optional: filter out items with no stock
-        wishlist.items = wishlist.items.filter((item) => {
-            if (!item.product) return false;
-            if (item.variant) return item.variant.stock > 0;
-            return item.product.stock && item.product.stock > 0;
-        });
 
         return wishlist;
     }

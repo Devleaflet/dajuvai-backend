@@ -15,6 +15,8 @@ import { Deal } from "../entities/deal.entity";
 import { Address } from "../entities/address.entity";
 import { Order } from "../entities/order.entity";
 import { OrderItem } from "../entities/orderItems.entity";
+import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
+import { OrderStatusHistory } from "../entities/orderStatusHistory.entity";
 import { Banner } from "../entities/banner.entity";
 import { Contact } from "../entities/contact.entity";
 import { District } from "../entities/district.entity";
@@ -90,6 +92,8 @@ const AppDataSource = new DataSource({
         Address,
         Order,
         OrderItem,
+        OrderVendorShipping,
+        OrderStatusHistory,
         Banner,
         Contact,
         District,

@@ -12,10 +12,12 @@ import {
 import { User } from "./user.entity";
 import { Address } from "./address.entity";
 import { OrderItem } from "./orderItems.entity";
+import { OrderVendorShipping } from "./orderVendorShipping.entity";
 
 export enum OrderStatus {
-    CONFIRMED = "CONFIRMED",
     PENDING = "PENDING",
+    CONFIRMED = "CONFIRMED",
+    PROCESSING = "PROCESSING",
     DELAYED = "DELAYED",
     SHIPPED = "SHIPPED",
     DELIVERED = "DELIVERED",
@@ -51,9 +53,17 @@ export enum DeliveryStatus {
 @Index(["orderedById", "status"])
 @Index(["paymentStatus"])
 @Index(["createdAt"])
+@Index(["orderNumber"], { unique: true })
+@Index(["idempotencyKey"], { unique: true })
 export class Order {
     @PrimaryGeneratedColumn()
     id: number;
+
+    @Column({ unique: true })
+    orderNumber: string;
+
+    @Column({ nullable: true })
+    idempotencyKey?: string;
 
     @ManyToOne(() => User, (user) => user.orders, { onDelete: "CASCADE" })
     @JoinColumn({ name: "orderedById" })
@@ -67,6 +77,24 @@ export class Order {
 
     @Column("decimal", { precision: 8, scale: 2 })
     shippingFee: number;
+
+    @Column("decimal", { precision: 10, scale: 2, nullable: true })
+    merchandiseSubtotal: number;
+
+    @Column("decimal", { precision: 10, scale: 2, default: 0 })
+    discountTotal: number;
+
+    @Column("decimal", { precision: 8, scale: 2, default: 0 })
+    taxTotal: number;
+
+    // Immutable copy of the shipping address at order time (province/district/
+    // city/localAddress/landmark/districtId) so a later edit to the user's
+    // saved address can never change a historical order's shipping calc.
+    @Column({ type: "jsonb", nullable: true })
+    shippingAddressSnapshot: Record<string, unknown> | null;
+
+    @OneToMany(() => OrderVendorShipping, (vs) => vs.order, { cascade: true })
+    vendorShippings: OrderVendorShipping[];
 
     @Column({ nullable: true })
     isBuyNow?: boolean;

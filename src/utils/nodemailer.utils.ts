@@ -12,6 +12,75 @@ const transporter = nodemailer.createTransport({
     },
 });
 
+const escapeHtml = (value: unknown): string =>
+    String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
+
+const getOrderStatusEmailMeta = (status: string) => {
+    const normalized = status.toUpperCase();
+    const map: Record<string, { label: string; color: string; bg: string; copy: string }> = {
+        PENDING: {
+            label: "Pending",
+            color: "#92400e",
+            bg: "#fef3c7",
+            copy: "We have received your order and are waiting for confirmation.",
+        },
+        CONFIRMED: {
+            label: "Confirmed",
+            color: "#1d4ed8",
+            bg: "#dbeafe",
+            copy: "Your order is confirmed and will move into preparation soon.",
+        },
+        PROCESSING: {
+            label: "Processing",
+            color: "#6d28d9",
+            bg: "#ede9fe",
+            copy: "Your order is being prepared by the seller.",
+        },
+        DELAYED: {
+            label: "Delayed",
+            color: "#be123c",
+            bg: "#ffe4e6",
+            copy: "Your order is taking longer than expected. We will keep you updated.",
+        },
+        SHIPPED: {
+            label: "Shipped",
+            color: "#0369a1",
+            bg: "#e0f2fe",
+            copy: "Your order has been handed to delivery and is on the way.",
+        },
+        DELIVERED: {
+            label: "Delivered",
+            color: "#047857",
+            bg: "#d1fae5",
+            copy: "Your order has been delivered. Thank you for shopping with DajuVai.",
+        },
+        CANCELLED: {
+            label: "Cancelled",
+            color: "#b91c1c",
+            bg: "#fee2e2",
+            copy: "Your order has been cancelled. Contact support if this looks wrong.",
+        },
+        RETURNED: {
+            label: "Returned",
+            color: "#854d0e",
+            bg: "#fef9c3",
+            copy: "Your return has been recorded for this order.",
+        },
+    };
+
+    return map[normalized] ?? {
+        label: normalized,
+        color: "#334155",
+        bg: "#e2e8f0",
+        copy: "Your order status has changed. View your account for details.",
+    };
+};
+
 /**
  * Sends an email when the contact form is submitted.
  * @param dto - ContactInput object validated by Zod with form data (name, email, subject, message)
@@ -96,6 +165,11 @@ export const sendCustomerOrderEmail = async (
     userDistrict?: string | null,
     subject = "Your Order Has Been Placed",
 ) => {
+    // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
+    // as strings — coerce here or `.toFixed()` throws and `+` silently
+    // string-concatenates instead of adding.
+    totalPrice = Number(totalPrice) || 0;
+    shippingFee = Number(shippingFee) || 0;
     const OrderTotal = totalPrice + shippingFee;
 
     // Group items by vendorDistrict
@@ -274,8 +348,8 @@ export const sendVendorOrderEmail = async (
     to: string,
     paymentMethod: string,
     orderId: number,
-    totalPrice: number,
-    shippingFee: number,
+    // Shipping fee is not vendor revenue and is intentionally not shown here —
+    // customer/admin emails carry the full shipping breakdown instead.
     products: VendorOrderItem[],
     customer: CustomerInfo,
     subject = "New Order Received",
@@ -356,7 +430,7 @@ export const sendVendorOrderEmail = async (
         </tbody>
       </table>
 
-      <!-- Totals -->
+      <!-- Totals (vendor payout basis — shipping is not vendor revenue) -->
       <table style="width: 100%; margin-bottom: 20px; font-size: 15px;">
         
         <tr>
@@ -382,7 +456,7 @@ export const sendVendorOrderEmail = async (
     });
 };
 
-export const sendOrderStatusEmail = async (
+const sendLegacyOrderStatusEmail = async (
     to: string,
     orderId: number,
     status: string,
@@ -420,6 +494,64 @@ export const sendOrderStatusEmail = async (
     };
 
     await transporter.sendMail(mailOptions);
+};
+
+export const sendOrderStatusEmail = async (
+    to: string,
+    orderId: number,
+    status: string,
+    subject = "Your Order Status Has Been Updated",
+) => {
+    const statusMeta = getOrderStatusEmailMeta(status);
+    const orderLabel = `#${orderId}`;
+    const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/profile`;
+
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: subject || `Order ${orderLabel} is now ${statusMeta.label}`,
+        html: `
+            <div style="margin:0;padding:0;background:#f6f7fb;font-family:Inter,Arial,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f6f7fb;">
+                    <tr>
+                        <td align="center" style="padding:32px 14px;">
+                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;border-collapse:collapse;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,0.08);">
+                                <tr>
+                                    <td style="padding:24px 28px;background:#111827;color:#ffffff;">
+                                        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fb923c;">DajuVai order update</div>
+                                        <h1 style="margin:8px 0 0;font-size:24px;line-height:1.25;font-weight:800;color:#ffffff;">Order ${escapeHtml(orderLabel)} is now ${escapeHtml(statusMeta.label)}</h1>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:28px;">
+                                        <p style="margin:0 0 18px;font-size:16px;line-height:1.6;color:#374151;">${escapeHtml(statusMeta.copy)}</p>
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:0 0 22px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;">
+                                            <tr>
+                                                <td style="padding:16px 18px;">
+                                                    <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Order number</div>
+                                                    <div style="margin-top:5px;font-size:18px;font-weight:800;color:#111827;">${escapeHtml(orderLabel)}</div>
+                                                </td>
+                                                <td align="right" style="padding:16px 18px;">
+                                                    <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:${statusMeta.bg};color:${statusMeta.color};font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(statusMeta.label)}</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+                                        <a href="${escapeHtml(accountUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#f97316;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;">View order details</a>
+                                        <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#64748b;">If you did not expect this update, contact DajuVai support with order ${escapeHtml(orderLabel)}.</p>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #e5e7eb;color:#64748b;font-size:12px;line-height:1.5;">
+                                        This is an automated message from DajuVai. Please do not reply to this email.
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        `,
+    });
 };
 
 export const userOrderCancelledEmail = (userName: string, orderId: number) => `

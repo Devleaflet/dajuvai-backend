@@ -18,11 +18,12 @@ export interface IOrderCreateRequest {
     instrumentName?: string;
     promoCode?: string;
     fullName?: string;
+    idempotencyKey?: string;
 
     // buy now 
     isBuyNow?: boolean;   
     productId?: number;   
-    variantId?: string;   
+    variantId?: number;   
     quantity?: number;    
 }
 
@@ -51,6 +52,15 @@ export interface IVendorOrderResponse {
 
 export interface IUpdateOrderStatusRequest {
     status: OrderStatus;
+    expectedCurrentStatus?: OrderStatus;
+    reason?: string;
+    note?: string;
+}
+
+export interface IUpdateVendorOrderStatusRequest {
+    status: import('../entities/orderVendorShipping.entity').VendorOrderStatus;
+    reason?: string;
+    note?: string;
 }
 
 export interface IOrderResponse {
@@ -71,4 +81,38 @@ export interface IOrderResponse {
 
 export interface ISearchOrdersRequest {
     orderId?: string; // For searching by order ID
+}
+
+export type AdminOrderSort =
+    | "newest"
+    | "oldest"
+    | "highest_total"
+    | "lowest_total"
+    | "recently_updated"
+    | "order_number";
+
+export interface IAdminOrderQueryParams {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: OrderStatus;
+    paymentStatus?: PaymentStatus;
+    vendorId?: number;
+    startDate?: string;
+    endDate?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    sort?: AdminOrderSort;
+}
+
+export interface IPaginatedResult<T> {
+    items: T[];
+    pagination: {
+        page: number;
+        limit: number;
+        totalItems: number;
+        totalPages: number;
+        hasNextPage: boolean;
+        hasPreviousPage: boolean;
+    };
 }

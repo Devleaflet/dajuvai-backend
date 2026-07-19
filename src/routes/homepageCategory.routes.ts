@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { HomepageCategoryController } from "../controllers/homepageCategory.controller";
+import { authMiddleware, isAdmin } from "../middlewares/auth.middleware";
 
 const homepageCategoryRoutes = Router();
 const homepageCategoryController = new HomepageCategoryController();
@@ -94,7 +95,7 @@ const homepageCategoryController = new HomepageCategoryController();
  *       500:
  *         description: Internal server error
  */
-homepageCategoryRoutes.post("/", homepageCategoryController.setHomepageCategories.bind(homepageCategoryController));
+homepageCategoryRoutes.post("/", authMiddleware, isAdmin, homepageCategoryController.setHomepageCategories.bind(homepageCategoryController));
 
 /**
  * @swagger
