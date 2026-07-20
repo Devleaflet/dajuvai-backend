@@ -462,34 +462,34 @@ export const sendVendorOrderEmail = async (
     subject = "New Order Received",
 ) => {
     // Generate HTML rows for each product
-    const productList = products
-        .map((item) => {
-            let variantAttributes = "";
-            if (item.variantAttributes) {
-                variantAttributes =
-                    " (" +
-                    Object.entries(item.variantAttributes)
-                        .map(([key, val]) => `${key}: ${val}`)
-                        .join(", ") +
-                    ")";
-            }
-
-            return `
-      <tr>
-        <td style="padding: 8px; border: 1px solid #ddd;">${item.name}${variantAttributes}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.sku || "-"}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: center;">${item.quantity}</td>
-        <td style="padding: 8px; border: 1px solid #ddd; text-align: right;">Rs ${item.price}</td>
-      </tr>
-    `;
-        })
-        .join("");
+    const rows = products.map((item) => {
+        return `
+              <tr>
+                <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8;">
+                  <strong style="color:#2b2b2b;">${item.name}</strong>${item.sku ? ` <span style="color:#999; font-size:12px;">(${item.sku})</span>` : ""}
+                  ${
+                      item.variantAttributes
+                          ? `<br><span style="color:#888; font-size:12px;">${Object.entries(
+                                item.variantAttributes,
+                            )
+                                .map(([key, val]) => `${key}: ${val}`)
+                                .join(", ")}</span>`
+                          : ""
+                  }
+                </td>
+                <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#444;">${item.quantity}</td>
+                <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">Rs ${item.price}</td>
+                <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:600; color:#2b2b2b;">Rs ${(
+                    item.price * item.quantity
+                ).toFixed(2)}</td>
+              </tr>
+            `;
+    });
 
     const vendorTotal = products.reduce(
         (sum, item) => sum + item.price * item.quantity,
         0,
     );
-    // const orderTotal = vendorTotal + shippingFee;
 
     // Combine address fields into a single string
     const fullAddress = [
@@ -501,66 +501,119 @@ export const sendVendorOrderEmail = async (
         .filter(Boolean)
         .join(", ");
 
-    // Email HTML
-    const mailHtml = `
-    <div style="font-family: Arial, sans-serif; max-width: 650px; margin: auto; padding: 20px; background: #ffffff; border-radius: 8px; border: 1px solid #e0e0e0;">
-      
-      <!-- Header -->
-      <h2 style="color: #333; text-align: center;">🛒 New Order Received</h2>
-      <p style="text-align: center; font-size: 16px;">
-        Order <strong>#${orderNumber}</strong> has been placed. Please review and fulfill it promptly.
-      </p>
+    const totalUnits = products.reduce((sum, item) => sum + item.quantity, 0);
 
-      <!-- Customer Info -->
-      <div style="margin-bottom: 20px;">
-        <h3>Customer Details</h3>
-        <p><strong>Name:</strong> ${customer.name}</p>
-        ${customer.email ? `<p><strong>Email:</strong> ${customer.email}</p>` : ""}
-        <p><strong>Phone:</strong> ${customer.phone}</p>
-        ${fullAddress ? `<p><strong>Address:</strong> ${fullAddress}</p>` : ""}
-        <p><strong>Payment Method:</strong> ${paymentMethod}</p>
-      </div>
-
-      <!-- Products Table -->
-      <h3>Order Items</h3>
-      <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px;">
-        <thead>
-          <tr style="background-color: #f5f5f5;">
-            <th style="padding: 8px; border: 1px solid #ddd;">Product</th>
-            <th style="padding: 8px; border: 1px solid #ddd;">SKU</th>
-            <th style="padding: 8px; border: 1px solid #ddd;">Qty</th>
-            <th style="padding: 8px; border: 1px solid #ddd; text-align: right;">Price</th>
-          </tr>
-        </thead>
-        <tbody>
-          ${productList}
-        </tbody>
-      </table>
-
-      <!-- Totals (vendor payout basis — shipping is not vendor revenue) -->
-      <table style="width: 100%; margin-bottom: 20px; font-size: 15px;">
-        
-        <tr>
-          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Total:</strong></td>
-          <td style="text-align: right; padding: 8px 0 0; border-top: 1px solid #eee; font-size: 16px;"><strong>Rs ${vendorTotal.toFixed(2)}</strong></td>
-        </tr>
-      </table>
-
-      <!-- Footer -->
-      <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
-      <p style="font-size: 13px; text-align: center; color: #666;">
-        This is an automated notification. Contact support if there are any issues with this order.
-      </p>
-    </div>
-  `;
-
-    // Send email
-    await transporter.sendMail({
+    const mailOptions = {
         from: `<${config.USER_EMAIL}>`,
         to,
         subject,
-        html: mailHtml,
-    });
+        html: `
+      <body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
+        <table width="100%" cellpadding="0" cellspacing="0" border="0">
+          <tr>
+            <td align="center" style="padding:24px 12px;">
+              <table width="700" cellpadding="0" cellspacing="0" border="0" style="max-width:95%; background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+
+                <!-- Header -->
+                <tr>
+                  <td style="background: linear-gradient(135deg, #ff7a1a, #ff9a3d); padding:28px 30px; text-align:center;">
+                    <h1 style="color:#ffffff; margin:0; font-size:22px; letter-spacing:0.4px;">New Order Received</h1>
+                    <p style="color:#fff2e6; font-size:14px; margin:8px 0 0;">
+                      Order <strong>#${orderNumber}</strong> is awaiting fulfillment
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Body -->
+                <tr>
+                  <td style="padding:30px;">
+                    <p style="font-size:15px; color:#333; margin:0 0 24px;">
+                      You've received a new order on your store. Please review the details below and prepare the items for dispatch as soon as possible to keep delivery times on track.
+                    </p>
+
+                    <!-- Customer Details -->
+                    <h3 style="margin:0 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Customer Details</h3>
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:24px; border:1px solid #f0e3d8; border-radius:8px; overflow:hidden;">
+                      <tbody>
+                        <tr>
+                          <td style="padding:10px 14px; width:140px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Name</td>
+                          <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${customer.name}</td>
+                        </tr>
+                        ${
+                            customer.email
+                                ? `<tr>
+                          <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Email</td>
+                          <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${customer.email}</td>
+                        </tr>`
+                                : ""
+                        }
+                        <tr>
+                          <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Phone</td>
+                          <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${customer.phone}</td>
+                        </tr>
+                        ${
+                            fullAddress
+                                ? `<tr>
+                          <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Address</td>
+                          <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${fullAddress}</td>
+                        </tr>`
+                                : ""
+                        }
+                        <tr>
+                          <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa;">Payment Method</td>
+                          <td style="padding:10px 14px; color:#2b2b2b;">${paymentMethod}</td>
+                        </tr>
+                      </tbody>
+                    </table>
+
+                    <!-- Order Items -->
+                    <h3 style="margin:0 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Order Items</h3>
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:24px; border:1px solid #f0e3d8; border-radius:8px; overflow:hidden;">
+                      <tr style="background-color:#fafafa;">
+                        <th style="padding:10px; text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Product</th>
+                        <th style="padding:10px; text-align:center; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Qty</th>
+                        <th style="padding:10px; text-align:right; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Price</th>
+                        <th style="padding:10px; text-align:right; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Subtotal</th>
+                      </tr>
+                      <tbody>
+                        ${rows.join("")}
+                      </tbody>
+                      <tfoot>
+                        <tr>
+                          <td colspan="3" style="padding:12px 10px; text-align:right; font-weight:700; color:#2b2b2b; background-color:#fafafa;">Total (${totalUnits} item${totalUnits === 1 ? "" : "s"}):</td>
+                          <td style="padding:12px 10px; text-align:right; font-weight:700; color:#c05a00; background-color:#fafafa;">Rs ${vendorTotal.toFixed(2)}</td>
+                        </tr>
+                      </tfoot>
+                    </table>
+
+                    <p style="font-size:13px; color:#888; margin:0;">
+                      Note: Above total amount does not include shipping fees. Shipping fees are handled separately.
+                    </p>
+                  </td>
+                </tr>
+
+                <!-- Info strip -->
+                <tr>
+                  <td style="padding:18px 30px; background-color:#fff4e9; font-size:14px; color:#7a4a1f;">
+                    Please pack and hand over this order for pickup within your standard processing window. Log in to your vendor dashboard to print the packing slip and update the order status.
+                  </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                  <td style="padding:20px 30px; border-top:1px solid #eee; font-size:12px; color:#999; text-align:center;">
+                    This is an automated notification sent to registered vendors. If you believe there is error in this order, please contact our vendor support team.
+                  </td>
+                </tr>
+              </table>
+            </td>
+          </tr>
+        </table>
+      </body>
+    `,
+    };
+
+    await transporter.sendMail(mailOptions);
 };
 
 const sendLegacyOrderStatusEmail = async (
@@ -618,37 +671,54 @@ export const sendOrderStatusEmail = async (
         to,
         subject: subject || `Order ${orderLabel} is now ${statusMeta.label}`,
         html: `
-            <div style="margin:0;padding:0;background:#f6f7fb;font-family:Inter,Arial,sans-serif;color:#111827;">
-                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f6f7fb;">
+            <div style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f4f4f4;">
                     <tr>
-                        <td align="center" style="padding:32px 14px;">
-                            <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="max-width:620px;border-collapse:collapse;background:#ffffff;border:1px solid #e5e7eb;border-radius:14px;overflow:hidden;box-shadow:0 18px 45px rgba(15,23,42,0.08);">
+                        <td align="center" style="padding:24px 12px;">
+                            <table role="presentation" width="700" cellspacing="0" cellpadding="0" style="max-width:95%;border-collapse:collapse;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+
+                                <!-- Header -->
                                 <tr>
-                                    <td style="padding:24px 28px;background:#111827;color:#ffffff;">
-                                        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fb923c;">DajuVai order update</div>
-                                        <h1 style="margin:8px 0 0;font-size:24px;line-height:1.25;font-weight:800;color:#ffffff;">Order ${escapeHtml(orderLabel)} is now ${escapeHtml(statusMeta.label)}</h1>
+                                    <td style="background:linear-gradient(135deg, #ff7a1a, #ff9a3d);padding:28px 30px;text-align:center;">
+                                        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fff2e6;">DajuVai Order Update</div>
+                                        <h1 style="margin:8px 0 0;color:#ffffff;font-size:22px;letter-spacing:0.4px;">Your order is ${escapeHtml(statusMeta.label)}</h1>
                                     </td>
                                 </tr>
+
+                                <!-- Body -->
                                 <tr>
-                                    <td style="padding:28px;">
-                                        <p style="margin:0 0 18px;font-size:16px;line-height:1.6;color:#374151;">${escapeHtml(statusMeta.copy)}</p>
-                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin:0 0 22px;background:#f8fafc;border:1px solid #e5e7eb;border-radius:10px;">
-                                            <tr>
-                                                <td style="padding:16px 18px;">
-                                                    <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#64748b;">Order number</div>
-                                                    <div style="margin-top:5px;font-size:18px;font-weight:800;color:#111827;">${escapeHtml(orderLabel)}</div>
+                                    <td style="padding:30px;">
+                                        <p style="font-size:15px;color:#333;margin:0 0 24px;">${escapeHtml(statusMeta.copy)}</p>
+
+                                        <!-- Order Status -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-bottom:24px;border:1px solid #f0e3d8;border-radius:8px;overflow:hidden;">
+                                            <tr style="background-color:#fafafa;">
+                                                <td style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
+                                                    <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#888;">Order Number</div>
+                                                    <div style="margin-top:5px;font-size:18px;font-weight:800;color:#2b2b2b;">#${escapeHtml(orderLabel)}</div>
                                                 </td>
-                                                <td align="right" style="padding:16px 18px;">
+                                                <td align="right" style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
                                                     <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:${statusMeta.bg};color:${statusMeta.color};font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(statusMeta.label)}</span>
                                                 </td>
                                             </tr>
                                         </table>
-                                        <a href="${escapeHtml(accountUrl)}" style="display:inline-block;padding:12px 18px;border-radius:8px;background:#f97316;color:#ffffff;text-decoration:none;font-size:14px;font-weight:800;">View order details</a>
-                                        <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#64748b;">If you did not expect this update, contact DajuVai support with order ${escapeHtml(orderLabel)}.</p>
+
+                                        <a href="${escapeHtml(accountUrl)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#ff7a1a;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">View Order Details</a>
+
+                                        <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#888;">If you did not expect this update, please contact DajuVai support and reference order #${escapeHtml(orderLabel)}.</p>
                                     </td>
                                 </tr>
+
+                                <!-- Info strip -->
                                 <tr>
-                                    <td style="padding:18px 28px;background:#f8fafc;border-top:1px solid #e5e7eb;color:#64748b;font-size:12px;line-height:1.5;">
+                                    <td style="padding:18px 30px;background-color:#fff4e9;font-size:14px;color:#7a4a1f;">
+                                        We'll keep you posted as your order moves through the next stages. You can track its progress anytime from your account.
+                                    </td>
+                                </tr>
+
+                                <!-- Footer -->
+                                <tr>
+                                    <td style="padding:20px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">
                                         This is an automated message from DajuVai. Please do not reply to this email.
                                     </td>
                                 </tr>
@@ -762,7 +832,7 @@ export const sendVendorRejectedEmail = async (
       </p>
 
       <p>
-        Thank you for your interest in becoming a vendor on <strong>Dajuvai</strong>. After reviewing your application, we regret to inform you that it has not been approved at this time.
+        Thank you for your interest in becoming a vendor on <strong>Dajuvai</strong>. After reviewing your application, we regret to inform you that your application has not been approved at this time.
       </p>
 
       <div style="background:#fef2f2;border-left:4px solid #dc2626;padding:14px 16px;margin:24px 0;">
