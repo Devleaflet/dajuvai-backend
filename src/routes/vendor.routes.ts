@@ -1396,6 +1396,69 @@ router.put(
 
 /**
  * @swagger
+ * /api/vendors/reject/{id}:
+ *   put:
+ *     summary: Reject a vendor
+ *     description: Rejects a verified vendor. Only accessible by admin or staff.
+ *     tags:
+ *       - Vendors
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the vendor to reject
+ *     responses:
+ *       200:
+ *         description: Vendor successfully rejected
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor Rejected"
+ *       400:
+ *         description: Vendor rejection failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor rejection failed"
+ *       503:
+ *         description: Service temporarily unavailable
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor update service temporarily unavailable"
+ */
+router.put(
+    "/reject/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    vendorController.rejectVendor.bind(vendorController),
+);
+
+/**
+ * @swagger
  * /api/vendors/{id}:
  *   delete:
  *     summary: Delete a vendor by ID

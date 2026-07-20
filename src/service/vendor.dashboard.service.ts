@@ -9,6 +9,7 @@ export class VendorDashBoardService {
     // Repositories for DB operations on Products and OrderItems
     private productRepository = AppDataSource.getRepository(Product);
     private orderItemRepository = AppDataSource.getRepository(OrderItem);
+    private orderRepository = AppDataSource.getRepository(Order);
 
     /**
      * Get key dashboard stats for a vendor:
@@ -25,32 +26,37 @@ export class VendorDashBoardService {
     async getStats(vendorId: number) {
         // Count products linked to vendorId
         const totalProducts = await this.productRepository.count({
-            where: { vendorId }
+            where: { vendorId },
         });
 
         // Count order items for this vendor
         const totalOrders = await this.orderItemRepository.count({
-            where: { vendorId }
+            where: { vendorId },
         });
 
         // Calculate total sales by summing price * quantity
         // Raw result is an object, convert to number; fallback 0
         const totalSalesRaw = await this.orderItemRepository
-            .createQueryBuilder('orderItem')
-            .innerJoin('orderItem.order', 'order')
-            .select('SUM(orderItem.price * orderItem.quantity)', 'totalSales')
-            .where('orderItem.vendorId = :vendorId', { vendorId })
-            .andWhere('order.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
+            .createQueryBuilder("orderItem")
+            .innerJoin("orderItem.order", "order")
+            .select("SUM(orderItem.price * orderItem.quantity)", "totalSales")
+            .where("orderItem.vendorId = :vendorId", { vendorId })
+            .andWhere("order.paymentStatus = :paymentStatus", {
+                paymentStatus: "PAID",
+            })
             .getRawOne();
 
         const totalSales = Number(totalSalesRaw.totalSales) || 0;
 
         // Count pending orders by joining order entity and filtering status
-        const totalPendingOrders = await this.orderItemRepository
-            .createQueryBuilder('orderItem')
-            .leftJoin('orderItem.order', 'order')
-            .where('orderItem.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.PENDING })
+        const pendingOrdersResult = await this.orderItemRepository
+            .createQueryBuilder("orderItem")
+            .innerJoin("orderItem.order", "order")
+            .where("orderItem.vendorId = :vendorId", { vendorId })
+            .andWhere("order.status IN (:...statuses)", {
+                statuses: [OrderStatus.PENDING, OrderStatus.CONFIRMED],
+            })
+            .distinct(true)
             .getCount();
 
         // Return all stats in one object
@@ -58,7 +64,7 @@ export class VendorDashBoardService {
             totalProducts,
             totalOrders,
             totalSales,
-            totalPendingOrders,
+            totalPendingOrders: pendingOrdersResult,
         };
     }
 
@@ -78,9 +84,9 @@ export class VendorDashBoardService {
      */
     async getVendorOrders(vendorId: number) {
         const orderItems = await this.orderItemRepository
-            .createQueryBuilder('orderItem')
-            .leftJoin('orderItem.product', 'product')
-            .leftJoin('orderItem.order', 'order')
+            .createQueryBuilder("orderItem")
+            .leftJoin("orderItem.product", "product")
+            .leftJoin("orderItem.order", "order")
             .select([
                 'product.name AS "productName"',
                 'orderItem.quantity AS "quantity"',
@@ -89,12 +95,12 @@ export class VendorDashBoardService {
                 'order.status AS "orderStatus"',
                 'order.createdAt AS "orderedAt"',
             ])
-            .where('orderItem.vendorId = :vendorId', { vendorId })
-            .orderBy('order.createdAt', 'DESC')
+            .where("orderItem.vendorId = :vendorId", { vendorId })
+            .orderBy("order.createdAt", "DESC")
             .getRawMany();
 
         // Convert raw data strings to numbers and return neat objects
-        return orderItems.map(item => ({
+        return orderItems.map((item) => ({
             productName: item.productName,
             quantity: Number(item.quantity),
             price: Number(item.price),
@@ -104,7 +110,11 @@ export class VendorDashBoardService {
         }));
     }
 
-    async getTotalSales(vendorId: number, startDate?: string, endDate?: string) {
+    async getTotalSales(
+        vendorId: number,
+        startDate?: string,
+        endDate?: string,
+    ) {
         const query = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder("oi")
             .innerJoin(Order, "o", "o.id = oi.orderId")
@@ -120,7 +130,9 @@ export class VendorDashBoardService {
                 end: new Date(endDate),
             });
         } else if (startDate) {
-            query.andWhere("o.createdAt >= :start", { start: new Date(startDate) });
+            query.andWhere("o.createdAt >= :start", {
+                start: new Date(startDate),
+            });
         } else if (endDate) {
             query.andWhere("o.createdAt <= :end", { end: new Date(endDate) });
         }
@@ -131,7 +143,6 @@ export class VendorDashBoardService {
             vendorId,
             totalSales: parseFloat(result.totalSales),
         };
-
     }
 
     async getLowStockProducts(vendorId: number, page: number) {
@@ -155,7 +166,12 @@ export class VendorDashBoardService {
             .where("vendor.id = :vendorId", { vendorId })
             .andWhere(
                 "(p.status IN (:...statuses) OR v.status IN (:...statuses))",
-                { statuses: [InventoryStatus.LOW_STOCK, InventoryStatus.OUT_OF_STOCK] }
+                {
+                    statuses: [
+                        InventoryStatus.LOW_STOCK,
+                        InventoryStatus.OUT_OF_STOCK,
+                    ],
+                },
             )
             .groupBy("p.id")
             .addGroupBy("vendor.id")
@@ -178,8 +194,12 @@ export class VendorDashBoardService {
         };
     }
 
-
-    async getTopProductsByVendor(vendorId: number, limit = 5, startDate?: string, endDate?: string) {
+    async getTopProductsByVendor(
+        vendorId: number,
+        limit = 5,
+        startDate?: string,
+        endDate?: string,
+    ) {
         const qb = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder("oi")
             .select("p.id", "productId")
@@ -192,7 +212,10 @@ export class VendorDashBoardService {
             .andWhere("o.paymentStatus = :status", { status: "PAID" });
 
         if (startDate && endDate) {
-            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", {
+                startDate,
+                endDate,
+            });
         }
 
         qb.groupBy("p.id")
@@ -201,7 +224,7 @@ export class VendorDashBoardService {
             .limit(limit);
 
         const rawResult = await qb.getRawMany();
-        const result = rawResult.map(r => ({
+        const result = rawResult.map((r) => ({
             productId: r.productId,
             productName: r.productName,
             totalquantity: Number(r.totalquantity),
@@ -211,10 +234,10 @@ export class VendorDashBoardService {
         return result;
     }
 
-
-
-    async getRevenueBySubcategoryForVendor(vendorId: number, filterParams: { startDate?: string, endDate?: string }) {
-
+    async getRevenueBySubcategoryForVendor(
+        vendorId: number,
+        filterParams: { startDate?: string; endDate?: string },
+    ) {
         const { startDate, endDate } = filterParams;
         const qb = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder("oi")
@@ -223,13 +246,18 @@ export class VendorDashBoardService {
             .innerJoin("oi.order", "o")
             .innerJoin("oi.product", "p")
             .leftJoin("p.subcategory", "sc")
-            .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .where("o.paymentStatus = :paymentStatus", {
+                paymentStatus: "PAID",
+            })
             .andWhere("oi.vendorId = :vendorId", { vendorId }) //  filter for vendor
             .groupBy("sc.name")
             .orderBy("revenue", "DESC");
 
         if (startDate && endDate) {
-            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", {
+                startDate,
+                endDate,
+            });
         }
 
         const result = await qb.getRawMany();
@@ -240,8 +268,10 @@ export class VendorDashBoardService {
         }));
     }
 
-
-    async revenueByCategoryForVendor(vendorId: number, filterParams: { startDate?: string, endDate?: string }) {
+    async revenueByCategoryForVendor(
+        vendorId: number,
+        filterParams: { startDate?: string; endDate?: string },
+    ) {
         const { startDate, endDate } = filterParams;
 
         const qb = AppDataSource.getRepository(OrderItem)
@@ -252,22 +282,25 @@ export class VendorDashBoardService {
             .innerJoin("oi.product", "p")
             .leftJoin("p.subcategory", "sc")
             .leftJoin("sc.category", "c")
-            .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .where("o.paymentStatus = :paymentStatus", {
+                paymentStatus: "PAID",
+            })
             .andWhere("oi.vendorId = :vendorId", { vendorId })
             .groupBy("c.name")
             .orderBy("revenue", "DESC");
 
-
         if (startDate && endDate) {
-            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+            qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", {
+                startDate,
+                endDate,
+            });
         }
 
         const result = await qb.getRawMany();
 
-        return result.map(r => ({
+        return result.map((r) => ({
             category: r.category || "Uncategorized",
             revenue: parseFloat(r.revenue || 0),
         }));
     }
-
 }

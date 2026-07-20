@@ -5,16 +5,15 @@ export interface IVendorSignupRequest {
     password: string;
     phoneNumber: string;
     telePhone: string;
-    district: string; 
+    district: string;
     districtId?: number;
     businessRegNumber: string;
     taxNumber?: string;
     isVerified?: boolean;
 
-    taxDocuments: string[]; 
+    taxDocuments: string[];
     chequePhoto?: string;
-    citizenshipDocuments?: string[]; 
-
+    citizenshipDocuments?: string[];
 
     accountName?: string;
     bankName?: string;
@@ -26,7 +25,6 @@ export interface IVendorSignupRequest {
     verificationCode?: string;
     verificationCodeExpire?: Date;
 }
-
 
 export interface IVendorLoginRequest {
     email: string;
@@ -48,10 +46,14 @@ export interface IResetPasswordRequest {
     token: string;
 }
 
-export interface IUpdateVendorRequest extends IVendorSignupRequest { };
+export interface IUpdateVendorRequest extends IVendorSignupRequest {}
 export interface IAddressRequest {
     province?: string;
     city?: string;
     streetAddress?: string;
     userId?: number;
+}
+
+export interface IRejectVendorRequest {
+    rejectionReason: string;
 }

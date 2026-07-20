@@ -163,7 +163,7 @@ export interface SanitizedOrderItem {
     productId: number;
     quantity: number;
     price: number;
-    variantId: string | null;
+    variantId: number | null;
     collectedAtWarehouse: boolean;
     product: {
         id: number;
@@ -176,7 +176,7 @@ export interface SanitizedOrderItem {
         vendorId: number;
     } | null;
     variant: {
-        id: string;
+        id: number;
         sku: string;
         attributes: any;
         finalPrice: number | null;

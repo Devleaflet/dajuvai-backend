@@ -246,6 +246,16 @@ export class VendorService {
         );
     }
 
+    // async rejectVendorService(id: number, rejectionReason: string) {
+    //     return await this.vendorRepository.update(
+    //         { id },
+    //         {
+    //             isApproved: false,
+    //             rejectionReason,
+    //         },
+    //     );
+    // }
+
     async deleteVendor(id: number) {
         return await this.vendorRepository.delete(id);
     }

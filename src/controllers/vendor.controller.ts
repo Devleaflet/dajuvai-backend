@@ -2,7 +2,11 @@ import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { AuthRequest, VendorAuthRequest } from "../middlewares/auth.middleware";
-import { sendVerificationEmail } from "../utils/nodemailer.utils";
+import {
+    sendVendorApprovedEmail,
+    sendVendorRejectedEmail,
+    sendVerificationEmail,
+} from "../utils/nodemailer.utils";
 import { sanitizeVendor, sanitizeVendorForAdmin } from "../utils/sanitize.util";
 import { VendorService } from "../service/vendor.service";
 import {
@@ -11,6 +15,7 @@ import {
     IVerificationTokenRequest,
     IResetPasswordRequest,
     IUpdateVendorRequest,
+    IRejectVendorRequest,
 } from "../interface/vendor.interface";
 import {
     vendorSignupSchema,
@@ -518,13 +523,44 @@ export class VendorController {
         );
 
         if (approveVendor.affected && approveVendor.affected > 0) {
-            await sendVerificationEmail(
+            await sendVendorApprovedEmail(
                 isValid.email,
                 "You account has been approved",
             );
             res.status(200).json({ success: true, message: "Vendor approved" });
         } else {
             throw new BadRequestError("Approval failed");
+        }
+    }
+
+    async rejectVendor(
+        req: AuthRequest<{ id: string }, {}, IRejectVendorRequest>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const vendorId = req.params.id;
+        const rejectionReason = req.body.rejectionReason;
+
+        const isValid = await this.vendorService.findVendorById(
+            Number(vendorId),
+        );
+        if (!isValid.isVerified)
+            throw new BadRequestError("Vendor must be verified");
+
+        // delete vendor completely as it was before
+        const rejectVendor = await this.vendorService.deleteVendor(
+            Number(vendorId),
+        );
+
+        if (rejectVendor.affected && rejectVendor.affected > 0) {
+            await sendVendorRejectedEmail(
+                isValid.email,
+                isValid.businessName,
+                rejectionReason,
+            );
+            res.status(200).json({ success: true, message: "Vendor rejected" });
+        } else {
+            throw new BadRequestError("Rejection failed");
         }
     }
 

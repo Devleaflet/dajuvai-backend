@@ -435,3 +435,65 @@ export const userOrderCancelledEmail = (userName: string, orderId: number) => `
     <p>Best regards,<br/><strong>Your Shop Team</strong></p>
   </div>
 `;
+
+export const sendVendorApprovedEmail = async (
+    to: string,
+    businessName: string,
+) => {
+    const mailHtml = `
+    <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #e3f2fd;">
+      
+      <p>Dear ${businessName},</p>
+      <p>Congratulations! Your vendor account has been approved and you can now log in to your account and add your products to the platform.</p>
+      
+      <p>Thank you for choosing Dajuvai as your preferred platform for selling your products. We are excited to have you on board and look forward to seeing your business grow with us.</p>
+      
+      <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+      
+      <p style="font-size: 12px; color: #888; text-align: center;">
+        If you have any questions, please contact our support team.
+      </p>
+    </div>
+  `;
+
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: "Vendor Account Approved",
+        html: mailHtml,
+    };
+
+    await transporter.sendMail(mailOptions);
+};
+
+export const sendVendorRejectedEmail = async (
+    to: string,
+    businessName: string,
+    rejectionReason: string,
+) => {
+    const mailHtml = `
+    <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
+      
+      <p>Dear ${businessName},</p>
+      <p>We regret to inform you that your vendor account has been rejected.</p> 
+      <p>Reason: ${rejectionReason}</p>
+      
+      <p>We apologize for any inconvenience this may have caused. We encourage you to address the issue and apply again to become a vendor.</p>
+      
+      <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+      
+      <p style="font-size: 12px; color: #888; text-align: center;">
+        If you have any questions, please contact our support team.
+      </p>
+    </div>
+  `;
+
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: "Vendor Account Rejected",
+        html: mailHtml,
+    };
+
+    await transporter.sendMail(mailOptions);
+};
