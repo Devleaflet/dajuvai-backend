@@ -32,7 +32,10 @@ import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
 import { NotificationService } from "../service/notification.service";
 import config from "../config/env.config";
-import { sanitizeOrderFull, sanitizeOrderForVendor } from "../utils/sanitize.util";
+import {
+    sanitizeOrderFull,
+    sanitizeOrderForVendor,
+} from "../utils/sanitize.util";
 
 /**
  * @class OrderController
@@ -99,108 +102,111 @@ export class OrderController {
 
         const orderSummary = this.buildOrderSummary(order);
 
-        void this.notificationService.notifyOrderPlaced(order).catch((error) => {
-            console.log("Failed to send order placed notification:", error);
-        });
+        void this.notificationService
+            .notifyOrderPlaced(order)
+            .catch((error) => {
+                console.log("Failed to send order placed notification:", error);
+            });
 
         if (order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
             void (async () => {
-            const shippingAddress = order.shippingAddress || null;
-            const userDistrict = shippingAddress?.district || null;
+                const shippingAddress = order.shippingAddress || null;
+                const userDistrict = shippingAddress?.district || null;
 
-            const vendorIds = order.orderItems.map((item) => item.vendorId);
-            const uniqueVendorIds = [...new Set(vendorIds)];
+                const vendorIds = order.orderItems.map((item) => item.vendorId);
+                const uniqueVendorIds = [...new Set(vendorIds)];
 
-            const vendors = await this.vendorRepository.find({
-                where: { id: In(uniqueVendorIds) },
-                relations: ["district"],
-            });
+                const vendors = await this.vendorRepository.find({
+                    where: { id: In(uniqueVendorIds) },
+                    relations: ["district"],
+                });
 
-            const customerEmailItems = order.orderItems.map((item) => {
-                const vendor = vendors.find((v) => v.id === item.vendorId);
-                return {
-                    name: item?.product?.name,
-                    sku: item.variant?.sku || null,
-                    quantity: item.quantity,
-                    price: item.price,
-                    variantAttributes: item.variant?.attributes || null,
-                    vendorDistrict: vendor?.district?.name || null,
-                };
-            });
-
-            // wrap in try catch so that if email fails, order wont fail
-            try {
-                await sendCustomerOrderEmail(
-                    useremail,
-                    order.id,
-                    order.totalPrice,
-                    order.shippingFee,
-                    customerEmailItems,
-                    userDistrict,
-                );
-            } catch (error) {
-                console.log("Failed to send customer order email:", error);
-            }
-
-            // Admin copy — full breakdown including shipping, same as the customer email.
-            if (config.USER_EMAIL) {
-                try {
-                    await sendCustomerOrderEmail(
-                        config.USER_EMAIL,
-                        order.id,
-                        order.totalPrice,
-                        order.shippingFee,
-                        customerEmailItems,
-                        userDistrict,
-                        `New Order Placed - #${order.id}`,
-                    );
-                } catch (error) {
-                    console.log("Failed to send admin order email:", error);
-                }
-            }
-
-            const orderItems = order.orderItems;
-
-            for (const vendorId of uniqueVendorIds) {
-                const itemsForVendor = orderItems
-                    .filter((item) => item.vendorId === vendorId)
-                    .map((item) => ({
+                const customerEmailItems = order.orderItems.map((item) => {
+                    const vendor = vendors.find((v) => v.id === item.vendorId);
+                    return {
                         name: item?.product?.name,
                         sku: item.variant?.sku || null,
                         quantity: item.quantity,
                         price: item.price,
                         variantAttributes: item.variant?.attributes || null,
-                    }));
+                        vendorDistrict: vendor?.district?.name || null,
+                    };
+                });
 
-                if (itemsForVendor.length === 0) continue;
-
-                const vendor = vendors.find((v) => v.id === vendorId);
-                if (!vendor) continue;
-
+                // wrap in try catch so that if email fails, order wont fail
                 try {
-                    await sendVendorOrderEmail(
-                        vendor.email,
-                        order.paymentMethod,
-                        order.id,
-                        itemsForVendor,
-                        {
-                            name: userexists.fullName,
-                            phone: userexists.phoneNumber,
-                            email: userexists.email,
-                            city: shippingAddress?.city || null,
-                            district: shippingAddress?.district || null,
-                            localAddress: shippingAddress?.localAddress || null,
-                            landmark: shippingAddress?.landmark || null,
-                        },
+                    await sendCustomerOrderEmail(
+                        useremail,
+                        order.orderNumber,
+                        order.totalPrice,
+                        order.shippingFee,
+                        customerEmailItems,
+                        userDistrict,
                     );
                 } catch (error) {
-                    console.log(
-                        "Failed to send email to vendor, vendor id: ",
-                        vendorId,
-                        error,
-                    );
+                    console.log("Failed to send customer order email:", error);
                 }
-            }
+
+                // Admin copy — full breakdown including shipping, same as the customer email.
+                if (config.USER_EMAIL) {
+                    try {
+                        await sendCustomerOrderEmail(
+                            config.USER_EMAIL,
+                            order.orderNumber,
+                            order.totalPrice,
+                            order.shippingFee,
+                            customerEmailItems,
+                            userDistrict,
+                            `New Order Placed - #${order.id}`,
+                        );
+                    } catch (error) {
+                        console.log("Failed to send admin order email:", error);
+                    }
+                }
+
+                const orderItems = order.orderItems;
+
+                for (const vendorId of uniqueVendorIds) {
+                    const itemsForVendor = orderItems
+                        .filter((item) => item.vendorId === vendorId)
+                        .map((item) => ({
+                            name: item?.product?.name,
+                            sku: item.variant?.sku || null,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null,
+                        }));
+
+                    if (itemsForVendor.length === 0) continue;
+
+                    const vendor = vendors.find((v) => v.id === vendorId);
+                    if (!vendor) continue;
+
+                    try {
+                        await sendVendorOrderEmail(
+                            vendor.email,
+                            order.paymentMethod,
+                            order.orderNumber,
+                            itemsForVendor,
+                            {
+                                name: userexists.fullName,
+                                phone: userexists.phoneNumber,
+                                email: userexists.email,
+                                city: shippingAddress?.city || null,
+                                district: shippingAddress?.district || null,
+                                localAddress:
+                                    shippingAddress?.localAddress || null,
+                                landmark: shippingAddress?.landmark || null,
+                            },
+                        );
+                    } catch (error) {
+                        console.log(
+                            "Failed to send email to vendor, vendor id: ",
+                            vendorId,
+                            error,
+                        );
+                    }
+                }
             })().catch((error) => {
                 console.log("Failed to send COD order emails:", error);
             });
@@ -239,7 +245,10 @@ export class OrderController {
     ): Promise<void> {
         if (!req.user) throw new AuthError("User not authenticated");
 
-        const estimate = await this.orderService.estimateCheckout(req.user.id, req.body);
+        const estimate = await this.orderService.estimateCheckout(
+            req.user.id,
+            req.body,
+        );
         res.status(200).json({ success: true, data: estimate });
     }
 
@@ -322,7 +331,10 @@ export class OrderController {
         const order = await this.orderService.getCustomerOrderDetails(orderId);
 
         if (user.role === UserRole.ADMIN || order.orderedById === user.id) {
-            res.status(200).json({ success: true, data: sanitizeOrderFull(order) });
+            res.status(200).json({
+                success: true,
+                data: sanitizeOrderFull(order),
+            });
             return;
         }
 
@@ -335,7 +347,10 @@ export class OrderController {
             if (hasProductFromVendor) {
                 // Vendor-scoped: never leak another vendor's items, shipping
                 // fee, or the order's grand total to this vendor.
-                res.status(200).json({ success: true, data: sanitizeOrderForVendor(order, vendorId) });
+                res.status(200).json({
+                    success: true,
+                    data: sanitizeOrderForVendor(order, vendorId),
+                });
                 return;
             }
         }
@@ -404,7 +419,11 @@ export class OrderController {
             maxPrice: q.maxPrice ? Number(q.maxPrice) : undefined,
             sort: q.sort as any,
         });
-        res.status(200).json({ success: true, data: result.items, pagination: result.pagination });
+        res.status(200).json({
+            success: true,
+            data: result.items,
+            pagination: result.pagination,
+        });
     }
 
     /**
@@ -438,7 +457,8 @@ export class OrderController {
         if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
         if (!req.user) throw new AuthError("User not authenticated");
 
-        const { status, expectedCurrentStatus, reason, note } = req.body as IUpdateOrderStatusRequest;
+        const { status, expectedCurrentStatus, reason, note } =
+            req.body as IUpdateOrderStatusRequest;
         const updatedOrder = await this.orderService.updateOrderStatus(
             orderId,
             status,
@@ -564,7 +584,11 @@ export class OrderController {
      * @access Vendor
      */
     async updateVendorOrderStatus(
-        req: VendorAuthRequest<{ orderId: string }, {}, IUpdateVendorOrderStatusRequest>,
+        req: VendorAuthRequest<
+            { orderId: string },
+            {},
+            IUpdateVendorOrderStatusRequest
+        >,
         res: Response,
         _next: NextFunction,
     ): Promise<void> {

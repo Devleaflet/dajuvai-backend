@@ -124,10 +124,96 @@ export const sendVerificationEmail = async (
             ${
                 token
                     ? `
-                <h2>Email Verification</h2>
-                <p>Your 6-digit verification code is:</p>
-                <h3>${token}</h3>
-                <p>This code will expire in 2 minutes</p>
+                <!DOCTYPE html>
+                <html lang="en">
+                <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Email Verification</title>
+                </head>
+                <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7; padding:40px 0;">
+                    <tr>
+                      <td align="center">
+                        <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:6px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+
+                          <!-- Header / Brand -->
+                          <tr>
+                            <td style="background:linear-gradient(135deg,#c2410c,#ea580c); padding:32px 40px; text-align:center;">
+                              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                                <tr>
+                                  <td style="vertical-align:middle; padding-right:10px;">
+                                    <div style="width:32px; height:32px; background-color:#ffffff; border-radius:6px; text-align:center; line-height:32px; font-size:18px; color:#ea580c; font-weight:bold;">B</div>
+                                  </td>
+                                  <td style="vertical-align:middle;">
+                                    <span style="color:#ffffff; font-size:22px; font-weight:700; letter-spacing:0.5px;">Dajuvai</span>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+
+                          <!-- Body -->
+                          <tr>
+                            <td style="padding:40px 40px 24px 40px;">
+                              <h1 style="margin:0 0 8px 0; font-size:20px; color:#0f172a; font-weight:700;">Verify Your Email Address</h1>
+                              <p style="margin:0 0 24px 0; font-size:15px; line-height:1.6; color:#475569;">
+                                Thanks for joining Dajuvai. To complete your sign-in and keep your account secure, please use the verification code below.
+                              </p>
+
+                              <!-- Code Box -->
+                              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                                <tr>
+                                  <td align="center" style="background-color:#fff7ed; border:1px dashed #fdba74; border-radius:6px; padding:24px;">
+                                    <div style="font-size:13px; color:#9a3412; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Your Verification Code</div>
+                                    <div style="font-size:34px; font-weight:800; color:#c2410c; letter-spacing:10px;">${token}</div>
+                                  </td>
+                                </tr>
+                              </table>
+
+                              <!-- Expiry Notice -->
+                              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fff7ed; border-left:4px solid #ea580c; border-radius:4px; margin-bottom:24px;">
+                                <tr>
+                                  <td style="padding:12px 16px;">
+                                    <p style="margin:0; font-size:13.5px; color:#9a3412; line-height:1.5;">
+                                       This code will expire in <strong>2 minutes</strong>. Please enter it promptly to complete verification.
+                                    </p>
+                                  </td>
+                                </tr>
+                              </table>
+
+                              <p style="margin:0 0 8px 0; font-size:14px; line-height:1.6; color:#475569;">
+                                If you didn't request this code, you can safely ignore this email.
+                              </p>
+                              <p style="margin:0; font-size:14px; line-height:1.6; color:#475569;">
+                                For your security, never share this code with anyone.
+                              </p>
+                            </td>
+                          </tr>
+
+                          <!-- Divider -->
+                          <tr>
+                            <td style="padding:0 40px;">
+                              <hr style="border:none; border-top:1px solid #e2e8f0; margin:0;">
+                            </td>
+                          </tr>
+
+                          <!-- Footer -->
+                          <tr>
+                            <td style="padding:24px 40px 32px 40px; text-align:center;">
+                              <p style="margin:0 0 4px 0; font-size:12.5px; color:#94a3b8;">
+                                This is an automated message from Dajuvai. Please do not reply to this email.
+                              </p>
+                              
+                            </td>
+                          </tr>
+
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </body>
+                </html>
             `
                     : `
                 <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
@@ -155,8 +241,8 @@ export const sendVerificationEmail = async (
 
 export const sendCustomerOrderEmail = async (
     to: string,
-    orderId: number,
-    totalPrice: number,
+    orderNumber: string,
+    tp: number, // not in use right now
     shippingFee: number,
     items: {
         name: string;
@@ -173,9 +259,9 @@ export const sendCustomerOrderEmail = async (
     // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
     // as strings — coerce here or `.toFixed()` throws and `+` silently
     // string-concatenates instead of adding.
-    totalPrice = Number(totalPrice) || 0;
+    let totalPrice = 0;
     shippingFee = Number(shippingFee) || 0;
-    const OrderTotal = totalPrice + shippingFee;
+    // const OrderTotal = totalPrice + shippingFee;
 
     // Group items by vendorDistrict
     const groupedByVendor: Record<string, typeof items> = {};
@@ -208,28 +294,28 @@ export const sendCustomerOrderEmail = async (
 
                 return `
                       <tr>
-                        <td style="padding:8px; border:1px solid #ddd;">
-                          <strong>${item.name}</strong>${item.sku ? ` (${item.sku})` : ""}
+                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8;">
+                          <strong style="color:#2b2b2b;">${item.name}</strong>${item.sku ? ` <span style="color:#999; font-size:12px;">(${item.sku})</span>` : ""}
                           ${
                               item.variantAttributes
-                                  ? `<br>${Object.entries(
+                                  ? `<br><span style="color:#888; font-size:12px;">${Object.entries(
                                         item.variantAttributes,
                                     )
                                         .map(([key, val]) => `${key}: ${val}`)
-                                        .join(", ")}`
+                                        .join(", ")}</span>`
                                   : ""
                           }
                         </td>
-                        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${
+                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#444;">${
                             item.quantity
                         }</td>
-                        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${
+                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">Rs ${
                             item.price
                         }</td>
-                        <td style="padding:8px; border:1px solid #ddd; text-align:right;">Rs ${(
+                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:600; color:#2b2b2b;">Rs ${(
                             item.price * item.quantity
                         ).toFixed(2)}</td>
-                        <td style="padding:8px; border:1px solid #ddd; text-align:center;">${deliveryEstimate}</td>
+                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#c05a00; font-size:12px; font-weight:600;">${deliveryEstimate}</td>
                       </tr>
                     `;
             });
@@ -239,25 +325,29 @@ export const sendCustomerOrderEmail = async (
                 0,
             );
 
+            totalPrice += vendorSubtotal;
+
             return `
-                  <h4 style="margin-top:20px;">Vendor District: ${vendorDistrict}</h4>
-                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:20px;">
-                    <thead>
-                      <tr style="background-color:#f0f0f0;">
-                        <th style="padding:8px; border:1px solid #ddd; text-align:left;">Product</th>
-                        <th style="padding:8px; border:1px solid #ddd; text-align:center;">Qty</th>
-                        <th style="padding:8px; border:1px solid #ddd; text-align:right;">Price</th>
-                        <th style="padding:8px; border:1px solid #ddd; text-align:right;">Subtotal</th>
-                        <th style="padding:8px; border:1px solid #ddd; text-align:center;">Delivery</th>
-                      </tr>
-                    </thead>
+                  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:24px; border:1px solid #f0e3d8; border-radius:8px; overflow:hidden;">
+                    <tr>
+                      <td colspan="5" style="background-color:#fff4e9; padding:10px 14px; border-bottom:2px solid #ff7a1a;">
+                        <span style="font-size:13px; font-weight:700; letter-spacing:0.3px; color:#c05a00; text-transform:uppercase;">Vendor District · ${vendorDistrict}</span>
+                      </td>
+                    </tr>
+                    <tr style="background-color:#fafafa;">
+                      <th style="padding:10px; text-align:left; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Product</th>
+                      <th style="padding:10px; text-align:center; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Qty</th>
+                      <th style="padding:10px; text-align:right; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Price</th>
+                      <th style="padding:10px; text-align:right; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Subtotal</th>
+                      <th style="padding:10px; text-align:center; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8;">Delivery</th>
+                    </tr>
                     <tbody>
                       ${rows.join("")}
                     </tbody>
                     <tfoot>
                       <tr>
-                        <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Vendor Subtotal:</td>
-                        <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${vendorSubtotal.toFixed(
+                        <td colspan="4" style="padding:12px 10px; text-align:right; font-weight:700; color:#2b2b2b; background-color:#fafafa;">Vendor Subtotal:</td>
+                        <td style="padding:12px 10px; text-align:right; font-weight:700; color:#c05a00; background-color:#fafafa;">Rs ${vendorSubtotal.toFixed(
                             2,
                         )}</td>
                       </tr>
@@ -267,56 +357,68 @@ export const sendCustomerOrderEmail = async (
         },
     );
 
+    const orderTotal = totalPrice + shippingFee;
+
     const mailOptions = {
         from: `<${config.USER_EMAIL}>`,
         to,
         subject,
         html: `
-      <body style="margin:0; padding:0; font-family: Arial, sans-serif; background-color:#f9f9f9;">
+      <body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
-            <td align="center">
-              <table width="700" cellpadding="0" cellspacing="0" border="0" style="max-width:95%; background-color:#fff; border:1px solid #e0e0e0; border-radius:8px; padding:20px;">
+            <td align="center" style="padding:24px 12px;">
+              <table width="700" cellpadding="0" cellspacing="0" border="0" style="max-width:95%; background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+
+                <!-- Header -->
                 <tr>
-                  <td style="text-align:center;">
-                    <h2 style="color:#2E7D32; margin:0;">Order Confirmation ✅</h2>
-                    <p style="font-size:16px; margin:10px 0;">
-                      Thank you for your order! Your order <strong>#${orderId}</strong> has been successfully placed.
+                  <td style="background: linear-gradient(135deg, #ff7a1a, #ff9a3d); padding:28px 30px; text-align:center;">
+                    <h1 style="color:#ffffff; margin:0; font-size:22px; letter-spacing:0.4px;">Order Confirmed</h1>
+                    <p style="color:#fff2e6; font-size:14px; margin:8px 0 0;">
+                      Order <strong>#${orderNumber}</strong> has been placed successfully
                     </p>
                   </td>
                 </tr>
 
+                <!-- Body -->
                 <tr>
-                  <td>
-                    <h3 style="margin-top:20px; margin-bottom:10px;">Order Summary</h3>
+                  <td style="padding:30px;">
+                    <p style="font-size:15px; color:#333; margin:0 0 24px;">
+                      Thank you for shopping with us. We've received your order and it's now being prepared. Here's a summary of your purchase:
+                    </p>
+
+                    <h3 style="margin:0 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Order Summary</h3>
                     ${vendorSections.join("")}
-                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
+
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-top:10px;">
                       <tfoot>
                         <tr>
-                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Subtotal:</td>
-                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${totalPrice.toFixed(2)}</td>
+                          <td style="padding:8px 10px; text-align:right; color:#555;">Subtotal:</td>
+                          <td style="padding:8px 10px; text-align:right; color:#555; width:120px;">Rs ${totalPrice.toFixed(2)}</td>
                         </tr>
                         <tr>
-                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Shipping Fee:</td>
-                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${shippingFee.toFixed(2)}</td>
+                          <td style="padding:8px 10px; text-align:right; color:#555;">Shipping Fee:</td>
+                          <td style="padding:8px 10px; text-align:right; color:#555;">Rs ${shippingFee.toFixed(2)}</td>
                         </tr>
                         <tr>
-                          <td colspan="4" style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Total:</td>
-                          <td style="padding:8px; border:1px solid #ddd; text-align:right; font-weight:bold;">Rs ${OrderTotal.toFixed(2)}</td>
+                          <td style="padding:14px 10px; text-align:right; font-weight:700; font-size:16px; color:#2b2b2b; border-top:2px solid #ff7a1a;">Total:</td>
+                          <td style="padding:14px 10px; text-align:right; font-weight:700; font-size:16px; color:#ff7a1a; border-top:2px solid #ff7a1a;">Rs ${orderTotal.toFixed(2)}</td>
                         </tr>
                       </tfoot>
                     </table>
                   </td>
                 </tr>
 
+                <!-- Info strip -->
                 <tr>
-                  <td style="padding-top:20px; font-size:14px;">
+                  <td style="padding:18px 30px; background-color:#fff4e9; font-size:14px; color:#7a4a1f;">
                     We are processing your order and will notify you once it has been shipped.
                   </td>
                 </tr>
 
+                <!-- Footer -->
                 <tr>
-                  <td style="padding-top:20px; border-top:1px solid #e0e0e0; font-size:12px; color:#888; text-align:center;">
+                  <td style="padding:20px 30px; border-top:1px solid #eee; font-size:12px; color:#999; text-align:center;">
                     If you did not place this order or have any concerns, please contact our support team immediately.
                   </td>
                 </tr>
@@ -352,7 +454,7 @@ interface CustomerInfo {
 export const sendVendorOrderEmail = async (
     to: string,
     paymentMethod: string,
-    orderId: number,
+    orderNumber: string,
     // Shipping fee is not vendor revenue and is intentionally not shown here —
     // customer/admin emails carry the full shipping breakdown instead.
     products: VendorOrderItem[],
@@ -406,7 +508,7 @@ export const sendVendorOrderEmail = async (
       <!-- Header -->
       <h2 style="color: #333; text-align: center;">🛒 New Order Received</h2>
       <p style="text-align: center; font-size: 16px;">
-        Order <strong>#${orderId}</strong> has been placed. Please review and fulfill it promptly.
+        Order <strong>#${orderNumber}</strong> has been placed. Please review and fulfill it promptly.
       </p>
 
       <!-- Customer Info -->
@@ -503,12 +605,12 @@ const sendLegacyOrderStatusEmail = async (
 
 export const sendOrderStatusEmail = async (
     to: string,
-    orderId: number,
+    orderNumber: string,
     status: string,
     subject = "Your Order Status Has Been Updated",
 ) => {
     const statusMeta = getOrderStatusEmailMeta(status);
-    const orderLabel = `#${orderId}`;
+    const orderLabel = `#${orderNumber}`;
     const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/profile`;
 
     await transporter.sendMail({
@@ -559,11 +661,14 @@ export const sendOrderStatusEmail = async (
     });
 };
 
-export const userOrderCancelledEmail = (userName: string, orderId: number) => `
+export const userOrderCancelledEmail = (
+    userName: string,
+    orderNumber: string,
+) => `
   <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
     <h2 style="color: #e63946;">Order Cancelled</h2>
     <p>Hi <strong>${userName}</strong>,</p>
-    <p>Your order <strong>#${orderId}</strong> has been automatically cancelled because the payment wasn’t completed within 15 minutes.</p>
+    <p>Your order <strong>#${orderNumber}</strong> has been automatically cancelled because the payment wasn’t completed within 15 minutes.</p>
     <p>If this was a mistake, please place your order again.</p>
     <br/>
     <p>Best regards,<br/><strong>Your Shop Team</strong></p>
@@ -575,19 +680,52 @@ export const sendVendorApprovedEmail = async (
     businessName: string,
 ) => {
     const mailHtml = `
-    <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #e3f2fd;">
-      
-      <p>Dear ${businessName},</p>
-      <p>Congratulations! Your vendor account has been approved and you can now log in to your account and add your products to the platform.</p>
-      
-      <p>Thank you for choosing Dajuvai as your preferred platform for selling your products. We are excited to have you on board and look forward to seeing your business grow with us.</p>
-      
-      <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-      
-      <p style="font-size: 12px; color: #888; text-align: center;">
-        If you have any questions, please contact our support team.
-      </p>
+    <div style="background:#f6f6f6;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:4px;overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:#f97316;padding:20px 24px;">
+      <h2 style="margin:0;color:#ffffff;font-size:24px;font-weight:600;">
+        Vendor Account Approved
+      </h2>
     </div>
+
+    <!-- Body -->
+    <div style="padding:28px 24px;color:#444;line-height:1.7;font-size:15px;">
+
+      <p style="margin-top:0;">
+        Dear <strong>${businessName}</strong>,
+      </p>
+
+      <p>
+        Congratulations! Your vendor account has been successfully approved. You can now log in to your account and start adding your products to the platform.
+      </p>
+
+      <div style="background:#fff7ed;border-left:4px solid #f97316;padding:14px 16px;margin:24px 0;">
+        <strong style="color:#c2410c;">You're all set!</strong>
+        <p style="margin:8px 0 0;">
+          Start listing your products and reach more customers through Dajuvai.
+        </p>
+      </div>
+
+      <p>
+        Thank you for choosing <strong>Dajuvai</strong> as your selling platform. We're excited to have you as part of our community and look forward to supporting your business as it grows.
+      </p>
+
+      <p style="margin-bottom:0;">
+        Best regards,<br>
+        <strong>The Dajuvai Team</strong>
+      </p>
+
+    </div>
+
+    <!-- Footer -->
+    <div style="border-top:1px solid #ececec;background:#fafafa;padding:16px 24px;text-align:center;font-size:12px;color:#777;">
+      If you have any questions, feel free to contact our support team.
+    </div>
+
+  </div>
+</div>
   `;
 
     const mailOptions = {
@@ -606,20 +744,52 @@ export const sendVendorRejectedEmail = async (
     rejectionReason: string,
 ) => {
     const mailHtml = `
-    <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px;">
-      
-      <p>Dear ${businessName},</p>
-      <p>We regret to inform you that your vendor account has been rejected.</p> 
-      <p>Reason: ${rejectionReason}</p>
-      
-      <p>We apologize for any inconvenience this may have caused. We encourage you to address the issue and apply again to become a vendor.</p>
-      
-      <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-      
-      <p style="font-size: 12px; color: #888; text-align: center;">
-        If you have any questions, please contact our support team.
-      </p>
+<div style="background:#f6f6f6;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
+  <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:4px;overflow:hidden;">
+
+    <!-- Header -->
+    <div style="background:#dc2626;padding:20px 24px;">
+      <h2 style="margin:0;color:#ffffff;font-size:24px;font-weight:600;">
+        Vendor Application Update
+      </h2>
     </div>
+
+    <!-- Body -->
+    <div style="padding:28px 24px;color:#444;line-height:1.7;font-size:15px;">
+
+      <p style="margin-top:0;">
+        Dear <strong>${businessName}</strong>,
+      </p>
+
+      <p>
+        Thank you for your interest in becoming a vendor on <strong>Dajuvai</strong>. After reviewing your application, we regret to inform you that it has not been approved at this time.
+      </p>
+
+      <div style="background:#fef2f2;border-left:4px solid #dc2626;padding:14px 16px;margin:24px 0;">
+        <strong style="color:#b91c1c;">Reason for Rejection</strong>
+        <p style="margin:8px 0 0;color:#444;">
+          ${rejectionReason}
+        </p>
+      </div>
+
+      <p>
+        We encourage you to address the issue mentioned above and submit a new application in the future. We appreciate your interest and hope to welcome you as a vendor soon.
+      </p>
+
+      <p style="margin-bottom:0;">
+        Best regards,<br>
+        <strong>The Dajuvai Team</strong>
+      </p>
+
+    </div>
+
+    <!-- Footer -->
+    <div style="border-top:1px solid #ececec;background:#fafafa;padding:16px 24px;text-align:center;font-size:12px;color:#777;">
+      If you have any questions, please feel free to contact our support team.
+    </div>
+
+  </div>
+</div>
   `;
 
     const mailOptions = {

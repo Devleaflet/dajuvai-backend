@@ -1015,7 +1015,7 @@ export class OrderService {
         try {
             await sendCustomerOrderEmail(
                 user.email,
-                order.id,
+                order.orderNumber,
                 order.totalPrice,
                 order.shippingFee,
                 customerEmailItems,
@@ -1030,7 +1030,7 @@ export class OrderService {
             try {
                 await sendCustomerOrderEmail(
                     config.USER_EMAIL,
-                    order.id,
+                    order.orderNumber,
                     order.totalPrice,
                     order.shippingFee,
                     customerEmailItems,
@@ -1063,7 +1063,7 @@ export class OrderService {
                 await sendVendorOrderEmail(
                     vendor.email,
                     order.paymentMethod,
-                    order.id,
+                    order.orderNumber,
                     itemsForVendor,
                     {
                         name: user.fullName,
@@ -2579,7 +2579,7 @@ export class OrderService {
         if (order.orderedBy?.email) {
             await sendOrderStatusEmail(
                 order.orderedBy.email,
-                order.id,
+                order.orderNumber,
                 order.status,
             );
         }
