@@ -1,16 +1,21 @@
-import { Repository } from 'typeorm';
-import { Cart } from '../entities/cart.entity';
-import { CartItem } from '../entities/cartItem.entity';
-import { Wishlist } from '../entities/wishlist.entity';
-import { WishlistItem } from '../entities/wishlistItem.entity';
-import { Product } from '../entities/product.entity';
-import AppDataSource from '../config/db.config';
-import { APIError } from '../utils/ApiError.utils';
-import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveManyToCartRequest, IWishlistMoveToCartRequest } from '../interface/wishlist.interface';
-import { CartService } from './cart.service';
-import { Variant } from '../entities/variant.entity';
-import { NotificationService } from './notification.service';
-import { calculatePriceSnapshot } from '../utils/pricing.utils';
+import { Repository } from "typeorm";
+import { Cart } from "../entities/cart.entity";
+import { CartItem } from "../entities/cartItem.entity";
+import { Wishlist } from "../entities/wishlist.entity";
+import { WishlistItem } from "../entities/wishlistItem.entity";
+import { Product } from "../entities/product.entity";
+import AppDataSource from "../config/db.config";
+import { APIError } from "../utils/ApiError.utils";
+import {
+    IWishlistAddRequest,
+    IWishlistRemoveRequest,
+    IWishlistMoveManyToCartRequest,
+    IWishlistMoveToCartRequest,
+} from "../interface/wishlist.interface";
+import { CartService } from "./cart.service";
+import { Variant } from "../entities/variant.entity";
+import { NotificationService } from "./notification.service";
+import { calculatePriceSnapshot } from "../utils/pricing.utils";
 
 /**
  * Service for managing wishlist-related operations such as
@@ -47,7 +52,6 @@ export class WishlistService {
         this.cartService = new CartService();
     }
 
-
     /**
      * Adds a product to the user's wishlist.
      * Uses a transaction to ensure consistency.
@@ -56,7 +60,10 @@ export class WishlistService {
      * @returns Promise<Wishlist> - The updated wishlist including the new item
      * @throws APIError if the product doesn't exist or is already in the wishlist
      */
-    async addToWishlist(userId: number, data: IWishlistAddRequest): Promise<Wishlist> {
+    async addToWishlist(
+        userId: number,
+        data: IWishlistAddRequest,
+    ): Promise<Wishlist> {
         const { productId, variantId } = data;
 
         return await AppDataSource.transaction(async (manager) => {
@@ -66,9 +73,11 @@ export class WishlistService {
             const wishlistItemRepository = manager.getRepository(WishlistItem);
 
             // Verify product exists before adding
-            const product = await productRepository.findOne({ where: { id: productId } });
+            const product = await productRepository.findOne({
+                where: { id: productId },
+            });
             if (!product) {
-                throw new APIError(404, 'Product not found');
+                throw new APIError(404, "Product not found");
             }
 
             // if variant provided
@@ -77,20 +86,20 @@ export class WishlistService {
             if (variantId) {
                 variant = await variantRepository.findOne({
                     where: {
-                        id: variantId, productId
-                    }
-                })
+                        id: variantId,
+                        productId,
+                    },
+                });
 
                 if (!variant) {
-                    throw new APIError(404, "Variant not found")
+                    throw new APIError(404, "Variant not found");
                 }
             }
-
 
             // Find existing wishlist or create a new one if none exists
             let wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
             if (!wishlist) {
@@ -119,7 +128,7 @@ export class WishlistService {
                 product,
                 productId,
                 variant: variant || null,
-                variantId: variantId || null
+                variantId: variantId || null,
             });
             try {
                 await wishlistItemRepository.save(wishlistItem);
@@ -130,17 +139,17 @@ export class WishlistService {
             // Reload wishlist to get updated items relation
             wishlist = await wishlistRepository.findOne({
                 where: { id: wishlist.id },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
             // Push notification (fire-and-forget)
-            new NotificationService().notifyAddToWishlist(userId, product.name).catch(() => {});
+            new NotificationService()
+                .notifyAddToWishlist(userId, product.name)
+                .catch(() => {});
 
             return wishlist!;
         });
     }
-
-
 
     /**
      * Removes a wishlist item from the user's wishlist.
@@ -152,13 +161,13 @@ export class WishlistService {
      */
     async removeFromWishlist(
         userId: number,
-        data: IWishlistRemoveRequest
+        data: IWishlistRemoveRequest,
     ): Promise<Wishlist> {
         const { wishlistItemId } = data;
 
         // Validate wishlistItemId
         if (!wishlistItemId || isNaN(wishlistItemId) || wishlistItemId <= 0) {
-            throw new APIError(400, 'Valid Wishlist Item ID is required');
+            throw new APIError(400, "Valid Wishlist Item ID is required");
         }
 
         return await AppDataSource.transaction(async (manager) => {
@@ -168,14 +177,16 @@ export class WishlistService {
             // Fetch wishlist with items for user, including product & variant
             const wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
             if (!wishlist) {
                 return wishlistRepository.create({ userId, items: [] });
             }
 
             // Find the item to remove
-            const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
+            const wishlistItem = wishlist.items.find(
+                (item) => item.id === wishlistItemId,
+            );
             if (!wishlistItem) {
                 return wishlist;
             }
@@ -184,13 +195,13 @@ export class WishlistService {
             await wishlistItemRepository.delete(wishlistItemId);
 
             // Remove it from the local array
-            wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
-
+            wishlist.items = wishlist.items.filter(
+                (item) => item.id !== wishlistItemId,
+            );
 
             return wishlist;
         });
     }
-
 
     /**
      * Retrieves the wishlist for a given user including product details.
@@ -201,7 +212,7 @@ export class WishlistService {
     async getWishlist(userId: number): Promise<Wishlist | null> {
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: ["items", "items.product", "items.variant"],
         });
 
         if (!wishlist) {
@@ -212,7 +223,6 @@ export class WishlistService {
         wishlist.items = wishlist.items.filter((item) => {
             return Boolean(item.product);
         });
-
 
         return wishlist;
     }
@@ -227,24 +237,26 @@ export class WishlistService {
      */
     async moveToCart(
         userId: number,
-        data: IWishlistMoveToCartRequest
+        data: IWishlistMoveToCartRequest,
     ): Promise<Wishlist> {
         const { wishlistItemId, quantity } = data;
 
         // Fetch wishlist with items, including product & variant relations
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: ["items", "items.product", "items.variant"],
         });
 
         if (!wishlist) {
-            throw new APIError(404, 'Wishlist not found');
+            throw new APIError(404, "Wishlist not found");
         }
 
         // Find the wishlist item
-        const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
+        const wishlistItem = wishlist.items.find(
+            (item) => item.id === wishlistItemId,
+        );
         if (!wishlistItem || !wishlistItem.product) {
-            throw new APIError(404, 'Wishlist item or product not found');
+            throw new APIError(404, "Wishlist item or product not found");
         }
 
         // Add to cart, passing variantId if exists
@@ -255,7 +267,9 @@ export class WishlistService {
         });
 
         // Remove from wishlist
-        wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
+        wishlist.items = wishlist.items.filter(
+            (item) => item.id !== wishlistItemId,
+        );
         await this.wishlistItemRepository.delete(wishlistItemId);
 
         return wishlist;
@@ -263,7 +277,7 @@ export class WishlistService {
 
     async moveManyToCart(
         userId: number,
-        data: IWishlistMoveManyToCartRequest
+        data: IWishlistMoveManyToCartRequest,
     ): Promise<{
         wishlist: Wishlist;
         movedItemIds: number[];
@@ -279,29 +293,49 @@ export class WishlistService {
 
             const wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
             if (!wishlist) {
-                throw new APIError(404, 'Wishlist not found');
+                throw new APIError(404, "Wishlist not found");
             }
 
+            // Map for O(1) wishlist item lookup instead of scanning the array per request item
             const wishlistItemsById = new Map(
-                wishlist.items.map((item) => [Number(item.id), item])
+                wishlist.items.map((item) => [Number(item.id), item]),
             );
             const movedItemIds: number[] = [];
-            const failedItems: { wishlistItemId: number; message: string }[] = [];
+            const failedItems: { wishlistItemId: number; message: string }[] =
+                [];
 
             let cart = await cartRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
             if (!cart) {
                 cart = await cartRepository.save(
-                    cartRepository.create({ userId, total: 0, items: [] })
+                    cartRepository.create({ userId, total: 0, items: [] }),
                 );
             }
+
+            // find if users cart already has that product by creating map
+            // previously we use to scan the array for each item
+            const existingCartItemsByKey = new Map<string, CartItem>();
+            for (const item of cart.items) {
+                const key = `${item.product.id}:${item.variantId ?? "null"}`;
+                existingCartItemsByKey.set(key, item);
+            }
+
+            // only keep track of items that are being added or updated
+            const itemsToInsert: CartItem[] = [];
+            const itemsToUpdate: CartItem[] = [];
+
+            // running total for the cart
+            let runningTotal = cart.items.reduce(
+                (sum, item) => sum + Number(item.price) * item.quantity,
+                0,
+            );
 
             for (const requestItem of requestedItems) {
                 const wishlistItemId = Number(requestItem.wishlistItemId);
@@ -310,7 +344,7 @@ export class WishlistService {
                 if (!wishlistItem || !wishlistItem.product) {
                     failedItems.push({
                         wishlistItemId,
-                        message: 'Wishlist item or product not found',
+                        message: "Wishlist item or product not found",
                     });
                     continue;
                 }
@@ -318,60 +352,88 @@ export class WishlistService {
                 try {
                     const product = wishlistItem.product;
                     const variantId = wishlistItem.variantId || null;
-                    const existingCartItem = cart.items.find((item) =>
-                        item.product.id === wishlistItem.productId &&
-                        (variantId ? item.variantId === variantId : !item.variantId)
-                    );
+                    const key = `${wishlistItem.productId}:${variantId ?? "null"}`;
+                    const existingCartItem = existingCartItemsByKey.get(key);
+
                     const requestedQuantity = Number(requestItem.quantity);
-                    const nextQuantity = (existingCartItem?.quantity || 0) + requestedQuantity;
+                    const previousQuantity = existingCartItem?.quantity || 0;
+                    const previousLineTotal = existingCartItem
+                        ? Number(existingCartItem.price) * previousQuantity
+                        : 0;
+                    const nextQuantity = previousQuantity + requestedQuantity;
+
                     let price: number;
                     let name = product.name;
-                    let image: string | null = product.productImages?.[0] ?? null;
+                    let image: string | null =
+                        product.productImages?.[0] ?? null;
 
                     if (variantId) {
                         const variant = wishlistItem.variant;
                         if (!variant) {
-                            throw new APIError(404, 'Variant not found');
+                            throw new APIError(404, "Variant not found");
                         }
-                        if (variant.status === 'OUT_OF_STOCK' || variant.stock < nextQuantity) {
-                            throw new APIError(400, `Cannot add ${nextQuantity} items; only ${variant.stock} available for this variant`);
+                        if (
+                            variant.status === "OUT_OF_STOCK" ||
+                            variant.stock < nextQuantity
+                        ) {
+                            throw new APIError(
+                                400,
+                                `Cannot add ${nextQuantity} items; only ${variant.stock} available for this variant`,
+                            );
                         }
                         price = calculatePriceSnapshot({
                             basePrice: variant.basePrice,
                             discount: variant.discount,
                             discountType: variant.discountType,
                         }).finalPrice;
-                        if (variant.attributes?.name) name = `${product.name} - ${variant.attributes.name}`;
-                        if (variant.variantImages?.length) image = variant.variantImages[0];
+                        if (variant.attributes?.name)
+                            name = `${product.name} - ${variant.attributes.name}`;
+                        if (variant.variantImages?.length)
+                            image = variant.variantImages[0];
 
                         if (existingCartItem) {
                             existingCartItem.quantity = nextQuantity;
                             existingCartItem.price = price;
                             existingCartItem.name = name;
-                            existingCartItem.description = product.description || '';
+                            existingCartItem.description =
+                                product.description || "";
                             existingCartItem.image = image;
+                            itemsToUpdate.push(existingCartItem);
                         } else {
-                            cart.items.push(cartItemRepository.create({
+                            const newItem = cartItemRepository.create({
                                 cart,
                                 product,
                                 quantity: requestedQuantity,
                                 price,
                                 name,
-                                description: product.description || '',
+                                description: product.description || "",
                                 image,
                                 variant,
                                 variantId,
-                            }));
+                            });
+                            itemsToInsert.push(newItem);
+                            // second wishlist item resolving to the same product+variant
+                            // in this same request updates instead of double-inserting
+                            existingCartItemsByKey.set(key, newItem);
                         }
                     } else {
                         if (product.hasVariants) {
-                            throw new APIError(400, 'Please select a variant before proceeding.');
+                            throw new APIError(
+                                400,
+                                "Please select a variant before proceeding.",
+                            );
                         }
                         if (!product.basePrice || product.stock === undefined) {
-                            throw new APIError(400, 'Product must have basePrice and stock');
+                            throw new APIError(
+                                400,
+                                "Product must have basePrice and stock",
+                            );
                         }
                         if (product.stock < nextQuantity) {
-                            throw new APIError(400, `Cannot add ${nextQuantity} items; only ${product.stock} available`);
+                            throw new APIError(
+                                400,
+                                `Cannot add ${nextQuantity} items; only ${product.stock} available`,
+                            );
                         }
                         price = calculatePriceSnapshot({
                             basePrice: product.basePrice,
@@ -383,49 +445,68 @@ export class WishlistService {
                             existingCartItem.quantity = nextQuantity;
                             existingCartItem.price = price;
                             existingCartItem.name = name;
-                            existingCartItem.description = product.description || '';
+                            existingCartItem.description =
+                                product.description || "";
                             existingCartItem.image = image;
+                            itemsToUpdate.push(existingCartItem);
                         } else {
-                            cart.items.push(cartItemRepository.create({
+                            const newItem = cartItemRepository.create({
                                 cart,
                                 product,
                                 quantity: requestedQuantity,
                                 price,
                                 name,
-                                description: product.description || '',
+                                description: product.description || "",
                                 image,
                                 variantId: null,
-                            }));
+                            });
+                            itemsToInsert.push(newItem);
+                            existingCartItemsByKey.set(key, newItem);
                         }
                     }
 
+                    // running total for the cart
+                    runningTotal =
+                        runningTotal - previousLineTotal + price * nextQuantity;
                     movedItemIds.push(wishlistItemId);
                 } catch (error: any) {
                     failedItems.push({
                         wishlistItemId,
-                        message: error?.message || 'Could not move item to cart',
+                        message:
+                            error?.message || "Could not move item to cart",
                     });
                 }
             }
 
             if (movedItemIds.length > 0) {
-                await cartItemRepository.save(cart.items);
-                cart.total = cart.items.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
-                await cartRepository.save(cart);
+                // Bulk INSERT for new cart items
+                if (itemsToInsert.length > 0) {
+                    await cartItemRepository.insert(itemsToInsert);
+                }
+                // .save() for updates is ok here since these are pre-existing rows
+                // with known IDs TypeORM issues UPDATEs, not existence checks.
+                if (itemsToUpdate.length > 0) {
+                    await cartItemRepository.save(itemsToUpdate);
+                }
+
+                // Targeted UPDATE on total column - does not touch cart.items
+                await cartRepository.update(cart.id, { total: runningTotal });
+
                 await wishlistItemRepository.delete(movedItemIds);
             }
 
             const updatedWishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
             return {
-                wishlist: updatedWishlist || wishlistRepository.create({ userId, items: [] }),
+                wishlist:
+                    updatedWishlist ||
+                    wishlistRepository.create({ userId, items: [] }),
                 movedItemIds,
                 failedItems,
             };
         });
     }
-
 }

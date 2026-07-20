@@ -2,7 +2,13 @@ import cron from "node-cron";
 import { User } from "../entities/user.entity";
 import { In, LessThan, Not } from "typeorm";
 import AppDataSource from "../config/db.config";
-import { OrderStatus, Order, PaymentStatus, PaymentMethod, DeliveryStatus } from '../entities/order.entity';
+import {
+    OrderStatus,
+    Order,
+    PaymentStatus,
+    PaymentMethod,
+    DeliveryStatus,
+} from "../entities/order.entity";
 import { sendOrderStatusEmail } from "./nodemailer.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { NotificationService } from "../service/notification.service";
@@ -16,11 +22,10 @@ const orderDB = AppDataSource.getRepository(Order);
 const orderItemRepo = AppDataSource.getRepository(OrderItem);
 const vendorRepo = AppDataSource.getRepository(Vendor);
 
-
 /**
  * Periodic cleanup of expired user verification tokens.
  * Runs every 2 minutes.
- * 
+ *
  * Logic:
  * - Find users with verificationCodeExpire date in the past AND
  *   who currently have a verificationCode set (not null).
@@ -28,13 +33,14 @@ const vendorRepo = AppDataSource.getRepository(Vendor);
  *    - Reset verificationCode, verificationCodeExpire,
  *      resendBlockUntil, resendCount fields to null.
  *    - Save user entity back to DB to persist these changes.
- * 
+ *
  * Purpose:
  * - Prevent stale verification codes from lingering indefinitely.
  * - Reset resend limits and blocks so user can try verification again later.
  */
 export const tokenCleanUp = () => {
-    cron.schedule("*/2 * * * *", async () => { // every 2 minutes
+    cron.schedule("*/2 * * * *", async () => {
+        // every 2 minutes
         try {
             // Only select known columns to avoid missing column issues
             const expiredUsers = await userDB.find({
@@ -51,12 +57,12 @@ export const tokenCleanUp = () => {
                     "verificationCode",
                     "verificationCodeExpire",
                     "resendCount",
-                    "resendBlockUntil"
+                    "resendBlockUntil",
                 ],
                 where: {
                     verificationCodeExpire: LessThan(new Date()),
-                    verificationCode: Not(null)
-                }
+                    verificationCode: Not(null),
+                },
             });
 
             if (expiredUsers.length > 0) {
@@ -81,15 +87,15 @@ export const tokenCleanUp = () => {
 /**
  * Periodic cleanup of stale pending orders.
  * Runs every 2 hours on the hour (e.g., 12:00, 14:00, 16:00).
- * 
+ *
  * Logic:
  * - Calculate threshold date as current time minus 24 hours.
  * - Find orders with status 'PENDING' created before threshold date.
  * - For each such order:
  *    - Remove order entity from DB, deleting it permanently.
- * 
+ *
  * Purpose:
-* - Remove old pending orders that may be abandoned or not processed.
+ * - Remove old pending orders that may be abandoned or not processed.
  * - Keep order data clean and avoid clutter.
  */
 export const orderCleanUp = () => {
@@ -104,7 +110,7 @@ export const orderCleanUp = () => {
                     paymentStatus: PaymentStatus.UNPAID,
                     createdAt: LessThan(thresholdDate),
                 },
-                relations: ['orderItems'],
+                relations: ["orderItems"],
             });
 
             if (staleOrders.length === 0) return;
@@ -116,13 +122,17 @@ export const orderCleanUp = () => {
                 // Restore stock for each order item
                 for (const item of order.orderItems) {
                     if (item.variantId) {
-                        const variant = await variantRepo.findOne({ where: { id: item.variantId } });
+                        const variant = await variantRepo.findOne({
+                            where: { id: item.variantId },
+                        });
                         if (variant) {
                             variant.stock += item.quantity;
                             await variantRepo.save(variant);
                         }
                     } else if (item.productId) {
-                        const product = await productRepo.findOne({ where: { id: item.productId } });
+                        const product = await productRepo.findOne({
+                            where: { id: item.productId },
+                        });
                         if (product && product.stock != null) {
                             product.stock += item.quantity;
                             await productRepo.save(product);
@@ -140,7 +150,7 @@ export const orderCleanUp = () => {
     });
 };
 
-// set order status to cancelled if the payment is dealyed formore than 15 minutes incase of esewa and nps 
+// set order status to cancelled if the payment is dealyed formore than 15 minutes incase of esewa and nps
 export const startOrderCleanupJob = () => {
     cron.schedule("*/5 * * * *", async () => {
         try {
@@ -165,13 +175,17 @@ export const startOrderCleanupJob = () => {
                 // Restore stock before cancelling
                 for (const item of order.orderItems) {
                     if (item.variantId) {
-                        const variant = await variantRepo.findOne({ where: { id: item.variantId } });
+                        const variant = await variantRepo.findOne({
+                            where: { id: item.variantId },
+                        });
                         if (variant) {
                             variant.stock += item.quantity;
                             await variantRepo.save(variant);
                         }
                     } else if (item.productId) {
-                        const product = await productRepo.findOne({ where: { id: item.productId } });
+                        const product = await productRepo.findOne({
+                            where: { id: item.productId },
+                        });
                         if (product && product.stock != null) {
                             product.stock += item.quantity;
                             await productRepo.save(product);
@@ -188,14 +202,26 @@ export const startOrderCleanupJob = () => {
                     where: { order: { id: order.id } },
                     relations: ["vendor"],
                 });
-                const vendorEmails = orderItems.map((item) => item.vendor?.email).filter(Boolean);
+                const vendorEmails = orderItems
+                    .map((item) => item.vendor?.email)
+                    .filter(Boolean);
 
                 if (userEmail) {
-                    await sendOrderStatusEmail(userEmail, order.id, "Cancelled", `Order #${order.id} Cancelled - Payment Timeout`);
+                    await sendOrderStatusEmail(
+                        userEmail,
+                        order.orderNumber,
+                        "Cancelled",
+                        `Order #${order.orderNumber} Cancelled - Payment Timeout`,
+                    );
                 }
 
                 for (const vendorEmail of vendorEmails) {
-                    await sendOrderStatusEmail(vendorEmail, order.id, "Cancelled", `Order #${order.id} Cancelled by System`);
+                    await sendOrderStatusEmail(
+                        vendorEmail,
+                        order.orderNumber,
+                        "Cancelled",
+                        `Order #${order.orderNumber} Cancelled by System`,
+                    );
                 }
 
                 const notificationService = new NotificationService();
@@ -207,13 +233,13 @@ export const startOrderCleanupJob = () => {
     });
 };
 
-
-
 // un verified vendor  clean up
 export const removeUnverifiedVendors = () => {
     cron.schedule("0 0,12 * * *", async () => {
         try {
-            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+            const twentyFourHoursAgo = new Date(
+                Date.now() - 24 * 60 * 60 * 1000,
+            );
             await vendorRepo.delete({
                 isVerified: false,
                 createdAt: LessThan(twentyFourHoursAgo),
@@ -221,8 +247,8 @@ export const removeUnverifiedVendors = () => {
         } catch (error) {
             // silent fail for cron
         }
-    })
-}
+    });
+};
 
 export const staleDeviceTokenCleanUp = () => {
     cron.schedule("0 2 * * *", async () => {
