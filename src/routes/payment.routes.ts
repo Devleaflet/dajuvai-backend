@@ -2,13 +2,11 @@ import { Request, Response } from "express";
 import crypto from "crypto";
 import axios from "axios";
 import { Router } from "express";
-import {
-    DeliveryStatus,
-    Order,
-    OrderStatus,
-    PaymentStatus,
-} from "../entities/order.entity";
+import { DeliveryStatus, Order, OrderStatus, PaymentStatus } from "../entities/order.entity";
+import { Variant } from "../entities/variant.entity";
+import { Product } from "../entities/product.entity";
 import AppDataSource from "../config/db.config";
+import config from "../config/env.config";
 import { APIError } from "../utils/ApiError.utils";
 import { CartService } from "../service/cart.service";
 import { NotificationService } from "../service/notification.service";
@@ -17,13 +15,13 @@ const paymentRouter = Router();
 const orderDb = AppDataSource.getRepository(Order);
 
 const CONFIG = {
-    MERCHANT_ID: "545",
-    MERCHANT_NAME: "dajuvaiapi",
-    API_USERNAME: "dajuvaiapi",
-    API_PASSWORD: "W#8rXp2!kL9z@Vm",
-    SECRET_KEY: "gT7$yMn#45v!QbA",
-    BASE_URL: "https://apigateway.nepalpayment.com",
-    GATEWAY_URL: "https://gateway.nepalpayment.com/",
+    MERCHANT_ID: config.NPX_MERCHANT_ID,
+    MERCHANT_NAME: config.NPX_MERCHANT_NAME,
+    API_USERNAME: config.NPX_API_USERNAME,
+    API_PASSWORD: config.NPX_API_PASSWORD,
+    SECRET_KEY: config.NPX_SECRET_KEY,
+    BASE_URL: config.NPX_BASE_URL,
+    GATEWAY_URL: config.NPS_GATEWAY_URL,
 };
 
 // Generate HMAC SHA512 Signature
@@ -85,17 +83,12 @@ paymentRouter.get(
             );
 
             res.json(response.data);
-        } catch (error: any) {
-            console.error(
-                "Error getting payment instruments:",
-                error.response?.data || error.message,
-            );
-            res.status(500).json({
-                error: "Failed to get payment instruments",
-            });
-        }
-    },
-);
+    } catch (error: any) {
+        res.status(500).json({
+            error: "Failed to get payment instruments",
+        });
+    }
+});
 
 /**
  * @swagger
@@ -155,10 +148,6 @@ paymentRouter.post("/service-charge", async (req: Request, res: Response) => {
 
         res.json(response.data);
     } catch (error: any) {
-        console.error(
-            "Error getting service charge:",
-            error.response?.data || error.message,
-        );
         res.status(500).json({ error: "Failed to get service charge" });
     }
 });
@@ -221,10 +210,6 @@ paymentRouter.post("/process-id", async (req: Request, res: Response) => {
 
         res.json(response.data);
     } catch (error: any) {
-        console.error(
-            "Error getting process ID:",
-            error.response?.data || error.message,
-        );
         res.status(500).json({ error: "Failed to get process ID" });
     }
 });
@@ -287,15 +272,8 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
     try {
         const { amount, instrumentCode, transactionRemarks, orderId } =
             req.body;
-        console.log(
-            "Initiating payment for orderId:",
-            orderId,
-            "amount:",
-            amount,
-        );
 
         const merchantTxnId = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-        console.log("Generated merchantTxnId:", merchantTxnId);
 
         const processData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
@@ -308,7 +286,6 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             processData,
             CONFIG.SECRET_KEY,
         );
-        console.log("ProcessData before request:", processData);
 
         const processResponse = await axios.post(
             `${CONFIG.BASE_URL}/GetProcessId`,
@@ -321,10 +298,7 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             },
         );
 
-        console.log("Process response from eSewa:", processResponse.data);
-
         if (processResponse.data.code !== "0") {
-            console.log("Failed to get process ID:", processResponse.data);
             res.status(400).json({
                 error: "Failed to get process ID",
                 details: processResponse.data,
@@ -333,7 +307,6 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
         }
 
         const processId = processResponse.data.data.ProcessId;
-        console.log("Received processId:", processId);
 
         const paymentData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
@@ -343,14 +316,13 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             ProcessId: processId,
             InstrumentCode: instrumentCode || "",
             TransactionRemarks: transactionRemarks || "Payment via API",
-            ResponseUrl: `https://dajuvai.com/order/payment-response`,
+            ResponseUrl: `${config.FRONTEND_URL}/order/payment-response`,
         };
 
         paymentData.Signature = generateSignature(
             paymentData,
             CONFIG.SECRET_KEY,
         );
-        console.log("PaymentData for frontend:", paymentData);
 
         const order = await orderDb.findOne({ where: { id: orderId } });
         if (!order) {
@@ -362,7 +334,6 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
         order.instrumentName = instrumentCode;
 
         await orderDb.save(order);
-        console.log("Order updated with merchantTxnId:", order);
 
         res.json({
             success: true,
@@ -371,7 +342,6 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             merchantTxnId,
         });
     } catch (error) {
-        console.error("Error in /initiate-payment:", error);
         if (error instanceof APIError) {
             res.status(error.status).json({
                 success: false,
@@ -439,10 +409,6 @@ paymentRouter.post("/check-status", async (req: Request, res: Response) => {
 
         res.json(response.data);
     } catch (error: any) {
-        console.error(
-            "Error checking transaction status:",
-            error.response?.data || error.message,
-        );
         res.status(500).json({ error: "Failed to check transaction status" });
     }
 });
@@ -475,59 +441,9 @@ paymentRouter.get("/response", (req: Request, res: Response) => {
     const { MerchantTxnId, GatewayTxnId } = req.query;
 
     res.redirect(
-        `http://localhost:5174/?MerchantTxnId=${MerchantTxnId}&GatewayTxnId=${GatewayTxnId}`,
+        `${config.FRONTEND_URL}/order/payment-response?MerchantTxnId=${MerchantTxnId}&GatewayTxnId=${GatewayTxnId}`,
     );
 });
-
-// https://api.dajuvai.com/api/payments/notification
-// Notification URL (Webhook)
-// paymentRouter.get('/notification', async (req: Request, res: Response) => {
-//     try {
-
-//         const { MerchantTxnId, GatewayTxnId, Status } = req.query;
-
-//         console.log(req.query);
-
-//         console.log('Payment notification received:', {
-//             MerchantTxnId,
-//             GatewayTxnId,
-//             timestamp: new Date().toISOString(),
-//         });
-
-//         if (!MerchantTxnId || typeof MerchantTxnId !== 'string') {
-//             throw new APIError(400, "Invalid or missing MerchantTxnId")
-//         }
-
-//         const order = await orderDb.findOne({
-//             where: {
-//                 mTransactionId: MerchantTxnId
-//             }
-//         })
-//         if (!order) {
-//             throw new APIError(404, "Order not found")
-//         }
-
-//         const userId = order.orderedById;
-
-//         order.paymentStatus = PaymentStatus.UNPAID;
-//         order.status = OrderStatus.DELAYED;
-
-//         const cartservice = new CartService();
-//         await cartservice.clearCart(userId);
-
-//         await orderDb.save(order);
-
-//         res.send('received');
-//     } catch (error) {
-//         // Handle known API errors
-//         if (error instanceof APIError) {
-//             console.log(error);
-//             res.status(error.status).json({ success: false, message: error.message });
-//         } else {
-//             res.status(500).json({ success: false, message: 'Internal server error' });
-//         }
-//     }
-// });
 
 /**
  * @swagger
@@ -568,15 +484,13 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
     try {
         const { MerchantTxnId, GatewayTxnId, Status } = req.query;
 
-        console.log("NPX Payment notification received:", req.query);
-        console.log("Timestamp:", new Date().toISOString());
-
         if (!MerchantTxnId || typeof MerchantTxnId !== "string") {
             throw new APIError(400, "Invalid or missing MerchantTxnId");
         }
 
         const order = await orderDb.findOne({
             where: { mTransactionId: MerchantTxnId },
+            relations: ["orderItems", "orderItems.product", "orderItems.variant"],
         });
 
         if (!order) {
@@ -585,8 +499,6 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
 
         const userId = order.orderedById;
         const cartService = new CartService();
-
-        // Handle payment status
         const notificationService = new NotificationService();
 
         switch ((Status as string).toUpperCase()) {
@@ -594,7 +506,6 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                 order.paymentStatus = PaymentStatus.PAID;
                 order.status = OrderStatus.CONFIRMED;
                 await cartService.clearCart(userId);
-                console.log(`Order ${order.id} marked as PAID`);
                 await orderDb.save(order);
                 await notificationService.notifyPaymentSuccess(
                     order.id,
@@ -603,35 +514,56 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                 break;
 
             case "FAILED":
-            case "CANCELLED":
+            case "CANCELLED": {
+                // Idempotency guard: skip stock restore if already terminal
+                const alreadyTerminal =
+                    order.status === OrderStatus.CANCELLED ||
+                    order.deliveryStatus === DeliveryStatus.DELIVERY_FAILED;
+
+                if (!alreadyTerminal) {
+                    // Restore stock for each item
+                    for (const item of order.orderItems) {
+                        if (item.variant) {
+                            item.variant.stockReserved = Math.max(
+                                0,
+                                (item.variant.stockReserved || 0) - item.quantity,
+                            );
+                            item.variant.stock += item.quantity;
+                            await AppDataSource.getRepository(Variant).save(item.variant);
+                        } else if (item.product) {
+                            item.product.stockReserved = Math.max(
+                                0,
+                                (item.product.stockReserved || 0) - item.quantity,
+                            );
+                            item.product.stock += item.quantity;
+                            await AppDataSource.getRepository(Product).save(item.product);
+                        }
+                    }
+                }
+
                 order.paymentStatus = PaymentStatus.UNPAID;
                 order.status = OrderStatus.CANCELLED;
                 order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
-                console.log(
-                    `Order ${order.id} marked as UNPAID due to ${Status}`,
-                );
                 await orderDb.save(order);
-                await notificationService.notifyPaymentFailed(order.id, userId);
+
+                if (!alreadyTerminal) {
+                    await notificationService.notifyPaymentFailed(order.id, userId);
+                }
                 break;
+            }
 
             default:
-                console.log(
-                    `Order ${order.id} received unknown status: ${Status}`,
-                );
-                await orderDb.save(order);
                 break;
         }
 
         res.send("received");
     } catch (error) {
         if (error instanceof APIError) {
-            console.log(error);
             res.status(error.status).json({
                 success: false,
                 message: error.message,
             });
         } else {
-            console.error("Internal server error in /notification:", error);
             res.status(500).json({
                 success: false,
                 message: "Internal server error",

@@ -663,7 +663,7 @@ export class OrderService {
         // Fetch the user first
         const user = await userDb.findOne({ where: { id: id } });
         if (!user) {
-            throw new Error("User not found");
+            throw new APIError(404, "User not found");
         }
 
         // Update fullName always
@@ -871,9 +871,13 @@ export class OrderService {
                 useremail,
             };
         } catch (error) {
-            throw error instanceof APIError
-                ? error
-                : new APIError(500, "Failed to create order");
+            // Rethrow as-is — do NOT collapse to a generic message here.
+            // globalErrorHandler's normalizeError() already knows how to turn a
+            // QueryFailedError, EntityNotFoundError, etc. into a safe, correctly
+            // typed response; swallowing the real error/message/stack here (as
+            // this used to do) is what made every order-creation failure show up
+            // as an opaque "Failed to create order" with no way to diagnose it.
+            throw error;
         }
     }
 
@@ -898,7 +902,10 @@ export class OrderService {
 
             return { success: true };
         } catch (err) {
-            throw new APIError(500, "Esewa payment verification failed");
+            // Same fix as createOrder above: this used to unconditionally wrap
+            // *any* error — including the intentional 400 "Payment not completed"
+            // thrown two lines up — into a flat 500, hiding the real cause.
+            throw err;
         }
     }
 
@@ -1572,11 +1579,17 @@ export class OrderService {
         const productRepo = manager.getRepository(Product);
 
         const [variants, products] = await Promise.all([
+            // No .leftJoinAndSelect("variant.product", ...) here: Postgres
+            // rejects `FOR UPDATE` combined with an outer join ("FOR UPDATE cannot
+            // be applied to the nullable side of an outer join"), which made this
+            // query throw for every variant-based product (and only variant
+            // products — the plain product lock query below has no join). The
+            // order item's own `.product` relation (loaded by the caller) covers
+            // the product name needed for the error message below.
             variantIds.length
                 ? variantRepo
                       .createQueryBuilder("variant")
                       .setLock("pessimistic_write")
-                      .leftJoinAndSelect("variant.product", "product")
                       .where("variant.id IN (:...ids)", { ids: variantIds })
                       .getMany()
                 : Promise.resolve([]),
@@ -1613,7 +1626,7 @@ export class OrderService {
                 if (variant.stock < item.quantity) {
                     throw new APIError(
                         400,
-                        `Insufficient stock for variant "${variant.sku || variant.id}" of product "${variant.product?.name || "Unknown"}". ` +
+                        `Insufficient stock for variant "${variant.sku || variant.id}" of product "${item.product?.name || "Unknown"}". ` +
                             `Available: ${variant.stock}, Requested: ${item.quantity}`,
                     );
                 }

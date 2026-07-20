@@ -11,3 +11,7 @@ export interface IWishlistMoveToCartRequest {
     wishlistItemId: number;
     quantity: number;
 }
+
+export interface IWishlistMoveManyToCartRequest {
+    items: IWishlistMoveToCartRequest[];
+}

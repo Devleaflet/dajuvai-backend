@@ -26,7 +26,12 @@ export const moveToCartSchema = z.object({
     quantity: z.number().int().positive('Quantity must be a positive integer'),
 });
 
+export const moveManyToCartSchema = z.object({
+    items: z.array(moveToCartSchema).min(1, 'At least one wishlist item is required').max(100, 'Cannot move more than 100 wishlist items at once'),
+});
+
 // TypeScript types inferred from the schemas
 export type AddToWishlistInput = z.infer<typeof addToWishlistSchema>;
 export type RemoveFromWishlistInput = z.infer<typeof removeFromWishlistSchema>;
 export type MoveToCartInput = z.infer<typeof moveToCartSchema>;
+export type MoveManyToCartInput = z.infer<typeof moveManyToCartSchema>;
