@@ -8,6 +8,8 @@ import { OrderItem } from "../entities/orderItems.entity";
 import { NotificationService } from "../service/notification.service";
 import { Vendor } from "../entities/vendor.entity";
 import { deviceTokenService } from "../service/deviceToken.service";
+import { Product } from "../entities/product.entity";
+import { Variant } from "../entities/variant.entity";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
@@ -66,15 +68,13 @@ export const tokenCleanUp = () => {
                         user.resendCount = null;
 
                         await userDB.save(user);
-                        console.log(`Token cleared for user ${user.id} ✅`);
                     } catch (err) {
-                        console.error(`Failed to update user ${user.id}:`, err);
+                        // silent fail for cron
                     }
                 }
             }
-            console.log("Cron job completed for token cleanup");
         } catch (err) {
-            console.error("❌ Error in cron job:", err);
+            // silent fail for cron
         }
     });
 };
@@ -93,34 +93,49 @@ export const tokenCleanUp = () => {
  * - Keep order data clean and avoid clutter.
  */
 export const orderCleanUp = () => {
-    cron.schedule("0 */2 * * *", async () => { // runs every 2 hours at minute 0
+    cron.schedule("0 */2 * * *", async () => {
         try {
             const thresholdDate = new Date();
-            thresholdDate.setHours(thresholdDate.getHours() - 24); // 24 hours ago
+            thresholdDate.setHours(thresholdDate.getHours() - 24);
 
-            // Find all PENDING orders created more than 24 hours ago
-            const pendingOrders = await orderDB.find({
+            const staleOrders = await orderDB.find({
                 where: {
                     status: OrderStatus.CONFIRMED,
                     paymentStatus: PaymentStatus.UNPAID,
                     createdAt: LessThan(thresholdDate),
                 },
-                relations: ['orderItems'], // Include related order items if needed for cascade
+                relations: ['orderItems'],
             });
 
-            if (pendingOrders.length > 0) {
-                for (const order of pendingOrders) {
-                    // Delete order from DB
-                    await orderDB.remove(order);
-                    console.log(`Order ${order.id} deleted 🗑️✅`);
+            if (staleOrders.length === 0) return;
+
+            const productRepo = AppDataSource.getRepository(Product);
+            const variantRepo = AppDataSource.getRepository(Variant);
+
+            for (const order of staleOrders) {
+                // Restore stock for each order item
+                for (const item of order.orderItems) {
+                    if (item.variantId) {
+                        const variant = await variantRepo.findOne({ where: { id: item.variantId } });
+                        if (variant) {
+                            variant.stock += item.quantity;
+                            await variantRepo.save(variant);
+                        }
+                    } else if (item.productId) {
+                        const product = await productRepo.findOne({ where: { id: item.productId } });
+                        if (product && product.stock != null) {
+                            product.stock += item.quantity;
+                            await productRepo.save(product);
+                        }
+                    }
                 }
-                console.log(`Deleted ${pendingOrders.length} pending orders`);
-            } else {
-                console.log("No pending orders to delete");
+
+                order.status = OrderStatus.CANCELLED;
+                order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
+                await orderDB.save(order);
             }
         } catch (err) {
-            // Log any error that occurs during the order cleanup cron job
-            console.error("❌ Error in order cleanup cron job:", err);
+            // silent fail for cron
         }
     });
 };
@@ -128,13 +143,8 @@ export const orderCleanUp = () => {
 // set order status to cancelled if the payment is dealyed formore than 15 minutes incase of esewa and nps 
 export const startOrderCleanupJob = () => {
     cron.schedule("*/5 * * * *", async () => {
-        console.log("⏰ [CRON] Checking for unpaid online orders...");
-
         try {
             const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-            console.log(
-                `🕒 [CRON] Cancelling orders created before: ${fifteenMinutesAgo.toISOString()}`
-            );
 
             const staleOrders = await orderDB.find({
                 where: {
@@ -146,81 +156,53 @@ export const startOrderCleanupJob = () => {
                 relations: ["orderedBy", "orderItems", "orderItems.vendor"],
             });
 
-            console.log("------Stale orders-----------")
-            console.log(staleOrders)
+            if (!staleOrders.length) return;
 
-            if (!staleOrders.length) {
-                console.log("✅ [CRON] No stale unpaid orders found.");
-                return;
-            }
-
-            console.log(`⚠️ [CRON] Found ${staleOrders.length} unpaid orders to cancel.`);
+            const productRepo = AppDataSource.getRepository(Product);
+            const variantRepo = AppDataSource.getRepository(Variant);
 
             for (const order of staleOrders) {
-                console.log(`🚨 [ORDER] Processing Order ID: ${order.id} ...`);
+                // Restore stock before cancelling
+                for (const item of order.orderItems) {
+                    if (item.variantId) {
+                        const variant = await variantRepo.findOne({ where: { id: item.variantId } });
+                        if (variant) {
+                            variant.stock += item.quantity;
+                            await variantRepo.save(variant);
+                        }
+                    } else if (item.productId) {
+                        const product = await productRepo.findOne({ where: { id: item.productId } });
+                        if (product && product.stock != null) {
+                            product.stock += item.quantity;
+                            await productRepo.save(product);
+                        }
+                    }
+                }
 
                 order.status = OrderStatus.CANCELLED;
                 order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
                 await orderDB.save(order);
-                console.log(`🛑 [ORDER] Order #${order.id} status set to CANCELLED.`);
 
                 const userEmail = order.orderedBy?.email;
-                const userName = order.orderedBy?.username || "Customer";
-
-                // Fetch vendors
                 const orderItems = await orderItemRepo.find({
                     where: { order: { id: order.id } },
                     relations: ["vendor"],
                 });
+                const vendorEmails = orderItems.map((item) => item.vendor?.email).filter(Boolean);
 
-                const vendorEmails = orderItems
-                    .map((item) => item.vendor?.email)
-                    .filter(Boolean);
-
-                // Send email to user
                 if (userEmail) {
-                    console.log(`📧 [EMAIL] Sending cancellation email to user: ${userEmail}`);
-                    await sendOrderStatusEmail(
-                        userEmail,
-                        order.id,
-                        "Cancelled",
-                        `Order #${order.id} Cancelled - Payment Timeout`
-                    );
-                    console.log(`✅ [EMAIL] Sent to user: ${userEmail}`);
-                } else {
-                    console.log(`⚠️ [EMAIL] No user email found for Order #${order.id}`);
+                    await sendOrderStatusEmail(userEmail, order.id, "Cancelled", `Order #${order.id} Cancelled - Payment Timeout`);
                 }
 
-                // Send emails to vendors
-                if (vendorEmails.length) {
-                    console.log(
-                        `📧 [EMAIL] Sending vendor notification to ${vendorEmails.length} vendor(s).`
-                    );
-                    for (const vendorEmail of vendorEmails) {
-                        await sendOrderStatusEmail(
-                            vendorEmail,
-                            order.id,
-                            "Cancelled",
-                            `Order #${order.id} Cancelled by System`
-                        );
-                        console.log(`✅ [EMAIL] Sent to vendor: ${vendorEmail}`);
-                    }
-                } else {
-                    console.log(`⚠️ [EMAIL] No vendor email(s) found for Order #${order.id}`);
+                for (const vendorEmail of vendorEmails) {
+                    await sendOrderStatusEmail(vendorEmail, order.id, "Cancelled", `Order #${order.id} Cancelled by System`);
                 }
 
-                // Send notification (in-app or push)
-                console.log(`🔔 [NOTIFY] Sending cancellation notification for Order #${order.id}`);
                 const notificationService = new NotificationService();
                 await notificationService.notifyOrderStatusUpdated(order);
-                console.log(`✅ [NOTIFY] Notification sent for Order #${order.id}`);
-
-                console.log(`🚫 [CRON] Finished cancelling Order #${order.id}`);
             }
-
-            console.log("🎯 [CRON] Cleanup cycle completed successfully.\n");
         } catch (error) {
-            console.error("❌ [CRON ERROR] Failed during order cleanup:", error);
+            // silent fail for cron
         }
     });
 };
@@ -229,31 +211,25 @@ export const startOrderCleanupJob = () => {
 
 // un verified vendor  clean up
 export const removeUnverifiedVendors = () => {
-    // run every 12 hrs 
     cron.schedule("0 0,12 * * *", async () => {
         try {
             const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-            const result = await vendorRepo.delete({
+            await vendorRepo.delete({
                 isVerified: false,
                 createdAt: LessThan(twentyFourHoursAgo),
             });
-
-            console.log(`Removed ${result.affected} unverified vendors.`);
-
         } catch (error) {
-            console.log(error)
+            // silent fail for cron
         }
     })
 }
 
-// Retires FCM tokens not refreshed in 60 days, so send batches stay small.
 export const staleDeviceTokenCleanUp = () => {
-    // 2am daily — low traffic, and this touches a lot of rows.
     cron.schedule("0 2 * * *", async () => {
         try {
             await deviceTokenService.cleanupStaleTokens();
         } catch (error) {
-            console.log(error);
+            // silent fail for cron
         }
     });
 };

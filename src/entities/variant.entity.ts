@@ -31,6 +31,9 @@ export class Variant {
     @Column({ type: 'integer' })
     stock: number;
 
+    @Column({ type: 'integer', default: 0 })
+    stockReserved: number;
+
     @Column({ type: 'enum', enum: InventoryStatus, default: InventoryStatus.AVAILABLE, nullable: true })
     status?: InventoryStatus;
 

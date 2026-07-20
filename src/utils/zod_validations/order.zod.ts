@@ -1,5 +1,7 @@
 
 import { z } from 'zod';
+import { OrderStatus } from '../../entities/order.entity';
+import { VendorOrderStatus } from '../../entities/orderVendorShipping.entity';
 
 /**
  * Enum schema for Nepal provinces used in shipping addresses.
@@ -16,14 +18,13 @@ const ProvinceEnum = z.enum([
 
 
 /**
- * Enum schema representing allowed order statuses.
+ * Order-status schema. Derived directly from the OrderStatus DB enum
+ * (entities/order.entity.ts) instead of a hand-duplicated list — this was
+ * exactly the bug: this list used to be a stale subset of the real enum
+ * (missing PROCESSING/SHIPPED/DELAYED/RETURNED), so legitimate status
+ * updates failed Zod validation before ever reaching the service layer.
  */
-const OrderStatusEnum = z.enum([
-    'PENDING',
-    'CONFIRMED',
-    'CANCELLED',
-    'DELIVERED'
-]);
+const OrderStatusEnum = z.nativeEnum(OrderStatus);
 
 
 /**
@@ -82,4 +83,21 @@ export const createOrderSchema = z.object({
  */
 export const updateOrderStatusSchema = z.object({
     status: OrderStatusEnum,
+    // Optimistic-concurrency guard: if provided and it no longer matches the
+    // order's current status, the update is rejected with 409 instead of
+    // silently overwriting a change another admin/vendor/webhook just made.
+    expectedCurrentStatus: OrderStatusEnum.optional(),
+    reason: z.string().max(500).optional(),
+    note: z.string().max(1000).optional(),
+});
+
+/**
+ * Schema for a vendor updating its own fulfillment stage for an order.
+ * Deliberately a separate, narrower enum than the admin order-status
+ * schema — a vendor can never set DELIVERED or any parent-order-only value.
+ */
+export const updateVendorOrderStatusSchema = z.object({
+    status: z.nativeEnum(VendorOrderStatus),
+    reason: z.string().max(500).optional(),
+    note: z.string().max(1000).optional(),
 });

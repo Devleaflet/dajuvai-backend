@@ -1,7 +1,8 @@
 import { Router } from 'express';
 import { OrderController } from '../controllers/order.controller';
-import { authMiddleware, combinedAuthMiddleware, isAccountOwner, isAccountOwnerOrAdmin, isAdmin, isAdminOrStaff, isVendor, validateZod, vendorAuthMiddleware } from '../middlewares/auth.middleware';
-import { createOrderSchema, shippingAddressSchema, updateOrderStatusSchema } from '../utils/zod_validations/order.zod';
+import { authMiddleware, combinedAuthMiddleware, isAccountOwner, isAccountOwnerOrAdmin, isAdmin, isAdminOrStaff, isVendor, vendorAuthMiddleware } from '../middlewares/auth.middleware';
+import { validateZod } from '../middlewares/validation.middleware';
+import { createOrderSchema, shippingAddressSchema, updateOrderStatusSchema, updateVendorOrderStatusSchema } from '../utils/zod_validations/order.zod';
 import { asyncHandler } from '../utils/asyncHandler.utils';
 
 const router = Router();
@@ -174,6 +175,11 @@ const orderController = new OrderController();
 
 router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
 
+// Read-only checkout preview: same vendor-grouped shipping/discount calc as
+// createOrder, without writing an order — the frontend renders these
+// numbers instead of recomputing shipping itself.
+router.post('/estimate', authMiddleware, asyncHandler(orderController.estimateCheckout.bind(orderController)));
+
 
 /**
  * @swagger
@@ -290,7 +296,7 @@ router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(or
  *                   example: "Internal server error"
  */
 
-router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getCustomerOrders.bind(orderController)));
+router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getAllOrders.bind(orderController)));
 
 /**
  * @swagger
@@ -872,7 +878,7 @@ router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.get
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind(orderController)));
+router.get('/customer/order/:id', authMiddleware, asyncHandler(orderController.getOrderById.bind(orderController)));
 
 
 // /**
@@ -1444,6 +1450,7 @@ router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(order
  *                   example: "Internal server error"
  */
 router.put('/admin/:orderId/status', authMiddleware, isAdminOrStaff, validateZod(updateOrderStatusSchema), asyncHandler(orderController.updateOrderStatus.bind(orderController)));
+router.get('/admin/:orderId/status-history', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getOrderStatusHistory.bind(orderController)));
 
 
 /**
@@ -1892,6 +1899,7 @@ router.get('/vendor/orders', vendorAuthMiddleware, isVendor, asyncHandler(orderC
  *                   example: "Internal server error"
  */
 router.get('/vendor/:orderId', vendorAuthMiddleware, asyncHandler(orderController.getVendorOrderDetails.bind(orderController)));
+router.put('/vendor/:orderId/status', vendorAuthMiddleware, isVendor, validateZod(updateVendorOrderStatusSchema), asyncHandler(orderController.updateVendorOrderStatus.bind(orderController)));
 
 
 /**
@@ -2087,7 +2095,7 @@ router.post("/search/merchant-transactionId", authMiddleware, orderController.ge
  *       500:
  *         description: Internal server error
  */
-router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
+router.delete("/order/delete/all", authMiddleware, isAdminOrStaff, asyncHandler(orderController.deleteOrder.bind(orderController)));
 
 /**
  * @swagger

@@ -1,4 +1,5 @@
 import { CorsOptions } from "cors";
+import config from "./env.config";
 
 export const allowedOrigins = [
     "https://dajuvai-frontend-ykrq.vercel.app",
@@ -13,10 +14,14 @@ export const allowedOrigins = [
 
 export const corsOptions: CorsOptions = {
     origin: (origin, callback) => {
-        // Allow requests with no origin (mobile apps, curl, Postman)
-        if (!origin) return callback(null, true);
+        if (!origin) {
+            if (config.NODE_ENV === "production") {
+                return callback(new Error("CORS: No origin header in production"));
+            }
+            return callback(null, true);
+        }
         if (allowedOrigins.includes(origin)) {
-            callback(null, origin); // reflect the exact origin, never "*"
+            callback(null, origin);
         } else {
             callback(new Error(`CORS: origin ${origin} not allowed`));
         }

@@ -20,6 +20,18 @@ export class BadRequestError extends APIError {
     }
 }
 
+export class InvalidOrderStatusTransitionError extends APIError {
+    constructor(message: string) {
+        super(400, message, "INVALID_ORDER_STATUS_TRANSITION");
+    }
+}
+
+export class OrderStateChangedError extends APIError {
+    constructor(message: string = "This order was updated by another user. Refresh and try again.") {
+        super(409, message, "ORDER_STATE_CHANGED");
+    }
+}
+
 // ── 401 Unauthorized ─────────────────────────────────────────────────────────
 
 export class AuthError extends APIError {

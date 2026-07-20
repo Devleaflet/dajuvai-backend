@@ -1,4 +1,4 @@
-import { DataSource, Repository, Not, In } from "typeorm";
+import { Brackets, DataSource, Repository, Not, In } from "typeorm";
 import { Product } from "../entities/product.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { User, UserRole } from "../entities/user.entity";
@@ -1003,106 +1003,175 @@ export class ProductService {
     total: number;
     page: number;
     limit: number;
+    totalPages: number;
   }> {
     const {
       page = 1,
-      limit = 7,
+      // Default bumped from 7 (an arbitrary, too-small default that forced
+      // heavy client-side re-slicing) to 20, matching the rest of the admin
+      // dashboard. Hard-capped at 100 regardless of what the client asks for.
       sort = "createdAt",
       filter,
       vendorId,
       search,
     } = params;
+    const pageNumber = Math.max(1, Number(page) || 1);
+    const limit = Math.min(100, Math.max(1, Number(params.limit) || 20));
+    const searchTerm = search?.trim();
 
-    const query = this.productRepository
+    const idQuery = this.productRepository
       .createQueryBuilder("product")
-      .leftJoinAndSelect("product.vendor", "vendor")
-      .leftJoinAndSelect("product.variants", "variants")
+      .leftJoin("product.vendor", "vendor")
+      .leftJoin("product.variants", "variants")
       .leftJoin("product.deal", "deal")
-      .leftJoinAndSelect("product.subcategory", "subcategory")
-      .leftJoinAndSelect("subcategory.category", "category")
-      .select([
-        "product.id",
-        "product.name",
-        "product.brand",
-        "product.keywords",
-        "product.stock",
-        "product.discount",
-        "product.discountType",
-        "product.productImages",
-        "product.hasVariants",
-        "product.finalPrice",
-        "product.basePrice",
-        "product.dealId",
-        "product.createdAt",
-        "product.status",
-
-        "subcategory.id",
-        "subcategory.name",
-
-        "category.id",
-        "category.name",
-
-        "deal.id",
-        "deal.name",
-        "deal.discountPercentage",
-        "deal.status",
-
-        "vendor.id",
-        "vendor.businessName",
-
-        "variants.id",
-        "variants.sku",
-        "variants.basePrice",
-        "variants.finalPrice",
-        "variants.stock",
-        "variants.status",
-        "variants.variantImages",
-      ]);
+      .leftJoin("product.subcategory", "subcategory")
+      .leftJoin("subcategory.category", "category")
+      .select("product.id", "id");
 
     if (filter === "out_of_stock") {
-      query.andWhere("(product.stock = 0 OR variants.stock = 0)");
+      idQuery.andWhere(
+        "(product.status = :outOfStockStatus OR product.stock = 0 OR variants.stock = 0)",
+        { outOfStockStatus: "OUT_OF_STOCK" },
+      );
+    } else if (filter === "low_stock") {
+      idQuery.andWhere(
+        "(product.status = :lowStockStatus OR variants.status = :lowStockStatus)",
+        { lowStockStatus: "LOW_STOCK" },
+      );
+    } else if (filter === "available") {
+      idQuery.andWhere("product.status = :availableStatus", {
+        availableStatus: "AVAILABLE",
+      });
     }
 
     if (vendorId) {
-      query.andWhere("product.vendorId = :vendorId", { vendorId });
+      idQuery.andWhere("product.vendorId = :vendorId", { vendorId });
     }
 
-    if (search && search.trim()) {
-      query.andWhere(
-        "(product.name ILIKE :search OR vendor.businessName ILIKE :search)",
-        {
-          search: `%${search.trim()}%`,
-        },
-      );
+    if (searchTerm) {
+      const wildcardSearch = `%${searchTerm}%`;
+      const prefixSearch = `${searchTerm}%`;
+
+      idQuery
+        .addSelect(
+          `MIN(CASE
+            WHEN product.name ILIKE :prefixSearch THEN 0
+            WHEN product.name ILIKE :search THEN 1
+            WHEN variants.sku ILIKE :search THEN 2
+            WHEN vendor.businessName ILIKE :search THEN 3
+            ELSE 4
+          END)`,
+          "search_rank",
+        )
+        .andWhere(
+          new Brackets((qb) => {
+            qb.where("CAST(product.id AS TEXT) ILIKE :search")
+              .orWhere("product.name ILIKE :search")
+              .orWhere("product.brand ILIKE :search")
+              .orWhere("product.description ILIKE :search")
+              .orWhere("product.keywords ILIKE :search")
+              .orWhere("vendor.businessName ILIKE :search")
+              .orWhere("subcategory.name ILIKE :search")
+              .orWhere("category.name ILIKE :search")
+              .orWhere("variants.sku ILIKE :search");
+          }),
+        )
+        .setParameters({
+          search: wildcardSearch,
+          prefixSearch,
+        });
+    }
+
+    const totalRow = await idQuery
+      .clone()
+      .select("COUNT(DISTINCT product.id)", "count")
+      .getRawOne<{ count: string }>();
+    const total = Number(totalRow?.count || 0);
+    const totalPages = Math.max(1, Math.ceil(total / limit));
+    idQuery.groupBy("product.id");
+
+    let hasOrderBy = false;
+    const applyOrderBy = (column: string, direction: "ASC" | "DESC") => {
+      if (hasOrderBy) {
+        idQuery.addOrderBy(column, direction);
+        return;
+      }
+      idQuery.orderBy(column, direction);
+      hasOrderBy = true;
+    };
+
+    if (searchTerm) {
+      applyOrderBy("search_rank", "ASC");
     }
 
     switch (sort) {
       case "name":
-        query.orderBy("product.name", "ASC");
+        idQuery.addSelect("MIN(product.name)", "sort_name");
+        applyOrderBy("sort_name", "ASC");
         break;
       case "oldest":
-        query.orderBy("product.createdAt", "ASC");
+        idQuery.addSelect("MIN(product.createdAt)", "sort_created_at");
+        applyOrderBy("sort_created_at", "ASC");
         break;
       case "newest":
-        query.orderBy("product.createdAt", "DESC");
+        idQuery.addSelect("MIN(product.createdAt)", "sort_created_at");
+        applyOrderBy("sort_created_at", "DESC");
         break;
       case "price_low_high":
-        query.orderBy("product.basePrice", "ASC");
+        idQuery.addSelect("MIN(product.basePrice)", "sort_price");
+        applyOrderBy("sort_price", "ASC");
         break;
       case "price_high_low":
-        query.orderBy("product.basePrice", "DESC");
+        idQuery.addSelect("MIN(product.basePrice)", "sort_price");
+        applyOrderBy("sort_price", "DESC");
         break;
       default:
-        query.orderBy("product.createdAt", "DESC");
+        idQuery.addSelect("MIN(product.createdAt)", "sort_created_at");
+        applyOrderBy("sort_created_at", "DESC");
         break;
     }
+    applyOrderBy("product.id", "ASC");
 
-    const skip = (page - 1) * limit;
-    query.skip(skip).take(limit);
+    const idRows = await idQuery
+      .offset((pageNumber - 1) * limit)
+      .limit(limit)
+      .getRawMany<{ id: number | string }>();
+    const productIds = idRows
+      .map((row) => Number(row.id))
+      .filter((id) => Number.isFinite(id));
 
-    const [products, total] = await query.getManyAndCount();
+    if (productIds.length === 0) {
+      return {
+        products: [],
+        total,
+        page: pageNumber,
+        limit,
+        totalPages,
+      };
+    }
 
-    return { products, total, page, limit };
+    const products = await this.productRepository
+      .createQueryBuilder("product")
+      .leftJoinAndSelect("product.vendor", "vendor")
+      .leftJoinAndSelect("product.variants", "variants")
+      .leftJoinAndSelect("product.deal", "deal")
+      .leftJoinAndSelect("product.subcategory", "subcategory")
+      .leftJoinAndSelect("subcategory.category", "category")
+      .where("product.id IN (:...productIds)", { productIds })
+      .getMany();
+
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    const sortedProducts = productIds
+      .map((id) => productsById.get(id))
+      .filter((product): product is Product => Boolean(product));
+
+    return {
+      products: sortedProducts,
+      total,
+      page: pageNumber,
+      limit,
+      totalPages,
+    };
   }
 
   async getProductById(
@@ -1118,7 +1187,6 @@ export class ProductService {
       .andWhere("subcategory.id = :subcategoryId", { subcategoryId })
       .getOne();
   }
-
   async getVendorIdByProductId(productId: number): Promise<number> {
     const product = await this.productRepository.findOne({
       where: { id: productId },

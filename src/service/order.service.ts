@@ -1,10 +1,12 @@
-import { EntityManager, In, Not, Repository } from "typeorm";
+import { Brackets, EntityManager, In, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import {
     IShippingAddressRequest,
     IUpdateOrderStatusRequest,
     IOrderCreateRequest,
+    IAdminOrderQueryParams,
+    IPaginatedResult,
 } from "../interface/order.interface";
 import {
     Order,
@@ -15,6 +17,20 @@ import {
 } from "../entities/order.entity";
 import { Address } from "../entities/address.entity";
 import { OrderItem } from "../entities/orderItems.entity";
+import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
+import {
+    OrderStatusHistory,
+    OrderStatusChangedByRole,
+} from "../entities/orderStatusHistory.entity";
+import {
+    VendorOrderStatus,
+    VENDOR_ORDER_STATUS_TRANSITIONS,
+} from "../entities/orderVendorShipping.entity";
+import { ORDER_STATUS_TRANSITIONS } from "../constants/orderStatus.constants";
+import {
+    InvalidOrderStatusTransitionError,
+    OrderStateChangedError,
+} from "../errors/HttpErrors";
 import { Cart } from "../entities/cart.entity";
 import { CartItem } from "../entities/cartItem.entity";
 import { User } from "../entities/user.entity";
@@ -33,7 +49,6 @@ import {
     sendVendorOrderEmail,
 } from "../utils/nodemailer.utils";
 import { NotificationService } from "./notification.service";
-import { add } from "winston";
 import crypto from "crypto";
 import axios from "axios";
 import { PromoType } from "../entities/promo.entity";
@@ -41,11 +56,15 @@ import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
 import config from "../config/env.config";
 import {
-    sanitizeUser,
-    sanitizeVendor,
     sanitizeOrderFull,
+    sanitizeOrderForVendor,
     SanitizedOrderFull,
+    SanitizedVendorOrderView,
 } from "../utils/sanitize.util";
+import {
+    ShippingCalculationService,
+    calculateGrandTotal,
+} from "./shipping.service";
 
 /**
  * Service class responsible for managing orders.
@@ -58,6 +77,9 @@ export class OrderService {
     private orderRepository: Repository<Order>;
     private addressRepository: Repository<Address>;
     private orderItemRepository: Repository<OrderItem>;
+    private orderVendorShippingRepository: Repository<OrderVendorShipping>;
+    private orderStatusHistoryRepository: Repository<OrderStatusHistory>;
+    private shippingService: ShippingCalculationService;
     private cartRepository: Repository<Cart>;
     private userRepository: Repository<User>;
     private cartService: CartService;
@@ -84,6 +106,17 @@ export class OrderService {
 
         // Repository to handle individual order items in an order
         this.orderItemRepository = AppDataSource.getRepository(OrderItem);
+
+        // Repository for the immutable per-vendor shipping snapshot rows
+        this.orderVendorShippingRepository =
+            AppDataSource.getRepository(OrderVendorShipping);
+
+        // Append-only order-status audit trail
+        this.orderStatusHistoryRepository =
+            AppDataSource.getRepository(OrderStatusHistory);
+
+        // Single source of truth for per-vendor shipping-fee calculation
+        this.shippingService = new ShippingCalculationService();
 
         // Repository for accessing cart data linked to users
         this.cartRepository = AppDataSource.getRepository(Cart);
@@ -221,8 +254,6 @@ export class OrderService {
             ],
         });
 
-        console.log(cart);
-
         // If cart not found or cart has no items, throw an error indicating cart is empty
         if (!cart || !cart.items.length)
             throw new APIError(400, "Cart is empty");
@@ -238,10 +269,14 @@ export class OrderService {
      * @returns {Promise<District>} The matched District entity.
      */
     private async getDistrict(districtName: string): Promise<District> {
-        // Attempt to find the district by its name
-        const district = await this.districtRepository.findOne({
-            where: { name: districtName },
-        });
+        if (!districtName)
+            throw new APIError(400, "Customer district is required");
+
+        // Normalized lookup (trim/case/whitespace-insensitive) so the same
+        // matching rule used for the shipping-fee comparison also validates
+        // the address at checkout time.
+        const district =
+            await this.shippingService.resolveDistrictByName(districtName);
 
         // If the district does not exist, throw an error
         if (!district) throw new APIError(400, "Invalid district");
@@ -272,16 +307,24 @@ export class OrderService {
             where: { userId },
         });
 
+        const resolvedDistrict =
+            await this.shippingService.resolveDistrictByName(
+                shippingAddress.district,
+            );
+        const districtId = resolvedDistrict?.id ?? null;
+
         if (address) {
             if (
                 address.province !== shippingAddress.province ||
                 address.district !== shippingAddress.district ||
                 address.city !== shippingAddress.city ||
                 address.localAddress !== shippingAddress.streetAddress ||
-                address.landmark !== shippingAddress.landmark
+                address.landmark !== shippingAddress.landmark ||
+                address.districtId !== districtId
             ) {
                 address.province = shippingAddress.province;
                 address.district = shippingAddress.district;
+                address.districtId = districtId;
                 address.city = shippingAddress.city;
                 address.localAddress = shippingAddress.streetAddress;
                 address.landmark = shippingAddress.landmark;
@@ -299,6 +342,7 @@ export class OrderService {
         const newAddress = this.addressRepository.create({
             province: shippingAddress.province,
             district: shippingAddress.district,
+            districtId,
             city: shippingAddress.city,
             localAddress: shippingAddress.streetAddress,
             landmark: shippingAddress.landmark,
@@ -328,6 +372,13 @@ export class OrderService {
                 price,
                 vendorId: item.product.vendorId,
                 variantId: item.variant ? item.variant.id : null,
+                productNameSnapshot: item.product.name || null,
+                skuSnapshot: item.variant?.sku || null,
+                imageSnapshot:
+                    item.variant?.variantImages?.[0] ||
+                    item.product.productImages?.[0] ||
+                    null,
+                unitPriceSnapshot: price,
             });
         });
     }
@@ -350,53 +401,47 @@ export class OrderService {
         user: any,
         items: any[],
         address: Address,
-        shippingFee: number,
+        shippingTotal: number,
         orderData: IOrderCreateRequest,
     ): Promise<Order> {
         // Convert items into OrderItem entities
         const orderItems = this.createOrderItems(items);
 
         // Calculate subtotal from items
-        const subtotal = items.reduce((sum, item) => {
+        const merchandiseSubtotal = items.reduce((sum, item) => {
             const linePrice = this.calculateLineItemPrice(item);
             return sum + linePrice * item.quantity;
         }, 0);
 
         // apply promo code if provided
-        let discountAmount = 0;
-        let appliedPromoCode: string | null = null;
-
-        if (orderData.promoCode) {
-            const promo = await this.promoService.findPromoByCode(
+        const { discountAmount, appliedPromoCode } =
+            await this.calculateDiscount(
+                userId,
                 orderData.promoCode,
+                merchandiseSubtotal,
+                shippingTotal,
             );
-            let pastOrderTransaction = await this.orderRepository.find({
-                where: {
-                    appliedPromoCode: orderData.promoCode,
-                    orderedById: userId,
-                    status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
-                },
-            });
 
-            if (promo && promo.isValid && pastOrderTransaction.length === 0) {
-                if (promo.applyOn === PromoType.LINE_TOTAL) {
-                    discountAmount =
-                        (subtotal * promo.discountPercentage) / 100;
-                } else {
-                    discountAmount =
-                        (shippingFee * promo.discountPercentage) / 100;
-                }
-                appliedPromoCode = promo.promoCode;
-            }
-        }
+        const taxTotal = 0; // no tax feature exists yet; kept for formula completeness
+        const totalPrice = calculateGrandTotal({
+            merchandiseSubtotal,
+            discountTotal: discountAmount,
+            shippingTotal,
+            taxTotal,
+        });
 
-        const totalPrice = subtotal - discountAmount + shippingFee;
+        const orderNumber = `DJV-${Date.now().toString(36).toUpperCase()}-${Math.random().toString(36).substring(2, 6).toUpperCase()}`;
 
         return this.orderRepository.create({
             orderedById: userId,
             orderedBy: user,
+            orderNumber,
+            idempotencyKey: orderData.idempotencyKey || null,
             totalPrice,
-            shippingFee,
+            shippingFee: shippingTotal,
+            merchandiseSubtotal,
+            discountTotal: discountAmount,
+            taxTotal,
             serviceCharge: orderData.serviceCharge || 0,
             instrumentName: orderData.instrumentName || null,
             paymentStatus: PaymentStatus.UNPAID,
@@ -407,11 +452,170 @@ export class OrderService {
                     ? OrderStatus.CONFIRMED
                     : OrderStatus.PENDING,
             shippingAddress: address,
+            shippingAddressSnapshot: {
+                province: address.province,
+                district: address.district,
+                districtId: address.districtId,
+                city: address.city,
+                localAddress: address.localAddress,
+                landmark: address.landmark,
+            },
             orderItems,
             deliveryStatus: DeliveryStatus.ORDER_PROCESSING,
             isBuyNow: Boolean(isBuyNow),
             phoneNumber: orderData.phoneNumber,
         });
+    }
+
+    /** Single place that applies a promo code — used by both checkout
+     * (`createOrderEntity`) and the pre-checkout estimate, so the discount a
+     * customer previews always matches what actually gets charged. */
+    private async calculateDiscount(
+        userId: number,
+        promoCode: string | undefined,
+        merchandiseSubtotal: number,
+        shippingTotal: number,
+    ): Promise<{ discountAmount: number; appliedPromoCode: string | null }> {
+        if (!promoCode) return { discountAmount: 0, appliedPromoCode: null };
+
+        const promo = await this.promoService.findPromoByCode(promoCode);
+        const pastOrderTransaction = await this.orderRepository.find({
+            where: {
+                appliedPromoCode: promoCode,
+                orderedById: userId,
+                status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
+            },
+        });
+
+        if (!promo || !promo.isValid || pastOrderTransaction.length > 0) {
+            return { discountAmount: 0, appliedPromoCode: null };
+        }
+
+        const discountAmount =
+            promo.applyOn === PromoType.LINE_TOTAL
+                ? (merchandiseSubtotal * promo.discountPercentage) / 100
+                : (shippingTotal * promo.discountPercentage) / 100;
+
+        return { discountAmount, appliedPromoCode: promo.promoCode };
+    }
+
+    /**
+     * Read-only checkout preview: resolves the same vendor/shipping/discount
+     * calculation `createOrder` will use, without writing anything to the
+     * database. The frontend calls this to render totals instead of
+     * recomputing shipping/discount itself — the backend stays the single
+     * source of truth even before an order is placed.
+     */
+    async estimateCheckout(
+        userId: number,
+        request: Pick<
+            IOrderCreateRequest,
+            | "shippingAddress"
+            | "promoCode"
+            | "isBuyNow"
+            | "productId"
+            | "variantId"
+            | "quantity"
+        >,
+    ) {
+        const {
+            shippingAddress,
+            promoCode,
+            isBuyNow,
+            productId,
+            variantId,
+            quantity,
+        } = request;
+
+        let items: any[];
+        if (isBuyNow) {
+            const product = await this.productRepository.findOne({
+                where: { id: productId },
+                relations: ["variants", "vendor", "vendor.district"],
+            });
+            if (!product) throw new APIError(404, "Product not found");
+
+            let variant = null;
+            if (variantId) {
+                variant = await this.variantRepository.findOne({
+                    where: { id: variantId },
+                });
+                if (!variant) throw new APIError(404, "Variant not found");
+            }
+
+            items = [{ product, variant, quantity: quantity || 1 }];
+        } else {
+            const cart = await this.getCart(userId);
+            items = cart.items;
+        }
+
+        const customerDistrict =
+            await this.shippingService.resolveDistrictByName(
+                shippingAddress?.district,
+            );
+        if (!customerDistrict) {
+            throw new APIError(400, "Invalid or missing customer district");
+        }
+
+        const vendorGroups = [...this.groupItemsByVendor(items).values()];
+        const { vendorShippingBreakdown, shippingTotal } =
+            this.shippingService.calculateOrderShipping(
+                {
+                    districtId: customerDistrict.id,
+                    districtName: customerDistrict.name,
+                },
+                vendorGroups.map((g) => ({
+                    vendorId: g.vendorId,
+                    vendorDistrict: {
+                        districtId: g.vendorDistrictId,
+                        districtName: g.vendorDistrictName,
+                    },
+                })),
+            );
+
+        const merchandiseSubtotal = vendorGroups.reduce(
+            (sum, g) => sum + g.merchandiseSubtotal,
+            0,
+        );
+
+        const { discountAmount, appliedPromoCode } =
+            await this.calculateDiscount(
+                userId,
+                promoCode,
+                merchandiseSubtotal,
+                shippingTotal,
+            );
+
+        const taxTotal = 0;
+        const grandTotal = calculateGrandTotal({
+            merchandiseSubtotal,
+            discountTotal: discountAmount,
+            shippingTotal,
+            taxTotal,
+        });
+
+        return {
+            merchandiseSubtotal,
+            vendorShippingBreakdown: vendorShippingBreakdown.map((vs) => {
+                const group = vendorGroups.find(
+                    (g) => g.vendorId === vs.vendorId,
+                )!;
+                return {
+                    vendorId: vs.vendorId,
+                    vendorName: group.vendorName,
+                    vendorDistrict: vs.vendorDistrict,
+                    customerDistrict: vs.customerDistrict,
+                    shippingZone: vs.shippingZone,
+                    shippingFee: vs.shippingFee,
+                    merchandiseSubtotal: group.merchandiseSubtotal,
+                };
+            }),
+            shippingTotal,
+            discountTotal: discountAmount,
+            appliedPromoCode,
+            taxTotal,
+            grandTotal,
+        };
     }
 
     async checkAvailablePromocode(promoCode: string, userId: number) {
@@ -493,7 +697,29 @@ export class OrderService {
                 isBuyNow,
                 variantId,
                 quantity,
+                idempotencyKey,
             } = orderData;
+
+            // Idempotency: if key provided, check for existing order
+            if (idempotencyKey) {
+                const existingOrder = await this.orderRepository.findOne({
+                    where: { idempotencyKey },
+                    relations: [
+                        "orderItems",
+                        "orderItems.product",
+                        "orderItems.variant",
+                        "shippingAddress",
+                    ],
+                });
+                if (existingOrder) {
+                    return {
+                        order: existingOrder,
+                        vendorids: [],
+                        useremail: "",
+                        esewaRedirectUrl: undefined,
+                    };
+                }
+            }
 
             await this.updateUserDetail(userId, fullName, phoneNumber);
 
@@ -544,14 +770,26 @@ export class OrderService {
                 user,
             );
 
-            // Calculate total shipping fee based on items and destination address
-            const shippingFee = await this.calculateShippingFee(
-                address,
-                userId,
-                items,
-            );
+            // Group items by vendor (never by district) and calculate each
+            // vendor's shipping fee independently through the single shared
+            // ShippingCalculationService.
+            const vendorGroups = [...this.groupItemsByVendor(items).values()];
+            const { vendorShippingBreakdown, shippingTotal } =
+                this.shippingService.calculateOrderShipping(
+                    {
+                        districtId: address.districtId,
+                        districtName: address.district,
+                    },
+                    vendorGroups.map((g) => ({
+                        vendorId: g.vendorId,
+                        vendorDistrict: {
+                            districtId: g.vendorDistrictId,
+                            districtName: g.vendorDistrictName,
+                        },
+                    })),
+                );
 
-            const vendorids = shippingFee.vendorIds;
+            const vendorids = vendorGroups.map((g) => g.vendorId);
 
             const userDetail = await findUserById(userId);
 
@@ -564,9 +802,25 @@ export class OrderService {
                 user,
                 items,
                 address,
-                shippingFee.shippingFee,
+                shippingTotal,
                 orderData,
             );
+
+            const vendorShippingRows = vendorShippingBreakdown.map((vs) => {
+                const group = vendorGroups.find(
+                    (g) => g.vendorId === vs.vendorId,
+                )!;
+                return {
+                    vendorId: vs.vendorId,
+                    vendorNameSnapshot: group.vendorName,
+                    vendorDistrictSnapshot: vs.vendorDistrict,
+                    customerDistrictSnapshot: vs.customerDistrict,
+                    shippingZone: vs.shippingZone,
+                    shippingFee: vs.shippingFee,
+                    vendorMerchandiseSubtotal: group.merchandiseSubtotal,
+                    vendorTotal: group.merchandiseSubtotal + vs.shippingFee,
+                };
+            });
 
             // let redirectUrl: string | undefined;
             let esewaRedirectUrl;
@@ -575,7 +829,10 @@ export class OrderService {
                 // Row-locked: stock is revalidated and decremented in the
                 // same transaction as the order save, so a concurrent
                 // checkout for the last unit can't oversell.
-                order = await this.reserveStockAndSaveOrder(order);
+                order = await this.reserveStockAndSaveOrder(
+                    order,
+                    vendorShippingRows,
+                );
 
                 // 🔹 Only clear cart if it's not Buy Now
                 if (!isBuyNow) {
@@ -589,7 +846,10 @@ export class OrderService {
                 // Reserve stock + save order atomically, THEN contact the
                 // payment gateway — never hold the DB transaction open across
                 // an external network call.
-                order = await this.reserveStockAndSaveOrder(order);
+                order = await this.reserveStockAndSaveOrder(
+                    order,
+                    vendorShippingRows,
+                );
 
                 if (paymentMethod === PaymentMethod.ESEWA) {
                     esewaRedirectUrl = await this.initateEsewaPayment(order);
@@ -598,6 +858,12 @@ export class OrderService {
                 throw new APIError(400, "Invalid payment method");
             }
 
+            await this.recordStatusChange(order.id, null, order.status, {
+                reason: "Order placed",
+                changedByUserId: userId,
+                changedByRole: OrderStatusChangedByRole.CUSTOMER,
+            });
+
             return {
                 order,
                 esewaRedirectUrl,
@@ -605,7 +871,6 @@ export class OrderService {
                 useremail,
             };
         } catch (error) {
-            console.error("Failed to create order:", error);
             throw error instanceof APIError
                 ? error
                 : new APIError(500, "Failed to create order");
@@ -633,7 +898,6 @@ export class OrderService {
 
             return { success: true };
         } catch (err) {
-            console.error("Esewa payment verification failed:", err);
             throw new APIError(500, "Esewa payment verification failed");
         }
     }
@@ -845,11 +1109,20 @@ export class OrderService {
                 await this.restoreStock(order.orderItems);
             }
 
+            const previousStatus = order.status;
             // Update order status
             order.status = OrderStatus.CANCELLED;
             order.paymentStatus = PaymentStatus.UNPAID;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
             await this.orderRepository.save(order);
+            await this.recordStatusChange(
+                order.id,
+                previousStatus,
+                OrderStatus.CANCELLED,
+                {
+                    reason: "eSewa payment failed",
+                },
+            );
 
             if (!alreadyTerminal) {
                 await this.notificationService.notifyPaymentFailed(
@@ -873,11 +1146,20 @@ export class OrderService {
                 throw new APIError(404, "Order not found");
             }
 
+            const previousStatus = order.status;
             // Update order status and transaction ID
             order.status = OrderStatus.CONFIRMED;
             order.paymentStatus = PaymentStatus.PAID;
             order.mTransactionId = transactionId;
             await this.orderRepository.save(order);
+            await this.recordStatusChange(
+                order.id,
+                previousStatus,
+                OrderStatus.CONFIRMED,
+                {
+                    reason: "eSewa payment confirmed",
+                },
+            );
             await this.notificationService.notifyPaymentSuccess(
                 order.id,
                 order.orderedById,
@@ -1186,17 +1468,45 @@ export class OrderService {
      * won the race), the order insert rolls back too, so no PENDING order
      * is left behind with unreserved inventory.
      */
-    private async reserveStockAndSaveOrder(order: Order): Promise<Order> {
+    private async reserveStockAndSaveOrder(
+        order: Order,
+        vendorShippingRows: Array<{
+            vendorId: number;
+            vendorNameSnapshot: string;
+            vendorDistrictSnapshot: string;
+            customerDistrictSnapshot: string;
+            shippingZone: string;
+            shippingFee: number;
+            vendorMerchandiseSubtotal: number;
+            vendorTotal: number;
+        }> = [],
+    ): Promise<Order> {
         return await AppDataSource.transaction(async (manager) => {
             const orderRepo = manager.getRepository(Order);
+            const vendorShippingRepo =
+                manager.getRepository(OrderVendorShipping);
 
             let savedOrder = await orderRepo.save(order);
+
+            if (vendorShippingRows.length) {
+                await vendorShippingRepo.save(
+                    vendorShippingRows.map(
+                        (row): Partial<OrderVendorShipping> => ({
+                            ...row,
+                            shippingZone: row.shippingZone as any,
+                            orderId: savedOrder.id,
+                        }),
+                    ),
+                );
+            }
+
             savedOrder = await orderRepo.findOne({
                 where: { id: savedOrder.id },
                 relations: [
                     "orderItems",
                     "orderItems.product",
                     "orderItems.variant",
+                    "vendorShippings",
                 ],
             });
 
@@ -1406,6 +1716,7 @@ export class OrderService {
                 "orderItems.product",
                 "orderItems.variant",
                 "orderItems.vendor",
+                "vendorShippings",
             ],
         });
 
@@ -1421,6 +1732,8 @@ export class OrderService {
             responseData,
         );
 
+        const previousStatus = order.status;
+
         if (isSuccessful) {
             order.paymentStatus = PaymentStatus.PAID;
             order.status = OrderStatus.CONFIRMED;
@@ -1433,6 +1746,11 @@ export class OrderService {
 
         // Save updated order info
         await this.orderRepository.save(order);
+        await this.recordStatusChange(order.id, previousStatus, order.status, {
+            reason: isSuccessful
+                ? "Payment verified"
+                : "Payment verification failed",
+        });
         if (isSuccessful) {
             await this.notificationService.notifyPaymentSuccess(
                 order.id,
@@ -1482,6 +1800,8 @@ export class OrderService {
             await this.restoreStock(order.orderItems);
         }
 
+        const previousStatus = order.status;
+
         // Mark payment as UNPAID
         order.paymentStatus = PaymentStatus.UNPAID;
 
@@ -1490,6 +1810,14 @@ export class OrderService {
         order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
 
         await this.orderRepository.save(order);
+        await this.recordStatusChange(
+            order.id,
+            previousStatus,
+            OrderStatus.CANCELLED,
+            {
+                reason: "Payment cancelled by customer",
+            },
+        );
         await this.notificationService.notifyPaymentCancelled(
             order.id,
             order.orderedById,
@@ -1497,164 +1825,101 @@ export class OrderService {
     }
 
     /**
-     * Calculates the total shipping fee based on the shipping address and vendor districts.
-     *
-     * @param {Address} shippingAddress - The user's provided shipping address.
-     * @param {number} userId - ID of the user placing the order.
-     * @param {CartItem[]} cartItems - List of cart items associated with the order.
-     * @returns {Promise<number>} - The total calculated shipping fee.
-     * @access Internal (used during order creation)
+     * Group cart/buy-now items by vendor (never by district — two vendors in
+     * the same district are still two separate shipments) and compute each
+     * vendor's merchandise subtotal plus district reference for shipping.
      */
-    private async calculateShippingFee(
-        shippingAddress: Address,
-        userId: number,
-        cartItems: CartItem[],
-    ): Promise<{ shippingFee: number; vendorIds: number[] }> {
-        if (!shippingAddress) {
-            throw new APIError(400, "Shipping address is missing");
+    private groupItemsByVendor(items: any[]): Map<
+        number,
+        {
+            vendorId: number;
+            vendorName: string;
+            vendorDistrictId: number | null;
+            vendorDistrictName: string;
+            merchandiseSubtotal: number;
         }
-
-        // Track unique vendor districts and vendor IDs
-        const vendorDistrictSet = new Set<string>();
-        const vendorIdsSet = new Set<number>();
-
-        for (const item of cartItems) {
-            const vendor = item.product?.vendor;
-
-            if (!vendor || !vendor.district || !vendor.district.name) {
-                throw new APIError(
-                    400,
-                    `Vendor for product ${item.product.id} has no valid address`,
-                );
-            }
-
-            vendorDistrictSet.add(vendor.district.name);
-            vendorIdsSet.add(vendor.id);
-        }
-
-        // User district
-        const userDistrict = shippingAddress.district;
-
-        // Districts treated as same metro area
-        const sameDistrictGroup = ["Kathmandu", "Bhaktapur", "Lalitpur"];
-
-        let shippingFee = 0;
-
-        // Calculate fee per unique vendor district
-        for (const vendorDistrict of vendorDistrictSet) {
-            const isSameCity =
-                userDistrict === vendorDistrict ||
-                (sameDistrictGroup.includes(userDistrict) &&
-                    sameDistrictGroup.includes(vendorDistrict));
-
-            shippingFee += isSameCity ? 100 : 200;
-        }
-
-        return {
-            shippingFee,
-            vendorIds: Array.from(vendorIdsSet),
-        };
-    }
-
-    private getShippingFeeForVendorDistrict(
-        userDistrict: string,
-        vendorDistrict: string,
-    ): number {
-        const sameDistrictGroup = ["Kathmandu", "Bhaktapur", "Lalitpur"];
-        const isSameCity =
-            userDistrict === vendorDistrict ||
-            (sameDistrictGroup.includes(userDistrict) &&
-                sameDistrictGroup.includes(vendorDistrict));
-
-        return isSameCity ? 100 : 200;
-    }
-
-    private buildVendorShippingBreakdown(order: Order) {
-        const userDistrict = order.shippingAddress?.district;
-        const chargedShipping = Number(order.shippingFee ?? 0);
-        const vendorMap = new Map<
+    > {
+        const groups = new Map<
             number,
             {
                 vendorId: number;
                 vendorName: string;
-                vendorDistrict: string;
-                itemCount: number;
-                itemSubtotal: number;
-                shippingFee: number;
+                vendorDistrictId: number | null;
+                vendorDistrictName: string;
+                merchandiseSubtotal: number;
             }
         >();
 
-        if (!userDistrict || !order.orderItems?.length) {
-            return {
-                total: chargedShipping,
-                vendors: [],
-            };
-        }
+        for (const item of items) {
+            const vendor = item.product?.vendor;
+            if (!vendor || !vendor.district || !vendor.district.name) {
+                throw new APIError(
+                    400,
+                    `Vendor for product ${item.product?.id} has no valid address`,
+                );
+            }
 
-        for (const item of order.orderItems) {
-            const vendor = item.vendor;
-            if (!vendor) continue;
-
-            const vendorDistrict = vendor.district?.name || "";
-            const existing = vendorMap.get(vendor.id);
-            const quantity = Number(item.quantity || 0);
-            const unitPrice = Number(item.price || 0);
-            const lineTotal = unitPrice * quantity;
-
+            const lineTotal = this.calculateLineItemPrice(item) * item.quantity;
+            const existing = groups.get(vendor.id);
             if (existing) {
-                existing.itemCount += quantity;
-                existing.itemSubtotal += lineTotal;
+                existing.merchandiseSubtotal += lineTotal;
                 continue;
             }
 
-            vendorMap.set(vendor.id, {
+            groups.set(vendor.id, {
                 vendorId: vendor.id,
-                vendorName: vendor.businessName || "Vendor",
-                vendorDistrict,
-                itemCount: quantity,
-                itemSubtotal: lineTotal,
-                shippingFee: vendorDistrict
-                    ? this.getShippingFeeForVendorDistrict(
-                          userDistrict,
-                          vendorDistrict,
-                      )
-                    : 0,
+                vendorName: vendor.businessName || `Vendor #${vendor.id}`,
+                vendorDistrictId:
+                    vendor.districtId ?? vendor.district.id ?? null,
+                vendorDistrictName: vendor.district.name,
+                merchandiseSubtotal: lineTotal,
             });
         }
 
-        const vendors = [...vendorMap.values()];
-        const calculatedTotal = vendors.reduce(
-            (sum, vendor) => sum + vendor.shippingFee,
-            0,
-        );
+        return groups;
+    }
 
-        if (
-            chargedShipping > 0 &&
-            calculatedTotal > 0 &&
-            calculatedTotal !== chargedShipping
-        ) {
-            let assignedTotal = 0;
-            vendors.forEach((vendor, index) => {
-                if (index === vendors.length - 1) {
-                    vendor.shippingFee = Number(
-                        (chargedShipping - assignedTotal).toFixed(2),
-                    );
-                    return;
-                }
-                vendor.shippingFee = Number(
-                    (
-                        (vendor.shippingFee / calculatedTotal) *
-                        chargedShipping
-                    ).toFixed(2),
+    /** Same grouping as {@link groupItemsByVendor}, but from already-persisted
+     * OrderItem rows (used when an existing order's address is edited). */
+    private groupOrderItemsByVendor(orderItems: OrderItem[]) {
+        const groups = new Map<
+            number,
+            {
+                vendorId: number;
+                vendorName: string;
+                vendorDistrictId: number | null;
+                vendorDistrictName: string;
+                merchandiseSubtotal: number;
+            }
+        >();
+
+        for (const item of orderItems) {
+            const vendor = item.vendor;
+            if (!vendor || !vendor.district || !vendor.district.name) {
+                throw new APIError(
+                    400,
+                    `Vendor for order item ${item.id} has no valid address`,
                 );
-                assignedTotal += vendor.shippingFee;
+            }
+
+            const lineTotal = Number(item.price) * item.quantity;
+            const existing = groups.get(vendor.id);
+            if (existing) {
+                existing.merchandiseSubtotal += lineTotal;
+                continue;
+            }
+
+            groups.set(vendor.id, {
+                vendorId: vendor.id,
+                vendorName: vendor.businessName || `Vendor #${vendor.id}`,
+                vendorDistrictId:
+                    vendor.districtId ?? vendor.district.id ?? null,
+                vendorDistrictName: vendor.district.name,
+                merchandiseSubtotal: lineTotal,
             });
         }
 
-        return {
-            total: chargedShipping || calculatedTotal,
-            vendors,
-        };
+        return groups;
     }
 
     /**
@@ -1671,6 +1936,7 @@ export class OrderService {
                 "shippingAddress",
                 "orderItems.product",
                 "orderItems.variant",
+                "vendorShippings",
             ],
             order: { createdAt: "desc" },
         });
@@ -1695,6 +1961,7 @@ export class OrderService {
             .leftJoinAndSelect("orderItems.vendor", "vendor")
             .leftJoinAndSelect("vendor.district", "district")
             .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
             // select only safe customer fields (exclude password, tokens, verification codes, etc.)
             .leftJoin("order.orderedBy", "orderedBy")
             .addSelect([
@@ -1818,7 +2085,7 @@ export class OrderService {
                 status: OrderStatus.CONFIRMED,
                 paymentStatus: PaymentStatus.UNPAID,
             },
-            relations: ["orderedBy"],
+            relations: ["orderedBy", "orderItems", "orderItems.vendor"],
         });
 
         // If order not found or status not PENDING, throw 404
@@ -1831,9 +2098,23 @@ export class OrderService {
             where: { userId },
         });
 
+        const resolvedDistrict =
+            await this.shippingService.resolveDistrictByName(
+                addressData.district,
+            );
+        const districtId = resolvedDistrict?.id ?? null;
+        const addressPayload = {
+            province: addressData.province,
+            district: addressData.district,
+            districtId,
+            city: addressData.city,
+            localAddress: addressData.streetAddress,
+            landmark: addressData.landmark,
+        };
+
         if (shippingAddress) {
             // Merge new address data into existing address entity
-            this.addressRepository.merge(shippingAddress, addressData);
+            this.addressRepository.merge(shippingAddress, addressPayload);
 
             // Save updated address to DB
             shippingAddress =
@@ -1841,7 +2122,7 @@ export class OrderService {
         } else {
             // No existing address: create a new one with userId attached
             shippingAddress = this.addressRepository.create({
-                ...addressData,
+                ...addressPayload,
                 userId,
             });
 
@@ -1850,12 +2131,70 @@ export class OrderService {
                 await this.addressRepository.save(shippingAddress);
         }
 
+        // Recalculate this order's shipping against the new address — an
+        // address change must never leave the order's old shipping numbers in
+        // place (per-vendor fees, shipping total, and grand total all shift).
+        const vendorGroups = [
+            ...this.groupOrderItemsByVendor(order.orderItems).values(),
+        ];
+        const { vendorShippingBreakdown, shippingTotal } =
+            this.shippingService.calculateOrderShipping(
+                {
+                    districtId: shippingAddress.districtId,
+                    districtName: shippingAddress.district,
+                },
+                vendorGroups.map((g) => ({
+                    vendorId: g.vendorId,
+                    vendorDistrict: {
+                        districtId: g.vendorDistrictId,
+                        districtName: g.vendorDistrictName,
+                    },
+                })),
+            );
+
         // Update order's shipping address reference with new or updated address
         order.shippingAddress = shippingAddress;
-        // order.shippingAddressId = shippingAddress.id;
+        order.shippingAddressSnapshot = {
+            province: shippingAddress.province,
+            district: shippingAddress.district,
+            districtId: shippingAddress.districtId,
+            city: shippingAddress.city,
+            localAddress: shippingAddress.localAddress,
+            landmark: shippingAddress.landmark,
+        };
+        order.shippingFee = shippingTotal;
+        order.totalPrice = calculateGrandTotal({
+            merchandiseSubtotal: Number(order.merchandiseSubtotal),
+            discountTotal: Number(order.discountTotal),
+            shippingTotal,
+            taxTotal: Number(order.taxTotal),
+        });
 
         // Persist changes to the order
         await this.orderRepository.save(order);
+
+        // Replace this order's per-vendor shipping snapshot with the freshly
+        // calculated one — the old rows described a delivery that no longer
+        // applies.
+        await this.orderVendorShippingRepository.delete({ orderId: order.id });
+        await this.orderVendorShippingRepository.save(
+            vendorShippingBreakdown.map((vs) => {
+                const group = vendorGroups.find(
+                    (g) => g.vendorId === vs.vendorId,
+                )!;
+                return this.orderVendorShippingRepository.create({
+                    orderId: order.id,
+                    vendorId: vs.vendorId,
+                    vendorNameSnapshot: group.vendorName,
+                    vendorDistrictSnapshot: vs.vendorDistrict,
+                    customerDistrictSnapshot: vs.customerDistrict,
+                    shippingZone: vs.shippingZone as any,
+                    shippingFee: vs.shippingFee,
+                    vendorMerchandiseSubtotal: group.merchandiseSubtotal,
+                    vendorTotal: group.merchandiseSubtotal + vs.shippingFee,
+                });
+            }),
+        );
 
         // Retrieve and return the updated order with all necessary relations
         const updatedOrder = await this.orderRepository.findOne({
@@ -1866,6 +2205,7 @@ export class OrderService {
                 "orderItems",
                 "orderItems.product",
                 "orderItems.vendor",
+                "vendorShippings",
             ],
         });
 
@@ -1878,24 +2218,181 @@ export class OrderService {
     }
 
     /**
-     * Retrieve all orders with related entities.
+     * Retrieve all orders with server-side pagination, search, filtering, and
+     * sorting — never load every order and paginate/filter in the frontend.
      *
-     * @returns {Promise<Order[]>} - List of all orders including user, shipping address, order items, products, and vendors.
      * @access Admin or authorized roles
      */
-    async getAllOrders(): Promise<SanitizedOrderFull[]> {
-        // Fetch all orders with full relations for detailed info
-        const orders = await this.orderRepository.find({
-            relations: [
-                "orderedBy",
-                "shippingAddress",
-                "orderItems",
-                "orderItems.product",
-                "orderItems.vendor",
-                "orderItems.variant",
-            ],
-        });
-        return orders.map(sanitizeOrderFull);
+    async getAllOrders(
+        params: IAdminOrderQueryParams = {},
+    ): Promise<IPaginatedResult<SanitizedOrderFull>> {
+        const page = Math.max(1, Number(params.page) || 1);
+        // Safe upper bound: never let a client request an unbounded page size.
+        const limit = Math.min(100, Math.max(1, Number(params.limit) || 20));
+
+        // Step 1: resolve the page of order IDs only. Paginating directly on a
+        // query that joins the one-to-many orderItems would skip/take across
+        // joined *rows*, not orders, and silently corrupt pagination — so this
+        // ID query joins only what search/filtering needs, then a second query
+        // loads full relations for exactly those IDs.
+        const idQuery = this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoin("order.orderedBy", "orderedBy")
+            .leftJoin("order.orderItems", "orderItems")
+            .leftJoin("orderItems.vendor", "vendor")
+            .select("order.id", "id");
+
+        if (params.search?.trim()) {
+            const search = `%${params.search.trim()}%`;
+            idQuery.andWhere(
+                new Brackets((qb) => {
+                    qb.where("CAST(order.id AS TEXT) ILIKE :search")
+                        .orWhere("order.orderNumber ILIKE :search")
+                        .orWhere("order.transactionId ILIKE :search")
+                        .orWhere("order.mTransactionId ILIKE :search")
+                        .orWhere("CAST(order.status AS TEXT) ILIKE :search")
+                        .orWhere(
+                            "CAST(order.paymentStatus AS TEXT) ILIKE :search",
+                        )
+                        .orWhere(
+                            "CAST(order.paymentMethod AS TEXT) ILIKE :search",
+                        )
+                        .orWhere("orderedBy.fullName ILIKE :search")
+                        .orWhere("orderedBy.username ILIKE :search")
+                        .orWhere("orderedBy.email ILIKE :search")
+                        .orWhere("orderedBy.phoneNumber ILIKE :search")
+                        .orWhere("vendor.businessName ILIKE :search");
+                }),
+                { search },
+            );
+        }
+
+        if (params.status) {
+            idQuery.andWhere("order.status = :status", {
+                status: params.status,
+            });
+        }
+
+        if (params.paymentStatus) {
+            idQuery.andWhere("order.paymentStatus = :paymentStatus", {
+                paymentStatus: params.paymentStatus,
+            });
+        }
+
+        if (params.vendorId) {
+            idQuery.andWhere("orderItems.vendorId = :vendorId", {
+                vendorId: params.vendorId,
+            });
+        }
+
+        if (params.startDate && params.endDate) {
+            idQuery.andWhere(
+                "order.createdAt BETWEEN :startDate AND :endDate",
+                {
+                    startDate: params.startDate,
+                    endDate: params.endDate,
+                },
+            );
+        }
+
+        if (params.minPrice != null) {
+            idQuery.andWhere("order.totalPrice >= :minPrice", {
+                minPrice: params.minPrice,
+            });
+        }
+        if (params.maxPrice != null) {
+            idQuery.andWhere("order.totalPrice <= :maxPrice", {
+                maxPrice: params.maxPrice,
+            });
+        }
+
+        let sortColumn = "order.createdAt";
+        let sortDirection: "ASC" | "DESC" = "DESC";
+        switch (params.sort) {
+            case "oldest":
+                sortColumn = "order.createdAt";
+                sortDirection = "ASC";
+                break;
+            case "highest_total":
+                sortColumn = "order.totalPrice";
+                sortDirection = "DESC";
+                break;
+            case "lowest_total":
+                sortColumn = "order.totalPrice";
+                sortDirection = "ASC";
+                break;
+            case "recently_updated":
+                sortColumn = "order.updatedAt";
+                sortDirection = "DESC";
+                break;
+            case "order_number":
+                sortColumn = "order.orderNumber";
+                sortDirection = "ASC";
+                break;
+            case "newest":
+            default:
+                sortColumn = "order.createdAt";
+                sortDirection = "DESC";
+                break;
+        }
+
+        const totalItems = await idQuery.getCount();
+        const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+
+        const idRows = await idQuery
+            .distinct(true)
+            .addSelect(sortColumn, "sortValue")
+            .orderBy(sortColumn, sortDirection)
+            .addOrderBy("order.id", sortDirection)
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .getRawMany<{ id: number }>();
+        const orderIds = idRows.map((r) => r.id);
+
+        if (orderIds.length === 0) {
+            return {
+                items: [],
+                pagination: {
+                    page,
+                    limit,
+                    totalItems,
+                    totalPages,
+                    hasNextPage: false,
+                    hasPreviousPage: page > 1,
+                },
+            };
+        }
+
+        // Step 2: load full relations for just this page's orders.
+        const orders = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.id IN (:...orderIds)", { orderIds })
+            .getMany();
+
+        // Preserve the page's sort order — `IN (...)` does not guarantee it.
+        const ordersById = new Map(orders.map((o) => [o.id, o]));
+        const sortedOrders = orderIds
+            .map((id) => ordersById.get(id))
+            .filter((o): o is Order => !!o);
+
+        return {
+            items: sortedOrders.map(sanitizeOrderFull),
+            pagination: {
+                page,
+                limit,
+                totalItems,
+                totalPages,
+                hasNextPage: page < totalPages,
+                hasPreviousPage: page > 1,
+            },
+        };
     }
 
     /**
@@ -1917,6 +2414,7 @@ export class OrderService {
                 "orderItems.product",
                 "orderItems.vendor",
                 "orderItems.variant",
+                "vendorShippings",
             ],
         });
 
@@ -1941,6 +2439,13 @@ export class OrderService {
     async updateOrderStatus(
         orderId: number,
         status: IUpdateOrderStatusRequest["status"],
+        options: {
+            expectedCurrentStatus?: OrderStatus;
+            reason?: string;
+            note?: string;
+            changedByUserId?: number;
+            changedByRole?: OrderStatusChangedByRole;
+        } = {},
     ): Promise<SanitizedOrderFull> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
@@ -1950,6 +2455,7 @@ export class OrderService {
                 "orderItems",
                 "orderItems.product",
                 "orderItems.vendor",
+                "vendorShippings",
             ],
         });
 
@@ -1957,31 +2463,76 @@ export class OrderService {
             throw new APIError(404, "Order not found");
         }
 
-        const validTransition: Record<OrderStatus, OrderStatus[]> = {
-            [OrderStatus.CONFIRMED]: [
-                OrderStatus.SHIPPED,
-                OrderStatus.CANCELLED,
-                OrderStatus.DELAYED,
-            ],
-            [OrderStatus.DELAYED]: [OrderStatus.SHIPPED, OrderStatus.CANCELLED],
-            [OrderStatus.SHIPPED]: [
-                OrderStatus.DELIVERED,
-                OrderStatus.CANCELLED,
-            ],
-            [OrderStatus.DELIVERED]: [OrderStatus.RETURNED],
-            [OrderStatus.RETURNED]: [],
-            [OrderStatus.CANCELLED]: [],
-            [OrderStatus.PENDING]: [],
-        };
-
+        // Optimistic-concurrency guard: reject if the order moved since the
+        // caller last read it (another admin, a vendor, or a payment webhook).
         if (
-            order.status !== status &&
-            !validTransition[order.status].includes(status)
+            options.expectedCurrentStatus &&
+            options.expectedCurrentStatus !== order.status
         ) {
-            throw new APIError(
-                400,
-                `Invalid status transition from ${order.status} to ${status}`,
+            throw new OrderStateChangedError(
+                `Order is currently ${order.status}, not ${options.expectedCurrentStatus}. Refresh and try again.`,
             );
+        }
+
+        const previousStatus = order.status;
+
+        if (status === OrderStatus.CANCELLED) {
+            for (const item of order.orderItems) {
+                if (item.variantId) {
+                    const variant = await this.variantRepository.findOne({
+                        where: { id: item.variantId },
+                    });
+                    if (variant) {
+                        variant.stock += item.quantity;
+                        await this.variantRepository.save(variant);
+                    }
+                } else {
+                    const product = await this.productRepository.findOne({
+                        where: { id: item.productId },
+                    });
+                    if (product) {
+                        product.stock += item.quantity;
+                        await this.productRepository.save(product);
+                    }
+                }
+            }
+        }
+
+        // Handle COD payment update on delivery
+        if (
+            status === OrderStatus.DELIVERED &&
+            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
+            order.paymentStatus !== PaymentStatus.PAID
+        ) {
+            order.paymentStatus = PaymentStatus.PAID;
+        }
+
+        if (status === OrderStatus.CANCELLED) {
+            for (const item of order.orderItems) {
+                if (item.variantId) {
+                    const variant = await this.variantRepository.findOne({
+                        where: { id: item.variantId },
+                    });
+                    if (variant) {
+                        variant.stock += item.quantity;
+                        variant.status = this.determineInventoryStatus(
+                            variant.stock,
+                        );
+                        await this.variantRepository.save(variant);
+                    }
+                } else {
+                    const product = await this.productRepository.findOne({
+                        where: { id: item.productId },
+                    });
+                    if (product) {
+                        product.stock += item.quantity;
+                        product.status = this.determineInventoryStatus(
+                            product.stock,
+                        );
+                        await this.productRepository.save(product);
+                    }
+                }
+            }
         }
 
         order.status = status;
@@ -2018,6 +2569,12 @@ export class OrderService {
         }
 
         await this.orderRepository.save(order);
+        await this.recordStatusChange(
+            order.id,
+            previousStatus,
+            status,
+            options,
+        );
 
         if (order.orderedBy?.email) {
             await sendOrderStatusEmail(
@@ -2028,6 +2585,129 @@ export class OrderService {
         }
 
         return sanitizeOrderFull(order);
+    }
+
+    /** Appends one row to the order-status audit trail; no-ops when the
+     * status didn't actually change. Every code path that mutates
+     * Order.status (manual update, payment webhook, cancellation) must call
+     * this instead of writing order_status_histories directly. */
+    private async recordStatusChange(
+        orderId: number,
+        previousStatus: OrderStatus | null,
+        newStatus: OrderStatus,
+        options: {
+            reason?: string;
+            note?: string;
+            changedByUserId?: number;
+            changedByRole?: OrderStatusChangedByRole;
+        } = {},
+    ): Promise<void> {
+        if (previousStatus === newStatus) return;
+
+        await this.orderStatusHistoryRepository.save(
+            this.orderStatusHistoryRepository.create({
+                orderId,
+                previousStatus,
+                newStatus,
+                changedByUserId: options.changedByUserId ?? null,
+                changedByRole:
+                    options.changedByRole ?? OrderStatusChangedByRole.SYSTEM,
+                reason: options.reason ?? null,
+                note: options.note ?? null,
+            }),
+        );
+    }
+
+    /**
+     * Chronological status timeline for one order, for the order-details
+     * "status history" panel.
+     */
+    async getOrderStatusHistory(
+        orderId: number,
+    ): Promise<OrderStatusHistory[]> {
+        return this.orderStatusHistoryRepository.find({
+            where: { orderId },
+            relations: ["changedBy"],
+            order: { createdAt: "ASC" },
+        });
+    }
+
+    /**
+     * Vendor-scoped fulfillment status update — moves only this vendor's own
+     * OrderVendorShipping.status, never the parent Order.status. A vendor
+     * cannot mark an order DELIVERED (courier/admin-only) or touch another
+     * vendor's row.
+     */
+    async updateVendorOrderStatus(
+        vendorId: number,
+        orderId: number,
+        status: VendorOrderStatus,
+        options: { reason?: string; note?: string } = {},
+    ): Promise<SanitizedVendorOrderView> {
+        const vendorShipping = await this.orderVendorShippingRepository.findOne(
+            {
+                where: { orderId, vendorId },
+            },
+        );
+
+        if (!vendorShipping) {
+            throw new APIError(
+                404,
+                "Order not found or you are not authorized to view it",
+            );
+        }
+
+        if (status === VendorOrderStatus.DELIVERED) {
+            throw new InvalidOrderStatusTransitionError(
+                "Vendors cannot mark an order delivered — this requires courier or admin confirmation.",
+            );
+        }
+
+        const previousStatus = vendorShipping.status;
+        if (
+            previousStatus !== status &&
+            !VENDOR_ORDER_STATUS_TRANSITIONS[previousStatus].includes(status)
+        ) {
+            throw new InvalidOrderStatusTransitionError(
+                `This vendor's order cannot move from ${previousStatus} to ${status}.`,
+            );
+        }
+
+        vendorShipping.status = status;
+        await this.orderVendorShippingRepository.save(vendorShipping);
+
+        if (previousStatus !== status) {
+            await this.orderStatusHistoryRepository.save(
+                this.orderStatusHistoryRepository.create({
+                    orderId,
+                    vendorOrderId: vendorShipping.id,
+                    previousStatus: previousStatus as unknown as OrderStatus,
+                    newStatus: status as unknown as OrderStatus,
+                    changedByRole: OrderStatusChangedByRole.VENDOR,
+                    reason: options.reason ?? null,
+                    note: options.note ?? null,
+                }),
+            );
+        }
+
+        const order = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.id = :orderId", { orderId })
+            .andWhere("orderItems.vendorId = :vendorId", { vendorId })
+            .getOne();
+
+        if (!order) {
+            throw new APIError(404, "Order not found");
+        }
+
+        return sanitizeOrderForVendor(order, vendorId);
     }
 
     /**
@@ -2048,6 +2728,7 @@ export class OrderService {
                 "orderItems",
                 "orderItems.product",
                 "orderItems.vendor",
+                "vendorShippings",
             ],
         });
         return order ? sanitizeOrderFull(order) : null;
@@ -2060,8 +2741,15 @@ export class OrderService {
      * @returns {Promise<Order[]>} - List of orders containing vendor's products.
      * @access Vendor or Admin
      */
-    async getVendorOrders(vendorId: number) {
-        // Use QueryBuilder to join related tables and filter orders by vendorId in orderItems
+    async getVendorOrders(
+        vendorId: number,
+    ): Promise<SanitizedVendorOrderView[]> {
+        // Use QueryBuilder to join related tables and filter orders by vendorId in orderItems.
+        // The WHERE on the joined orderItems alias scopes the hydrated orderItems
+        // array to just this vendor's rows already — but top-level order fields
+        // (totalPrice, shippingFee, merchandiseSubtotal) still belong to the
+        // whole multi-vendor order, so the response must go through
+        // sanitizeOrderForVendor rather than being spread as-is.
         const orders = await this.orderRepository
             .createQueryBuilder("order")
             .leftJoinAndSelect("order.orderItems", "orderItems") // Include order items
@@ -2071,43 +2759,31 @@ export class OrderService {
             .leftJoinAndSelect("orderItems.vendor", "vendor") // Include vendor info for order items
             .leftJoinAndSelect("vendor.district", "district")
             .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
             .where("orderItems.vendorId = :vendorId", { vendorId }) // Filter by vendorId
             .orderBy("order.createdAt", "DESC")
             .getMany(); // Get all matching orders
 
-        const sanitizedOrders = orders.map((o) => {
-            return {
-                ...o,
-                totalPrice: o.orderItems.reduce((acc, item) => {
-                    return acc + item.price * item.quantity;
-                }, 0),
-                orderedBy: sanitizeUser(o.orderedBy),
-                orderItems: o.orderItems.map((oi) => {
-                    return {
-                        ...oi,
-                        vendor: sanitizeVendor(oi.vendor),
-                    };
-                }),
-            };
-        });
-
-        return sanitizedOrders;
+        return orders.map((o) => sanitizeOrderForVendor(o, vendorId));
     }
 
     /**
      * Get detailed information about a specific order for a vendor,
      * only if the order contains items sold by that vendor.
      *
+     * Vendor-scoped: excludes the order's grand total, other vendors' items,
+     * and the cross-vendor shipping breakdown — a vendor must never see
+     * another vendor's shipping or settlement information.
+     *
      * @param {number} vendorId - The ID of the vendor requesting the order details.
      * @param {number} orderId - The ID of the order to retrieve.
-     * @returns {Promise<Order>} - The order details with related entities.
      * @throws {APIError} - Throws 404 if order not found or vendor not authorized.
      * @access Vendor
      */
     async getVendorOrderDetails(
         vendorId: number,
         orderId: number,
-    ): Promise<SanitizedOrderFull> {
+    ): Promise<SanitizedVendorOrderView> {
         // Query the order with all relevant relations and filter by orderId and vendorId
         const order = await this.orderRepository
             .createQueryBuilder("order")
@@ -2117,6 +2793,7 @@ export class OrderService {
             .leftJoinAndSelect("orderItems.product", "product") // Join products in order items
             .leftJoinAndSelect("orderItems.vendor", "vendor") // Join vendor info for order items
             .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
             .where("order.id = :orderId", { orderId }) // Filter by order ID
             .andWhere("orderItems.vendorId = :vendorId", { vendorId })
             .getOne();
@@ -2129,7 +2806,7 @@ export class OrderService {
             );
         }
 
-        return sanitizeOrderFull(order);
+        return sanitizeOrderForVendor(order, vendorId);
     }
 
     /**
@@ -2155,6 +2832,7 @@ export class OrderService {
                 "orderItems.vendor",
                 "orderItems.vendor.district",
                 "shippingAddress",
+                "vendorShippings",
             ],
             order: { createdAt: "DESC" }, // Sort orders by creation date descending
         });

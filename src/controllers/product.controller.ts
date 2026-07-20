@@ -285,10 +285,24 @@ export class ProductController {
     res: Response,
     _next: NextFunction,
   ): Promise<void> {
-    const { products, total } = await this.productService.getAdminProducts(
+    const { products, total, page, limit, totalPages } = await this.productService.getAdminProducts(
       req.query,
     );
-    res.status(200).json({ success: true, data: { products, total } });
+    res.status(200).json({
+      success: true,
+      data: {
+        products,
+        total,
+        pagination: {
+          page,
+          limit,
+          totalItems: total,
+          totalPages,
+          hasNextPage: page < totalPages,
+          hasPreviousPage: page > 1,
+        },
+      },
+    });
   }
 
   async uplaodImage(
