@@ -31,6 +31,7 @@ import { DiscountType } from "../entities/product.enum";
 import { OrderStatus } from "../entities/order.entity";
 import { sanitizeVendor } from "../utils/sanitize.util";
 import { calculatePriceSnapshot } from "../utils/pricing.utils";
+import { OrderItem } from "../entities/orderItems.entity";
 
 /**
  * Service class for handling product-related operations.
@@ -60,6 +61,7 @@ export class ProductService {
   private bannerService: BannerService;
   private dealService: DealService;
   private variantRepository: Repository<Variant>;
+  private orderItemRepository: Repository<OrderItem>;
 
   constructor(private dataSource: DataSource) {
     this.productRepository = this.dataSource.getRepository(Product);
@@ -78,6 +80,7 @@ export class ProductService {
     this.bannerService = new BannerService();
     this.dealService = new DealService();
     this.variantRepository = this.dataSource.getRepository(Variant);
+    this.orderItemRepository = this.dataSource.getRepository(OrderItem);
     cloudinary.config({
       cloud_name: config.CLOUDINARY_CLOUD_NAME,
       api_key: config.CLOUDINARY_API_KEY,
@@ -1029,15 +1032,13 @@ export class ProductService {
       .select("product.id", "id");
 
     if (filter === "out_of_stock") {
-      idQuery.andWhere(
-        "(product.status = :outOfStockStatus OR product.stock = 0 OR variants.stock = 0)",
-        { outOfStockStatus: "OUT_OF_STOCK" },
-      );
+      idQuery.andWhere("product.status = :outOfStockStatus", {
+        outOfStockStatus: "OUT_OF_STOCK",
+      });
     } else if (filter === "low_stock") {
-      idQuery.andWhere(
-        "(product.status = :lowStockStatus OR variants.status = :lowStockStatus)",
-        { lowStockStatus: "LOW_STOCK" },
-      );
+      idQuery.andWhere("product.status = :lowStockStatus", {
+        lowStockStatus: "LOW_STOCK",
+      });
     } else if (filter === "available") {
       idQuery.andWhere("product.status = :availableStatus", {
         availableStatus: "AVAILABLE",
@@ -1200,6 +1201,18 @@ export class ProductService {
     return product.vendorId;
   }
 
+  private async assertNoOrderHistory(productId: number): Promise<void> {
+    const orderItemCount = await this.orderItemRepository.count({
+      where: { productId },
+    });
+    if (orderItemCount > 0) {
+      throw new APIError(
+        409,
+        "This product has existing orders and can't be deleted. Mark it as out of stock or unavailable instead.",
+      );
+    }
+  }
+
   async deleteProduct(
     id: number,
     subcategoryId: number,
@@ -1223,6 +1236,8 @@ export class ProductService {
     if (user.role !== UserRole.ADMIN && product.vendor.id !== userId) {
       throw new APIError(403, "You can only delete your own products");
     }
+
+    await this.assertNoOrderHistory(id);
 
     await this.productRepository.delete(id);
   }
@@ -1352,6 +1367,8 @@ export class ProductService {
     if (!product) {
       throw new APIError(404, "Product does not exist");
     }
+
+    await this.assertNoOrderHistory(id);
 
     // Collect all image URLs (product images + variant images)
     const imageUrls: string[] = [

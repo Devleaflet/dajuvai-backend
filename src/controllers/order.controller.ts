@@ -184,8 +184,8 @@ export class OrderController {
                         order.id,
                         itemsForVendor,
                         {
-                            name: userexists.fullName,
-                            phone: userexists.phoneNumber,
+                            name: data.fullName || userexists.fullName,
+                            phone: data.phoneNumber || userexists.phoneNumber,
                             email: userexists.email,
                             city: shippingAddress?.city || null,
                             district: shippingAddress?.district || null,

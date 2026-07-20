@@ -37,6 +37,7 @@ export const fetchAllUser = async (): Promise<User[]> => {
             "createdAt",
             "updatedAt",
             "profilePicture",
+            "provider",
         ],
     });
 };
