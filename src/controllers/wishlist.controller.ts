@@ -1,5 +1,5 @@
 import { Response, NextFunction } from "express";
-import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveToCartRequest } from "../interface/wishlist.interface";
+import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveManyToCartRequest, IWishlistMoveToCartRequest } from "../interface/wishlist.interface";
 import { AuthRequest } from "../middlewares/auth.middleware";
 import { WishlistService } from "../service/wishlist.service";
 
@@ -28,5 +28,10 @@ export class WishlistController {
     async moveToCart(req: AuthRequest<{}, {}, IWishlistMoveToCartRequest>, res: Response, _next: NextFunction): Promise<void> {
         const wishlist = await this.wishlistService.moveToCart(req.user?.id, req.body);
         res.status(200).json({ success: true, data: wishlist });
+    }
+
+    async moveManyToCart(req: AuthRequest<{}, {}, IWishlistMoveManyToCartRequest>, res: Response, _next: NextFunction): Promise<void> {
+        const result = await this.wishlistService.moveManyToCart(req.user?.id, req.body);
+        res.status(200).json({ success: true, data: result });
     }
 }

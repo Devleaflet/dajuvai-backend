@@ -1,13 +1,16 @@
 import { Repository } from 'typeorm';
+import { Cart } from '../entities/cart.entity';
+import { CartItem } from '../entities/cartItem.entity';
 import { Wishlist } from '../entities/wishlist.entity';
 import { WishlistItem } from '../entities/wishlistItem.entity';
 import { Product } from '../entities/product.entity';
 import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
-import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveToCartRequest } from '../interface/wishlist.interface';
+import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveManyToCartRequest, IWishlistMoveToCartRequest } from '../interface/wishlist.interface';
 import { CartService } from './cart.service';
 import { Variant } from '../entities/variant.entity';
 import { NotificationService } from './notification.service';
+import { calculatePriceSnapshot } from '../utils/pricing.utils';
 
 /**
  * Service for managing wishlist-related operations such as
@@ -256,6 +259,173 @@ export class WishlistService {
         await this.wishlistItemRepository.delete(wishlistItemId);
 
         return wishlist;
+    }
+
+    async moveManyToCart(
+        userId: number,
+        data: IWishlistMoveManyToCartRequest
+    ): Promise<{
+        wishlist: Wishlist;
+        movedItemIds: number[];
+        failedItems: { wishlistItemId: number; message: string }[];
+    }> {
+        const requestedItems = data.items;
+
+        return await AppDataSource.transaction(async (manager) => {
+            const wishlistRepository = manager.getRepository(Wishlist);
+            const wishlistItemRepository = manager.getRepository(WishlistItem);
+            const cartRepository = manager.getRepository(Cart);
+            const cartItemRepository = manager.getRepository(CartItem);
+
+            const wishlist = await wishlistRepository.findOne({
+                where: { userId },
+                relations: ['items', 'items.product', 'items.variant'],
+            });
+
+            if (!wishlist) {
+                throw new APIError(404, 'Wishlist not found');
+            }
+
+            const wishlistItemsById = new Map(
+                wishlist.items.map((item) => [Number(item.id), item])
+            );
+            const movedItemIds: number[] = [];
+            const failedItems: { wishlistItemId: number; message: string }[] = [];
+
+            let cart = await cartRepository.findOne({
+                where: { userId },
+                relations: ['items', 'items.product', 'items.variant'],
+            });
+
+            if (!cart) {
+                cart = await cartRepository.save(
+                    cartRepository.create({ userId, total: 0, items: [] })
+                );
+            }
+
+            for (const requestItem of requestedItems) {
+                const wishlistItemId = Number(requestItem.wishlistItemId);
+                const wishlistItem = wishlistItemsById.get(wishlistItemId);
+
+                if (!wishlistItem || !wishlistItem.product) {
+                    failedItems.push({
+                        wishlistItemId,
+                        message: 'Wishlist item or product not found',
+                    });
+                    continue;
+                }
+
+                try {
+                    const product = wishlistItem.product;
+                    const variantId = wishlistItem.variantId || null;
+                    const existingCartItem = cart.items.find((item) =>
+                        item.product.id === wishlistItem.productId &&
+                        (variantId ? item.variantId === variantId : !item.variantId)
+                    );
+                    const requestedQuantity = Number(requestItem.quantity);
+                    const nextQuantity = (existingCartItem?.quantity || 0) + requestedQuantity;
+                    let price: number;
+                    let name = product.name;
+                    let image: string | null = product.productImages?.[0] ?? null;
+
+                    if (variantId) {
+                        const variant = wishlistItem.variant;
+                        if (!variant) {
+                            throw new APIError(404, 'Variant not found');
+                        }
+                        if (variant.status === 'OUT_OF_STOCK' || variant.stock < nextQuantity) {
+                            throw new APIError(400, `Cannot add ${nextQuantity} items; only ${variant.stock} available for this variant`);
+                        }
+                        price = calculatePriceSnapshot({
+                            basePrice: variant.basePrice,
+                            discount: variant.discount,
+                            discountType: variant.discountType,
+                        }).finalPrice;
+                        if (variant.attributes?.name) name = `${product.name} - ${variant.attributes.name}`;
+                        if (variant.variantImages?.length) image = variant.variantImages[0];
+
+                        if (existingCartItem) {
+                            existingCartItem.quantity = nextQuantity;
+                            existingCartItem.price = price;
+                            existingCartItem.name = name;
+                            existingCartItem.description = product.description || '';
+                            existingCartItem.image = image;
+                        } else {
+                            cart.items.push(cartItemRepository.create({
+                                cart,
+                                product,
+                                quantity: requestedQuantity,
+                                price,
+                                name,
+                                description: product.description || '',
+                                image,
+                                variant,
+                                variantId,
+                            }));
+                        }
+                    } else {
+                        if (product.hasVariants) {
+                            throw new APIError(400, 'Please select a variant before proceeding.');
+                        }
+                        if (!product.basePrice || product.stock === undefined) {
+                            throw new APIError(400, 'Product must have basePrice and stock');
+                        }
+                        if (product.stock < nextQuantity) {
+                            throw new APIError(400, `Cannot add ${nextQuantity} items; only ${product.stock} available`);
+                        }
+                        price = calculatePriceSnapshot({
+                            basePrice: product.basePrice,
+                            discount: product.discount,
+                            discountType: product.discountType,
+                        }).finalPrice;
+
+                        if (existingCartItem) {
+                            existingCartItem.quantity = nextQuantity;
+                            existingCartItem.price = price;
+                            existingCartItem.name = name;
+                            existingCartItem.description = product.description || '';
+                            existingCartItem.image = image;
+                        } else {
+                            cart.items.push(cartItemRepository.create({
+                                cart,
+                                product,
+                                quantity: requestedQuantity,
+                                price,
+                                name,
+                                description: product.description || '',
+                                image,
+                                variantId: null,
+                            }));
+                        }
+                    }
+
+                    movedItemIds.push(wishlistItemId);
+                } catch (error: any) {
+                    failedItems.push({
+                        wishlistItemId,
+                        message: error?.message || 'Could not move item to cart',
+                    });
+                }
+            }
+
+            if (movedItemIds.length > 0) {
+                await cartItemRepository.save(cart.items);
+                cart.total = cart.items.reduce((sum, item) => sum + (Number(item.price) * item.quantity), 0);
+                await cartRepository.save(cart);
+                await wishlistItemRepository.delete(movedItemIds);
+            }
+
+            const updatedWishlist = await wishlistRepository.findOne({
+                where: { userId },
+                relations: ['items', 'items.product', 'items.variant'],
+            });
+
+            return {
+                wishlist: updatedWishlist || wishlistRepository.create({ userId, items: [] }),
+                movedItemIds,
+                failedItems,
+            };
+        });
     }
 
 }

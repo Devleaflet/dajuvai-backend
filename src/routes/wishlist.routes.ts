@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { WishlistController } from '../controllers/wishlist.controller';
 import { authMiddleware, requireUserRole, validateZod } from '../middlewares/auth.middleware';
-import { addToWishlistSchema, removeFromWishlistSchema, moveToCartSchema } from '../utils/zod_validations/wishlist.zod';
+import { addToWishlistSchema, removeFromWishlistSchema, moveManyToCartSchema, moveToCartSchema } from '../utils/zod_validations/wishlist.zod';
 
 const router = Router();
 const wishlistController = new WishlistController();
@@ -252,6 +252,8 @@ router.delete('/', authMiddleware, requireUserRole, validateZod(removeFromWishli
  *         description: Internal server error
  */
 router.get('/', authMiddleware, requireUserRole, wishlistController.getWishlist.bind(wishlistController));
+
+router.post('/move-to-cart/batch', authMiddleware, requireUserRole, validateZod(moveManyToCartSchema), wishlistController.moveManyToCart.bind(wishlistController));
 
 /**
  * @swagger
