@@ -523,10 +523,7 @@ export class VendorController {
         );
 
         if (approveVendor.affected && approveVendor.affected > 0) {
-            await sendVendorApprovedEmail(
-                isValid.email,
-                "You account has been approved",
-            );
+            await sendVendorApprovedEmail(isValid.email, isValid.businessName);
             res.status(200).json({ success: true, message: "Vendor approved" });
         } else {
             throw new BadRequestError("Approval failed");

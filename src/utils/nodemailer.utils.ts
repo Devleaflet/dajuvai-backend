@@ -124,14 +124,9 @@ export const sendVerificationEmail = async (
             ${
                 token
                     ? `
-                <!DOCTYPE html>
-                <html lang="en">
-                <head>
-                <meta charset="UTF-8">
-                <meta name="viewport" content="width=device-width, initial-scale=1.0">
-                <title>Email Verification</title>
-                </head>
-                <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+                
+              
+                <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:Arial, Helvetica, sans-serif;">
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7; padding:40px 0;">
                     <tr>
                       <td align="center">
@@ -139,12 +134,9 @@ export const sendVerificationEmail = async (
 
                           <!-- Header / Brand -->
                           <tr>
-                            <td style="background:linear-gradient(135deg,#c2410c,#ea580c); padding:32px 40px; text-align:center;">
+                            <td style="background:linear-gradient(135deg,#ea580c,#f97316); padding:32px 40px; text-align:center;">
                               <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
                                 <tr>
-                                  <td style="vertical-align:middle; padding-right:10px;">
-                                    <div style="width:32px; height:32px; background-color:#ffffff; border-radius:6px; text-align:center; line-height:32px; font-size:18px; color:#ea580c; font-weight:bold;">B</div>
-                                  </td>
                                   <td style="vertical-align:middle;">
                                     <span style="color:#ffffff; font-size:22px; font-weight:700; letter-spacing:0.5px;">Dajuvai</span>
                                   </td>
@@ -213,7 +205,6 @@ export const sendVerificationEmail = async (
                     </tr>
                   </table>
                 </body>
-                </html>
             `
                     : `
                 <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
@@ -735,14 +726,83 @@ export const userOrderCancelledEmail = (
     userName: string,
     orderNumber: string,
 ) => `
-  <div style="font-family: Arial, sans-serif; padding: 20px; color: #333;">
-    <h2 style="color: #e63946;">Order Cancelled</h2>
-    <p>Hi <strong>${userName}</strong>,</p>
-    <p>Your order <strong>#${orderNumber}</strong> has been automatically cancelled because the payment wasn’t completed within 15 minutes.</p>
-    <p>If this was a mistake, please place your order again.</p>
-    <br/>
-    <p>Best regards,<br/><strong>Your Shop Team</strong></p>
-  </div>
+  
+<body style="margin:0; padding:0; background:#f4f5f7; font-family:Arial, Helvetica, sans-serif;">
+
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f5f7; padding:40px 0;">
+  <tr>
+    <td align="center">
+
+      <table role="presentation" width="520" cellpadding="0" cellspacing="0" style="background:#ffffff; border-radius:6px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+
+        <!-- Header -->
+        <tr>
+          <td style="background-color:#dc2626; padding:30px 40px; text-align:center;">
+            <span style="font-size:22px; font-weight:700; color:#ffffff;">Dajuvai</span>
+          </td>
+        </tr>
+
+        <!-- Body -->
+        <tr>
+          <td style="padding:40px;">
+
+            <h1 style="margin:0 0 12px; font-size:22px; font-weight:700; color:#b91c1c;">
+              Order Cancelled
+            </h1>
+
+            <p style="margin:0 0 20px; font-size:15px; line-height:1.7; color:#4b5563;">
+              Hi <strong>${userName}</strong>,
+            </p>
+
+            <p style="margin:0 0 24px; font-size:15px; line-height:1.7; color:#4b5563;">
+              Your order <strong>#${orderNumber}</strong> has been automatically cancelled because the payment was not completed within the required <strong>15-minute payment window</strong>.
+            </p>
+
+            <!-- Notice -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+              <tr>
+                <td style="background:#fef2f2; border-left:4px solid #dc2626; padding:16px;">
+                  <p style="margin:0; font-size:14px; line-height:1.6; color:#991b1b;">
+                    No payment was received, so your order has been cancelled automatically and any reserved items have been released back into inventory.
+                  </p>
+                </td>
+              </tr>
+            </table>
+
+            <p style="margin:0 0 20px; font-size:15px; line-height:1.7; color:#4b5563;">
+              If you'd still like to purchase these items, simply return to Dajuvai and place a new order.
+            </p>
+
+            <p style="margin:0; font-size:15px; line-height:1.7; color:#4b5563;">
+              Thank you for shopping with Dajuvai.
+            </p>
+
+          </td>
+        </tr>
+
+        <!-- Divider -->
+        <tr>
+          <td style="padding:0 40px;">
+            <hr style="border:none; border-top:1px solid #e5e7eb; margin:0;">
+          </td>
+        </tr>
+
+        <!-- Footer -->
+        <tr>
+          <td style="padding:24px 40px 32px; text-align:center;">
+            <p style="margin:0; font-size:12px; color:#9ca3af;">
+              This is an automated email from Dajuvai. Please do not reply to this message.
+            </p>
+          </td>
+        </tr>
+
+      </table>
+
+    </td>
+  </tr>
+</table>
+
+</body>
 `;
 
 export const sendVendorApprovedEmail = async (
