@@ -189,8 +189,9 @@ export class OrderController {
                             order.orderNumber,
                             itemsForVendor,
                             {
-                                name: userexists.fullName,
-                                phone: userexists.phoneNumber,
+                                name: data.fullName || userexists.fullName,
+                                phone:
+                                    data.phoneNumber || userexists.phoneNumber,
                                 email: userexists.email,
                                 city: shippingAddress?.city || null,
                                 district: shippingAddress?.district || null,
@@ -526,10 +527,10 @@ export class OrderController {
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const orderId = Number(req.query.orderId);
+        const orderId = req.query.orderId;
         const email = req.query.email;
 
-        if (!orderId) throw new BadRequestError("Order id is required");
+        if (!orderId) throw new BadRequestError("Order Number is required");
 
         const userExists = await findUserByEmail(email);
         if (!userExists) throw new NotFoundError("User");

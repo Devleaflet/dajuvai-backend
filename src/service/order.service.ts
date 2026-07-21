@@ -2,26 +2,35 @@ import { Brackets, EntityManager, In, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import {
-  IShippingAddressRequest,
-  IUpdateOrderStatusRequest,
-  IOrderCreateRequest,
-  IAdminOrderQueryParams,
-  IPaginatedResult,
+    IShippingAddressRequest,
+    IUpdateOrderStatusRequest,
+    IOrderCreateRequest,
+    IAdminOrderQueryParams,
+    IPaginatedResult,
 } from "../interface/order.interface";
 import {
-  Order,
-  OrderStatus,
-  PaymentStatus,
-  PaymentMethod,
-  DeliveryStatus,
+    Order,
+    OrderStatus,
+    PaymentStatus,
+    PaymentMethod,
+    DeliveryStatus,
 } from "../entities/order.entity";
 import { Address } from "../entities/address.entity";
 import { OrderItem } from "../entities/orderItems.entity";
 import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
-import { OrderStatusHistory, OrderStatusChangedByRole } from "../entities/orderStatusHistory.entity";
-import { VendorOrderStatus, VENDOR_ORDER_STATUS_TRANSITIONS } from "../entities/orderVendorShipping.entity";
+import {
+    OrderStatusHistory,
+    OrderStatusChangedByRole,
+} from "../entities/orderStatusHistory.entity";
+import {
+    VendorOrderStatus,
+    VENDOR_ORDER_STATUS_TRANSITIONS,
+} from "../entities/orderVendorShipping.entity";
 import { ORDER_STATUS_TRANSITIONS } from "../constants/orderStatus.constants";
-import { InvalidOrderStatusTransitionError, OrderStateChangedError } from "../errors/HttpErrors";
+import {
+    InvalidOrderStatusTransitionError,
+    OrderStateChangedError,
+} from "../errors/HttpErrors";
 import { Cart } from "../entities/cart.entity";
 import { CartItem } from "../entities/cartItem.entity";
 import { User } from "../entities/user.entity";
@@ -35,9 +44,9 @@ import { Variant } from "../entities/variant.entity";
 import { findUserById } from "./user.service";
 import { calculatePriceSnapshot } from "../utils/pricing.utils";
 import {
-  sendCustomerOrderEmail,
-  sendOrderStatusEmail,
-  sendVendorOrderEmail,
+    sendCustomerOrderEmail,
+    sendOrderStatusEmail,
+    sendVendorOrderEmail,
 } from "../utils/nodemailer.utils";
 import { NotificationService } from "./notification.service";
 import crypto from "crypto";
@@ -47,12 +56,15 @@ import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
 import config from "../config/env.config";
 import {
-  sanitizeOrderFull,
-  sanitizeOrderForVendor,
-  SanitizedOrderFull,
-  SanitizedVendorOrderView,
+    sanitizeOrderFull,
+    sanitizeOrderForVendor,
+    SanitizedOrderFull,
+    SanitizedVendorOrderView,
 } from "../utils/sanitize.util";
-import { ShippingCalculationService, calculateGrandTotal } from "./shipping.service";
+import {
+    ShippingCalculationService,
+    calculateGrandTotal,
+} from "./shipping.service";
 
 /**
  * Service class responsible for managing orders.
@@ -62,72 +74,74 @@ import { ShippingCalculationService, calculateGrandTotal } from "./shipping.serv
  * @module OrderService
  */
 export class OrderService {
-  private orderRepository: Repository<Order>;
-  private addressRepository: Repository<Address>;
-  private orderItemRepository: Repository<OrderItem>;
-  private orderVendorShippingRepository: Repository<OrderVendorShipping>;
-  private orderStatusHistoryRepository: Repository<OrderStatusHistory>;
-  private shippingService: ShippingCalculationService;
-  private cartRepository: Repository<Cart>;
-  private userRepository: Repository<User>;
-  private cartService: CartService;
-  private paymentService: PaymentService;
-  private districtRepository: Repository<District>;
-  private productRepository: Repository<Product>;
-  private promoService: PromoService;
-  private variantRepository: Repository<Variant>;
-  private vendorService: VendorService;
-  private notificationService: NotificationService;
+    private orderRepository: Repository<Order>;
+    private addressRepository: Repository<Address>;
+    private orderItemRepository: Repository<OrderItem>;
+    private orderVendorShippingRepository: Repository<OrderVendorShipping>;
+    private orderStatusHistoryRepository: Repository<OrderStatusHistory>;
+    private shippingService: ShippingCalculationService;
+    private cartRepository: Repository<Cart>;
+    private userRepository: Repository<User>;
+    private cartService: CartService;
+    private paymentService: PaymentService;
+    private districtRepository: Repository<District>;
+    private productRepository: Repository<Product>;
+    private promoService: PromoService;
+    private variantRepository: Repository<Variant>;
+    private vendorService: VendorService;
+    private notificationService: NotificationService;
 
-  /**
-   * Initialize repositories and dependent services.
-   * Uses AppDataSource to get TypeORM repositories for database operations.
-   * Instantiates CartService and PaymentService for related business logic.
-   */
-  constructor() {
-    // Repository to perform CRUD ope
-    // rations on Order entities
-    this.orderRepository = AppDataSource.getRepository(Order);
+    /**
+     * Initialize repositories and dependent services.
+     * Uses AppDataSource to get TypeORM repositories for database operations.
+     * Instantiates CartService and PaymentService for related business logic.
+     */
+    constructor() {
+        // Repository to perform CRUD ope
+        // rations on Order entities
+        this.orderRepository = AppDataSource.getRepository(Order);
 
-    // Repository to manage user addresses related to orders
-    this.addressRepository = AppDataSource.getRepository(Address);
+        // Repository to manage user addresses related to orders
+        this.addressRepository = AppDataSource.getRepository(Address);
 
-    // Repository to handle individual order items in an order
-    this.orderItemRepository = AppDataSource.getRepository(OrderItem);
+        // Repository to handle individual order items in an order
+        this.orderItemRepository = AppDataSource.getRepository(OrderItem);
 
-    // Repository for the immutable per-vendor shipping snapshot rows
-    this.orderVendorShippingRepository = AppDataSource.getRepository(OrderVendorShipping);
+        // Repository for the immutable per-vendor shipping snapshot rows
+        this.orderVendorShippingRepository =
+            AppDataSource.getRepository(OrderVendorShipping);
 
-    // Append-only order-status audit trail
-    this.orderStatusHistoryRepository = AppDataSource.getRepository(OrderStatusHistory);
+        // Append-only order-status audit trail
+        this.orderStatusHistoryRepository =
+            AppDataSource.getRepository(OrderStatusHistory);
 
-    // Single source of truth for per-vendor shipping-fee calculation
-    this.shippingService = new ShippingCalculationService();
+        // Single source of truth for per-vendor shipping-fee calculation
+        this.shippingService = new ShippingCalculationService();
 
-    // Repository for accessing cart data linked to users
-    this.cartRepository = AppDataSource.getRepository(Cart);
+        // Repository for accessing cart data linked to users
+        this.cartRepository = AppDataSource.getRepository(Cart);
 
-    // Repository to manage user data, useful for order-user relations
-    this.userRepository = AppDataSource.getRepository(User);
+        // Repository to manage user data, useful for order-user relations
+        this.userRepository = AppDataSource.getRepository(User);
 
-    // Service instance to perform cart-related logic (e.g., fetching cart items)
-    this.cartService = new CartService();
+        // Service instance to perform cart-related logic (e.g., fetching cart items)
+        this.cartService = new CartService();
 
-    // Service instance to handle payment processing and related operations
-    this.paymentService = new PaymentService();
+        // Service instance to handle payment processing and related operations
+        this.paymentService = new PaymentService();
 
-    // Repository to manage district data, possibly for shipping or address validation
-    this.districtRepository = AppDataSource.getRepository(District);
+        // Repository to manage district data, possibly for shipping or address validation
+        this.districtRepository = AppDataSource.getRepository(District);
 
-    this.productRepository = AppDataSource.getRepository(Product);
+        this.productRepository = AppDataSource.getRepository(Product);
 
-    this.promoService = new PromoService();
+        this.promoService = new PromoService();
 
-    this.variantRepository = AppDataSource.getRepository(Variant);
+        this.variantRepository = AppDataSource.getRepository(Variant);
 
-    this.vendorService = new VendorService();
-    this.notificationService = new NotificationService();
-  }
+        this.vendorService = new VendorService();
+        this.notificationService = new NotificationService();
+    }
 
     private calculateLineItemPrice(item: any): number {
         if (item?.variant) {
@@ -623,14 +637,15 @@ export class OrderService {
         return promo;
     }
 
-    async trackOrder(email: string, orderId: number) {
+    async trackOrder(email: string, orderNumber: string) {
         const order = await this.orderRepository.findOne({
             where: {
-                id: orderId,
-                orderedBy: { email },
+                orderNumber: orderNumber,
+                orderedBy: {
+                    email: email.toLowerCase(),
+                },
             },
             relations: ["orderedBy"],
-            select: ["id", "status"],
         });
 
         if (!order) {
@@ -2195,249 +2210,285 @@ export class OrderService {
             }),
         );
 
-    // Retrieve and return the updated order with all necessary relations
-    const updatedOrder = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: [
-        "orderedBy",
-        "shippingAddress",
-        "orderItems",
-        "orderItems.product",
-        "orderItems.vendor",
-        "vendorShippings",
-      ],
-    });
+        // Retrieve and return the updated order with all necessary relations
+        const updatedOrder = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "vendorShippings",
+            ],
+        });
 
-    // Defensive check to ensure updated order was retrieved
-    if (!updatedOrder) {
-      throw new APIError(500, "Failed to retrieve updated order");
+        // Defensive check to ensure updated order was retrieved
+        if (!updatedOrder) {
+            throw new APIError(500, "Failed to retrieve updated order");
+        }
+
+        return sanitizeOrderFull(updatedOrder) as any;
     }
 
-    return sanitizeOrderFull(updatedOrder) as any;
-  }
+    /**
+     * Retrieve all orders with server-side pagination, search, filtering, and
+     * sorting — never load every order and paginate/filter in the frontend.
+     *
+     * @access Admin or authorized roles
+     */
+    async getAllOrders(
+        params: IAdminOrderQueryParams = {},
+    ): Promise<IPaginatedResult<SanitizedOrderFull>> {
+        const page = Math.max(1, Number(params.page) || 1);
+        // Safe upper bound: never let a client request an unbounded page size.
+        const limit = Math.min(100, Math.max(1, Number(params.limit) || 20));
 
-  /**
-   * Retrieve all orders with server-side pagination, search, filtering, and
-   * sorting — never load every order and paginate/filter in the frontend.
-   *
-   * @access Admin or authorized roles
-   */
-  async getAllOrders(
-    params: IAdminOrderQueryParams = {},
-  ): Promise<IPaginatedResult<SanitizedOrderFull>> {
-    const page = Math.max(1, Number(params.page) || 1);
-    // Safe upper bound: never let a client request an unbounded page size.
-    const limit = Math.min(100, Math.max(1, Number(params.limit) || 20));
+        // Step 1: resolve the page of order IDs only. Paginating directly on a
+        // query that joins the one-to-many orderItems would skip/take across
+        // joined *rows*, not orders, and silently corrupt pagination — so this
+        // ID query joins only what search/filtering needs, then a second query
+        // loads full relations for exactly those IDs.
+        const idQuery = this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoin("order.orderedBy", "orderedBy")
+            .leftJoin("order.orderItems", "orderItems")
+            .leftJoin("orderItems.vendor", "vendor")
+            .select("order.id", "id");
 
-    // Step 1: resolve the page of order IDs only. Paginating directly on a
-    // query that joins the one-to-many orderItems would skip/take across
-    // joined *rows*, not orders, and silently corrupt pagination — so this
-    // ID query joins only what search/filtering needs, then a second query
-    // loads full relations for exactly those IDs.
-    const idQuery = this.orderRepository
-      .createQueryBuilder("order")
-      .leftJoin("order.orderedBy", "orderedBy")
-      .leftJoin("order.orderItems", "orderItems")
-      .leftJoin("orderItems.vendor", "vendor")
-      .select("order.id", "id");
+        if (params.search?.trim()) {
+            const search = `%${params.search.trim()}%`;
+            idQuery.andWhere(
+                new Brackets((qb) => {
+                    qb.where("CAST(order.id AS TEXT) ILIKE :search")
+                        .orWhere("order.orderNumber ILIKE :search")
+                        .orWhere("order.transactionId ILIKE :search")
+                        .orWhere("order.mTransactionId ILIKE :search")
+                        .orWhere("CAST(order.status AS TEXT) ILIKE :search")
+                        .orWhere(
+                            "CAST(order.paymentStatus AS TEXT) ILIKE :search",
+                        )
+                        .orWhere(
+                            "CAST(order.paymentMethod AS TEXT) ILIKE :search",
+                        )
+                        .orWhere("orderedBy.fullName ILIKE :search")
+                        .orWhere("orderedBy.username ILIKE :search")
+                        .orWhere("orderedBy.email ILIKE :search")
+                        .orWhere("orderedBy.phoneNumber ILIKE :search")
+                        .orWhere("vendor.businessName ILIKE :search");
+                }),
+                { search },
+            );
+        }
 
-    if (params.search?.trim()) {
-      const search = `%${params.search.trim()}%`;
-      idQuery.andWhere(
-        new Brackets((qb) => {
-          qb.where("CAST(order.id AS TEXT) ILIKE :search")
-            .orWhere("order.orderNumber ILIKE :search")
-            .orWhere("order.transactionId ILIKE :search")
-            .orWhere("order.mTransactionId ILIKE :search")
-            .orWhere("CAST(order.status AS TEXT) ILIKE :search")
-            .orWhere("CAST(order.paymentStatus AS TEXT) ILIKE :search")
-            .orWhere("CAST(order.paymentMethod AS TEXT) ILIKE :search")
-            .orWhere("orderedBy.fullName ILIKE :search")
-            .orWhere("orderedBy.username ILIKE :search")
-            .orWhere("orderedBy.email ILIKE :search")
-            .orWhere("orderedBy.phoneNumber ILIKE :search")
-            .orWhere("vendor.businessName ILIKE :search");
-        }),
-        { search },
-      );
+        if (params.status) {
+            idQuery.andWhere("order.status = :status", {
+                status: params.status,
+            });
+        }
+
+        if (params.paymentStatus) {
+            idQuery.andWhere("order.paymentStatus = :paymentStatus", {
+                paymentStatus: params.paymentStatus,
+            });
+        }
+
+        if (params.vendorId) {
+            idQuery.andWhere("orderItems.vendorId = :vendorId", {
+                vendorId: params.vendorId,
+            });
+        }
+
+        if (params.startDate && params.endDate) {
+            idQuery.andWhere(
+                "order.createdAt BETWEEN :startDate AND :endDate",
+                {
+                    startDate: params.startDate,
+                    endDate: params.endDate,
+                },
+            );
+        }
+
+        if (params.minPrice != null) {
+            idQuery.andWhere("order.totalPrice >= :minPrice", {
+                minPrice: params.minPrice,
+            });
+        }
+        if (params.maxPrice != null) {
+            idQuery.andWhere("order.totalPrice <= :maxPrice", {
+                maxPrice: params.maxPrice,
+            });
+        }
+
+        let sortColumn = "order.createdAt";
+        let sortDirection: "ASC" | "DESC" = "DESC";
+        switch (params.sort) {
+            case "oldest":
+                sortColumn = "order.createdAt";
+                sortDirection = "ASC";
+                break;
+            case "highest_total":
+                sortColumn = "order.totalPrice";
+                sortDirection = "DESC";
+                break;
+            case "lowest_total":
+                sortColumn = "order.totalPrice";
+                sortDirection = "ASC";
+                break;
+            case "recently_updated":
+                sortColumn = "order.updatedAt";
+                sortDirection = "DESC";
+                break;
+            case "order_number":
+                sortColumn = "order.orderNumber";
+                sortDirection = "ASC";
+                break;
+            case "newest":
+            default:
+                sortColumn = "order.createdAt";
+                sortDirection = "DESC";
+                break;
+        }
+
+        const totalItems = await idQuery.getCount();
+        const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+
+        const idRows = await idQuery
+            .distinct(true)
+            .addSelect(sortColumn, "sortValue")
+            .orderBy(sortColumn, sortDirection)
+            .addOrderBy("order.id", sortDirection)
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .getRawMany<{ id: number }>();
+        const orderIds = idRows.map((r) => r.id);
+
+        if (orderIds.length === 0) {
+            return {
+                items: [],
+                pagination: {
+                    page,
+                    limit,
+                    totalItems,
+                    totalPages,
+                    hasNextPage: false,
+                    hasPreviousPage: page > 1,
+                },
+            };
+        }
+
+        // Step 2: load full relations for just this page's orders.
+        const orders = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.id IN (:...orderIds)", { orderIds })
+            .getMany();
+
+        // Preserve the page's sort order — `IN (...)` does not guarantee it.
+        const ordersById = new Map(orders.map((o) => [o.id, o]));
+        const sortedOrders = orderIds
+            .map((id) => ordersById.get(id))
+            .filter((o): o is Order => !!o);
+
+        return {
+            items: sortedOrders.map(sanitizeOrderFull),
+            pagination: {
+                page,
+                limit,
+                totalItems,
+                totalPages,
+                hasNextPage: page < totalPages,
+                hasPreviousPage: page > 1,
+            },
+        };
     }
 
-    if (params.status) {
-      idQuery.andWhere("order.status = :status", { status: params.status });
+    /**
+     * Retrieve detailed information of a single order by its ID.
+     *
+     * @param {number} orderId - The ID of the order to fetch.
+     * @returns {Promise<Order>} - The order with related user, shipping address, items, products, and vendors.
+     * @throws {APIError} - Throws 404 error if the order is not found.
+     * @access Admin or authorized roles
+     */
+    async getOrderDetails(orderId: number): Promise<SanitizedOrderFull> {
+        // Find the order by ID with all related entities loaded
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "orderItems.variant",
+                "vendorShippings",
+            ],
+        });
+
+        // Throw error if no order is found
+        if (!order) {
+            throw new APIError(404, "Order not found");
+        }
+
+        // Return the found order with relations
+        return sanitizeOrderFull(order);
     }
 
-    if (params.paymentStatus) {
-      idQuery.andWhere("order.paymentStatus = :paymentStatus", {
-        paymentStatus: params.paymentStatus,
-      });
-    }
+    /**
+     * Update the status of an existing order by ID.
+     *
+     * @param {number} orderId - The ID of the order to update.
+     * @param {OrderStatus} status - The new status to set for the order.
+     * @returns {Promise<Order>} - The updated order entity.
+     * @throws {APIError} - Throws 404 if order not found, 400 if invalid status provided.
+     * @access Admin or authorized users
+     */
+    async updateOrderStatus(
+        orderId: number,
+        status: IUpdateOrderStatusRequest["status"],
+        options: {
+            expectedCurrentStatus?: OrderStatus;
+            reason?: string;
+            note?: string;
+            changedByUserId?: number;
+            changedByRole?: OrderStatusChangedByRole;
+        } = {},
+    ): Promise<SanitizedOrderFull> {
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "vendorShippings",
+            ],
+        });
 
-    if (params.vendorId) {
-      idQuery.andWhere("orderItems.vendorId = :vendorId", { vendorId: params.vendorId });
-    }
+        if (!order) {
+            throw new APIError(404, "Order not found");
+        }
 
-    if (params.startDate && params.endDate) {
-      idQuery.andWhere("order.createdAt BETWEEN :startDate AND :endDate", {
-        startDate: params.startDate,
-        endDate: params.endDate,
-      });
-    }
+        // Optimistic-concurrency guard: reject if the order moved since the
+        // caller last read it (another admin, a vendor, or a payment webhook).
+        if (
+            options.expectedCurrentStatus &&
+            options.expectedCurrentStatus !== order.status
+        ) {
+            throw new OrderStateChangedError(
+                `Order is currently ${order.status}, not ${options.expectedCurrentStatus}. Refresh and try again.`,
+            );
+        }
 
-    if (params.minPrice != null) {
-      idQuery.andWhere("order.totalPrice >= :minPrice", { minPrice: params.minPrice });
-    }
-    if (params.maxPrice != null) {
-      idQuery.andWhere("order.totalPrice <= :maxPrice", { maxPrice: params.maxPrice });
-    }
-
-    let sortColumn = "order.createdAt";
-    let sortDirection: "ASC" | "DESC" = "DESC";
-    switch (params.sort) {
-      case "oldest":
-        sortColumn = "order.createdAt"; sortDirection = "ASC"; break;
-      case "highest_total":
-        sortColumn = "order.totalPrice"; sortDirection = "DESC"; break;
-      case "lowest_total":
-        sortColumn = "order.totalPrice"; sortDirection = "ASC"; break;
-      case "recently_updated":
-        sortColumn = "order.updatedAt"; sortDirection = "DESC"; break;
-      case "order_number":
-        sortColumn = "order.orderNumber"; sortDirection = "ASC"; break;
-      case "newest":
-      default:
-        sortColumn = "order.createdAt"; sortDirection = "DESC"; break;
-    }
-
-    const totalItems = await idQuery.getCount();
-    const totalPages = Math.max(1, Math.ceil(totalItems / limit));
-
-    const idRows = await idQuery
-      .distinct(true)
-      .addSelect(sortColumn, "sortValue")
-      .orderBy(sortColumn, sortDirection)
-      .addOrderBy("order.id", sortDirection)
-      .offset((page - 1) * limit)
-      .limit(limit)
-      .getRawMany<{ id: number }>();
-    const orderIds = idRows.map((r) => r.id);
-
-    if (orderIds.length === 0) {
-      return {
-        items: [],
-        pagination: { page, limit, totalItems, totalPages, hasNextPage: false, hasPreviousPage: page > 1 },
-      };
-    }
-
-    // Step 2: load full relations for just this page's orders.
-    const orders = await this.orderRepository
-      .createQueryBuilder("order")
-      .leftJoinAndSelect("order.orderedBy", "orderedBy")
-      .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
-      .leftJoinAndSelect("order.orderItems", "orderItems")
-      .leftJoinAndSelect("orderItems.product", "product")
-      .leftJoinAndSelect("orderItems.vendor", "vendor")
-      .leftJoinAndSelect("orderItems.variant", "variant")
-      .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
-      .where("order.id IN (:...orderIds)", { orderIds })
-      .getMany();
-
-    // Preserve the page's sort order — `IN (...)` does not guarantee it.
-    const ordersById = new Map(orders.map((o) => [o.id, o]));
-    const sortedOrders = orderIds.map((id) => ordersById.get(id)).filter((o): o is Order => !!o);
-
-    return {
-      items: sortedOrders.map(sanitizeOrderFull),
-      pagination: {
-        page,
-        limit,
-        totalItems,
-        totalPages,
-        hasNextPage: page < totalPages,
-        hasPreviousPage: page > 1,
-      },
-    };
-  }
-
-  /**
-   * Retrieve detailed information of a single order by its ID.
-   *
-   * @param {number} orderId - The ID of the order to fetch.
-   * @returns {Promise<Order>} - The order with related user, shipping address, items, products, and vendors.
-   * @throws {APIError} - Throws 404 error if the order is not found.
-   * @access Admin or authorized roles
-   */
-  async getOrderDetails(orderId: number): Promise<SanitizedOrderFull> {
-    // Find the order by ID with all related entities loaded
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: [
-        "orderedBy",
-        "shippingAddress",
-        "orderItems",
-        "orderItems.product",
-        "orderItems.vendor",
-        "orderItems.variant",
-        "vendorShippings",
-      ],
-    });
-
-    // Throw error if no order is found
-    if (!order) {
-      throw new APIError(404, "Order not found");
-    }
-
-    // Return the found order with relations
-    return sanitizeOrderFull(order);
-  }
-
-  /**
-   * Update the status of an existing order by ID.
-   *
-   * @param {number} orderId - The ID of the order to update.
-   * @param {OrderStatus} status - The new status to set for the order.
-   * @returns {Promise<Order>} - The updated order entity.
-   * @throws {APIError} - Throws 404 if order not found, 400 if invalid status provided.
-   * @access Admin or authorized users
-   */
-  async updateOrderStatus(
-    orderId: number,
-    status: IUpdateOrderStatusRequest["status"],
-    options: {
-      expectedCurrentStatus?: OrderStatus;
-      reason?: string;
-      note?: string;
-      changedByUserId?: number;
-      changedByRole?: OrderStatusChangedByRole;
-    } = {},
-  ): Promise<SanitizedOrderFull> {
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: [
-        "orderedBy",
-        "shippingAddress",
-        "orderItems",
-        "orderItems.product",
-        "orderItems.vendor",
-        "vendorShippings",
-      ],
-    });
-
-    if (!order) {
-      throw new APIError(404, "Order not found");
-    }
-
-    // Optimistic-concurrency guard: reject if the order moved since the
-    // caller last read it (another admin, a vendor, or a payment webhook).
-    if (
-      options.expectedCurrentStatus &&
-      options.expectedCurrentStatus !== order.status
-    ) {
-      throw new OrderStateChangedError(
-        `Order is currently ${order.status}, not ${options.expectedCurrentStatus}. Refresh and try again.`,
-      );
-    }
-
-    const previousStatus = order.status;
+        const previousStatus = order.status;
 
         if (status === OrderStatus.CANCELLED) {
             for (const item of order.orderItems) {
@@ -2470,43 +2521,52 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.PAID;
         }
 
-    if (status === OrderStatus.CANCELLED) {
-      for (const item of order.orderItems) {
-        if (item.variantId) {
-          const variant = await this.variantRepository.findOne({
-            where: { id: item.variantId },
-          });
-          if (variant) {
-            variant.stock += item.quantity;
-            variant.status = this.determineInventoryStatus(variant.stock);
-            await this.variantRepository.save(variant);
-          }
-        } else {
-          const product = await this.productRepository.findOne({
-            where: { id: item.productId },
-          });
-          if (product) {
-            product.stock += item.quantity;
-            product.status = this.determineInventoryStatus(product.stock);
-            await this.productRepository.save(product);
-          }
+        if (status === OrderStatus.CANCELLED) {
+            for (const item of order.orderItems) {
+                if (item.variantId) {
+                    const variant = await this.variantRepository.findOne({
+                        where: { id: item.variantId },
+                    });
+                    if (variant) {
+                        variant.stock += item.quantity;
+                        variant.status = this.determineInventoryStatus(
+                            variant.stock,
+                        );
+                        await this.variantRepository.save(variant);
+                    }
+                } else {
+                    const product = await this.productRepository.findOne({
+                        where: { id: item.productId },
+                    });
+                    if (product) {
+                        product.stock += item.quantity;
+                        product.status = this.determineInventoryStatus(
+                            product.stock,
+                        );
+                        await this.productRepository.save(product);
+                    }
+                }
+            }
         }
-      }
-    }
 
-    order.status = status;
+        order.status = status;
 
-    // Handle COD payment update on delivery
-    if (
-      status === OrderStatus.DELIVERED &&
-      order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
-      order.paymentStatus !== PaymentStatus.PAID
-    ) {
-      order.paymentStatus = PaymentStatus.PAID;
-    }
+        // Handle COD payment update on delivery
+        if (
+            status === OrderStatus.DELIVERED &&
+            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
+            order.paymentStatus !== PaymentStatus.PAID
+        ) {
+            order.paymentStatus = PaymentStatus.PAID;
+        }
 
-    await this.orderRepository.save(order);
-    await this.recordStatusChange(order.id, previousStatus, status, options);
+        await this.orderRepository.save(order);
+        await this.recordStatusChange(
+            order.id,
+            previousStatus,
+            status,
+            options,
+        );
 
         if (order.orderedBy?.email) {
             await sendOrderStatusEmail(
@@ -2516,261 +2576,273 @@ export class OrderService {
             );
         }
 
-    return sanitizeOrderFull(order);
-  }
-
-  /** Appends one row to the order-status audit trail; no-ops when the
-   * status didn't actually change. Every code path that mutates
-   * Order.status (manual update, payment webhook, cancellation) must call
-   * this instead of writing order_status_histories directly. */
-  private async recordStatusChange(
-    orderId: number,
-    previousStatus: OrderStatus | null,
-    newStatus: OrderStatus,
-    options: {
-      reason?: string;
-      note?: string;
-      changedByUserId?: number;
-      changedByRole?: OrderStatusChangedByRole;
-    } = {},
-  ): Promise<void> {
-    if (previousStatus === newStatus) return;
-
-    await this.orderStatusHistoryRepository.save(
-      this.orderStatusHistoryRepository.create({
-        orderId,
-        previousStatus,
-        newStatus,
-        changedByUserId: options.changedByUserId ?? null,
-        changedByRole: options.changedByRole ?? OrderStatusChangedByRole.SYSTEM,
-        reason: options.reason ?? null,
-        note: options.note ?? null,
-      }),
-    );
-  }
-
-  /**
-   * Chronological status timeline for one order, for the order-details
-   * "status history" panel.
-   */
-  async getOrderStatusHistory(orderId: number): Promise<OrderStatusHistory[]> {
-    return this.orderStatusHistoryRepository.find({
-      where: { orderId },
-      relations: ["changedBy"],
-      order: { createdAt: "ASC" },
-    });
-  }
-
-  /**
-   * Vendor-scoped fulfillment status update — moves only this vendor's own
-   * OrderVendorShipping.status, never the parent Order.status. A vendor
-   * cannot mark an order DELIVERED (courier/admin-only) or touch another
-   * vendor's row.
-   */
-  async updateVendorOrderStatus(
-    vendorId: number,
-    orderId: number,
-    status: VendorOrderStatus,
-    options: { reason?: string; note?: string } = {},
-  ): Promise<SanitizedVendorOrderView> {
-    const vendorShipping = await this.orderVendorShippingRepository.findOne({
-      where: { orderId, vendorId },
-    });
-
-    if (!vendorShipping) {
-      throw new APIError(404, "Order not found or you are not authorized to view it");
+        return sanitizeOrderFull(order);
     }
 
-    if (status === VendorOrderStatus.DELIVERED) {
-      throw new InvalidOrderStatusTransitionError(
-        "Vendors cannot mark an order delivered — this requires courier or admin confirmation.",
-      );
+    /** Appends one row to the order-status audit trail; no-ops when the
+     * status didn't actually change. Every code path that mutates
+     * Order.status (manual update, payment webhook, cancellation) must call
+     * this instead of writing order_status_histories directly. */
+    private async recordStatusChange(
+        orderId: number,
+        previousStatus: OrderStatus | null,
+        newStatus: OrderStatus,
+        options: {
+            reason?: string;
+            note?: string;
+            changedByUserId?: number;
+            changedByRole?: OrderStatusChangedByRole;
+        } = {},
+    ): Promise<void> {
+        if (previousStatus === newStatus) return;
+
+        await this.orderStatusHistoryRepository.save(
+            this.orderStatusHistoryRepository.create({
+                orderId,
+                previousStatus,
+                newStatus,
+                changedByUserId: options.changedByUserId ?? null,
+                changedByRole:
+                    options.changedByRole ?? OrderStatusChangedByRole.SYSTEM,
+                reason: options.reason ?? null,
+                note: options.note ?? null,
+            }),
+        );
     }
 
-    const previousStatus = vendorShipping.status;
-    if (
-      previousStatus !== status &&
-      !VENDOR_ORDER_STATUS_TRANSITIONS[previousStatus].includes(status)
-    ) {
-      throw new InvalidOrderStatusTransitionError(
-        `This vendor's order cannot move from ${previousStatus} to ${status}.`,
-      );
+    /**
+     * Chronological status timeline for one order, for the order-details
+     * "status history" panel.
+     */
+    async getOrderStatusHistory(
+        orderId: number,
+    ): Promise<OrderStatusHistory[]> {
+        return this.orderStatusHistoryRepository.find({
+            where: { orderId },
+            relations: ["changedBy"],
+            order: { createdAt: "ASC" },
+        });
     }
 
-    vendorShipping.status = status;
-    await this.orderVendorShippingRepository.save(vendorShipping);
+    /**
+     * Vendor-scoped fulfillment status update — moves only this vendor's own
+     * OrderVendorShipping.status, never the parent Order.status. A vendor
+     * cannot mark an order DELIVERED (courier/admin-only) or touch another
+     * vendor's row.
+     */
+    async updateVendorOrderStatus(
+        vendorId: number,
+        orderId: number,
+        status: VendorOrderStatus,
+        options: { reason?: string; note?: string } = {},
+    ): Promise<SanitizedVendorOrderView> {
+        const vendorShipping = await this.orderVendorShippingRepository.findOne(
+            {
+                where: { orderId, vendorId },
+            },
+        );
 
-    if (previousStatus !== status) {
-      await this.orderStatusHistoryRepository.save(
-        this.orderStatusHistoryRepository.create({
-          orderId,
-          vendorOrderId: vendorShipping.id,
-          previousStatus: previousStatus as unknown as OrderStatus,
-          newStatus: status as unknown as OrderStatus,
-          changedByRole: OrderStatusChangedByRole.VENDOR,
-          reason: options.reason ?? null,
-          note: options.note ?? null,
-        }),
-      );
+        if (!vendorShipping) {
+            throw new APIError(
+                404,
+                "Order not found or you are not authorized to view it",
+            );
+        }
+
+        if (status === VendorOrderStatus.DELIVERED) {
+            throw new InvalidOrderStatusTransitionError(
+                "Vendors cannot mark an order delivered — this requires courier or admin confirmation.",
+            );
+        }
+
+        const previousStatus = vendorShipping.status;
+        if (
+            previousStatus !== status &&
+            !VENDOR_ORDER_STATUS_TRANSITIONS[previousStatus].includes(status)
+        ) {
+            throw new InvalidOrderStatusTransitionError(
+                `This vendor's order cannot move from ${previousStatus} to ${status}.`,
+            );
+        }
+
+        vendorShipping.status = status;
+        await this.orderVendorShippingRepository.save(vendorShipping);
+
+        if (previousStatus !== status) {
+            await this.orderStatusHistoryRepository.save(
+                this.orderStatusHistoryRepository.create({
+                    orderId,
+                    vendorOrderId: vendorShipping.id,
+                    previousStatus: previousStatus as unknown as OrderStatus,
+                    newStatus: status as unknown as OrderStatus,
+                    changedByRole: OrderStatusChangedByRole.VENDOR,
+                    reason: options.reason ?? null,
+                    note: options.note ?? null,
+                }),
+            );
+        }
+
+        const order = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.id = :orderId", { orderId })
+            .andWhere("orderItems.vendorId = :vendorId", { vendorId })
+            .getOne();
+
+        if (!order) {
+            throw new APIError(404, "Order not found");
+        }
+
+        return sanitizeOrderForVendor(order, vendorId);
     }
 
-    const order = await this.orderRepository
-      .createQueryBuilder("order")
-      .leftJoinAndSelect("order.orderItems", "orderItems")
-      .leftJoinAndSelect("order.orderedBy", "orderedBy")
-      .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
-      .leftJoinAndSelect("orderItems.product", "product")
-      .leftJoinAndSelect("orderItems.vendor", "vendor")
-      .leftJoinAndSelect("orderItems.variant", "variant")
-      .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
-      .where("order.id = :orderId", { orderId })
-      .andWhere("orderItems.vendorId = :vendorId", { vendorId })
-      .getOne();
-
-    if (!order) {
-      throw new APIError(404, "Order not found");
+    /**
+     * Search for an order by its ID, including related entities.
+     *
+     * @param {number} orderId - The ID of the order to search for.
+     * @returns {Promise<Order | null>} - The order if found, otherwise null.
+     * @access Admin or authorized users
+     */
+    async searchOrdersById(
+        orderId: number,
+    ): Promise<SanitizedOrderFull | null> {
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "vendorShippings",
+            ],
+        });
+        return order ? sanitizeOrderFull(order) : null;
     }
 
-    return sanitizeOrderForVendor(order, vendorId);
-  }
+    /**
+     * Get all orders that include products sold by a specific vendor.
+     *
+     * @param {number} vendorId - The ID of the vendor to filter orders by.
+     * @returns {Promise<Order[]>} - List of orders containing vendor's products.
+     * @access Vendor or Admin
+     */
+    async getVendorOrders(
+        vendorId: number,
+    ): Promise<SanitizedVendorOrderView[]> {
+        // Use QueryBuilder to join related tables and filter orders by vendorId in orderItems.
+        // The WHERE on the joined orderItems alias scopes the hydrated orderItems
+        // array to just this vendor's rows already — but top-level order fields
+        // (totalPrice, shippingFee, merchandiseSubtotal) still belong to the
+        // whole multi-vendor order, so the response must go through
+        // sanitizeOrderForVendor rather than being spread as-is.
+        const orders = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems") // Include order items
+            .leftJoinAndSelect("order.orderedBy", "orderedBy") // Include user who placed order
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress") // Include shipping address
+            .leftJoinAndSelect("orderItems.product", "product") // Include products in order items
+            .leftJoinAndSelect("orderItems.vendor", "vendor") // Include vendor info for order items
+            .leftJoinAndSelect("vendor.district", "district")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("orderItems.vendorId = :vendorId", { vendorId }) // Filter by vendorId
+            .orderBy("order.createdAt", "DESC")
+            .getMany(); // Get all matching orders
 
-  /**
-   * Search for an order by its ID, including related entities.
-   *
-   * @param {number} orderId - The ID of the order to search for.
-   * @returns {Promise<Order | null>} - The order if found, otherwise null.
-   * @access Admin or authorized users
-   */
-  async searchOrdersById(orderId: number): Promise<SanitizedOrderFull | null> {
-    const order = await this.orderRepository.findOne({
-      where: { id: orderId },
-      relations: [
-        "orderedBy",
-        "shippingAddress",
-        "orderItems",
-        "orderItems.product",
-        "orderItems.vendor",
-        "vendorShippings",
-      ],
-    });
-    return order ? sanitizeOrderFull(order) : null;
-  }
-
-  /**
-   * Get all orders that include products sold by a specific vendor.
-   *
-   * @param {number} vendorId - The ID of the vendor to filter orders by.
-   * @returns {Promise<Order[]>} - List of orders containing vendor's products.
-   * @access Vendor or Admin
-   */
-  async getVendorOrders(vendorId: number): Promise<SanitizedVendorOrderView[]> {
-    // Use QueryBuilder to join related tables and filter orders by vendorId in orderItems.
-    // The WHERE on the joined orderItems alias scopes the hydrated orderItems
-    // array to just this vendor's rows already — but top-level order fields
-    // (totalPrice, shippingFee, merchandiseSubtotal) still belong to the
-    // whole multi-vendor order, so the response must go through
-    // sanitizeOrderForVendor rather than being spread as-is.
-    const orders = await this.orderRepository
-      .createQueryBuilder("order")
-      .leftJoinAndSelect("order.orderItems", "orderItems") // Include order items
-      .leftJoinAndSelect("order.orderedBy", "orderedBy") // Include user who placed order
-      .leftJoinAndSelect("order.shippingAddress", "shippingAddress") // Include shipping address
-      .leftJoinAndSelect("orderItems.product", "product") // Include products in order items
-      .leftJoinAndSelect("orderItems.vendor", "vendor") // Include vendor info for order items
-      .leftJoinAndSelect("vendor.district", "district")
-      .leftJoinAndSelect("orderItems.variant", "variant")
-      .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
-      .where("orderItems.vendorId = :vendorId", { vendorId }) // Filter by vendorId
-      .orderBy("order.createdAt", "DESC")
-      .getMany(); // Get all matching orders
-
-    return orders.map((o) => sanitizeOrderForVendor(o, vendorId));
-  }
-
-  /**
-   * Get detailed information about a specific order for a vendor,
-   * only if the order contains items sold by that vendor.
-   *
-   * Vendor-scoped: excludes the order's grand total, other vendors' items,
-   * and the cross-vendor shipping breakdown — a vendor must never see
-   * another vendor's shipping or settlement information.
-   *
-   * @param {number} vendorId - The ID of the vendor requesting the order details.
-   * @param {number} orderId - The ID of the order to retrieve.
-   * @throws {APIError} - Throws 404 if order not found or vendor not authorized.
-   * @access Vendor
-   */
-  async getVendorOrderDetails(
-    vendorId: number,
-    orderId: number,
-  ): Promise<SanitizedVendorOrderView> {
-    // Query the order with all relevant relations and filter by orderId and vendorId
-    const order = await this.orderRepository
-      .createQueryBuilder("order")
-      .leftJoinAndSelect("order.orderItems", "orderItems") // Join order items
-      .leftJoinAndSelect("order.orderedBy", "orderedBy") // Join user who placed order
-      .leftJoinAndSelect("order.shippingAddress", "shippingAddress") // Join shipping address
-      .leftJoinAndSelect("orderItems.product", "product") // Join products in order items
-      .leftJoinAndSelect("orderItems.vendor", "vendor") // Join vendor info for order items
-      .leftJoinAndSelect("orderItems.variant", "variant")
-      .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
-      .where("order.id = :orderId", { orderId }) // Filter by order ID
-      .andWhere("orderItems.vendorId = :vendorId", { vendorId })
-      .getOne();
-
-    // Throw error if no such order exists or vendor is not authorized to view it
-    if (!order) {
-      throw new APIError(
-        404,
-        "Order not found or you are not authorized to view it",
-      );
+        return orders.map((o) => sanitizeOrderForVendor(o, vendorId));
     }
 
-    return sanitizeOrderForVendor(order, vendorId);
-  }
+    /**
+     * Get detailed information about a specific order for a vendor,
+     * only if the order contains items sold by that vendor.
+     *
+     * Vendor-scoped: excludes the order's grand total, other vendors' items,
+     * and the cross-vendor shipping breakdown — a vendor must never see
+     * another vendor's shipping or settlement information.
+     *
+     * @param {number} vendorId - The ID of the vendor requesting the order details.
+     * @param {number} orderId - The ID of the order to retrieve.
+     * @throws {APIError} - Throws 404 if order not found or vendor not authorized.
+     * @access Vendor
+     */
+    async getVendorOrderDetails(
+        vendorId: number,
+        orderId: number,
+    ): Promise<SanitizedVendorOrderView> {
+        // Query the order with all relevant relations and filter by orderId and vendorId
+        const order = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems") // Join order items
+            .leftJoinAndSelect("order.orderedBy", "orderedBy") // Join user who placed order
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress") // Join shipping address
+            .leftJoinAndSelect("orderItems.product", "product") // Join products in order items
+            .leftJoinAndSelect("orderItems.vendor", "vendor") // Join vendor info for order items
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.id = :orderId", { orderId }) // Filter by order ID
+            .andWhere("orderItems.vendorId = :vendorId", { vendorId })
+            .getOne();
 
-  /**
-   * Retrieve the order history for a specific customer,
-   * including order items, products, and shipping address,
-   * ordered by most recent first.
-   *
-   * @param {number} userId - The ID of the customer.
-   * @returns {Promise<Order[]>} - List of orders made by the customer.
-   * @access Customer
-   */
-  async getOrderHistoryForCustomer(
-    userId: number,
-  ): Promise<SanitizedOrderFull[]> {
-    // Find all orders where orderedById matches the userId
-    // Include relations: orderItems, the products within those items, and shipping address
-    const orders = await this.orderRepository.find({
-      where: { orderedById: userId },
-      relations: [
-        "orderItems",
-        "orderItems.product",
-        "orderItems.variant",
-        "orderItems.vendor",
-        "orderItems.vendor.district",
-        "shippingAddress",
-        "vendorShippings",
-      ],
-      order: { createdAt: "DESC" }, // Sort orders by creation date descending
-    });
+        // Throw error if no such order exists or vendor is not authorized to view it
+        if (!order) {
+            throw new APIError(
+                404,
+                "Order not found or you are not authorized to view it",
+            );
+        }
 
-    return orders.map(sanitizeOrderFull);
-  }
+        return sanitizeOrderForVendor(order, vendorId);
+    }
 
-  async getOrderDetailByMerchantTransactionId(mTransactionId: string) {
-    const order = await this.orderRepository.findOne({
-      where: {
-        mTransactionId: mTransactionId,
-      },
-    });
+    /**
+     * Retrieve the order history for a specific customer,
+     * including order items, products, and shipping address,
+     * ordered by most recent first.
+     *
+     * @param {number} userId - The ID of the customer.
+     * @returns {Promise<Order[]>} - List of orders made by the customer.
+     * @access Customer
+     */
+    async getOrderHistoryForCustomer(
+        userId: number,
+    ): Promise<SanitizedOrderFull[]> {
+        // Find all orders where orderedById matches the userId
+        // Include relations: orderItems, the products within those items, and shipping address
+        const orders = await this.orderRepository.find({
+            where: { orderedById: userId },
+            relations: [
+                "orderItems",
+                "orderItems.product",
+                "orderItems.variant",
+                "orderItems.vendor",
+                "orderItems.vendor.district",
+                "shippingAddress",
+                "vendorShippings",
+            ],
+            order: { createdAt: "DESC" }, // Sort orders by creation date descending
+        });
 
-    return order;
-  }
+        return orders.map(sanitizeOrderFull);
+    }
 
-  async deleteOrder() {
-    const order = await this.orderRepository.delete({});
-  }
+    async getOrderDetailByMerchantTransactionId(mTransactionId: string) {
+        const order = await this.orderRepository.findOne({
+            where: {
+                mTransactionId: mTransactionId,
+            },
+        });
+
+        return order;
+    }
+
+    async deleteOrder() {
+        const order = await this.orderRepository.delete({});
+    }
 }

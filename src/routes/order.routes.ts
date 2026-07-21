@@ -1,9 +1,23 @@
-import { Router } from 'express';
-import { OrderController } from '../controllers/order.controller';
-import { authMiddleware, combinedAuthMiddleware, isAccountOwner, isAccountOwnerOrAdmin, isAdmin, isAdminOrStaff, isVendor, vendorAuthMiddleware } from '../middlewares/auth.middleware';
-import { validateZod } from '../middlewares/validation.middleware';
-import { createOrderSchema, shippingAddressSchema, updateOrderStatusSchema, updateVendorOrderStatusSchema } from '../utils/zod_validations/order.zod';
-import { asyncHandler } from '../utils/asyncHandler.utils';
+import { Router } from "express";
+import { OrderController } from "../controllers/order.controller";
+import {
+    authMiddleware,
+    combinedAuthMiddleware,
+    isAccountOwner,
+    isAccountOwnerOrAdmin,
+    isAdmin,
+    isAdminOrStaff,
+    isVendor,
+    vendorAuthMiddleware,
+} from "../middlewares/auth.middleware";
+import { validateZod } from "../middlewares/validation.middleware";
+import {
+    createOrderSchema,
+    shippingAddressSchema,
+    updateOrderStatusSchema,
+    updateVendorOrderStatusSchema,
+} from "../utils/zod_validations/order.zod";
+import { asyncHandler } from "../utils/asyncHandler.utils";
 
 const router = Router();
 const orderController = new OrderController();
@@ -173,13 +187,21 @@ const orderController = new OrderController();
  *                   example: "Internal server error"
  */
 
-router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
+router.post(
+    "/",
+    authMiddleware,
+    validateZod(createOrderSchema),
+    asyncHandler(orderController.createOrder.bind(orderController)),
+);
 
 // Read-only checkout preview: same vendor-grouped shipping/discount calc as
 // createOrder, without writing an order — the frontend renders these
 // numbers instead of recomputing shipping itself.
-router.post('/estimate', authMiddleware, asyncHandler(orderController.estimateCheckout.bind(orderController)));
-
+router.post(
+    "/estimate",
+    authMiddleware,
+    asyncHandler(orderController.estimateCheckout.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -296,7 +318,12 @@ router.post('/estimate', authMiddleware, asyncHandler(orderController.estimateCh
  *                   example: "Internal server error"
  */
 
-router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getAllOrders.bind(orderController)));
+router.get(
+    "/",
+    authMiddleware,
+    isAdminOrStaff,
+    asyncHandler(orderController.getAllOrders.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -466,8 +493,10 @@ router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.get
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/payment/success', asyncHandler(orderController.handlePaymentSuccess.bind(orderController)));
-
+router.get(
+    "/payment/success",
+    asyncHandler(orderController.handlePaymentSuccess.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -537,8 +566,10 @@ router.get('/payment/success', asyncHandler(orderController.handlePaymentSuccess
  *                   type: string
  *                   example: Internal server error
  */
-router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.bind(orderController)));
-
+router.get(
+    "/payment/cancel",
+    asyncHandler(orderController.handlePaymentCancel.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -708,13 +739,17 @@ router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.b
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.getCustomerOrderDetails.bind(orderController)));
+router.get(
+    "/:orderId",
+    combinedAuthMiddleware,
+    asyncHandler(orderController.getCustomerOrderDetails.bind(orderController)),
+);
 
 /**
  * @swagger
  * /api/order/customer/order/{id}:
  *   get:
- *     summary: Get order details by order ID 
+ *     summary: Get order details by order ID
  *     tags:
  *       - Orders
  *     security:
@@ -878,8 +913,11 @@ router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.get
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/customer/order/:id', authMiddleware, asyncHandler(orderController.getOrderById.bind(orderController)));
-
+router.get(
+    "/customer/order/:id",
+    authMiddleware,
+    asyncHandler(orderController.getOrderById.bind(orderController)),
+);
 
 // /**
 //  * @swagger
@@ -1304,8 +1342,12 @@ router.get('/customer/order/:id', authMiddleware, asyncHandler(orderController.g
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getOrderDetails.bind(orderController)));// order by id
-
+router.get(
+    "/admin/:orderId",
+    authMiddleware,
+    isAdminOrStaff,
+    asyncHandler(orderController.getOrderDetails.bind(orderController)),
+); // order by id
 
 /**
  * @swagger
@@ -1449,9 +1491,19 @@ router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(order
  *                   type: string
  *                   example: "Internal server error"
  */
-router.put('/admin/:orderId/status', authMiddleware, isAdminOrStaff, validateZod(updateOrderStatusSchema), asyncHandler(orderController.updateOrderStatus.bind(orderController)));
-router.get('/admin/:orderId/status-history', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getOrderStatusHistory.bind(orderController)));
-
+router.put(
+    "/admin/:orderId/status",
+    authMiddleware,
+    isAdminOrStaff,
+    validateZod(updateOrderStatusSchema),
+    asyncHandler(orderController.updateOrderStatus.bind(orderController)),
+);
+router.get(
+    "/admin/:orderId/status-history",
+    authMiddleware,
+    isAdminOrStaff,
+    asyncHandler(orderController.getOrderStatusHistory.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1579,8 +1631,12 @@ router.get('/admin/:orderId/status-history', authMiddleware, isAdminOrStaff, asy
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(orderController.searchOrdersById.bind(orderController)));
-
+router.get(
+    "/admin/order/search",
+    authMiddleware,
+    isAdminOrStaff,
+    asyncHandler(orderController.searchOrdersById.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1647,7 +1703,10 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *       500:
  *         description: Internal server error
  */
-router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(orderController)));
+router.get(
+    "/user/track",
+    asyncHandler(orderController.trackOrderById.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1757,7 +1816,12 @@ router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(order
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/vendor/orders', vendorAuthMiddleware, isVendor, asyncHandler(orderController.getVendorOrders.bind(orderController)));
+router.get(
+    "/vendor/orders",
+    vendorAuthMiddleware,
+    isVendor,
+    asyncHandler(orderController.getVendorOrders.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1898,9 +1962,18 @@ router.get('/vendor/orders', vendorAuthMiddleware, isVendor, asyncHandler(orderC
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/vendor/:orderId', vendorAuthMiddleware, asyncHandler(orderController.getVendorOrderDetails.bind(orderController)));
-router.put('/vendor/:orderId/status', vendorAuthMiddleware, isVendor, validateZod(updateVendorOrderStatusSchema), asyncHandler(orderController.updateVendorOrderStatus.bind(orderController)));
-
+router.get(
+    "/vendor/:orderId",
+    vendorAuthMiddleware,
+    asyncHandler(orderController.getVendorOrderDetails.bind(orderController)),
+);
+router.put(
+    "/vendor/:orderId/status",
+    vendorAuthMiddleware,
+    isVendor,
+    validateZod(updateVendorOrderStatusSchema),
+    asyncHandler(orderController.updateVendorOrderStatus.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1994,8 +2067,11 @@ router.put('/vendor/:orderId/status', vendorAuthMiddleware, isVendor, validateZo
  *       500:
  *         description: Internal server error
  */
-router.get("/customer/history", authMiddleware, orderController.getCustomerOrderHistory.bind(orderController));
-
+router.get(
+    "/customer/history",
+    authMiddleware,
+    orderController.getCustomerOrderHistory.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2080,7 +2156,11 @@ router.get("/customer/history", authMiddleware, orderController.getCustomerOrder
  *                   type: string
  *                   example: Internal server error
  */
-router.post("/search/merchant-transactionId", authMiddleware, orderController.getOrderDetailByMerchantTransactionId.bind(orderController));
+router.post(
+    "/search/merchant-transactionId",
+    authMiddleware,
+    orderController.getOrderDetailByMerchantTransactionId.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2095,7 +2175,12 @@ router.post("/search/merchant-transactionId", authMiddleware, orderController.ge
  *       500:
  *         description: Internal server error
  */
-router.delete("/order/delete/all", authMiddleware, isAdminOrStaff, asyncHandler(orderController.deleteOrder.bind(orderController)));
+router.delete(
+    "/order/delete/all",
+    authMiddleware,
+    isAdminOrStaff,
+    asyncHandler(orderController.deleteOrder.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -2126,7 +2211,10 @@ router.delete("/order/delete/all", authMiddleware, isAdminOrStaff, asyncHandler(
  *       500:
  *         description: Internal server error
  */
-router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderController));
+router.post(
+    "/esewa/success",
+    orderController.esewaPaymentSuccess.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2154,7 +2242,10 @@ router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderCont
  *       500:
  *         description: Internal server error
  */
-router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderController));
+router.post(
+    "/esewa/fail",
+    orderController.esewaPaymentFailed.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2201,6 +2292,10 @@ router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderControll
  *       500:
  *         description: Internal server error
  */
-router.post("/check-promo", authMiddleware, orderController.checkAvailablePromocode.bind(orderController));
+router.post(
+    "/check-promo",
+    authMiddleware,
+    orderController.checkAvailablePromocode.bind(orderController),
+);
 
 export default router;
