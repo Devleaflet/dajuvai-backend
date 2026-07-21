@@ -5,85 +5,85 @@ import { generateContactEmailHTML } from "./emailTemplate.utils";
 
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
 const transporter = nodemailer.createTransport({
-  service: "Gmail",
-  auth: {
-    user: config.USER_EMAIL, // Your Gmail email address
-    pass: config.PASS_EMAIL, // App password or actual password (prefer app password for security)
-  },
+    service: "Gmail",
+    auth: {
+        user: config.USER_EMAIL, // Your Gmail email address
+        pass: config.PASS_EMAIL, // App password or actual password (prefer app password for security)
+    },
 });
 
 const escapeHtml = (value: unknown): string =>
-  String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+    String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#039;");
 
 const getOrderStatusEmailMeta = (status: string) => {
-  const normalized = status.toUpperCase();
-  const map: Record<
-    string,
-    { label: string; color: string; bg: string; copy: string }
-  > = {
-    PENDING: {
-      label: "Pending",
-      color: "#92400e",
-      bg: "#fef3c7",
-      copy: "We have received your order and are waiting for confirmation.",
-    },
-    CONFIRMED: {
-      label: "Confirmed",
-      color: "#1d4ed8",
-      bg: "#dbeafe",
-      copy: "Your order is confirmed and will move into preparation soon.",
-    },
-    PROCESSING: {
-      label: "Processing",
-      color: "#6d28d9",
-      bg: "#ede9fe",
-      copy: "Your order is being prepared by the seller.",
-    },
-    DELAYED: {
-      label: "Delayed",
-      color: "#be123c",
-      bg: "#ffe4e6",
-      copy: "Your order is taking longer than expected. We will keep you updated.",
-    },
-    SHIPPED: {
-      label: "Shipped",
-      color: "#0369a1",
-      bg: "#e0f2fe",
-      copy: "Your order has been handed to delivery and is on the way.",
-    },
-    DELIVERED: {
-      label: "Delivered",
-      color: "#047857",
-      bg: "#d1fae5",
-      copy: "Your order has been delivered. Thank you for shopping with DajuVai.",
-    },
-    CANCELLED: {
-      label: "Cancelled",
-      color: "#b91c1c",
-      bg: "#fee2e2",
-      copy: "Your order has been cancelled. Contact support if this looks wrong.",
-    },
-    RETURNED: {
-      label: "Returned",
-      color: "#854d0e",
-      bg: "#fef9c3",
-      copy: "Your return has been recorded for this order.",
-    },
-  };
+    const normalized = status.toUpperCase();
+    const map: Record<
+        string,
+        { label: string; color: string; bg: string; copy: string }
+    > = {
+        PENDING: {
+            label: "Pending",
+            color: "#92400e",
+            bg: "#fef3c7",
+            copy: "We have received your order and are waiting for confirmation.",
+        },
+        CONFIRMED: {
+            label: "Confirmed",
+            color: "#1d4ed8",
+            bg: "#dbeafe",
+            copy: "Your order is confirmed and will move into preparation soon.",
+        },
+        PROCESSING: {
+            label: "Processing",
+            color: "#6d28d9",
+            bg: "#ede9fe",
+            copy: "Your order is being prepared by the seller.",
+        },
+        DELAYED: {
+            label: "Delayed",
+            color: "#be123c",
+            bg: "#ffe4e6",
+            copy: "Your order is taking longer than expected. We will keep you updated.",
+        },
+        SHIPPED: {
+            label: "Shipped",
+            color: "#0369a1",
+            bg: "#e0f2fe",
+            copy: "Your order has been handed to delivery and is on the way.",
+        },
+        DELIVERED: {
+            label: "Delivered",
+            color: "#047857",
+            bg: "#d1fae5",
+            copy: "Your order has been delivered. Thank you for shopping with DajuVai.",
+        },
+        CANCELLED: {
+            label: "Cancelled",
+            color: "#b91c1c",
+            bg: "#fee2e2",
+            copy: "Your order has been cancelled. Contact support if this looks wrong.",
+        },
+        RETURNED: {
+            label: "Returned",
+            color: "#854d0e",
+            bg: "#fef9c3",
+            copy: "Your return has been recorded for this order.",
+        },
+    };
 
-  return (
-    map[normalized] ?? {
-      label: normalized,
-      color: "#334155",
-      bg: "#e2e8f0",
-      copy: "Your order status has changed. View your account for details.",
-    }
-  );
+    return (
+        map[normalized] ?? {
+            label: normalized,
+            color: "#334155",
+            bg: "#e2e8f0",
+            copy: "Your order status has changed. View your account for details.",
+        }
+    );
 };
 
 /**
@@ -91,16 +91,16 @@ const getOrderStatusEmailMeta = (status: string) => {
  * @param dto - ContactInput object validated by Zod with form data (name, email, subject, message)
  */
 export const sendContactEmail = async (dto: ContactInput) => {
-  // Email options including recipient, subject, and HTML body generated from dto
-  const mailOptions = {
-    from: `${dto.email}`, // sender address with friendly name
-    to: `${config.USER_EMAIL}`, // support or admin email address
-    subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
-    html: generateContactEmailHTML(dto), // formatted HTML content of the message
-  };
+    // Email options including recipient, subject, and HTML body generated from dto
+    const mailOptions = {
+        from: `${dto.email}`, // sender address with friendly name
+        to: `${config.USER_EMAIL}`, // support or admin email address
+        subject: `New Contact Form Submission: ${dto.subject}`, // email subject line
+        html: generateContactEmailHTML(dto), // formatted HTML content of the message
+    };
 
-  // Send mail asynchronously
-  await transporter.sendMail(mailOptions);
+    // Send mail asynchronously
+    await transporter.sendMail(mailOptions);
 };
 
 /**
@@ -110,20 +110,20 @@ export const sendContactEmail = async (dto: ContactInput) => {
  * @param token - Verification code to include in the email body
  */
 export const sendVerificationEmail = async (
-  to: string,
-  sub: string,
-  token?: string,
+    to: string,
+    sub: string,
+    token?: string,
 ) => {
-  const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login";
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject: sub,
-    html: `
+    const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login";
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: sub,
+        html: `
         <div>
             ${
-              token
-                ? `
+                token
+                    ? `
                 
               
                 <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:Arial, Helvetica, sans-serif;">
@@ -206,7 +206,7 @@ export const sendVerificationEmail = async (
                   </table>
                 </body>
             `
-                : `
+                    : `
                 <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.5; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #f9f9f9;">
                     <h2 style="color: #2E7D32; text-align: center;">Vendor Approved ✅</h2>
                     <p style="font-size: 16px; text-align: center;">
@@ -224,101 +224,101 @@ export const sendVerificationEmail = async (
             }
         </div>
     `,
-  };
+    };
 
-  // Send the verification email
-  await transporter.sendMail(mailOptions);
+    // Send the verification email
+    await transporter.sendMail(mailOptions);
 };
 
 export const sendCustomerOrderEmail = async (
-  to: string,
-  orderNumber: string,
-  tp: number, // not in use right now
-  shippingFee: number,
-  items: {
-    name: string;
-    sku?: string | null;
-    quantity: number;
-    price: number;
-    variantAttributes?: Record<string, string> | null;
-    vendorDistrict?: string | null;
-    vendorName?: string | null; // optional if you want vendor name
-  }[],
-  userDistrict?: string | null,
-  subject = "Your Order Has Been Placed",
+    to: string,
+    orderNumber: string,
+    tp: number, // not in use right now
+    shippingFee: number,
+    items: {
+        name: string;
+        sku?: string | null;
+        quantity: number;
+        price: number;
+        variantAttributes?: Record<string, string> | null;
+        vendorDistrict?: string | null;
+        vendorName?: string | null; // optional if you want vendor name
+    }[],
+    userDistrict?: string | null,
+    subject = "Your Order Has Been Placed",
 ) => {
-  // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
-  // as strings — coerce here or `.toFixed()` throws and `+` silently
-  // string-concatenates instead of adding.
-  let totalPrice = 0;
-  shippingFee = Number(shippingFee) || 0;
-  // const OrderTotal = totalPrice + shippingFee;
+    // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
+    // as strings — coerce here or `.toFixed()` throws and `+` silently
+    // string-concatenates instead of adding.
+    let totalPrice = 0;
+    shippingFee = Number(shippingFee) || 0;
+    // const OrderTotal = totalPrice + shippingFee;
 
-  // Group items by vendorDistrict
-  const groupedByVendor: Record<string, typeof items> = {};
-  for (const item of items) {
-    const vendorKey = item.vendorDistrict || "Unknown District";
-    if (!groupedByVendor[vendorKey]) {
-      groupedByVendor[vendorKey] = [];
-    }
-    groupedByVendor[vendorKey].push(item);
-  }
-
-  // Generate vendor sections
-  const vendorSections = Object.entries(groupedByVendor).map(
-    ([vendorDistrict, vendorItems]) => {
-      const rows = vendorItems.map((item) => {
-        console.log("Comparing districts ->", {
-          userDistrict,
-          vendorDistrict: item.vendorDistrict,
-        });
-
-        let deliveryEstimate = "3-5 days";
-        if (userDistrict && item.vendorDistrict) {
-          if (
-            userDistrict.trim().toLowerCase() ===
-            item.vendorDistrict.trim().toLowerCase()
-          ) {
-            deliveryEstimate = "2-3 days";
-          }
+    // Group items by vendorDistrict
+    const groupedByVendor: Record<string, typeof items> = {};
+    for (const item of items) {
+        const vendorKey = item.vendorDistrict || "Unknown District";
+        if (!groupedByVendor[vendorKey]) {
+            groupedByVendor[vendorKey] = [];
         }
+        groupedByVendor[vendorKey].push(item);
+    }
 
-        return `
+    // Generate vendor sections
+    const vendorSections = Object.entries(groupedByVendor).map(
+        ([vendorDistrict, vendorItems]) => {
+            const rows = vendorItems.map((item) => {
+                console.log("Comparing districts ->", {
+                    userDistrict,
+                    vendorDistrict: item.vendorDistrict,
+                });
+
+                let deliveryEstimate = "3-5 days";
+                if (userDistrict && item.vendorDistrict) {
+                    if (
+                        userDistrict.trim().toLowerCase() ===
+                        item.vendorDistrict.trim().toLowerCase()
+                    ) {
+                        deliveryEstimate = "2-3 days";
+                    }
+                }
+
+                return `
                       <tr>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8;">
                           <strong style="color:#2b2b2b;">${item.name}</strong>${item.sku ? ` <span style="color:#999; font-size:12px;">(${item.sku})</span>` : ""}
                           ${
-                            item.variantAttributes
-                              ? `<br><span style="color:#888; font-size:12px;">${Object.entries(
-                                  item.variantAttributes,
-                                )
-                                  .map(([key, val]) => `${key}: ${val}`)
-                                  .join(", ")}</span>`
-                              : ""
+                              item.variantAttributes
+                                  ? `<br><span style="color:#888; font-size:12px;">${Object.entries(
+                                        item.variantAttributes,
+                                    )
+                                        .map(([key, val]) => `${key}: ${val}`)
+                                        .join(", ")}</span>`
+                                  : ""
                           }
                         </td>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#444;">${
-                          item.quantity
+                            item.quantity
                         }</td>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">Rs ${
-                          item.price
+                            item.price
                         }</td>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:600; color:#2b2b2b;">Rs ${(
-                          item.price * item.quantity
+                            item.price * item.quantity
                         ).toFixed(2)}</td>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#c05a00; font-size:12px; font-weight:600;">${deliveryEstimate}</td>
                       </tr>
                     `;
-      });
+            });
 
-      const vendorSubtotal = vendorItems.reduce(
-        (sum, i) => sum + i.price * i.quantity,
-        0,
-      );
+            const vendorSubtotal = vendorItems.reduce(
+                (sum, i) => sum + i.price * i.quantity,
+                0,
+            );
 
-      totalPrice += vendorSubtotal;
+            totalPrice += vendorSubtotal;
 
-      return `
+            return `
                   <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:24px; border:1px solid #f0e3d8; border-radius:8px; overflow:hidden;">
                     <tr>
                       <td colspan="5" style="background-color:#fff4e9; padding:10px 14px; border-bottom:2px solid #ff7a1a;">
@@ -339,22 +339,22 @@ export const sendCustomerOrderEmail = async (
                       <tr>
                         <td colspan="4" style="padding:12px 10px; text-align:right; font-weight:700; color:#2b2b2b; background-color:#fafafa;">Vendor Subtotal:</td>
                         <td style="padding:12px 10px; text-align:right; font-weight:700; color:#c05a00; background-color:#fafafa;">Rs ${vendorSubtotal.toFixed(
-                          2,
+                            2,
                         )}</td>
                       </tr>
                     </tfoot>
                   </table>
                 `;
-    },
-  );
+        },
+    );
 
-  const orderTotal = totalPrice + shippingFee;
+    const orderTotal = totalPrice + shippingFee;
 
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject,
-    html: `
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
       <body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
@@ -419,86 +419,86 @@ export const sendCustomerOrderEmail = async (
         </table>
       </body>
     `,
-  };
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 };
 
 interface VendorOrderItem {
-  name: string;
-  sku?: string | null;
-  quantity: number;
-  price: number;
-  variantAttributes?: Record<string, string> | null;
+    name: string;
+    sku?: string | null;
+    quantity: number;
+    price: number;
+    variantAttributes?: Record<string, string> | null;
 }
 
 interface CustomerInfo {
-  name: string;
-  phone: string;
-  email?: string;
-  city?: string;
-  district?: string;
-  localAddress?: string;
-  landmark?: string;
+    name: string;
+    phone: string;
+    email?: string;
+    city?: string;
+    district?: string;
+    localAddress?: string;
+    landmark?: string;
 }
 
 export const sendVendorOrderEmail = async (
-  to: string,
-  paymentMethod: string,
-  orderNumber: string,
-  // Shipping fee is not vendor revenue and is intentionally not shown here —
-  // customer/admin emails carry the full shipping breakdown instead.
-  products: VendorOrderItem[],
-  customer: CustomerInfo,
-  subject = "New Order Received",
+    to: string,
+    paymentMethod: string,
+    orderNumber: string,
+    // Shipping fee is not vendor revenue and is intentionally not shown here —
+    // customer/admin emails carry the full shipping breakdown instead.
+    products: VendorOrderItem[],
+    customer: CustomerInfo,
+    subject = "New Order Received",
 ) => {
-  // Generate HTML rows for each product
-  const rows = products.map((item) => {
-    return `
+    // Generate HTML rows for each product
+    const rows = products.map((item) => {
+        return `
               <tr>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8;">
                   <strong style="color:#2b2b2b;">${item.name}</strong>${item.sku ? ` <span style="color:#999; font-size:12px;">(${item.sku})</span>` : ""}
                   ${
-                    item.variantAttributes
-                      ? `<br><span style="color:#888; font-size:12px;">${Object.entries(
-                          item.variantAttributes,
-                        )
-                          .map(([key, val]) => `${key}: ${val}`)
-                          .join(", ")}</span>`
-                      : ""
+                      item.variantAttributes
+                          ? `<br><span style="color:#888; font-size:12px;">${Object.entries(
+                                item.variantAttributes,
+                            )
+                                .map(([key, val]) => `${key}: ${val}`)
+                                .join(", ")}</span>`
+                          : ""
                   }
                 </td>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#444;">${item.quantity}</td>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">Rs ${item.price}</td>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:600; color:#2b2b2b;">Rs ${(
-                  item.price * item.quantity
+                    item.price * item.quantity
                 ).toFixed(2)}</td>
               </tr>
             `;
-  });
+    });
 
-  const vendorTotal = products.reduce(
-    (sum, item) => sum + item.price * item.quantity,
-    0,
-  );
+    const vendorTotal = products.reduce(
+        (sum, item) => sum + item.price * item.quantity,
+        0,
+    );
 
-  // Combine address fields into a single string
-  const fullAddress = [
-    customer.localAddress,
-    customer.landmark,
-    customer.city,
-    customer.district,
-  ]
-    .filter(Boolean)
-    .join(", ");
+    // Combine address fields into a single string
+    const fullAddress = [
+        customer.localAddress,
+        customer.landmark,
+        customer.city,
+        customer.district,
+    ]
+        .filter(Boolean)
+        .join(", ");
 
-  const totalUnits = products.reduce((sum, item) => sum + item.quantity, 0);
+    const totalUnits = products.reduce((sum, item) => sum + item.quantity, 0);
 
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject,
-    html: `
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
       <body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
           <tr>
@@ -531,24 +531,24 @@ export const sendVendorOrderEmail = async (
                           <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${customer.name}</td>
                         </tr>
                         ${
-                          customer.email
-                            ? `<tr>
+                            customer.email
+                                ? `<tr>
                           <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Email</td>
                           <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${customer.email}</td>
                         </tr>`
-                            : ""
+                                : ""
                         }
                         <tr>
                           <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Phone</td>
                           <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${customer.phone}</td>
                         </tr>
                         ${
-                          fullAddress
-                            ? `<tr>
+                            fullAddress
+                                ? `<tr>
                           <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8;">Address</td>
                           <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8;">${fullAddress}</td>
                         </tr>`
-                            : ""
+                                : ""
                         }
                         <tr>
                           <td style="padding:10px 14px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa;">Payment Method</td>
@@ -602,22 +602,22 @@ export const sendVendorOrderEmail = async (
         </table>
       </body>
     `,
-  };
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 };
 
 const sendLegacyOrderStatusEmail = async (
-  to: string,
-  orderId: number,
-  status: string,
-  subject = "Your Order Status Has Been Updated",
+    to: string,
+    orderId: number,
+    status: string,
+    subject = "Your Order Status Has Been Updated",
 ) => {
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject,
-    html: `
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
       <div style="font-family: Arial, sans-serif; color: #333; line-height: 1.6; max-width: 600px; margin: auto; padding: 20px; border: 1px solid #e0e0e0; border-radius: 8px; background-color: #e3f2fd;">
         <h2 style="color: #1976d2; text-align: center;">Order Update 📦</h2>
         
@@ -642,26 +642,26 @@ const sendLegacyOrderStatusEmail = async (
         </p>
       </div>
     `,
-  };
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 };
 
 export const sendOrderStatusEmail = async (
-  to: string,
-  orderNumber: string,
-  status: string,
-  subject = "Your Order Status Has Been Updated",
+    to: string,
+    orderNumber: string,
+    status: string,
+    subject = "Your Order Status Has Been Updated",
 ) => {
-  const statusMeta = getOrderStatusEmailMeta(status);
-  const orderLabel = `#${orderNumber}`;
-  const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/profile`;
+    const statusMeta = getOrderStatusEmailMeta(status);
+    const orderLabel = `#${orderNumber}`;
+    const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/profile`;
 
-  await transporter.sendMail({
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject: subject || `Order ${orderLabel} is now ${statusMeta.label}`,
-    html: `
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: subject || `Order ${orderLabel} is now ${statusMeta.label}`,
+        html: `
             <div style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#111827;">
                 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f4f4f4;">
                     <tr>
@@ -719,12 +719,12 @@ export const sendOrderStatusEmail = async (
                 </table>
             </div>
         `,
-  });
+    });
 };
 
 export const userOrderCancelledEmail = (
-  userName: string,
-  orderNumber: string,
+    userName: string,
+    orderNumber: string,
 ) => `
   
 <body style="margin:0; padding:0; background:#f4f5f7; font-family:Arial, Helvetica, sans-serif;">
@@ -806,10 +806,10 @@ export const userOrderCancelledEmail = (
 `;
 
 export const sendVendorApprovedEmail = async (
-  to: string,
-  businessName: string,
+    to: string,
+    businessName: string,
 ) => {
-  const mailHtml = `
+    const mailHtml = `
     <div style="background:#f6f6f6;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:4px;overflow:hidden;">
 
@@ -858,22 +858,22 @@ export const sendVendorApprovedEmail = async (
 </div>
   `;
 
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject: "Vendor Account Approved",
-    html: mailHtml,
-  };
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: "Vendor Account Approved",
+        html: mailHtml,
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
 };
 
 export const sendVendorRejectedEmail = async (
-  to: string,
-  businessName: string,
-  rejectionReason: string,
+    to: string,
+    businessName: string,
+    rejectionReason: string,
 ) => {
-  const mailHtml = `
+    const mailHtml = `
 <div style="background:#f6f6f6;padding:32px 16px;font-family:Arial,Helvetica,sans-serif;">
   <div style="max-width:600px;margin:0 auto;background:#ffffff;border:1px solid #e5e5e5;border-radius:4px;overflow:hidden;">
 
@@ -922,12 +922,147 @@ export const sendVendorRejectedEmail = async (
 </div>
   `;
 
-  const mailOptions = {
-    from: `<${config.USER_EMAIL}>`,
-    to,
-    subject: "Vendor Account Rejected",
-    html: mailHtml,
-  };
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: "Vendor Account Rejected",
+        html: mailHtml,
+    };
 
-  await transporter.sendMail(mailOptions);
+    await transporter.sendMail(mailOptions);
+};
+
+export const sendVendorApplicationEmail = async (
+    to: string,
+    businessName: string,
+) => {
+    const mailHtml = `
+      <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:Arial, Helvetica, sans-serif;">
+                  <table role="presentation" width="100%"  cellpadding="0" cellspacing="0" style="background-color:#f4f5f7; padding:40px 0;">
+                    <tr>
+                      <td align="center">
+                        <table role="presentation" width="550" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:6px; overflow:hidden; box-shadow:0 4px 20px rgba(0,0,0,0.06);">
+
+                          <!-- Header / Brand -->
+                          <tr>
+                            <td style="background:linear-gradient(135deg,#ea580c,#f97316); padding:32px 40px; text-align:center;">
+                              <table role="presentation" cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                                <tr>
+                                  <td style="vertical-align:middle;">
+                                    <span style="color:#ffffff; font-size:22px; font-weight:700; letter-spacing:0.5px;">Dajuvai</span>
+                                  </td>
+                                </tr>
+                              </table>
+                            </td>
+                          </tr>
+
+                          <!-- Body -->
+                          <tr>
+                            <td style="padding:40px 40px 24px 40px;">
+                              <h1 style="margin:0 0 8px 0; font-size:20px; color:#0f172a; font-weight:700;">Application Received</h1>
+                              <p style="margin:0 0 24px 0; font-size:15px; line-height:1.6; color:#475569;">
+                                Hi ${businessName},<br><br>
+                                Thank you for applying to become a vendor on Dajuvai. We're excited about the possibility of partnering with you and appreciate the time you took to complete your application.
+                              </p>
+
+                              <!-- Status Box -->
+                              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                                <tr>
+                                  <td align="center" style="background-color:#fff7ed; border:1px dashed #fdba74; border-radius:6px; padding:24px;">
+                                    <div style="font-size:13px; color:#9a3412; text-transform:uppercase; letter-spacing:1px; margin-bottom:8px;">Application Status</div>
+                                    <div style="font-size:22px; font-weight:800; color:#c2410c; letter-spacing:1px;">Under Review</div>
+                                  </td>
+                                </tr>
+                              </table>
+
+                              <!-- Info Notice -->
+                              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#fff7ed; border-left:4px solid #ea580c; border-radius:4px; margin-bottom:24px;">
+                                <tr>
+                                  <td style="padding:12px 16px;">
+                                    <p style="margin:0; font-size:13.5px; color:#9a3412; line-height:1.5;">
+                                       Our team typically reviews new vendor applications within <strong>3–5 business days</strong>. We'll notify you by email as soon as a decision has been made.
+                                    </p>
+                                  </td>
+                                </tr>
+                              </table>
+
+                              <p style="margin:0 0 16px 0; font-size:14px; line-height:1.6; color:#475569;">
+                                Here's what happens next:
+                              </p>
+
+                              <!-- Steps List -->
+                              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:24px;">
+                                <tr>
+                                  <td style="padding:0 0 12px 0;">
+                                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                      <tr>
+                                        <td width="28" valign="top" style="font-size:14px; color:#ea580c; font-weight:700;">1.</td>
+                                        <td style="font-size:14px; line-height:1.6; color:#475569;">Our team reviews your submitted business details and documents.</td>
+                                      </tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td style="padding:0 0 12px 0;">
+                                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                      <tr>
+                                        <td width="28" valign="top" style="font-size:14px; color:#ea580c; font-weight:700;">2.</td>
+                                        <td style="font-size:14px; line-height:1.6; color:#475569;">We may reach out if we need any additional information from you.</td>
+                                      </tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                                <tr>
+                                  <td>
+                                    <table role="presentation" cellpadding="0" cellspacing="0" width="100%">
+                                      <tr>
+                                        <td width="28" valign="top" style="font-size:14px; color:#ea580c; font-weight:700;">3.</td>
+                                        <td style="font-size:14px; line-height:1.6; color:#475569;">You'll receive an email confirming approval along with onboarding instructions.</td>
+                                      </tr>
+                                    </table>
+                                  </td>
+                                </tr>
+                              </table>
+
+                              <p style="margin:0 0 8px 0; font-size:14px; line-height:1.6; color:#475569;">
+                                If you have any questions in the meantime, feel free to reach out to our vendor support team.
+                              </p>
+                              <p style="margin:0; font-size:14px; line-height:1.6; color:#475569;">
+                                We look forward to the possibility of working with you.
+                              </p>
+                            </td>
+                          </tr>
+
+                          <!-- Divider -->
+                          <tr>
+                            <td style="padding:0 40px;">
+                              <hr style="border:none; border-top:1px solid #e2e8f0; margin:0;">
+                            </td>
+                          </tr>
+
+                          <!-- Footer -->
+                          <tr>
+                            <td style="padding:24px 40px 32px 40px; text-align:center;">
+                              <p style="margin:0 0 4px 0; font-size:12.5px; color:#94a3b8;">
+                                This is an automated message from Dajuvai. Please do not reply to this email.
+                              </p>
+
+                            </td>
+                          </tr>
+
+                        </table>
+                      </td>
+                    </tr>
+                  </table>
+                </body>
+  `;
+
+    const mailOptions = {
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: "Vendor Application Received",
+        html: mailHtml,
+    };
+
+    await transporter.sendMail(mailOptions);
 };

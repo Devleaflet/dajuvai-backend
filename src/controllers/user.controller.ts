@@ -50,10 +50,14 @@ import {
     CombinedAuthRequest,
     isVendor,
 } from "../middlewares/auth.middleware";
-import { sendVerificationEmail } from "../utils/nodemailer.utils";
+import {
+    sendVendorApplicationEmail,
+    sendVerificationEmail,
+} from "../utils/nodemailer.utils";
 import AppDataSource from "../config/db.config";
 import { VendorService } from "../service/vendor.service";
 import { sanitizeUser } from "../utils/sanitize.util";
+import { Vendor } from "../entities/vendor.entity";
 
 const googleClient = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 
@@ -1020,6 +1024,7 @@ export class UserController {
             }
 
             // Reference the correct entity (user or vendor) for further validation
+            // const entity: Vendor | User = isVendor ? vendor : user;
             const entity = isVendor ? vendor : user;
 
             // Check if verification token and its expiration exist for the entity
@@ -1051,6 +1056,12 @@ export class UserController {
 
             // Save the updated user or vendor entity to the database
             await (isVendor ? saveVendor(vendor) : saveUser(user));
+
+            if (isVendor) {
+                const vendorEmail = (entity as Vendor).email;
+                const businessName = (entity as Vendor).businessName;
+                await sendVendorApplicationEmail(vendorEmail, businessName);
+            }
 
             // Respond with 200 OK and success message
             res.status(200).json({
