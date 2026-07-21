@@ -53,12 +53,53 @@ export class VendorDashBoardService {
             .andWhere('order.status = :status', { status: OrderStatus.PENDING })
             .getCount();
 
+        // Low-stock and out-of-stock counts, split, across ALL of the vendor's
+        // products (not just the current page). Classification mirrors
+        // ProductList.tsx's `getVariantStatus` row badge exactly, so these
+        // counts always agree with what the product table itself shows:
+        // - no variants: the product's own status column decides.
+        // - has variants: ALL variants out-of-stock -> out-of-stock; ANY
+        //   variant low/out (but not all out) -> low-stock; else available.
+        const productsForStock = await this.productRepository.find({
+            where: { vendorId },
+            relations: ["variants"],
+        });
+
+        let lowStockCount = 0;
+        let outOfStockCount = 0;
+        for (const p of productsForStock) {
+            let effective: InventoryStatus;
+            if (p.hasVariants) {
+                const variants = p.variants || [];
+                if (variants.length === 0) {
+                    effective = InventoryStatus.OUT_OF_STOCK;
+                } else if (variants.every((v) => v.status === InventoryStatus.OUT_OF_STOCK)) {
+                    effective = InventoryStatus.OUT_OF_STOCK;
+                } else if (
+                    variants.some(
+                        (v) => v.status === InventoryStatus.LOW_STOCK || v.status === InventoryStatus.OUT_OF_STOCK,
+                    )
+                ) {
+                    effective = InventoryStatus.LOW_STOCK;
+                } else {
+                    effective = InventoryStatus.AVAILABLE;
+                }
+            } else {
+                effective = p.status ?? InventoryStatus.AVAILABLE;
+            }
+
+            if (effective === InventoryStatus.OUT_OF_STOCK) outOfStockCount++;
+            else if (effective === InventoryStatus.LOW_STOCK) lowStockCount++;
+        }
+
         // Return all stats in one object
         return {
             totalProducts,
             totalOrders,
             totalSales,
             totalPendingOrders,
+            lowStockCount,
+            outOfStockCount,
         };
     }
 
