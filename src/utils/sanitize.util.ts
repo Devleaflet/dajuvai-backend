@@ -68,6 +68,7 @@ export interface SanitizedVendorForAdmin {
     businessRegNumber: string;
     taxNumber: string;
     citizenshipDocuments: string[];
+    createdAt: Date;
 }
 
 export const sanitizeVendorForAdmin = (
@@ -95,6 +96,11 @@ export const sanitizeVendorForAdmin = (
     businessRegNumber: vendor.businessRegNumber,
     taxNumber: vendor.taxNumber,
     citizenshipDocuments: vendor.citizenshipDocuments,
+    // Missing here meant the admin panel's vendor-join-date range filter
+    // always received `undefined`, making every comparison an Invalid Date
+    // (always false) — the filter silently excluded every vendor instead of
+    // matching the ones actually in range.
+    createdAt: vendor.createdAt,
 });
 
 export interface SanitizedUser {

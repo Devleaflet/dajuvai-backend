@@ -961,10 +961,18 @@ export class ProductService {
             const term = search.trim();
             const searchPattern = `%${term}%`;
 
+            // Same field set the admin product search already covers
+            // (getAdminProducts below) — customers searching by SKU or
+            // category/subcategory name were getting zero results here even
+            // though the exact same search on the admin panel found the
+            // product, since this list was missing those two conditions.
             const conditions = [
                 "product.name ILIKE :searchPattern",
                 "product.brand ILIKE :searchPattern",
                 "product.keywords ILIKE :searchPattern",
+                "variants.sku ILIKE :searchPattern",
+                "subcategory.name ILIKE :searchPattern",
+                "category.name ILIKE :searchPattern",
             ];
 
             // only search description if the search term is at least 4 characters
@@ -982,12 +990,15 @@ export class ProductService {
             WHEN product.name ILIKE :searchPattern THEN 0
             WHEN product.keywords ILIKE :searchPattern THEN 1
             WHEN product.brand ILIKE :searchPattern THEN 2
+            WHEN variants.sku ILIKE :searchPattern THEN 3
+            WHEN subcategory.name ILIKE :searchPattern THEN 4
+            WHEN category.name ILIKE :searchPattern THEN 4
             ${
                 term.length >= 4
-                    ? "WHEN product.description ILIKE :searchPattern THEN 3"
+                    ? "WHEN product.description ILIKE :searchPattern THEN 5"
                     : ""
             }
-            ELSE 4
+            ELSE 6
           END
         `,
                 "ASC",
@@ -1184,11 +1195,62 @@ export class ProductService {
                 applyOrderBy("sort_created_at", "DESC");
                 break;
             case "price_low_high":
-                idQuery.addSelect("MIN(product.basePrice)", "sort_price");
+                // `MIN(product.basePrice)` alone always sorted variant
+                // products as NULL (basePrice is only set on non-variant
+                // products — variants carry their own basePrice/discount),
+                // so every variant product tied for last place regardless of
+                // its actual price. Mirror filterProducts' LEAST/GREATEST
+                // formula: fall back to each variant's own discounted price
+                // when the product itself has none.
+                idQuery.addSelect(
+                    `
+          LEAST(
+            "product"."basePrice" - CASE
+              WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+              ELSE "product"."discount"
+            END,
+            COALESCE(
+              MIN(
+                "variants"."basePrice" - CASE
+                  WHEN "variants"."discountType" = 'PERCENTAGE' THEN "variants"."basePrice" * "variants"."discount" / 100.0
+                  ELSE "variants"."discount"
+                END
+              ),
+              "product"."basePrice" - CASE
+                WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+                ELSE "product"."discount"
+              END
+            )
+          )
+          `,
+                    "sort_price",
+                );
                 applyOrderBy("sort_price", "ASC");
                 break;
             case "price_high_low":
-                idQuery.addSelect("MIN(product.basePrice)", "sort_price");
+                idQuery.addSelect(
+                    `
+          GREATEST(
+            "product"."basePrice" - CASE
+              WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+              ELSE "product"."discount"
+            END,
+            COALESCE(
+              MAX(
+                "variants"."basePrice" - CASE
+                  WHEN "variants"."discountType" = 'PERCENTAGE' THEN "variants"."basePrice" * "variants"."discount" / 100.0
+                  ELSE "variants"."discount"
+                END
+              ),
+              "product"."basePrice" - CASE
+                WHEN "product"."discountType" = 'PERCENTAGE' THEN "product"."basePrice" * "product"."discount" / 100.0
+                ELSE "product"."discount"
+              END
+            )
+          )
+          `,
+                    "sort_price",
+                );
                 applyOrderBy("sort_price", "DESC");
                 break;
             default:
