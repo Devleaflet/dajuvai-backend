@@ -42,7 +42,7 @@ import { PromoService } from "./promo.service";
 import { DiscountType, InventoryStatus } from "../entities/product.enum";
 import { Variant } from "../entities/variant.entity";
 import { findUserById } from "./user.service";
-import { calculatePriceSnapshot } from "../utils/pricing.utils";
+import { resolveFinalPrice } from "../utils/pricing.utils";
 import {
     sendCustomerOrderEmail,
     sendOrderStatusEmail,
@@ -144,25 +144,27 @@ export class OrderService {
     }
 
     private calculateLineItemPrice(item: any): number {
+        // Always prefer the persisted finalPrice: a product/variant with an
+        // active Deal has its own discount/discountType zeroed out at save
+        // time (the Deal price lives only in finalPrice), so recomputing from
+        // discount/discountType alone would silently drop the Deal and charge
+        // full price. resolveFinalPrice only recomputes as a fallback when
+        // finalPrice is missing/invalid.
         if (item?.variant) {
-            const variantPrice =
-                item.variant.finalPrice ?? item.variant.basePrice;
-            const numericVariantPrice = Number(variantPrice);
-            return Number.isFinite(numericVariantPrice)
-                ? numericVariantPrice
-                : 0;
+            return resolveFinalPrice({
+                finalPrice: item.variant.finalPrice,
+                basePrice: item.variant.basePrice,
+                discount: item.variant.discount,
+                discountType: item.variant.discountType,
+            });
         }
 
-        const basePrice = Number(item?.product?.basePrice ?? 0);
-        const discount = Number(item?.product?.discount ?? 0);
-        const discountType = item?.product?.discountType;
-
-        if (!Number.isFinite(basePrice)) return 0;
-        return calculatePriceSnapshot({
-            basePrice,
-            discount,
-            discountType,
-        }).finalPrice;
+        return resolveFinalPrice({
+            finalPrice: item?.product?.finalPrice,
+            basePrice: item?.product?.basePrice,
+            discount: item?.product?.discount,
+            discountType: item?.product?.discountType,
+        });
     }
 
     private determineInventoryStatus(stock: number): InventoryStatus {
@@ -1028,6 +1030,9 @@ export class OrderService {
                 order.shippingFee,
                 customerEmailItems,
                 user.address.district || null,
+                undefined,
+                order.discountTotal,
+                order.appliedPromoCode,
             );
         } catch (error) {
             console.error("Failed to send customer order email:", error);
@@ -1044,6 +1049,8 @@ export class OrderService {
                     customerEmailItems,
                     user.address.district || null,
                     `New Order Placed - #${order.id}`,
+                    order.discountTotal,
+                    order.appliedPromoCode,
                 );
             } catch (error) {
                 console.error("Failed to send admin order email:", error);
@@ -2262,7 +2269,6 @@ export class OrderService {
                 new Brackets((qb) => {
                     qb.where("CAST(order.id AS TEXT) ILIKE :search")
                         .orWhere("order.orderNumber ILIKE :search")
-                        .orWhere("order.transactionId ILIKE :search")
                         .orWhere("order.mTransactionId ILIKE :search")
                         .orWhere("CAST(order.status AS TEXT) ILIKE :search")
                         .orWhere(

@@ -246,6 +246,8 @@ export const sendCustomerOrderEmail = async (
     }[],
     userDistrict?: string | null,
     subject = "Your Order Has Been Placed",
+    discountTotal = 0,
+    appliedPromoCode?: string | null,
 ) => {
     // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
     // as strings — coerce here or `.toFixed()` throws and `+` silently
@@ -348,7 +350,8 @@ export const sendCustomerOrderEmail = async (
         },
     );
 
-    const orderTotal = totalPrice + shippingFee;
+    const discount = Number(discountTotal) || 0;
+    const orderTotal = totalPrice + shippingFee - discount;
 
     const mailOptions = {
         from: `<${config.USER_EMAIL}>`,
@@ -387,6 +390,14 @@ export const sendCustomerOrderEmail = async (
                           <td style="padding:8px 10px; text-align:right; color:#555;">Subtotal:</td>
                           <td style="padding:8px 10px; text-align:right; color:#555; width:120px;">Rs ${totalPrice.toFixed(2)}</td>
                         </tr>
+                        ${
+                            discount > 0
+                                ? `<tr>
+                          <td style="padding:8px 10px; text-align:right; color:#2e7d32;">Discount${appliedPromoCode ? ` (${appliedPromoCode})` : ""}:</td>
+                          <td style="padding:8px 10px; text-align:right; color:#2e7d32;">-Rs ${discount.toFixed(2)}</td>
+                        </tr>`
+                                : ""
+                        }
                         <tr>
                           <td style="padding:8px 10px; text-align:right; color:#555;">Shipping Fee:</td>
                           <td style="padding:8px 10px; text-align:right; color:#555;">Rs ${shippingFee.toFixed(2)}</td>
