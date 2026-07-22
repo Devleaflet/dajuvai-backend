@@ -107,7 +107,7 @@ export const generateContactEmailHTML = (dto: ContactInput) => {
 
       <!-- Footer -->
       <div style="text-align: center; background-color: #f9fafb; padding: 15px; font-size: 12px; color: #888; border-top: 1px solid #eee;">
-        © ${new Date().getFullYear()} <strong>Leaflet Digital</strong>. All rights reserved.
+        © ${new Date().getFullYear()} <strong>Dajuvai</strong>. All rights reserved.
       </div>
     </div>
   `;
