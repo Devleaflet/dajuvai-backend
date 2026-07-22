@@ -15,7 +15,7 @@ import {
 import { CartService } from "./cart.service";
 import { Variant } from "../entities/variant.entity";
 import { NotificationService } from "./notification.service";
-import { calculatePriceSnapshot } from "../utils/pricing.utils";
+import { resolveFinalPrice } from "../utils/pricing.utils";
 
 /**
  * Service for managing wishlist-related operations such as
@@ -381,11 +381,12 @@ export class WishlistService {
                                 `Cannot add ${nextQuantity} items; only ${variant.stock} available for this variant`,
                             );
                         }
-                        price = calculatePriceSnapshot({
+                        price = resolveFinalPrice({
+                            finalPrice: variant.finalPrice,
                             basePrice: variant.basePrice,
                             discount: variant.discount,
                             discountType: variant.discountType,
-                        }).finalPrice;
+                        });
                         if (variant.attributes?.name)
                             name = `${product.name} - ${variant.attributes.name}`;
                         if (variant.variantImages?.length)
@@ -435,11 +436,12 @@ export class WishlistService {
                                 `Cannot add ${nextQuantity} items; only ${product.stock} available`,
                             );
                         }
-                        price = calculatePriceSnapshot({
+                        price = resolveFinalPrice({
+                            finalPrice: product.finalPrice,
                             basePrice: product.basePrice,
                             discount: product.discount,
                             discountType: product.discountType,
-                        }).finalPrice;
+                        });
 
                         if (existingCartItem) {
                             existingCartItem.quantity = nextQuantity;

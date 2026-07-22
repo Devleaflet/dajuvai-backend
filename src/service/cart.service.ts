@@ -7,7 +7,7 @@ import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
 import { Variant } from '../entities/variant.entity';
 import { NotificationService } from './notification.service';
-import { calculatePriceSnapshot } from '../utils/pricing.utils';
+import { resolveFinalPrice } from '../utils/pricing.utils';
 import { emitCartUpdate } from '../socket/socket';
 
 /**
@@ -67,11 +67,17 @@ export class CartService {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${variant.stock} available for this variant`);
             }
 
-            price = calculatePriceSnapshot({
+            // Trust the variant's persisted finalPrice (deal-inclusive) over
+            // recomputing from discount/discountType — a variant with an
+            // active Deal has its own discount fields zeroed out at save
+            // time, so recomputing here would silently ignore the Deal and
+            // show a too-high price (diverging from checkout's real total).
+            price = resolveFinalPrice({
+                finalPrice: variant.finalPrice,
                 basePrice: variant.basePrice,
                 discount: variant.discount,
                 discountType: variant.discountType,
-            }).finalPrice;
+            });
             if (variant.attributes?.name) name = `${product.name} - ${variant.attributes.name}`;
             if (variant.variantImages?.length) image = variant.variantImages[0];
         } else {
@@ -87,11 +93,12 @@ export class CartService {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${product.stock} available`);
             }
 
-            price = calculatePriceSnapshot({
+            price = resolveFinalPrice({
+                finalPrice: product.finalPrice,
                 basePrice: product.basePrice,
                 discount: product.discount,
                 discountType: product.discountType,
-            }).finalPrice;
+            });
         }
 
         // Get or create cart
@@ -228,43 +235,91 @@ export class CartService {
             return await this.cartRepository.save(newCart);
         }
 
+        // A cart item's price is a snapshot taken at add-to-cart time — if the
+        // product/variant's discount or an admin Deal changes afterward (or
+        // the original add-time computation was wrong, e.g. a Deal being
+        // dropped by an outdated calculation), the cart would keep showing a
+        // stale price forever. Since stock is already re-checked live here
+        // per item, re-resolve the current authoritative price at the same
+        // time and self-heal the stored snapshot so the cart never drifts
+        // from what checkout will actually charge.
+        const itemsToPersist: CartItem[] = [];
+
         const cartItemsWithWarnings = await Promise.all(
             cart.items.map(async (item) => {
                 let warningMessage: string | undefined;
+                let currentPrice = Number(item.price);
 
                 if (item.variantId) {
                     // Check variant stock
                     const variant = await this.variantRepository.findOne({ where: { id: item.variantId } });
                     if (!variant) {
                         warningMessage = 'Associated variant no longer exists';
-                    } else if (variant.status !== 'AVAILABLE') {
-                        warningMessage = 'Variant is not available';
-                    } else if (item.quantity > variant.stock) {
-                        warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
+                    } else {
+                        if (variant.status !== 'AVAILABLE') {
+                            warningMessage = 'Variant is not available';
+                        } else if (item.quantity > variant.stock) {
+                            warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
+                        }
+                        currentPrice = resolveFinalPrice({
+                            finalPrice: variant.finalPrice,
+                            basePrice: variant.basePrice,
+                            discount: variant.discount,
+                            discountType: variant.discountType,
+                        });
                     }
                 } else {
                     // Check product stock
                     const product = await this.productRepository.findOne({ where: { id: item.product.id } });
                     if (!product) {
                         warningMessage = 'Associated product no longer exists';
-                    } else if (product.hasVariants) {
-                        warningMessage = 'Product requires a variant but none is selected';
-                    } else if (product.status !== 'AVAILABLE') {
-                        warningMessage = 'Product is not available';
-                    } else if (item.quantity > (product.stock ?? 0)) {
-                        warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
+                    } else {
+                        if (product.hasVariants) {
+                            warningMessage = 'Product requires a variant but none is selected';
+                        } else if (product.status !== 'AVAILABLE') {
+                            warningMessage = 'Product is not available';
+                        } else if (item.quantity > (product.stock ?? 0)) {
+                            warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
+                        }
+                        currentPrice = resolveFinalPrice({
+                            finalPrice: product.finalPrice,
+                            basePrice: product.basePrice,
+                            discount: product.discount,
+                            discountType: product.discountType,
+                        });
                     }
+                }
+
+                if (currentPrice !== Number(item.price)) {
+                    item.price = currentPrice;
+                    itemsToPersist.push(item);
                 }
 
                 return {
                     ...item,
+                    price: currentPrice,
                     warningMessage,
                 };
             })
         );
 
+        const total = cartItemsWithWarnings.reduce(
+            (sum, item) => sum + item.price * item.quantity,
+            0,
+        );
+
+        if (itemsToPersist.length || total !== Number(cart.total)) {
+            await Promise.all([
+                itemsToPersist.length
+                    ? this.cartItemRepository.save(itemsToPersist)
+                    : Promise.resolve(),
+                this.cartRepository.update(cart.id, { total }),
+            ]);
+        }
+
         return {
             ...cart,
+            total,
             items: cartItemsWithWarnings,
         };
     }

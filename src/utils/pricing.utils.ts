@@ -98,6 +98,26 @@ export const calculatePriceSnapshot = (
     };
 };
 
+export interface ResolveFinalPriceInput {
+    finalPrice?: number | string | null;
+    basePrice: number | string | null | undefined;
+    discount?: number | string | null;
+    discountType?: DiscountType | string | null;
+}
+
+export const resolveFinalPrice = (input: ResolveFinalPriceInput): number => {
+    const persisted = Number(input.finalPrice);
+    if (Number.isFinite(persisted) && persisted >= 0) {
+        return persisted;
+    }
+
+    return calculatePriceSnapshot({
+        basePrice: input.basePrice,
+        discount: input.discount,
+        discountType: input.discountType,
+    }).finalPrice;
+};
+
 export const calculateLineTotal = (
     unitFinalPrice: number | string,
     quantity: number,
