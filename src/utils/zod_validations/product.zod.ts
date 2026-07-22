@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { DiscountType } from "../../entities/product.enum";
+import { DiscountType, ProductSortOption } from "../../entities/product.enum";
 
 export enum InventoryStatus {
     AVAILABLE = "AVAILABLE",
@@ -61,16 +61,16 @@ const ProductBaseSchema = z.object({
             return [...keywords].join(",");
         })
         .optional(),
-    basePrice: z
-        .preprocess(
-            (value) => (value === "" || value === undefined ? undefined : Number(value)),
-            z.number().positive("Base price must be greater than zero").optional(),
-        ),
-    discount: z
-        .preprocess(
-            (value) => (value === "" || value === undefined ? undefined : Number(value)),
-            z.number().min(0, "Discount must be non-negative").optional(),
-        ),
+    basePrice: z.preprocess(
+        (value) =>
+            value === "" || value === undefined ? undefined : Number(value),
+        z.number().positive("Base price must be greater than zero").optional(),
+    ),
+    discount: z.preprocess(
+        (value) =>
+            value === "" || value === undefined ? undefined : Number(value),
+        z.number().min(0, "Discount must be non-negative").optional(),
+    ),
     discountType: z
         .enum([DiscountType.NONE, DiscountType.PERCENTAGE, DiscountType.FLAT])
         .optional(),
@@ -81,48 +81,59 @@ const ProductBaseSchema = z.object({
             InventoryStatus.LOW_STOCK,
         ])
         .optional(),
-    stock: z
-        .preprocess(
-            (value) => (value === "" || value === undefined ? undefined : Number(value)),
-            z.number().int().min(0, "Stock must be non-negative").optional(),
-        ),
-    hasVariants: z
-        .preprocess(
-            (value) =>
-                value === "true" ? true : value === "false" ? false : value,
-            z.boolean().optional(),
-        ),
+    stock: z.preprocess(
+        (value) =>
+            value === "" || value === undefined ? undefined : Number(value),
+        z.number().int().min(0, "Stock must be non-negative").optional(),
+    ),
+    hasVariants: z.preprocess(
+        (value) =>
+            value === "true" ? true : value === "false" ? false : value,
+        z.boolean().optional(),
+    ),
     variants: z
         .array(
             z.object({
                 sku: z.string().min(1, "SKU is required"),
                 id: z.number().int().positive().optional(),
-                basePrice: z
-                    .preprocess(
-                        (value) =>
-                            value === "" || value === undefined
-                                ? undefined
-                                : Number(value),
-                        z.number().positive("Variant base price must be greater than zero").optional(),
-                    ),
-                price: z
-                    .preprocess(
-                        (value) =>
-                            value === "" || value === undefined
-                                ? undefined
-                                : Number(value),
-                        z.number().positive("Variant price must be greater than zero").optional(),
-                    ),
-                discount: z
-                    .preprocess(
-                        (value) =>
-                            value === "" || value === undefined
-                                ? undefined
-                                : Number(value),
-                        z.number().min(0, "Variant discount must be non-negative").optional(),
-                    ),
+                basePrice: z.preprocess(
+                    (value) =>
+                        value === "" || value === undefined
+                            ? undefined
+                            : Number(value),
+                    z
+                        .number()
+                        .positive(
+                            "Variant base price must be greater than zero",
+                        )
+                        .optional(),
+                ),
+                price: z.preprocess(
+                    (value) =>
+                        value === "" || value === undefined
+                            ? undefined
+                            : Number(value),
+                    z
+                        .number()
+                        .positive("Variant price must be greater than zero")
+                        .optional(),
+                ),
+                discount: z.preprocess(
+                    (value) =>
+                        value === "" || value === undefined
+                            ? undefined
+                            : Number(value),
+                    z
+                        .number()
+                        .min(0, "Variant discount must be non-negative")
+                        .optional(),
+                ),
                 discountType: z
-                    .enum([DiscountType.NONE, DiscountType.PERCENTAGE, DiscountType.FLAT])
+                    .enum([
+                        DiscountType.NONE,
+                        DiscountType.PERCENTAGE,
+                        DiscountType.FLAT,
+                    ])
                     .optional(),
                 stock: z.preprocess(
                     (value) => Number(value),
@@ -135,14 +146,25 @@ const ProductBaseSchema = z.object({
                         InventoryStatus.LOW_STOCK,
                     ])
                     .optional(),
-                attributes: z.union([z.record(z.string()), z.array(z.any())]).optional(),
+                attributes: z
+                    .union([z.record(z.string()), z.array(z.any())])
+                    .optional(),
                 variantImages: z.array(z.string().min(1)).optional(),
-                images: z.array(z.union([z.string().min(1), z.object({ url: z.string().min(1) })])).optional(),
+                images: z
+                    .array(
+                        z.union([
+                            z.string().min(1),
+                            z.object({ url: z.string().min(1) }),
+                        ]),
+                    )
+                    .optional(),
             }),
         )
         .optional(),
     productImages: z
-        .array(z.union([z.string().min(1), z.object({ url: z.string().min(1) })]))
+        .array(
+            z.union([z.string().min(1), z.object({ url: z.string().min(1) })]),
+        )
         .optional(),
     subcategoryId: z
         .number()
@@ -227,6 +249,36 @@ export const ProductParamsSchema = z.object({
     id: z.number().int().positive("Product ID must be positive"),
 });
 
+export const VendorProductsQuerySchema = z.object({
+    page: z
+        .string()
+        .regex(/^\d+$/, "page must be a positive integer")
+        .transform(Number)
+        .refine((n) => n >= 1, "page must be at least 1")
+        .default("1"),
+
+    limit: z
+        .string()
+        .refine(
+            (v) => ["10", "25", "50", "100"].includes(v),
+            "limit must be one of 25, 50, or 100",
+        )
+        .transform(Number)
+        .default("25"),
+
+    search: z
+        .string()
+        .trim()
+        .min(1, "search cannot be empty")
+        .max(100, "search is too long")
+        .optional(),
+
+    sortBy: z.nativeEnum(ProductSortOption).optional(),
+
+    status: z.nativeEnum(InventoryStatus).optional(),
+});
+
 export type ProductCreateType = z.infer<typeof ProductCreateSchema>;
 export type ProductUpdateType = z.infer<typeof ProductUpdateSchema>;
 export type ProductParamsType = z.infer<typeof ProductParamsSchema>;
+export type VendorProductsQueryType = z.infer<typeof VendorProductsQuerySchema>;

@@ -27,11 +27,17 @@ import { SubcategoryService } from "./subcategory.service";
 import { MulterFile } from "../config/multer.config";
 import { Variant } from "../entities/variant.entity";
 import config from "../config/env.config";
-import { DiscountType } from "../entities/product.enum";
+import { DiscountType, ProductSortOption } from "../entities/product.enum"; // adjust path as needed
 import { OrderStatus } from "../entities/order.entity";
 import { sanitizeVendor } from "../utils/sanitize.util";
 import { calculatePriceSnapshot } from "../utils/pricing.utils";
 import { OrderItem } from "../entities/orderItems.entity";
+
+interface GetProductsOptions {
+    search?: string;
+    sortBy?: ProductSortOption;
+    status?: InventoryStatus;
+}
 
 /**
  * Service class for handling product-related operations.
@@ -360,17 +366,12 @@ export class ProductService {
             (total, variant) => total + Number(variant.stock || 0),
             0,
         );
-        const hasLowVariant = variants.some((variant) => {
-            const stock = Number(variant.stock || 0);
-            return stock > 0 && stock < 5;
-        });
-
         return {
             stock: totalStock,
             status:
                 totalStock <= 0
                     ? InventoryStatus.OUT_OF_STOCK
-                    : totalStock < 5 || hasLowVariant
+                    : totalStock < 5
                       ? InventoryStatus.LOW_STOCK
                       : InventoryStatus.AVAILABLE,
         };
@@ -1024,7 +1025,7 @@ export class ProductService {
       )
       `,
                 "price",
-            ).orderBy("price", "ASC");
+            ).addOrderBy("price", "ASC");
         } else if (sort === "high-to-low") {
             qb.addSelect(
                 `
@@ -1048,9 +1049,9 @@ export class ProductService {
                 )
                 `,
                 "price",
-            ).orderBy("price", "DESC");
+            ).addOrderBy("price", "DESC");
         } else {
-            qb.orderBy("product.createdAt", "DESC");
+            qb.addOrderBy("product.createdAt", "DESC");
         }
 
         qb.skip(skip).take(limit);
@@ -1394,34 +1395,147 @@ export class ProductService {
         });
     }
 
-    async getProductsByVendorId(vendorId: number, page: number, limit: number) {
-        // Verify vendor existence via vendor service
+    async getProductsByVendorId(
+        vendorId: number,
+        page: number,
+        limit: number,
+        options: GetProductsOptions = {},
+    ) {
         const vendor = await this.vendorService.findVendorById(vendorId);
         if (!vendor) {
             throw new APIError(404, "Vendor not found");
         }
 
-        // Calculate number of records to skip based on pagination parameters
+        const { search, sortBy, status } = options;
         const skip = (page - 1) * limit;
 
-        // Find products with vendor relation filtered by vendorId, paginated with total count
-        const [products, total] = await this.productRepository.findAndCount({
-            where: { vendor: { id: vendorId } },
+        const idQb = this.productRepository
+            .createQueryBuilder("product")
+            .select("product.id", "id")
+            .where("product.vendorId = :vendorId", { vendorId });
+
+        if (search) {
+            idQb.andWhere("product.name ILIKE :search", {
+                search: `%${search}%`,
+            });
+        }
+
+        if (status) {
+            if (status === InventoryStatus.AVAILABLE) {
+                idQb.andWhere(
+                    `(
+                    (product."hasVariants" = false AND product.status = :status)
+                    OR
+                    (product."hasVariants" = true AND 
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) >= 5
+                    )
+                )`,
+                    { status },
+                );
+            } else if (status === InventoryStatus.LOW_STOCK) {
+                idQb.andWhere(
+                    `(
+                    (product."hasVariants" = false AND product.status = :status)
+                    OR
+                    (product."hasVariants" = true AND 
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) > 0 AND
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) < 5
+                    )
+                )`,
+                    { status },
+                );
+            } else if (status === InventoryStatus.OUT_OF_STOCK) {
+                idQb.andWhere(
+                    `(
+                    (product."hasVariants" = false AND product.status = :status)
+                    OR
+                    (product."hasVariants" = true AND 
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) <= 0
+                    )
+                )`,
+                    { status },
+                );
+            }
+        }
+
+        const total = await idQb.getCount();
+
+        idQb.addSelect(
+            `CASE WHEN product."hasVariants" = true
+            THEN (
+                SELECT MIN(COALESCE(v."finalPrice", v."basePrice"))
+                FROM variants v
+                WHERE v.product_id = product.id
+            )
+            ELSE COALESCE(product."finalPrice", product."basePrice")
+        END`,
+            "effectiveprice",
+        );
+
+        idQb.addSelect(
+            `CASE WHEN product."hasVariants" = true
+            THEN (
+                SELECT COALESCE(SUM(v.stock), 0)
+                FROM variants v
+                WHERE v.product_id = product.id
+            )
+            ELSE COALESCE(product.stock, 0)
+        END`,
+            "effectivestock",
+        );
+
+        switch (sortBy) {
+            case ProductSortOption.PRICE_HIGH_LOW:
+                idQb.orderBy("effectiveprice", "DESC", "NULLS LAST");
+                break;
+            case ProductSortOption.PRICE_LOW_HIGH:
+                idQb.orderBy("effectiveprice", "ASC", "NULLS LAST");
+                break;
+            case ProductSortOption.STOCK_HIGH_LOW:
+                idQb.orderBy("effectivestock", "DESC");
+                break;
+            case ProductSortOption.STOCK_LOW_HIGH:
+                idQb.orderBy("effectivestock", "ASC");
+                break;
+            case ProductSortOption.NAME_A_Z:
+                idQb.orderBy("product.name", "ASC");
+                break;
+            case ProductSortOption.NAME_Z_A:
+                idQb.orderBy("product.name", "DESC");
+                break;
+            case ProductSortOption.OLDEST:
+                idQb.orderBy("product.createdAt", "ASC");
+                break;
+            case ProductSortOption.NEWEST:
+            default:
+                idQb.orderBy("product.createdAt", "DESC");
+        }
+
+        idQb.offset(skip).limit(limit);
+
+        const rows = await idQb.getRawMany();
+        const orderedIds: number[] = rows.map((r) => r.id);
+
+        if (orderedIds.length === 0) {
+            return { products: [], total };
+        }
+
+        const products = await this.productRepository.find({
+            where: { id: In(orderedIds) },
             relations: ["subcategory", "vendor", "variants", "deal"],
-            skip,
-            take: limit,
         });
 
-        const sanitzedProducts = products.map((p) => {
-            return {
-                ...p,
-                vendor: sanitizeVendor(p.vendor),
-            };
-        });
+        const productMap = new Map(products.map((p) => [p.id, p]));
+        const orderedProducts = orderedIds
+            .map((id) => productMap.get(id))
+            .filter((p): p is Product => Boolean(p));
 
-        console.log(sanitzedProducts);
+        const sanitizedProducts = orderedProducts.map((p) => ({
+            ...p,
+            vendor: sanitizeVendor(p.vendor),
+        }));
 
-        return { products: sanitzedProducts, total };
+        return { products: sanitizedProducts, total };
     }
 
     async deleteProductById(id: number) {

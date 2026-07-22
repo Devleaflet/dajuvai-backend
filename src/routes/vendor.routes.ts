@@ -23,6 +23,7 @@ import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { verificationTokenSchema } from "../utils/zod_validations/user.zod";
 import { authRateLimiter } from "./user.routes";
+import { VendorProductsQuerySchema } from "../utils/zod_validations/product.zod";
 
 const router = Router();
 const vendorController = new VendorController();
@@ -381,6 +382,7 @@ router.get(
  */
 router.get(
     "/:vendorId/products",
+    validateZod(VendorProductsQuerySchema, "query"),
     productController.getProductsByVendorId.bind(productController),
 );
 
