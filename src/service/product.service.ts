@@ -985,25 +985,25 @@ export class ProductService {
                 searchPattern,
             });
 
-            qb.addOrderBy(
+            qb.addSelect(
                 `
           CASE
-            WHEN product.name ILIKE :searchPattern THEN 0
-            WHEN product.keywords ILIKE :searchPattern THEN 1
-            WHEN product.brand ILIKE :searchPattern THEN 2
-            WHEN variants.sku ILIKE :searchPattern THEN 3
-            WHEN subcategory.name ILIKE :searchPattern THEN 4
-            WHEN category.name ILIKE :searchPattern THEN 4
+            WHEN "product"."name" ILIKE :searchPattern THEN 0
+            WHEN "product"."keywords" ILIKE :searchPattern THEN 1
+            WHEN "product"."brand" ILIKE :searchPattern THEN 2
+            WHEN "variants"."sku" ILIKE :searchPattern THEN 3
+            WHEN "subcategory"."name" ILIKE :searchPattern THEN 4
+            WHEN "category"."name" ILIKE :searchPattern THEN 4
             ${
                 term.length >= 4
-                    ? "WHEN product.description ILIKE :searchPattern THEN 5"
+                    ? 'WHEN "product"."description" ILIKE :searchPattern THEN 5'
                     : ""
             }
             ELSE 6
           END
         `,
-                "ASC",
-            );
+                "search_relevance",
+            ).addOrderBy("search_relevance", "ASC");
         }
 
         qb.groupBy("product.id")
