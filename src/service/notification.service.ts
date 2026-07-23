@@ -81,21 +81,17 @@ export class NotificationService {
         console.log("____________Order---------------")
         console.log(order)
         const notifications: Notification[] = [];
-
-        const orders = this.orderRepo.findOne({
-            where: { id: order.id },
-            relations: ["orderedBy"]
-        })
-        const fullName = (await orders).orderedBy.fullName
+        const fullName = order.orderedBy?.fullName || "Customer";
+        const orderDisplayNumber = order.orderNumber || order.id;
 
         // Notify Admin
         const adminNotification = this.notificationRepo.create({
             title: "New Order Placed",
-            message: `Order #${order.id} has been placed by ${fullName}`,
+            message: `Order #${orderDisplayNumber} has been placed by ${fullName}`,
             type: NotificationType.ORDER_PLACED,
             target: NotificationTarget.ADMIN,
             orderId: order.id,
-            createdById: (await orders).orderedBy.id,
+            createdById: order.orderedBy?.id,
         });
         notifications.push(adminNotification);
 
@@ -110,12 +106,12 @@ export class NotificationService {
             notifications.push(
                 this.notificationRepo.create({
                     title: "New Order Received",
-                    message: `You have received a new order #${order.id}`,
+                    message: `You have received a new order #${orderDisplayNumber}`,
                     type: NotificationType.ORDER_PLACED,
                     target: NotificationTarget.VENDOR,
                     vendorId: vendor.id,
                     orderId: order.id,
-                    createdById: (await orders).orderedBy.id,
+                    createdById: order?.orderedBy?.id,
                 })
             );
         }
@@ -140,7 +136,17 @@ export class NotificationService {
     async notifyOrderStatusUpdated(order: any): Promise<void> {
         const notifications: Notification[] = [];
 
-        const statusMessage = `Order #${order.id} status updated to ${order.status}`;
+        let orderNumber = order?.orderNumber;
+        if (!orderNumber && order?.id) {
+            const dbOrder = await this.orderRepo.findOne({
+                where: { id: order.id },
+                select: { id: true, orderNumber: true },
+            });
+            orderNumber = dbOrder?.orderNumber;
+        }
+
+        const orderDisplayNumber = orderNumber || order.id;
+        const statusMessage = `Order #${orderDisplayNumber} status updated to ${order.status}`;
 
         // Admin notification
         notifications.push(
@@ -154,7 +160,7 @@ export class NotificationService {
         );
 
         // Vendor notifications
-        const vendorIds = [...new Set(order.orderItems.map((item: any) => item.vendorId ?? item.vendor?.id).filter(Boolean))] as number[];
+        const vendorIds = [...new Set(order.orderItems?.map((item: any) => item.vendorId ?? item.vendor?.id).filter(Boolean) || [])] as number[];
 
         for (const vendorId of vendorIds) {
             notifications.push(
@@ -223,10 +229,14 @@ export class NotificationService {
         const user = await this.userRepo.findOne({ where: { id: userId }, select: { id: true } });
         if (!user) return;
 
+        const order = await this.orderRepo.findOne({ where: { id: orderId }, select: { id: true, orderNumber: true } });
+        const orderDisplayNumber = order?.orderNumber || orderId;
+        const inAppMessage = feedMessage.replace(`#${orderId}`, `#${orderDisplayNumber}`);
+
         await this.notificationRepo.save(
             this.notificationRepo.create({
                 title,
-                message: feedMessage,
+                message: inAppMessage,
                 type: NotificationType.ORDER_STATUS_UPDATED,
                 target: NotificationTarget.USER,
                 orderId,

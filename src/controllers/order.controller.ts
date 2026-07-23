@@ -157,7 +157,7 @@ export class OrderController {
                             order.shippingFee,
                             customerEmailItems,
                             userDistrict,
-                            `New Order Placed - #${order.id}`,
+                            `New Order Placed - #${order.orderNumber}`,
                         );
                     } catch (error) {
                         console.log("Failed to send admin order email:", error);
@@ -552,8 +552,19 @@ export class OrderController {
     ): Promise<void> {
         if (!req.vendor) throw new AuthError("Vendor not authenticated");
 
-        const orders = await this.orderService.getVendorOrders(req.vendor.id);
-        res.status(200).json({ success: true, data: orders });
+        const q = req.query as Record<string, string>;
+        const result = await this.orderService.getVendorOrders(req.vendor.id, {
+            page: q.page ? Number(q.page) : undefined,
+            limit: q.limit ? Number(q.limit) : undefined,
+            status: q.status,
+            sort: q.sort as any,
+        });
+        res.status(200).json({
+            success: true,
+            data: result.items,
+            pagination: result.pagination,
+            statusCounts: result.statusCounts,
+        });
     }
 
     /**

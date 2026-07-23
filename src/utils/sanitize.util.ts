@@ -16,6 +16,7 @@ export interface SanitizedVendor {
     businessName: string;
     email: string;
     phoneNumber: string;
+    telePhone: string | null;
     profilePicture: string | null;
     districtId: number;
     district: { id: number; name: string } | null;
@@ -33,6 +34,7 @@ export const sanitizeVendor = (vendor: Vendor): SanitizedVendor => ({
     businessName: vendor.businessName,
     email: vendor.email,
     phoneNumber: vendor.phoneNumber,
+    telePhone: vendor.telePhone ?? null,
     profilePicture: vendor.profilePicture ?? null,
     districtId: vendor.districtId,
     district: vendor.district
@@ -52,6 +54,7 @@ export interface SanitizedVendorForAdmin {
     businessName: string;
     email: string;
     phoneNumber: string;
+    telePhone: string | null;
     profilePicture: string | null;
     districtId: number;
     district: { id: number; name: string } | null;
@@ -78,6 +81,7 @@ export const sanitizeVendorForAdmin = (
     businessName: vendor.businessName,
     email: vendor.email,
     phoneNumber: vendor.phoneNumber,
+    telePhone: vendor.telePhone ?? null,
     profilePicture: vendor.profilePicture ?? null,
     districtId: vendor.districtId,
     district: vendor.district

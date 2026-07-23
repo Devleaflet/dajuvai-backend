@@ -105,6 +105,27 @@ export interface IAdminOrderQueryParams {
     sort?: AdminOrderSort;
 }
 
+export type VendorOrderSort =
+    | "newest"
+    | "oldest"
+    | "highestPrice"
+    | "lowestPrice";
+
+export interface IVendorOrderQueryParams {
+    page?: number;
+    limit?: number;
+    /** Maps to order.status (e.g. PENDING, DELIVERED, CANCELLED) */
+    status?: string;
+    sort?: VendorOrderSort;
+}
+
+export interface IVendorStatusCounts {
+    all: number;
+    pending: number;
+    delivered: number;
+    canceled: number;
+}
+
 export interface IPaginatedResult<T> {
     items: T[];
     pagination: {

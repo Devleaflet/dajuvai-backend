@@ -666,7 +666,7 @@ export const sendOrderStatusEmail = async (
 ) => {
     const statusMeta = getOrderStatusEmailMeta(status);
     const orderLabel = `#${orderNumber}`;
-    const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/profile`;
+    const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/user-profile`;
 
     await transporter.sendMail({
         from: `<${config.USER_EMAIL}>`,
