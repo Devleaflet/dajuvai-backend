@@ -421,12 +421,6 @@ export class HomePageSectionService {
 
         const sections = await query.getMany();
 
-        const inStockCondition = `(
-            (product.hasVariants = false AND product.stock > 0)
-            OR
-            (product.hasVariants = true AND variants.stock > 0)
-        )`;
-
         // --- batch fetch products for DEAL sections ---
         const dealSections = sections.filter(
             (s) => s.productSource === ProductSource.DEAL && s.selectedDeal?.id,
@@ -438,7 +432,6 @@ export class HomePageSectionService {
                 .createQueryBuilder("product")
                 .leftJoinAndSelect("product.variants", "variants")
                 .where("product.dealId IN (:...dealIds)", { dealIds })
-                .andWhere(inStockCondition)
                 .getMany();
             for (const p of dealProducts) {
                 const arr = dealProductsMap.get(p.dealId) ?? [];
@@ -464,7 +457,6 @@ export class HomePageSectionService {
                 .where("product.subcategoryId IN (:...subcategoryIds)", {
                     subcategoryIds,
                 })
-                .andWhere(inStockCondition)
                 .getMany();
             for (const p of subcategoryProducts) {
                 const arr = subcategoryProductsMap.get(p.subcategoryId) ?? [];
@@ -492,7 +484,6 @@ export class HomePageSectionService {
                     .leftJoin("subcategory.category", "category")
                     .addSelect("category.id")
                     .where("category.id IN (:...categoryIds)", { categoryIds })
-                    .andWhere(inStockCondition)
                     .getRawAndEntities();
             for (let i = 0; i < categoryProducts.length; i++) {
                 const categoryId = Number(raw[i].category_id);
@@ -530,13 +521,7 @@ export class HomePageSectionService {
 
                 case ProductSource.MANUAL:
                 default:
-                    products = (section.products || [])
-                        .filter((p) =>
-                            p.hasVariants
-                                ? p.variants?.some((v) => v.stock > 0)
-                                : p.stock > 0,
-                        )
-                        .slice(0, 25);
+                    products = (section.products || []).slice(0, 25);
                     break;
             }
 

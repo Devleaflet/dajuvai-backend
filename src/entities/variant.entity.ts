@@ -16,7 +16,7 @@ export class Variant {
     @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
     finalPrice: number; 
 
-    @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+    @Column({ type: 'decimal', precision: 8, scale: 2, default: 0 })
     discount: number;
 
     @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE })
