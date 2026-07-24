@@ -47,6 +47,7 @@ function normalizeError(err: unknown): APIError {
             code?: string;
             detail?: string;
             column?: string;
+            table?: string;
         };
 
         // 23505 = unique_violation
@@ -60,13 +61,24 @@ function normalizeError(err: unknown): APIError {
 
         // 23503 = foreign_key_violation
         if (pgErr.code === "23503") {
-            return new ForeignKeyConstraintError("Referenced record does not exist");
+            const fkErr = new ForeignKeyConstraintError(
+                "Referenced record does not exist",
+            );
+            // The client only ever gets the generic message above, but the
+            // server log needs the real detail (which column/table/value)
+            // or every occurrence turns into line-number archaeology.
+            fkErr.stack = `${pgErr.detail ?? "no detail"}\n${err.stack}`;
+            return fkErr;
         }
 
         // 23502 = not_null_violation
         if (pgErr.code === "23502") {
             const col = pgErr.column ?? "field";
-            return new ValidationError(`Field '${col}' cannot be null`);
+            const validationErr = new ValidationError(
+                `Field '${col}' cannot be null`,
+            );
+            validationErr.stack = `table=${pgErr.table ?? "?"} column=${col}\n${err.stack}`;
+            return validationErr;
         }
 
         // All other DB errors are programmer errors — never expose internals

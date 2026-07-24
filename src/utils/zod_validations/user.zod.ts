@@ -144,7 +144,11 @@ export const verifyEmailChangeSchema = z.object({
 });
 
 export const adminResetPasswordSchema = z.object({
-    newPass: z.string().min(8, 'New password must be at least 8 characters long'),
+    newPass: z.string()
+        .min(8, 'New password must be at least 8 characters long')
+        .regex(/[0-9]/, 'Password must contain at least one number')
+        .regex(/[A-Z]/, 'Password must contain at least one capital letter')
+        .regex(/[^a-zA-Z0-9]/, 'Password must contain at least one symbol'),
     confirmPass: z.string().min(1, 'Confirm password is required'),
 }).refine(data => data.newPass === data.confirmPass, {
     message: 'Passwords do not match',

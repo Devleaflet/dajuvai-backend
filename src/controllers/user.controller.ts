@@ -478,7 +478,7 @@ export class UserController {
                 await saveUser(existingUser);
                 await sendVerificationEmail(
                     email,
-                    "Email Verification",
+                    "Email Verification Code",
                     verificationToken,
                 );
 
@@ -504,7 +504,7 @@ export class UserController {
             //  Send email with raw verification code
             await sendVerificationEmail(
                 email,
-                "Email Verification",
+                "Email Verification Code",
                 verificationToken,
             );
 
@@ -951,7 +951,7 @@ export class UserController {
             // Send verification email containing the raw token to the user's or vendor's email address
             await sendVerificationEmail(
                 entity.email,
-                "Email Verification",
+                "Email Verification Code",
                 verificationToken,
             );
 
