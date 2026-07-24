@@ -48,7 +48,7 @@ const getOrderStatusEmailMeta = (status: string) => {
             label: "Delayed",
             color: "#be123c",
             bg: "#ffe4e6",
-            copy: "Your order is taking longer than expected. We will keep you updated.",
+            copy: "Order is taking longer than expected. We will keep you updated.",
         },
         SHIPPED: {
             label: "Shipped",
@@ -114,7 +114,7 @@ export const sendVerificationEmail = async (
     sub: string,
     token?: string,
 ) => {
-    const loginUrl = "https://dev.api.dajuvai.com/api/vendors/login";
+    const loginUrl = "https://dev.api.dajuvai.com";
     const mailOptions = {
         from: `<${config.USER_EMAIL}>`,
         to,
@@ -124,8 +124,6 @@ export const sendVerificationEmail = async (
             ${
                 token
                     ? `
-                
-              
                 <body style="margin:0; padding:0; background-color:#f4f5f7; font-family:Arial, Helvetica, sans-serif;">
                   <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f7; padding:40px 0;">
                     <tr>
@@ -148,9 +146,9 @@ export const sendVerificationEmail = async (
                           <!-- Body -->
                           <tr>
                             <td style="padding:40px 40px 24px 40px;">
-                              <h1 style="margin:0 0 8px 0; font-size:20px; color:#0f172a; font-weight:700;">Verify Your Email Address</h1>
+                              <h1 style="margin:0 0 8px 0; font-size:20px; color:#0f172a; font-weight:700;">Your Verification Code</h1>
                               <p style="margin:0 0 24px 0; font-size:15px; line-height:1.6; color:#475569;">
-                                Thanks for joining Dajuvai. To complete your sign-in and keep your account secure, please use the verification code below.
+                                Please use the verification code below to complete your request and keep your account secure.
                               </p>
 
                               <!-- Code Box -->
@@ -662,7 +660,7 @@ export const sendOrderStatusEmail = async (
     to: string,
     orderNumber: string,
     status: string,
-    subject = "Your Order Status Has Been Updated",
+    subject = "Order Status Has Been Updated",
 ) => {
     const statusMeta = getOrderStatusEmailMeta(status);
     const orderLabel = `#${orderNumber}`;
@@ -697,7 +695,7 @@ export const sendOrderStatusEmail = async (
                                             <tr style="background-color:#fafafa;">
                                                 <td style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
                                                     <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#888;">Order Number</div>
-                                                    <div style="margin-top:5px;font-size:18px;font-weight:800;color:#2b2b2b;">#${escapeHtml(orderLabel)}</div>
+                                                    <div style="margin-top:5px;font-size:18px;font-weight:800;color:#2b2b2b;">${escapeHtml(orderLabel)}</div>
                                                 </td>
                                                 <td align="right" style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
                                                     <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:${statusMeta.bg};color:${statusMeta.color};font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(statusMeta.label)}</span>
@@ -1076,4 +1074,118 @@ export const sendVendorApplicationEmail = async (
     };
 
     await transporter.sendMail(mailOptions);
+};
+
+const getVendorOrderStatusEmailMeta = (status: string) => {
+    const normalized = status.toUpperCase();
+    const map: Record<
+        string,
+        { label: string; color: string; bg: string; copy: string }
+    > = {
+        CANCELLED: {
+            label: "Cancelled",
+            color: "#b91c1c",
+            bg: "#fee2e2",
+            copy: "This order has been cancelled. Please do not fulfill this order if it hasn't been shipped yet.",
+        },
+        DELAYED: {
+            label: "Delayed",
+            color: "#be123c",
+            bg: "#ffe4e6",
+            copy: "This order is currently delayed. Please ensure it is fulfilled and dispatched as soon as possible.",
+        },
+        DELIVERED: {
+            label: "Delivered",
+            color: "#047857",
+            bg: "#d1fae5",
+            copy: "This order has been successfully delivered to the customer.",
+        },
+        RETURNED: {
+            label: "Returned",
+            color: "#854d0e",
+            bg: "#fef9c3",
+            copy: "This order has been returned by the customer. Please expect the returned items.",
+        },
+    };
+
+    return (
+        map[normalized] ?? {
+            label: normalized,
+            color: "#334155",
+            bg: "#e2e8f0",
+            copy: "The status of this order has changed. Please check your dashboard for details.",
+        }
+    );
+};
+
+export const sendVendorOrderStatusEmail = async (
+    to: string,
+    orderNumber: string,
+    status: string,
+    subject?: string,
+) => {
+    const statusMeta = getVendorOrderStatusEmailMeta(status);
+    const orderLabel = `#${orderNumber}`;
+
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: subject || `Update for Order ${orderLabel}: ${statusMeta.label}`,
+        html: `
+            <div style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f4f4f4;">
+                    <tr>
+                        <td align="center" style="padding:24px 12px;">
+                            <table role="presentation" width="700" cellspacing="0" cellpadding="0" style="max-width:95%;border-collapse:collapse;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+
+                                <!-- Header -->
+                                <tr>
+                                    <td style="background:linear-gradient(135deg, #ff7a1a, #ff9a3d);padding:28px 30px;text-align:center;">
+                                        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fff2e6;">Vendor Order Update</div>
+                                        <h1 style="margin:8px 0 0;color:#ffffff;font-size:22px;letter-spacing:0.4px;">Order is ${escapeHtml(statusMeta.label)}</h1>
+                                    </td>
+                                </tr>
+
+                                <!-- Body -->
+                                <tr>
+                                    <td style="padding:30px;">
+                                        <p style="font-size:15px;color:#333;margin:0 0 24px;">${escapeHtml(statusMeta.copy)}</p>
+
+                                        <!-- Order Status -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-bottom:24px;border:1px solid #f0e3d8;border-radius:8px;overflow:hidden;">
+                                            <tr style="background-color:#fafafa;">
+                                                <td style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
+                                                    <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#888;">Order Number</div>
+                                                    <div style="margin-top:5px;font-size:18px;font-weight:800;color:#2b2b2b;">${escapeHtml(orderLabel)}</div>
+                                                </td>
+                                                <td align="right" style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
+                                                    <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:${statusMeta.bg};color:${statusMeta.color};font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">${escapeHtml(statusMeta.label)}</span>
+                                                </td>
+                                            </tr>
+                                        </table>
+
+                                        <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#888;">Please check your vendor dashboard for more details.</p>
+                                    </td>
+                                </tr>
+
+                                <!-- Info strip -->
+                                <tr>
+                                    <td style="padding:18px 30px;background-color:#fff4e9;font-size:14px;color:#7a4a1f;">
+                                        You can log in to your vendor dashboard to manage this and other orders.
+                                    </td>
+                                </tr>
+
+                                <!-- Footer -->
+                                <tr>
+                                    <td style="padding:20px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">
+                                        This is an automated notification sent to registered vendors. Please do not reply to this email.
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        `,
+    });
 };

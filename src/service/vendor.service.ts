@@ -289,7 +289,7 @@ export class VendorService {
                 districtId: data.districtEntity.id,
                 verificationCode: data.verificationCode,
                 verificationCodeExpire: data.verificationCodeExpire,
-                isVerified: true,
+                isVerified: true, // only for now, change later
                 isApproved: false,
 
                 accountName: data.accountName,

@@ -49,6 +49,7 @@ import {
     sendCustomerOrderEmail,
     sendOrderStatusEmail,
     sendVendorOrderEmail,
+    sendVendorOrderStatusEmail,
 } from "../utils/nodemailer.utils";
 import { NotificationService } from "./notification.service";
 import crypto from "crypto";
@@ -2498,28 +2499,6 @@ export class OrderService {
 
         const previousStatus = order.status;
 
-        if (status === OrderStatus.CANCELLED) {
-            for (const item of order.orderItems) {
-                if (item.variantId) {
-                    const variant = await this.variantRepository.findOne({
-                        where: { id: item.variantId },
-                    });
-                    if (variant) {
-                        variant.stock += item.quantity;
-                        await this.variantRepository.save(variant);
-                    }
-                } else {
-                    const product = await this.productRepository.findOne({
-                        where: { id: item.productId },
-                    });
-                    if (product) {
-                        product.stock += item.quantity;
-                        await this.productRepository.save(product);
-                    }
-                }
-            }
-        }
-
         // Handle COD payment update on delivery
         if (
             status === OrderStatus.DELIVERED &&
@@ -2529,7 +2508,7 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.PAID;
         }
 
-        if (status === OrderStatus.CANCELLED) {
+        if (status === OrderStatus.CANCELLED && previousStatus !== OrderStatus.CANCELLED) {
             for (const item of order.orderItems) {
                 if (item.variantId) {
                     const variant = await this.variantRepository.findOne({
@@ -2582,6 +2561,27 @@ export class OrderService {
                 order.orderNumber,
                 order.status,
             );
+        }
+
+        const notifyVendor = [OrderStatus.CANCELLED, OrderStatus.DELAYED, OrderStatus.DELIVERED, OrderStatus.RETURNED]
+
+        if(notifyVendor.includes(status)){
+            let vendorEmails: string[] = []
+            for(const item of order.orderItems){
+                if(item.vendorId){
+                    vendorEmails.push(item.vendor.email)
+                }
+            }
+            vendorEmails = [...new Set(vendorEmails)]
+            
+            // send email to all vendor at once
+            await Promise.all(vendorEmails.map(email => {
+                return sendVendorOrderStatusEmail(
+                    email,
+                    order.orderNumber,
+                    order.status,
+                )
+            }))
         }
 
         return sanitizeOrderFull(order);
