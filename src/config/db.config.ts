@@ -112,6 +112,13 @@ const AppDataSource = new DataSource({
         PlacementItem,
     ],
     migrations: ["src/migrations/*.ts"],
+    // Each migration file commits in its own transaction instead of the
+    // TypeORM default (all pending migrations sharing one transaction) —
+    // required for the order-status migration pair, where the 2nd file's
+    // backfill UPDATE uses enum values the 1st file just added (Postgres
+    // forbids using a brand-new enum value inside the transaction that
+    // added it).
+    migrationsTransactionMode: "each",
     ssl: false,
 });
 
