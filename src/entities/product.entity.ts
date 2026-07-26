@@ -1,5 +1,6 @@
 import {
   Column,
+  DeleteDateColumn,
   Entity,
   ManyToOne,
   OneToMany,
@@ -111,7 +112,14 @@ export class Product {
   @Column({ type: "boolean", default: false })
   hasVariants: boolean;
 
-  @OneToMany(() => Variant, (variant) => variant.product, { cascade: true })
+  // orphanedRowAction: 'soft-delete' — when a variant is dropped from this
+  // product's collection (e.g. hasVariants toggled off, or a variant removed
+  // during edit), TypeORM archives it (sets deletedAt) instead of nullifying
+  // its NOT NULL product_id, which order history still needs intact.
+  @OneToMany(() => Variant, (variant) => variant.product, {
+    cascade: true,
+    orphanedRowAction: "soft-delete",
+  })
   variants: Variant[];
 
   @OneToMany(() => Review, (review) => review.product, { cascade: true })
@@ -122,4 +130,10 @@ export class Product {
 
   @UpdateDateColumn({ name: "updated_at" })
   updatedAt: Date;
+
+  // Deleting a product with order history must never cascade-delete its
+  // order_items (which would destroy those orders' records), so deletion
+  // archives the product instead of removing the row.
+  @DeleteDateColumn({ name: "deleted_at" })
+  deletedAt?: Date;
 }

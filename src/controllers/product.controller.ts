@@ -18,6 +18,7 @@ import { v2 as cloudinary } from "cloudinary";
 import { DataSource } from "typeorm";
 import { ReviewService } from "../service/review.service";
 import config from "../config/env.config";
+import { UserRole } from "../entities/user.entity";
 
 /**
  * @class ProductController
@@ -238,22 +239,6 @@ export class ProductController {
         res.status(200).json({ success: true, data: { product, total } });
     }
 
-    async deleteProduct(
-        req: AuthRequest<{ id: string; subcategoryId: string }>,
-        res: Response,
-        _next: NextFunction,
-    ): Promise<void> {
-        const { id, subcategoryId } = req.params;
-
-        await this.productService.deleteProduct(
-            Number(id),
-            Number(subcategoryId),
-            req.user!.id,
-        );
-
-        res.status(204).json({ success: true });
-    }
-
     /**
      * @method deleteProductImage
      * @route DELETE /products/:id/:subcategoryId/image
@@ -273,12 +258,14 @@ export class ProductController {
 
         if (!imageUrl) throw new BadRequestError("Image URL is required");
 
-        const userId = req.user?.id || req.vendor?.id;
+        if (!req.user && !req.vendor) {
+            throw new BadRequestError("Not authenticated");
+        }
 
         const product = await this.productService.deleteProductImage(
             Number(id),
             Number(subcategoryId),
-            userId,
+            { userId: req.user?.id, vendorId: req.vendor?.id },
             imageUrl,
         );
 
@@ -288,7 +275,7 @@ export class ProductController {
     }
 
     async deleteProductById(
-        req: Request<{ id: string }>,
+        req: CombinedAuthRequest<{ id: string }>,
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
@@ -296,12 +283,127 @@ export class ProductController {
 
         if (isNaN(id)) throw new BadRequestError("Invalid product ID");
 
-        await this.productService.deleteProductById(id);
+        if (!req.user && !req.vendor) {
+            throw new BadRequestError("Not authenticated");
+        }
+
+        await this.productService.deleteProductById(id, {
+            userId: req.user?.id,
+            vendorId: req.vendor?.id,
+        });
 
         res.status(200).json({
             success: true,
             msg: "Product deleted successfully",
         });
+    }
+
+    /**
+     * @method restoreProductById
+     * @route PATCH /products/:id/restore
+     * @access Admin or product's owning Vendor
+     */
+    async restoreProductById(
+        req: CombinedAuthRequest<{ id: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const id = Number(req.params.id);
+
+        if (isNaN(id)) throw new BadRequestError("Invalid product ID");
+
+        if (!req.user && !req.vendor) {
+            throw new BadRequestError("Not authenticated");
+        }
+
+        const product = await this.productService.restoreProduct(id, {
+            userId: req.user?.id,
+            vendorId: req.vendor?.id,
+        });
+
+        res.status(200).json({
+            success: true,
+            msg: "Product restored successfully",
+            data: product,
+        });
+    }
+
+    /**
+     * @method restoreVariant
+     * @route PATCH /products/:id/variant/:variantId/restore
+     * @access Admin or product's owning Vendor
+     */
+    async restoreVariant(
+        req: CombinedAuthRequest<{ id: string; variantId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const id = Number(req.params.id);
+        const variantId = Number(req.params.variantId);
+
+        if (isNaN(id) || isNaN(variantId)) {
+            throw new BadRequestError("Invalid product or variant ID");
+        }
+
+        if (!req.user && !req.vendor) {
+            throw new BadRequestError("Not authenticated");
+        }
+
+        const variant = await this.productService.restoreVariant(
+            id,
+            variantId,
+            { userId: req.user?.id, vendorId: req.vendor?.id },
+        );
+
+        res.status(200).json({
+            success: true,
+            msg: "Variant restored successfully",
+            data: variant,
+        });
+    }
+
+    /**
+     * @method getArchivedProducts
+     * @route GET /products/archived
+     * @access Admin (sees all) or Vendor (sees own)
+     */
+    /**
+     * @method getArchivedProducts
+     * @route GET /products/archived
+     * @access Admin (sees all) or Vendor (sees own)
+     */
+    async getArchivedProducts(
+        req: CombinedAuthRequest<
+            {},
+            {},
+            {},
+            {
+                page?: string;
+                limit?: string;
+                search?: string;
+                type?: "product" | "variants";
+            }
+        >,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.user && !req.vendor) {
+            throw new BadRequestError("Not authenticated");
+        }
+
+        const page = Math.max(1, Number(req.query.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
+
+        const isAdmin = req.user?.role === UserRole.ADMIN;
+        const result = await this.productService.getArchivedProducts(
+            { vendorId: isAdmin ? undefined : req.vendor?.id },
+            page,
+            limit,
+            req.query.search,
+            req.query.type,
+        );
+
+        res.status(200).json({ success: true, data: result });
     }
 
     /**

@@ -182,7 +182,7 @@ export class VendorDashBoardService {
         // Base query
         const query = productsRepo
             .createQueryBuilder("p")
-            .leftJoin("p.variants", "v")
+            .leftJoin("p.variants", "v", "v.deletedAt IS NULL")
             .innerJoin("p.vendor", "vendor")
             .select([
                 "p.id AS productId",
@@ -198,6 +198,7 @@ export class VendorDashBoardService {
                 "(p.status IN (:...statuses) OR v.status IN (:...statuses))",
                 { statuses: [InventoryStatus.LOW_STOCK, InventoryStatus.OUT_OF_STOCK] }
             )
+            .andWhere("p.deletedAt IS NULL")
             .groupBy("p.id")
             .addGroupBy("vendor.id")
             .addGroupBy("vendor.businessName")

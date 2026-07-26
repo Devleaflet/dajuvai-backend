@@ -13,6 +13,15 @@ import { responseCache } from "../middlewares/responseCache.middleware";
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
 
+// /api/product/archived — must be registered before GET /:id below,
+// otherwise Express would match "archived" as an :id value and route there.
+productRouter.get(
+    "/archived",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    productController.getArchivedProducts.bind(productController),
+);
+
 /**
  * @swagger
  * /api/product/{id}:
@@ -179,6 +188,22 @@ productRouter.delete(
     combinedAuthMiddleware,
     isAdminOrVendor,
     productController.deleteProductById.bind(productController),
+);
+
+// /api/product/:id/restore — restores an archived (soft-deleted) product.
+productRouter.patch(
+    "/:id/restore",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    productController.restoreProductById.bind(productController),
+);
+
+// /api/product/:id/variant/:variantId/restore — restores a single archived variant.
+productRouter.patch(
+    "/:id/variant/:variantId/restore",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    productController.restoreVariant.bind(productController),
 );
 
 /**

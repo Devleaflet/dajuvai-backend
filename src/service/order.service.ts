@@ -714,6 +714,7 @@ export class OrderService {
                         "orderItems.variant",
                         "shippingAddress",
                     ],
+                    withDeleted: true,
                 });
                 if (existingOrder) {
                     return {
@@ -984,6 +985,7 @@ export class OrderService {
                 "orderItems.product",
                 "orderItems.variant",
             ],
+            withDeleted: true,
         });
 
         if (!order) {
@@ -1110,6 +1112,7 @@ export class OrderService {
                     "orderItems.product",
                     "orderItems.variant",
                 ],
+                withDeleted: true,
             });
             if (!order) {
                 throw new APIError(404, "Order not found");
@@ -1524,6 +1527,7 @@ export class OrderService {
                     "orderItems.variant",
                     "vendorShippings",
                 ],
+                withDeleted: true,
             });
 
             if (!savedOrder) {
@@ -1740,6 +1744,7 @@ export class OrderService {
                 "orderItems.vendor",
                 "vendorShippings",
             ],
+            withDeleted: true,
         });
 
         // If order doesn't exist, throw a 404 error
@@ -1808,6 +1813,7 @@ export class OrderService {
                 "orderItems.product",
                 "orderItems.variant",
             ],
+            withDeleted: true,
         });
 
         if (!order) {
@@ -1961,6 +1967,7 @@ export class OrderService {
                 "vendorShippings",
             ],
             order: { createdAt: "desc" },
+            withDeleted: true,
         });
 
         return orders.map((order) => sanitizeOrderFull(order));
@@ -2076,6 +2083,7 @@ export class OrderService {
                     },
                 },
             },
+            withDeleted: true,
         });
         // Handle case when order does not exist
         if (!order) {
@@ -2230,6 +2238,7 @@ export class OrderService {
                 "orderItems.vendor",
                 "vendorShippings",
             ],
+            withDeleted: true,
         });
 
         // Defensive check to ensure updated order was retrieved
@@ -2438,6 +2447,7 @@ export class OrderService {
                 "orderItems.variant",
                 "vendorShippings",
             ],
+            withDeleted: true,
         });
 
         // Throw error if no order is found
@@ -2479,6 +2489,7 @@ export class OrderService {
                 "orderItems.vendor",
                 "vendorShippings",
             ],
+            withDeleted: true,
         });
 
         if (!order) {
@@ -2729,6 +2740,7 @@ export class OrderService {
                 "orderItems.vendor",
                 "vendorShippings",
             ],
+            withDeleted: true,
         });
         return order ? sanitizeOrderFull(order) : null;
     }
@@ -2963,6 +2975,7 @@ export class OrderService {
                 "vendorShippings",
             ],
             order: { createdAt: "DESC" }, // Sort orders by creation date descending
+            withDeleted: true,
         });
 
         return orders.map(sanitizeOrderFull);

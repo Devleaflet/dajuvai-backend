@@ -1,4 +1,4 @@
-import { Brackets, DataSource, Repository, Not, In } from "typeorm";
+import { Brackets, DataSource, Repository, In } from "typeorm";
 import { Product } from "../entities/product.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { User, UserRole } from "../entities/user.entity";
@@ -33,11 +33,25 @@ import { sanitizeVendor } from "../utils/sanitize.util";
 import { calculatePriceSnapshot, normalizeLegacyProductDiscount, normalizeLegacyVariantDiscount } from "../utils/pricing.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { CartItem } from "../entities/cartItem.entity";
+import { WishlistItem } from "../entities/wishlistItem.entity";
 
 interface GetProductsOptions {
   search?: string;
   sortBy?: ProductSortOption;
   status?: InventoryStatus;
+}
+
+/**
+ * Identifies the caller for ownership checks. Must come from
+ * `req.user`/`req.vendor` directly (never a merged bare id) — User and
+ * Vendor are separate tables with independent auto-increment ids, so a
+ * vendor's id can coincidentally collide with an unrelated user's id, and
+ * guessing which table a bare id belongs to can silently authorize (or deny)
+ * the wrong caller.
+ */
+interface ProductActor {
+  userId?: number;
+  vendorId?: number;
 }
 
 /**
@@ -68,8 +82,8 @@ export class ProductService {
   private bannerService: BannerService;
   private dealService: DealService;
   private variantRepository: Repository<Variant>;
-  private orderItemRepository: Repository<OrderItem>;
   private cartItemRepository: Repository<CartItem>;
+  private wishlistItemRepository: Repository<WishlistItem>;
 
   constructor(private dataSource: DataSource) {
     this.productRepository = this.dataSource.getRepository(Product);
@@ -88,8 +102,8 @@ export class ProductService {
     this.bannerService = new BannerService();
     this.dealService = new DealService();
     this.variantRepository = this.dataSource.getRepository(Variant);
-    this.orderItemRepository = this.dataSource.getRepository(OrderItem);
     this.cartItemRepository = this.dataSource.getRepository(CartItem);
+    this.wishlistItemRepository = this.dataSource.getRepository(WishlistItem);
     cloudinary.config({
       cloud_name: config.CLOUDINARY_CLOUD_NAME,
       api_key: config.CLOUDINARY_API_KEY,
@@ -212,6 +226,23 @@ export class ProductService {
       .filter(Boolean);
   }
 
+  /** Every variant of a variant product must carry its own image(s) — there
+   * is no product-level image to fall back to (see normalizeProductImages).
+   */
+  private normalizeVariantImages(value: unknown, index: number): string[] {
+    const images = this.normalizeImageUrls(
+      value,
+      `Variant ${index + 1} images`,
+    );
+    if (images.length === 0) {
+      throw new APIError(
+        400,
+        `Variant ${index + 1} must have at least one image`,
+      );
+    }
+    return images;
+  }
+
   private normalizeAttributes(value: unknown): Record<string, string> {
     if (!value) return {};
 
@@ -261,15 +292,31 @@ export class ProductService {
     discountPercent: unknown,
     discountType: unknown,
     fieldPrefix = "Discount",
-  ): { discountAmount: number; discountPercent: number; discountType: DiscountType; discount: number } {
+  ): {
+    discountAmount: number;
+    discountPercent: number;
+    discountType: DiscountType;
+    discount: number;
+  } {
     const normalizedDiscountType = this.sanitizeDiscountType(discountType);
 
     if (normalizedDiscountType === DiscountType.NONE) {
-      return { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 };
+      return {
+        discountAmount: 0,
+        discountPercent: 0,
+        discountType: DiscountType.NONE,
+        discount: 0,
+      };
     }
 
-    const parsedDiscountAmount = this.parseNumber(discountAmount ?? 0, fieldPrefix + " Amount");
-    const parsedDiscountPercent = this.parseNumber(discountPercent ?? 0, fieldPrefix + " Percent");
+    const parsedDiscountAmount = this.parseNumber(
+      discountAmount ?? 0,
+      fieldPrefix + " Amount",
+    );
+    const parsedDiscountPercent = this.parseNumber(
+      discountPercent ?? 0,
+      fieldPrefix + " Percent",
+    );
 
     if (
       normalizedDiscountType === DiscountType.PERCENTAGE &&
@@ -289,18 +336,26 @@ export class ProductService {
     let finalDiscountPercent = 0;
 
     if (normalizedDiscountType === DiscountType.FLAT) {
-        finalDiscountAmount = parsedDiscountAmount;
-        finalDiscountPercent = basePrice > 0 ? Number(((parsedDiscountAmount / basePrice) * 100).toFixed(2)) : 0;
+      finalDiscountAmount = parsedDiscountAmount;
+      finalDiscountPercent =
+        basePrice > 0
+          ? Number(((parsedDiscountAmount / basePrice) * 100).toFixed(2))
+          : 0;
     } else if (normalizedDiscountType === DiscountType.PERCENTAGE) {
-        finalDiscountPercent = parsedDiscountPercent;
-        finalDiscountAmount = Number(((basePrice * parsedDiscountPercent) / 100).toFixed(2));
+      finalDiscountPercent = parsedDiscountPercent;
+      finalDiscountAmount = Number(
+        ((basePrice * parsedDiscountPercent) / 100).toFixed(2),
+      );
     }
 
     return {
       discountAmount: finalDiscountAmount,
       discountPercent: finalDiscountPercent,
       discountType: normalizedDiscountType,
-      discount: normalizedDiscountType === DiscountType.FLAT ? finalDiscountAmount : finalDiscountPercent,
+      discount:
+        normalizedDiscountType === DiscountType.FLAT
+          ? finalDiscountAmount
+          : finalDiscountPercent,
     };
   }
 
@@ -328,7 +383,12 @@ export class ProductService {
     );
 
     const { discountAmount, discountPercent, discountType, discount } = hasDeal
-      ? { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 }
+      ? {
+          discountAmount: 0,
+          discountPercent: 0,
+          discountType: DiscountType.NONE,
+          discount: 0,
+        }
       : this.normalizeDiscount(
           base,
           variant?.discountAmount,
@@ -352,14 +412,32 @@ export class ProductService {
       discountType,
       discount,
       attributes: this.normalizeAttributes(variant?.attributes),
-      variantImages: this.normalizeImageUrls(
+      variantImages: this.normalizeVariantImages(
         variant?.variantImages ?? variant?.images ?? [],
-        `Variant ${index + 1} images`,
+        index,
       ),
       stock,
       status: this.determineOrderStatus(stock),
       finalPrice: this.applyDealPrice(priceAfterDiscount, deal),
     };
+  }
+
+  /** Duplicate SKUs within one product break update's id-then-sku variant
+   * matching (a sku lookup could resolve to the wrong row), so reject them
+   * up front rather than let create/update silently corrupt a variant.
+   */
+  private assertUniqueSkus(variants: Array<{ sku: string }>): void {
+    const seen = new Set<string>();
+    for (const variant of variants) {
+      const key = variant.sku.toLowerCase();
+      if (seen.has(key)) {
+        throw new APIError(
+          400,
+          `Duplicate SKU "${variant.sku}" — each variant needs a unique SKU`,
+        );
+      }
+      seen.add(key);
+    }
   }
 
   private aggregateVariantInventory(
@@ -442,6 +520,14 @@ export class ProductService {
           "Variants array is required for variant products",
         );
       }
+      // A variant product has no product-level images — each variant
+      // carries its own (see normalizeVariantImages).
+      if (normalizedProductImages.length > 0) {
+        throw new APIError(
+          400,
+          "Variant products can't have product-level images — add images to each variant instead",
+        );
+      }
     }
 
     let dealValidation: Deal | null = null;
@@ -480,7 +566,12 @@ export class ProductService {
           integer: true,
         });
     const normalizedProductDiscount = hasDeal
-      ? { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 }
+      ? {
+          discountAmount: 0,
+          discountPercent: 0,
+          discountType: DiscountType.NONE,
+          discount: 0,
+        }
       : this.normalizeDiscount(
           Number(normalizedBasePrice || 0),
           discountAmount,
@@ -492,6 +583,7 @@ export class ProductService {
           this.normalizeVariantInput(variant, index, hasDeal, deal),
         )
       : [];
+    if (isVariantProduct) this.assertUniqueSkus(normalizedVariants);
     const variantInventory = this.aggregateVariantInventory(normalizedVariants);
 
     // ─────────────────────────────────────────────
@@ -536,43 +628,47 @@ export class ProductService {
       hasVariants: isVariantProduct,
     });
 
-    const savedProduct = await this.productRepository.save(product);
-
     // ─────────────────────────────────────────────
-    // Create Variants (if any)
+    // Save product + variants atomically — a failed variant insert must
+    // not leave a saved product with zero variants behind.
     // ─────────────────────────────────────────────
-    let savedVariants: Variant[] = [];
+    const savedProduct = await this.dataSource.transaction(async (manager) => {
+      const savedProduct = await manager.getRepository(Product).save(product);
 
-    if (isVariantProduct) {
-      savedVariants = await Promise.all(
-        normalizedVariants.map(async (variant) => {
-          const insertResult = await this.variantRepository
-            .createQueryBuilder()
-            .insert()
-            .into(Variant)
-            .values({
-              sku: variant.sku,
-              basePrice: variant.basePrice,
-              discountAmount: variant.discountAmount,
-              discountPercent: variant.discountPercent,
-              discountType: variant.discountType,
-              discount: variant.discount,
-              attributes: variant.attributes,
-              variantImages: variant.variantImages,
-              stock: variant.stock,
-              status: variant.status,
-              productId: savedProduct.id,
-              finalPrice: variant.finalPrice,
-            })
-            .returning("*")
-            .execute();
+      let savedVariants: Variant[] = [];
+      if (isVariantProduct) {
+        savedVariants = await Promise.all(
+          normalizedVariants.map(async (variant) => {
+            const insertResult = await manager
+              .getRepository(Variant)
+              .createQueryBuilder()
+              .insert()
+              .into(Variant)
+              .values({
+                sku: variant.sku,
+                basePrice: variant.basePrice,
+                discountAmount: variant.discountAmount,
+                discountPercent: variant.discountPercent,
+                discountType: variant.discountType,
+                discount: variant.discount,
+                attributes: variant.attributes,
+                variantImages: variant.variantImages,
+                stock: variant.stock,
+                status: variant.status,
+                productId: savedProduct.id,
+                finalPrice: variant.finalPrice,
+              })
+              .returning("*")
+              .execute();
 
-          return insertResult.raw[0] as Variant;
-        }),
-      );
-    }
+            return insertResult.raw[0] as Variant;
+          }),
+        );
+      }
 
-    savedProduct.variants = savedVariants;
+      savedProduct.variants = savedVariants;
+      return savedProduct;
+    });
 
     return savedProduct;
   }
@@ -716,11 +812,20 @@ export class ProductService {
       }
 
       const productDiscount = hasDeal
-        ? { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 }
+        ? {
+            discountAmount: 0,
+            discountPercent: 0,
+            discountType: DiscountType.NONE,
+            discount: 0,
+          }
         : this.normalizeDiscount(
             Number(resolvedBasePrice),
-            discountAmount !== undefined ? discountAmount : product.discountAmount,
-            discountPercent !== undefined ? discountPercent : product.discountPercent,
+            discountAmount !== undefined
+              ? discountAmount
+              : product.discountAmount,
+            discountPercent !== undefined
+              ? discountPercent
+              : product.discountPercent,
             discountType !== undefined ? discountType : product.discountType,
           );
 
@@ -736,6 +841,10 @@ export class ProductService {
       product.discountAmount = 0;
       product.discountPercent = 0;
       product.discountType = DiscountType.NONE;
+      // Otherwise a product just switched to variants keeps whatever flat
+      // price it last had as a normal product, stale forever since nothing
+      // recomputes it for variant products.
+      product.finalPrice = null;
     }
 
     if (bannerId === null) {
@@ -761,10 +870,28 @@ export class ProductService {
         "Product images",
       );
 
-      if (normalizedProductImages.length === 0 && !effectiveHasVariants) {
-        throw new APIError(400, "At least one product image is required");
+      if (effectiveHasVariants) {
+        if (normalizedProductImages.length > 0) {
+          throw new APIError(
+            400,
+            "Variant products can't have product-level images — add images to each variant instead",
+          );
+        }
+      } else {
+        product.productImages = normalizedProductImages;
       }
-      product.productImages = normalizedProductImages;
+    }
+
+    // A variant product never carries product-level images (each variant
+    // has its own), regardless of whether this request touched images at
+    // all — otherwise switching to variants would silently keep stale
+    // product-level images around.
+    if (effectiveHasVariants) {
+      product.productImages = null;
+    } else if (!product.productImages || product.productImages.length === 0) {
+      // Catches switching to "normal" without supplying images in the same
+      // request too, not just an explicit empty array.
+      throw new APIError(400, "At least one product image is required");
     }
 
     if (!effectiveHasVariants && product.basePrice !== null) {
@@ -783,13 +910,21 @@ export class ProductService {
     let variantsForResponse: Variant[] | undefined;
 
     if (!effectiveHasVariants && originalHadVariants) {
-      const existingVariantIds = (
-        await this.variantRepository.find({
-          where: { productId },
-          select: ["id"],
-        })
-      ).map((v) => v.id);
-      await this.deleteVariantsSafely(existingVariantIds, "bestEffort");
+      // Switching a product to "normal" always succeeds, order history or
+      // not: variants are archived (soft-deleted), never blocked. Reassigning
+      // `product.variants` to [] below lets Product.variants'
+      // orphanedRowAction: 'soft-delete' archive them during save(), instead
+      // of hard-deleting (which order history may forbid) or nullifying
+      // their NOT NULL product_id.
+      const removedVariantIds = (product.variants || []).map((v) => v.id);
+      if (removedVariantIds.length > 0) {
+        await this.cartItemRepository.delete({
+          variantId: In(removedVariantIds),
+        });
+        await this.wishlistItemRepository.delete({
+          variantId: In(removedVariantIds),
+        });
+      }
       variantsForResponse = [];
     }
 
@@ -806,6 +941,7 @@ export class ProductService {
           product.deal ?? null,
         ),
       );
+      this.assertUniqueSkus(normalizedVariants);
 
       const savedVariants = await Promise.all(
         normalizedVariants.map(async (variant) => {
@@ -870,18 +1006,22 @@ export class ProductService {
       variantsForResponse = savedVariants;
       product.hasVariants = true;
 
-      const savedVariantIds = savedVariants.map((variant) => variant.id);
-      if (savedVariantIds.length > 0) {
-        const staleVariantIds = (
-          await this.variantRepository.find({
-            where: {
-              productId,
-              id: Not(In(savedVariantIds)),
-            },
-            select: ["id"],
-          })
-        ).map((v) => v.id);
-        await this.deleteVariantsSafely(staleVariantIds);
+      // Any previously-active variant not present in this update's list is
+      // being removed from the product: archive it (via orphanedRowAction:
+      // 'soft-delete' on save, below) rather than blocking on order history.
+      const keptVariantIds = new Set(
+        savedVariants.map((variant) => variant.id),
+      );
+      const removedVariantIds = (product.variants || [])
+        .map((v) => v.id)
+        .filter((id) => !keptVariantIds.has(id));
+      if (removedVariantIds.length > 0) {
+        await this.cartItemRepository.delete({
+          variantId: In(removedVariantIds),
+        });
+        await this.wishlistItemRepository.delete({
+          variantId: In(removedVariantIds),
+        });
       }
 
       const inventory = this.aggregateVariantInventory(savedVariants);
@@ -906,7 +1046,6 @@ export class ProductService {
     if (hasVariantsBool !== undefined) {
       product.hasVariants = hasVariantsBool;
     }
-
 
     if (variantsForResponse !== undefined) {
       product.variants = variantsForResponse;
@@ -954,8 +1093,13 @@ export class ProductService {
         "vendor.updatedAt",
       ])
       .leftJoinAndSelect("product.deal", "deal")
-      .leftJoinAndSelect("product.variants", "variants")
-      .where("1 = 1");
+      .leftJoinAndSelect(
+        "product.variants",
+        "variants",
+        "variants.deletedAt IS NULL",
+      )
+      .where("1 = 1")
+      .andWhere("product.deletedAt IS NULL");
 
     if (bannerId) {
       const banner = await this.bannerRepository.findOne({
@@ -1152,10 +1296,11 @@ export class ProductService {
     const idQuery = this.productRepository
       .createQueryBuilder("product")
       .leftJoin("product.vendor", "vendor")
-      .leftJoin("product.variants", "variants")
+      .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
       .leftJoin("product.deal", "deal")
       .leftJoin("product.subcategory", "subcategory")
       .leftJoin("subcategory.category", "category")
+      .where("product.deletedAt IS NULL")
       .select("product.id", "id");
 
     if (filter === "out_of_stock") {
@@ -1332,11 +1477,16 @@ export class ProductService {
     const products = await this.productRepository
       .createQueryBuilder("product")
       .leftJoinAndSelect("product.vendor", "vendor")
-      .leftJoinAndSelect("product.variants", "variants")
+      .leftJoinAndSelect(
+        "product.variants",
+        "variants",
+        "variants.deletedAt IS NULL",
+      )
       .leftJoinAndSelect("product.deal", "deal")
       .leftJoinAndSelect("product.subcategory", "subcategory")
       .leftJoinAndSelect("subcategory.category", "category")
       .where("product.id IN (:...productIds)", { productIds })
+      .andWhere("product.deletedAt IS NULL")
       .getMany();
 
     const productsById = new Map(
@@ -1369,9 +1519,14 @@ export class ProductService {
       .createQueryBuilder("product")
       .leftJoinAndSelect("product.vendor", "vendor")
       .leftJoinAndSelect("product.subcategory", "subcategory")
-      .leftJoinAndSelect("product.variants", "variant")
+      .leftJoinAndSelect(
+        "product.variants",
+        "variant",
+        "variant.deletedAt IS NULL",
+      )
       .where("product.id = :id", { id })
       .andWhere("subcategory.id = :subcategoryId", { subcategoryId })
+      .andWhere("product.deletedAt IS NULL")
       .getOne();
 
     if (!product) return null;
@@ -1396,92 +1551,56 @@ export class ProductService {
     return product.vendorId;
   }
 
-  private async assertNoOrderHistory(productId: number): Promise<void> {
-    const orderItemCount = await this.orderItemRepository.count({
-      where: { productId },
-    });
-    if (orderItemCount > 0) {
-      throw new APIError(
-        409,
-        "This product has existing orders and can't be deleted. Mark it as out of stock or unavailable instead.",
-      );
-    }
+  // Cart/wishlist rows relied on the product/variant FK's onDelete: 'CASCADE'
+  // to disappear when the product was hard-deleted. Archiving no longer
+  // triggers that DB-level cascade, so it must be done explicitly here —
+  // otherwise a cart/wishlist would keep a "ghost" entry pointing at a
+  // product that no longer resolves through any active-only read.
+  private async removeFromCartsAndWishlists(productId: number): Promise<void> {
+    // CartItem has no scalar productId column (only the `product` relation),
+    // so the delete criteria must go through the relation, not a flat field.
+    await this.cartItemRepository.delete({ product: { id: productId } });
+    await this.wishlistItemRepository.delete({ productId });
   }
 
-  private async deleteVariantsSafely(
-    variantIds: number[],
-    mode: "strict" | "bestEffort" = "strict",
+  /**
+   * Throws unless `actor` is an admin or the given product's owning vendor.
+   * `product.vendor` must be loaded by the caller.
+   */
+  private async assertProductOwner(
+    product: Product,
+    actor: ProductActor,
+    action: string,
   ): Promise<void> {
-    if (variantIds.length === 0) return;
-
-    const ordered = await this.orderItemRepository.find({
-      where: { variantId: In(variantIds) },
-      select: ["variantId"],
-    });
-    const orderedIds = new Set(ordered.map((o) => o.variantId));
-
-    if (orderedIds.size > 0 && mode === "strict") {
-      throw new APIError(
-        409,
-        "One or more variants can't be removed because they have order history. Set their stock to 0 instead of deleting them.",
-      );
-    }
-
-    const deletableIds = variantIds.filter((id) => !orderedIds.has(id));
-    if (deletableIds.length === 0) return;
-
-    await this.cartItemRepository.delete({
-      variantId: In(deletableIds),
-    });
-    await this.variantRepository.delete({ id: In(deletableIds) });
-  }
-
-  async deleteProduct(
-    id: number,
-    subcategoryId: number,
-    userId: number,
-  ): Promise<void> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-    if (!user) {
+    if (actor.userId === undefined && actor.vendorId === undefined) {
       throw new APIError(404, "User not found");
     }
 
-    const product = await this.productRepository.findOne({
-      where: { id, subcategory: { id: subcategoryId } },
-      relations: ["vendor"],
-    });
-    if (!product) {
-      throw new APIError(404, "Product not found");
+    let isAdmin = false;
+    if (actor.userId !== undefined) {
+      const user = await this.userRepository.findOne({
+        where: { id: actor.userId },
+      });
+      if (!user) {
+        throw new APIError(404, "User not found");
+      }
+      isAdmin = user.role === UserRole.ADMIN;
     }
 
-    if (user.role !== UserRole.ADMIN && product.vendor.id !== userId) {
-      throw new APIError(403, "You can only delete your own products");
+    const isVendorOwner =
+      actor.vendorId !== undefined && product.vendor?.id === actor.vendorId;
+
+    if (!isAdmin && !isVendorOwner) {
+      throw new APIError(403, `You can only ${action} your own products`);
     }
-
-    await this.assertNoOrderHistory(id);
-
-    await this.productRepository.delete(id);
   }
 
   async deleteProductImage(
     id: number,
     subcategoryId: number,
-    userId: number,
+    actor: ProductActor,
     imageUrl: string,
   ): Promise<Product | null> {
-    const user = await this.userRepository.findOne({
-      where: { id: userId },
-    });
-    const vendor = !user
-      ? await this.vendorRepository.findOne({ where: { id: userId } })
-      : null;
-
-    if (!user && !vendor) {
-      throw new APIError(404, "User not found");
-    }
-
     // Fetch product with variants
     const product = await this.productRepository.findOne({
       where: { id, subcategory: { id: subcategoryId } },
@@ -1491,15 +1610,7 @@ export class ProductService {
       throw new APIError(404, "Product not found");
     }
 
-    const isAdmin = user?.role === UserRole.ADMIN;
-    const isVendorOwner = vendor && product.vendor?.id === vendor.id;
-
-    if (!isAdmin && !isVendorOwner) {
-      throw new APIError(
-        403,
-        "You can only delete images from your own products",
-      );
-    }
+    await this.assertProductOwner(product, actor, "delete images from");
 
     // Determine if the image belongs to the main product or a variant
     let updatedProductImages = product.productImages || [];
@@ -1567,7 +1678,8 @@ export class ProductService {
     const idQb = this.productRepository
       .createQueryBuilder("product")
       .select("product.id", "id")
-      .where("product.vendorId = :vendorId", { vendorId });
+      .where("product.vendorId = :vendorId", { vendorId })
+      .andWhere("product.deletedAt IS NULL");
 
     if (search) {
       idQb.andWhere("product.name ILIKE :search", {
@@ -1582,7 +1694,7 @@ export class ProductService {
                     (product."hasVariants" = false AND product.status = :status)
                     OR
                     (product."hasVariants" = true AND 
-                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) >= 5
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id AND v.deleted_at IS NULL) >= 5
                     )
                 )`,
           { status },
@@ -1593,8 +1705,8 @@ export class ProductService {
                     (product."hasVariants" = false AND product.status = :status)
                     OR
                     (product."hasVariants" = true AND 
-                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) > 0 AND
-                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) < 5
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id AND v.deleted_at IS NULL) > 0 AND
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id AND v.deleted_at IS NULL) < 5
                     )
                 )`,
           { status },
@@ -1605,7 +1717,7 @@ export class ProductService {
                     (product."hasVariants" = false AND product.status = :status)
                     OR
                     (product."hasVariants" = true AND 
-                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id) <= 0
+                        (SELECT COALESCE(SUM(v.stock), 0) FROM variants v WHERE v.product_id = product.id AND v.deleted_at IS NULL) <= 0
                     )
                 )`,
           { status },
@@ -1620,7 +1732,7 @@ export class ProductService {
             THEN (
                 SELECT MIN(COALESCE(v."finalPrice", v."basePrice"))
                 FROM variants v
-                WHERE v.product_id = product.id
+                WHERE v.product_id = product.id AND v.deleted_at IS NULL
             )
             ELSE COALESCE(product."finalPrice", product."basePrice")
         END`,
@@ -1632,7 +1744,7 @@ export class ProductService {
             THEN (
                 SELECT COALESCE(SUM(v.stock), 0)
                 FROM variants v
-                WHERE v.product_id = product.id
+                WHERE v.product_id = product.id AND v.deleted_at IS NULL
             )
             ELSE COALESCE(product.stock, 0)
         END`,
@@ -1696,39 +1808,267 @@ export class ProductService {
     return { products: sanitizedProducts, total };
   }
 
-  async deleteProductById(id: number) {
-    // Fetch product with variants to collect all image URLs before deletion
+  async deleteProductById(id: number, actor: ProductActor) {
     const product = await this.productRepository.findOne({
       where: { id },
-      relations: ["variants"],
+      relations: ["vendor", "variants"],
     });
 
     if (!product) {
       throw new APIError(404, "Product does not exist");
     }
 
-    await this.assertNoOrderHistory(id);
+    await this.assertProductOwner(product, actor, "delete");
 
-    // Collect all image URLs (product images + variant images)
-    const imageUrls: string[] = [
-      ...(product.productImages || []),
-      ...(product.variants?.flatMap((v) => v.variantImages || []) || []),
-    ];
+    // Archive (soft-delete) rather than hard-delete: order history must
+    // never be broken, and OrderItem.product cascades on a real DELETE.
+    // Images are left in place (not removed from Cloudinary) since the
+    // product row — and its productImages URLs — still exists, just archived.
+    //
+    // Uses the bulk .softDelete() query (SQL CURRENT_TIMESTAMP) instead of
+    // cascading .softRemove(entity) (which stamps deletedAt with a fresh JS
+    // `new Date()` per entity — parent and children end up with slightly
+    // different instants). Doing both in one transaction with .softDelete()
+    // gives the product and its variants the exact same deletedAt, which
+    // restoreProduct relies on to identify "archived by this same delete".
+    const variantIds = product.variants.map((v) => v.id);
+    await this.dataSource.transaction(async (manager) => {
+      await manager.getRepository(Product).softDelete(id);
+      if (variantIds.length > 0) {
+        await manager.getRepository(Variant).softDelete(variantIds);
+      }
+    });
+    await this.removeFromCartsAndWishlists(id);
+  }
 
-    // Delete all images from Cloudinary (non-blocking — DB delete proceeds even if some fail)
-    if (imageUrls.length > 0) {
-      await Promise.allSettled(
-        imageUrls.map((url) =>
-          this.imageDeletionService.deleteSingleImage(url),
-        ),
+  private async resolveDeletedProductForOwner(
+    id: number,
+    actor: ProductActor,
+  ): Promise<Product> {
+    const product = await this.productRepository.findOne({
+      where: { id },
+      relations: ["vendor"],
+      withDeleted: true,
+    });
+
+    if (!product || !product.deletedAt) {
+      throw new APIError(404, "Archived product not found");
+    }
+
+    await this.assertProductOwner(product, actor, "restore");
+
+    return product;
+  }
+
+  /**
+   * Restores an archived product. Also restores exactly the variants that
+   * were archived by that same delete (same Postgres transaction => same
+   * CURRENT_TIMESTAMP, so an exact deletedAt match reliably identifies them)
+   * — variants a vendor removed individually beforehand, in a separate edit,
+   * are left archived rather than being resurrected.
+   */
+  async restoreProduct(id: number, actor: ProductActor): Promise<Product> {
+    const product = await this.resolveDeletedProductForOwner(id, actor);
+
+    // Compared entirely in SQL against the still-archived product row —
+    // round-tripping `product.deletedAt` through a JS Date and back loses
+    // the sub-millisecond precision Postgres actually stored, so an
+    // in-JS comparison silently never matches. Must run before recover()
+    // clears the product's own deleted_at, which is what's being matched.
+    const siblingVariants = await this.variantRepository
+      .createQueryBuilder("variant")
+      .withDeleted()
+      .where("variant.productId = :id", { id })
+      .andWhere(
+        "variant.deletedAt = (SELECT p.deleted_at FROM products p WHERE p.id = :id)",
+        { id },
+      )
+      .getMany();
+
+    await this.productRepository.recover(product);
+
+    if (siblingVariants.length > 0) {
+      await this.variantRepository.recover(siblingVariants);
+    }
+
+    const restored = await this.productRepository.findOne({
+      where: { id },
+      relations: ["variants", "vendor", "subcategory", "deal"],
+    });
+    return restored!;
+  }
+
+  /** Restores a single archived variant without touching its product. */
+  async restoreVariant(
+    productId: number,
+    variantId: number,
+    actor: ProductActor,
+  ): Promise<Variant> {
+    // Deliberately NOT loading the `variants` relation here (unlike other
+    // reads in this class): with withDeleted:true it would attach a stale
+    // in-memory list (including still-archived siblings) to the entity, and
+    // the later productRepository.save() below would cascade-diff that
+    // stale list against the DB's current active children — the same
+    // orphan-cascade hazard resolveDeletedProductForOwner avoids for the
+    // same reason.
+    const product = await this.productRepository.findOne({
+      where: { id: productId },
+      relations: ["vendor"],
+      withDeleted: true,
+    });
+    if (!product) {
+      throw new APIError(404, "Product not found");
+    }
+
+    await this.assertProductOwner(product, actor, "restore variants of");
+
+    if (product.deletedAt) {
+      throw new APIError(
+        400,
+        "This product itself is archived — restore the product first, then its variants",
       );
     }
 
-    // Delete product from database (cascades to variants)
-    const result = await this.productRepository.delete({ id });
-
-    if (result.affected === 0) {
-      throw new APIError(404, "Product does not exist");
+    const variant = await this.variantRepository.findOne({
+      where: { id: variantId, productId },
+      withDeleted: true,
+    });
+    if (!variant || !variant.deletedAt) {
+      throw new APIError(404, "Archived variant not found");
     }
+
+    await this.variantRepository.recover(variant);
+
+    // A restored variant is invisible otherwise: every read (and the edit
+    // form) gates the variants array on hasVariants, and stock/status are
+    // only ever recomputed inside updateProduct — never here. Bring the
+    // product into a consistent variant-mode state so the restored variant
+    // actually shows up, instead of sitting active-but-orphaned in the DB.
+    const activeVariants = await this.variantRepository.find({
+      where: { productId },
+    });
+    const inventory = this.aggregateVariantInventory(activeVariants);
+    product.hasVariants = true;
+    product.basePrice = null;
+    product.discount = 0;
+    product.discountType = DiscountType.NONE;
+    product.productImages = null;
+    product.stock = inventory.stock;
+    product.status = inventory.status;
+    await this.productRepository.save(product);
+
+    return variant;
+  }
+
+  /**
+   * Lists archived (soft-deleted) products so a vendor/admin has somewhere
+   * to find and restore them — every other product read excludes them by
+   * design. Vendors only see their own; admins (actor.vendorId undefined)
+   * see all.
+   */
+  /**
+   * Lists everything a vendor/admin needs to find and restore: products
+   * that are themselves archived, AND products that are still active but
+   * have one or more individually-archived variants (e.g. removed during a
+   * normal hasVariants-off edit). One unified list — a row is either
+   * "product archived" or "N variant(s) archived", never both concerns
+   * split across separate endpoints.
+   */
+  async getArchivedProducts(
+    actor: ProductActor,
+    page: number,
+    limit: number,
+    search?: string,
+    type?: "product" | "variants",
+  ): Promise<{
+    products: Array<
+      Product & { isProductArchived: boolean; archivedVariantsCount: number }
+    >;
+    total: number;
+    page: number;
+    limit: number;
+  }> {
+    const skip = (page - 1) * limit;
+
+    const idQb = this.productRepository
+      .createQueryBuilder("product")
+      .withDeleted()
+      .select("product.id", "id")
+      .where(
+        type === "product"
+          ? "product.deletedAt IS NOT NULL"
+          : type === "variants"
+            ? `product.deletedAt IS NULL AND EXISTS (
+                SELECT 1 FROM variants v
+                WHERE v.product_id = product.id AND v.deleted_at IS NOT NULL
+              )`
+            : `(product.deletedAt IS NOT NULL OR EXISTS (
+                SELECT 1 FROM variants v
+                WHERE v.product_id = product.id AND v.deleted_at IS NOT NULL
+              ))`,
+      );
+
+    if (actor.vendorId !== undefined) {
+      idQb.andWhere("product.vendorId = :vendorId", {
+        vendorId: actor.vendorId,
+      });
+    }
+    if (search) {
+      idQb.andWhere("product.name ILIKE :search", { search: `%${search}%` });
+    }
+
+    const total = await idQb.getCount();
+
+    const rows = await idQb
+      .orderBy(
+        `COALESCE(product.deletedAt, (
+          SELECT MAX(v.deleted_at) FROM variants v
+          WHERE v.product_id = product.id AND v.deleted_at IS NOT NULL
+        ))`,
+        "DESC",
+      )
+      .offset(skip)
+      .limit(limit)
+      .getRawMany();
+    const ids = rows.map((r) => Number(r.id));
+
+    if (ids.length === 0) {
+      return { products: [], total, page, limit };
+    }
+
+    // withDeleted here is deliberate and safe (unlike restoreVariant above):
+    // this is a read-only display list, nothing gets saved back, so there's
+    // no orphan-cascade risk in attaching every variant regardless of status.
+    const products = await this.productRepository.find({
+      where: { id: In(ids) },
+      relations: ["vendor", "subcategory", "variants"],
+      withDeleted: true,
+    });
+    const productsById = new Map(products.map((p) => [p.id, p]));
+
+    const ordered = ids
+      .map((id) => productsById.get(id))
+      .filter((p): p is Product => Boolean(p))
+      .map((p) => {
+        const archivedVariants = (p.variants || []).filter((v) => v.deletedAt);
+        const activeVariants = (p.variants || []).filter((v) => !v.deletedAt);
+        return {
+          ...p,
+          variants: activeVariants,
+          archivedVariants,
+          isProductArchived: Boolean(p.deletedAt),
+          archivedVariantsCount: archivedVariants.length,
+          // Product-level image first; else fall back to any variant's
+          // image (active or archived) so a variant product's archived
+          // row isn't left with a blank thumbnail.
+          thumbnail:
+            p.productImages?.[0] ??
+            activeVariants[0]?.variantImages?.[0] ??
+            archivedVariants[0]?.variantImages?.[0] ??
+            null,
+        };
+      });
+
+    return { products: ordered as any, total, page, limit };
   }
 }

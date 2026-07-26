@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Column, DeleteDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
 import { DiscountType, InventoryStatus } from "./product.enum";
 import { Product } from "./product.entity";
 
@@ -52,7 +52,19 @@ export class Variant {
     @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP', onUpdate: 'CURRENT_TIMESTAMP' })
     updated_at: Date;
 
-    @ManyToOne(() => Product, (product) => product.variants, { onDelete: 'CASCADE' })
+    // Archived variants (e.g. removed while they have order history) are kept
+    // for referential/order-history integrity instead of being hard-deleted.
+    @DeleteDateColumn({ name: 'deleted_at' })
+    deletedAt?: Date;
+
+    // orphanedRowAction must be set here too: TypeORM reads it off this
+    // (inverse/ManyToOne) side when deciding what to do with a variant
+    // dropped from Product.variants, defaulting to "nullify" otherwise —
+    // which would crash on the NOT NULL product_id column above.
+    @ManyToOne(() => Product, (product) => product.variants, {
+        onDelete: 'CASCADE',
+        orphanedRowAction: 'soft-delete',
+    })
     @JoinColumn({ name: 'product_id' })
     product: Product;
 }
