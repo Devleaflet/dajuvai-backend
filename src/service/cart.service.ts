@@ -254,7 +254,7 @@ export class CartService {
                     if (!variant) {
                         warningMessage = 'Associated variant no longer exists';
                     } else {
-                        if (variant.status !== 'AVAILABLE') {
+                        if (variant.status === 'OUT_OF_STOCK') {
                             warningMessage = 'Variant is not available';
                         } else if (item.quantity > variant.stock) {
                             warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
@@ -273,7 +273,7 @@ export class CartService {
                     } else {
                         if (product.hasVariants) {
                             warningMessage = 'Product requires a variant but none is selected';
-                        } else if (product.status !== 'AVAILABLE') {
+                        } else if (product.status === 'OUT_OF_STOCK') {
                             warningMessage = 'Product is not available';
                         } else if (item.quantity > (product.stock ?? 0)) {
                             warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
