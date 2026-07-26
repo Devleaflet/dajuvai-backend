@@ -30,7 +30,7 @@ import config from "../config/env.config";
 import { DiscountType, ProductSortOption } from "../entities/product.enum"; // adjust path as needed
 import { OrderStatus } from "../entities/order.entity";
 import { sanitizeVendor } from "../utils/sanitize.util";
-import { calculatePriceSnapshot } from "../utils/pricing.utils";
+import { calculatePriceSnapshot, normalizeLegacyProductDiscount, normalizeLegacyVariantDiscount } from "../utils/pricing.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { CartItem } from "../entities/cartItem.entity";
 
@@ -105,7 +105,7 @@ export class ProductService {
       take: limit,
     });
     const sanitizedProducts = products.map((p) => ({
-      ...p,
+      ...normalizeLegacyProductDiscount(p),
       vendor: p.vendor ? sanitizeVendor(p.vendor) : null,
     }));
 
@@ -123,8 +123,11 @@ export class ProductService {
     }
 
     const sanitizedProduct = {
-      ...product,
+      ...normalizeLegacyProductDiscount(product),
       vendor: product.vendor ? sanitizeVendor(product.vendor) : null,
+      variants: (product.variants ?? []).map((v) =>
+        normalizeLegacyVariantDiscount(v),
+      ),
     };
     return sanitizedProduct;
   }
@@ -1109,8 +1112,15 @@ export class ProductService {
 
     const [data, total] = await qb.getManyAndCount();
 
+    const normalizedData = data.map((p) => ({
+      ...normalizeLegacyProductDiscount(p),
+      variants: (p.variants ?? []).map((v) =>
+        normalizeLegacyVariantDiscount(v),
+      ),
+    }));
+
     return {
-      data,
+      data: normalizedData,
       total,
       page: Number(page),
       limit: Number(limit),
@@ -1334,7 +1344,13 @@ export class ProductService {
     );
     const sortedProducts = productIds
       .map((id) => productsById.get(id))
-      .filter((product): product is Product => Boolean(product));
+      .filter((product): product is Product => Boolean(product))
+      .map((p) => ({
+        ...normalizeLegacyProductDiscount(p),
+        variants: (p.variants ?? []).map((v) =>
+          normalizeLegacyVariantDiscount(v),
+        ),
+      }));
 
     return {
       products: sortedProducts,
@@ -1349,7 +1365,7 @@ export class ProductService {
     id: number,
     subcategoryId: number,
   ): Promise<Product | null> {
-    return this.productRepository
+    const product = await this.productRepository
       .createQueryBuilder("product")
       .leftJoinAndSelect("product.vendor", "vendor")
       .leftJoinAndSelect("product.subcategory", "subcategory")
@@ -1357,6 +1373,15 @@ export class ProductService {
       .where("product.id = :id", { id })
       .andWhere("subcategory.id = :subcategoryId", { subcategoryId })
       .getOne();
+
+    if (!product) return null;
+
+    // Normalize legacy discount fields in-place for all callers
+    const normalized = normalizeLegacyProductDiscount(product);
+    normalized.variants = (product.variants ?? []).map((v) =>
+      normalizeLegacyVariantDiscount(v),
+    );
+    return normalized;
   }
   async getVendorIdByProductId(productId: number): Promise<number> {
     const product = await this.productRepository.findOne({
@@ -1661,8 +1686,11 @@ export class ProductService {
       .filter((p): p is Product => Boolean(p));
 
     const sanitizedProducts = orderedProducts.map((p) => ({
-      ...p,
+      ...normalizeLegacyProductDiscount(p),
       vendor: sanitizeVendor(p.vendor),
+      variants: (p.variants ?? []).map((v) =>
+        normalizeLegacyVariantDiscount(v),
+      ),
     }));
 
     return { products: sanitizedProducts, total };

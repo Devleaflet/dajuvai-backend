@@ -393,7 +393,10 @@ export class VendorService {
                     businessName:
                         updateData.businessName ?? vendor.businessName,
                     phoneNumber: updateData.phoneNumber ?? vendor.phoneNumber,
-                    telePhone: updateData.telePhone ?? vendor.telePhone,
+                    telePhone:
+                        updateData.telePhone !== undefined
+                            ? updateData.telePhone
+                            : vendor.telePhone,
                     taxNumber: updateData.taxNumber ?? vendor.taxNumber,
                     taxDocuments:
                         updateData.taxDocuments ?? vendor.taxDocuments,

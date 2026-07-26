@@ -16,6 +16,11 @@ import { CartService } from "./cart.service";
 import { Variant } from "../entities/variant.entity";
 import { NotificationService } from "./notification.service";
 import { resolveFinalPrice } from "../utils/pricing.utils";
+import {
+    normalizeLegacyProductDiscount,
+    normalizeLegacyVariantDiscount,
+} from "../utils/pricing.utils";
+
 
 /**
  * Service for managing wishlist-related operations such as
@@ -142,6 +147,19 @@ export class WishlistService {
                 relations: ["items", "items.product", "items.variant"],
             });
 
+            // Normalize legacy discount fields on the freshly loaded items
+            if (wishlist) {
+                wishlist.items = wishlist.items.map((item) => ({
+                    ...item,
+                    product: item.product
+                        ? normalizeLegacyProductDiscount(item.product)
+                        : item.product,
+                    variant: item.variant
+                        ? normalizeLegacyVariantDiscount(item.variant)
+                        : item.variant,
+                }));
+            }
+
             // Push notification (fire-and-forget)
             new NotificationService()
                 .notifyAddToWishlist(userId, product.name)
@@ -223,6 +241,17 @@ export class WishlistService {
         wishlist.items = wishlist.items.filter((item) => {
             return Boolean(item.product);
         });
+
+        // Normalize legacy discount fields on embedded product/variant objects
+        wishlist.items = wishlist.items.map((item) => ({
+            ...item,
+            product: item.product
+                ? normalizeLegacyProductDiscount(item.product)
+                : item.product,
+            variant: item.variant
+                ? normalizeLegacyVariantDiscount(item.variant)
+                : item.variant,
+        }));
 
         return wishlist;
     }
@@ -499,6 +528,19 @@ export class WishlistService {
                 where: { userId },
                 relations: ["items", "items.product", "items.variant"],
             });
+
+            // Normalize legacy discount fields on items before returning
+            if (updatedWishlist) {
+                updatedWishlist.items = updatedWishlist.items.map((item) => ({
+                    ...item,
+                    product: item.product
+                        ? normalizeLegacyProductDiscount(item.product)
+                        : item.product,
+                    variant: item.variant
+                        ? normalizeLegacyVariantDiscount(item.variant)
+                        : item.variant,
+                }));
+            }
 
             return {
                 wishlist:

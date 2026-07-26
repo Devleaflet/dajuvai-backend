@@ -11,7 +11,7 @@ export const vendorSignupSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(25),
   phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/),
-  telePhone: z.string().optional(),
+  telePhone: z.string().optional().nullable(),
   district: z.string().min(1),
 
   businessRegNumber: z
@@ -95,7 +95,7 @@ export const paymentOptionEnum = z.nativeEnum(PaymentOption);
  * Used for: ESEWA, KHALTI, IMEPAY, FONEPAY
  */
 const walletDetailsSchema = z.object({
-  walletNumber: z.string().min(5, "Wallet number is required"),
+  walletNumber: z.string().length(10, "Wallet number must be 10 digits"),
   accountName: z.string().optional(),
 });
 
@@ -189,7 +189,7 @@ export const updateVendorSchema2 = z.object({
     .string()
     .regex(/^\+?[1-9]\d{1,14}$/)
     .optional(),
-  telePhone: z.string().optional(),
+  telePhone: z.string().optional().nullable(),
 
   taxNumber: z.string().optional(),
   taxDocuments: z.array(z.string().url()).optional(),
