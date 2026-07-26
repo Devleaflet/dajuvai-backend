@@ -1,6 +1,7 @@
 import { Repository } from "typeorm";
 import { Deal, DealStatus } from "../entities/deal.entity";
 import { Product } from "../entities/product.entity";
+import { Variant } from "../entities/variant.entity";
 import {
     CreateDealInput,
     UpdateDealInput,
@@ -18,6 +19,7 @@ export class DealService {
     private dealRepository: Repository<Deal>;
     private productRepository: Repository<Product>;
     private userRepository: Repository<User>;
+    private variantRepository: Repository<Variant>;
 
     /**
      * Initializes repositories for Deal, Product, and User entities.
@@ -26,6 +28,7 @@ export class DealService {
         this.dealRepository = AppDataSource.getRepository(Deal);
         this.productRepository = AppDataSource.getRepository(Product);
         this.userRepository = AppDataSource.getRepository(User);
+        this.variantRepository = AppDataSource.getRepository(Variant);
     }
 
     /**
@@ -158,6 +161,7 @@ export class DealService {
             .select("product.dealId", "dealId")
             .addSelect("COUNT(product.id)", "count")
             .where("product.dealId IS NOT NULL")
+            .andWhere("product.deletedAt IS NULL")
             .groupBy("product.dealId")
             .getRawMany();
 
@@ -186,8 +190,32 @@ export class DealService {
             throw new APIError(404, "Deal not found");
         }
 
-        // Unassign deal from all products
-        await this.productRepository.update({ dealId: id }, { dealId: null });
+        // Deal pricing is a snapshot: while assigned, a product/variant's own
+        // discount is zeroed out and finalPrice is computed off the deal
+        // instead (see ProductService.createProduct/updateProduct). Simply
+        // unassigning dealId here would leave that deal-discounted finalPrice
+        // permanently stuck — the deal is gone but the price it produced
+        // never reverts. Reset finalPrice back to basePrice (discount is
+        // already 0/NONE on every deal-priced row) for everything affected.
+        const affectedProducts = await this.productRepository.find({
+            where: { dealId: id },
+            relations: ["variants"],
+        });
+
+        for (const product of affectedProducts) {
+            product.dealId = null;
+            if (!product.hasVariants) {
+                product.finalPrice = product.basePrice;
+            }
+            await this.productRepository.save(product);
+
+            if (product.hasVariants && product.variants?.length) {
+                for (const variant of product.variants) {
+                    variant.finalPrice = variant.basePrice;
+                }
+                await this.variantRepository.save(product.variants);
+            }
+        }
 
         // Delete deal
         await this.dealRepository.delete(id);

@@ -432,6 +432,7 @@ export class AdminDashBoardService {
             .createQueryBuilder("product")
             .where("product.hasVariants = false")
             .andWhere("product.stock <= :threshold", { threshold })
+            .andWhere("product.deletedAt IS NULL")
             .select([
                 "product.id AS productId",
                 "product.name AS productName",
@@ -444,6 +445,8 @@ export class AdminDashBoardService {
             .createQueryBuilder("variant")
             .innerJoin("variant.product", "product")
             .where("variant.stock <= :threshold", { threshold })
+            .andWhere("variant.deletedAt IS NULL")
+            .andWhere("product.deletedAt IS NULL")
             .select([
                 "product.id AS productId",
                 "product.name AS productName",

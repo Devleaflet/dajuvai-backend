@@ -409,8 +409,16 @@ export class HomePageSectionService {
         }
 
         query
-            .leftJoinAndSelect("section.products", "products")
-            .leftJoinAndSelect("products.variants", "variants")
+            .leftJoinAndSelect(
+                "section.products",
+                "products",
+                "products.deletedAt IS NULL",
+            )
+            .leftJoinAndSelect(
+                "products.variants",
+                "variants",
+                "variants.deletedAt IS NULL",
+            )
             .leftJoinAndSelect("section.selectedCategory", "selectedCategory")
             .leftJoinAndSelect(
                 "section.selectedSubcategory",
@@ -430,8 +438,13 @@ export class HomePageSectionService {
             const dealIds = dealSections.map((s) => s.selectedDeal.id);
             const dealProducts = await this.productRepository
                 .createQueryBuilder("product")
-                .leftJoinAndSelect("product.variants", "variants")
+                .leftJoinAndSelect(
+                    "product.variants",
+                    "variants",
+                    "variants.deletedAt IS NULL",
+                )
                 .where("product.dealId IN (:...dealIds)", { dealIds })
+                .andWhere("product.deletedAt IS NULL")
                 .getMany();
             for (const p of dealProducts) {
                 const arr = dealProductsMap.get(p.dealId) ?? [];
@@ -453,10 +466,15 @@ export class HomePageSectionService {
             );
             const subcategoryProducts = await this.productRepository
                 .createQueryBuilder("product")
-                .leftJoinAndSelect("product.variants", "variants")
+                .leftJoinAndSelect(
+                    "product.variants",
+                    "variants",
+                    "variants.deletedAt IS NULL",
+                )
                 .where("product.subcategoryId IN (:...subcategoryIds)", {
                     subcategoryIds,
                 })
+                .andWhere("product.deletedAt IS NULL")
                 .getMany();
             for (const p of subcategoryProducts) {
                 const arr = subcategoryProductsMap.get(p.subcategoryId) ?? [];
@@ -479,11 +497,16 @@ export class HomePageSectionService {
             const { entities: categoryProducts, raw } =
                 await this.productRepository
                     .createQueryBuilder("product")
-                    .leftJoinAndSelect("product.variants", "variants")
+                    .leftJoinAndSelect(
+                    "product.variants",
+                    "variants",
+                    "variants.deletedAt IS NULL",
+                )
                     .leftJoin("product.subcategory", "subcategory")
                     .leftJoin("subcategory.category", "category")
                     .addSelect("category.id")
                     .where("category.id IN (:...categoryIds)", { categoryIds })
+                    .andWhere("product.deletedAt IS NULL")
                     .getRawAndEntities();
             for (let i = 0; i < categoryProducts.length; i++) {
                 const categoryId = Number(raw[i].category_id);

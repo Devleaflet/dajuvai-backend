@@ -180,6 +180,7 @@ export class DeliveryAdminService {
                 "orderItems.vendor",
             ],
             order: { createdAt: "DESC" },
+            withDeleted: true,
         });
 
         return orders.map((o) => sanitizeOrderForDelivery(o));
@@ -196,6 +197,7 @@ export class DeliveryAdminService {
                 "orderItems.variant",
                 "orderItems.vendor",
             ],
+            withDeleted: true,
         });
 
         if (!order) {
@@ -272,6 +274,7 @@ export class DeliveryAdminService {
             order: { updatedAt: "ASC" },
             skip: (page - 1) * limit,
             take: limit,
+            withDeleted: true,
         });
 
         const totalPages = Math.ceil(total / limit);

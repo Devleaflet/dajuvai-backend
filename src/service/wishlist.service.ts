@@ -205,7 +205,12 @@ export class WishlistService {
 
     /**
      * Retrieves the wishlist for a given user including product details.
-     * Filters out items whose products are deleted or out of stock.
+     * Out-of-stock items are kept (the frontend shows an "Out of stock"
+     * badge and disables move-to-cart for them) — only items whose product
+     * no longer resolves at all are dropped. In practice this is now rare:
+     * archiving a product removes its wishlist rows immediately
+     * (ProductService.removeFromCartsAndWishlists), so this filter mainly
+     * guards against any pre-existing orphaned rows.
      * @param userId - ID of the user
      * @returns Promise<Wishlist | null> - Wishlist or null if none found
      */
