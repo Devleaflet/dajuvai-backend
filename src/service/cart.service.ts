@@ -75,8 +75,7 @@ export class CartService {
             price = resolveFinalPrice({
                 finalPrice: variant.finalPrice,
                 basePrice: variant.basePrice,
-                discount: variant.discount,
-                discountType: variant.discountType,
+                discountAmount: variant.discountAmount,
             });
             if (variant.attributes?.name) name = `${product.name} - ${variant.attributes.name}`;
             if (variant.variantImages?.length) image = variant.variantImages[0];
@@ -96,8 +95,7 @@ export class CartService {
             price = resolveFinalPrice({
                 finalPrice: product.finalPrice,
                 basePrice: product.basePrice,
-                discount: product.discount,
-                discountType: product.discountType,
+                discountAmount: product.discountAmount,
             });
         }
 
@@ -264,8 +262,7 @@ export class CartService {
                         currentPrice = resolveFinalPrice({
                             finalPrice: variant.finalPrice,
                             basePrice: variant.basePrice,
-                            discount: variant.discount,
-                            discountType: variant.discountType,
+                            discountAmount: variant.discountAmount,
                         });
                     }
                 } else {
@@ -284,8 +281,7 @@ export class CartService {
                         currentPrice = resolveFinalPrice({
                             finalPrice: product.finalPrice,
                             basePrice: product.basePrice,
-                            discount: product.discount,
-                            discountType: product.discountType,
+                            discountAmount: product.discountAmount,
                         });
                     }
                 }

@@ -101,8 +101,7 @@ export const calculatePriceSnapshot = (
 export interface ResolveFinalPriceInput {
     finalPrice?: number | string | null;
     basePrice: number | string | null | undefined;
-    discount?: number | string | null;
-    discountType?: DiscountType | string | null;
+    discountAmount?: number | string | null;
 }
 
 export const resolveFinalPrice = (input: ResolveFinalPriceInput): number => {
@@ -113,8 +112,8 @@ export const resolveFinalPrice = (input: ResolveFinalPriceInput): number => {
 
     return calculatePriceSnapshot({
         basePrice: input.basePrice,
-        discount: input.discount,
-        discountType: input.discountType,
+        discount: input.discountAmount,
+        discountType: DiscountType.FLAT,
     }).finalPrice;
 };
 

@@ -15,7 +15,8 @@ interface Image {
 interface VariantInterface {
   sku: string;
   basePrice: string; // String from form, parsed to number
-  discount?: string; // Optional, defaults to "0"
+  discountAmount?: string; // Optional
+  discountPercent?: string; // Optional
   discountType?: DiscountType; // Optional, defaults to PERCENTAGE
   stock: string; // String from form, parsed to number
   status?: InventoryStatus; // Optional, defaults to AVAILABLE
@@ -29,7 +30,8 @@ export interface ProductInterface {
   description?: string;
   keywords?: string;
   basePrice?: string; // Required for non-variant products
-  discount?: string; // Optional, defaults to "0"
+  discountAmount?: string; // Optional
+  discountPercent?: string; // Optional
   discountType?: DiscountType; // Optional, defaults to PERCENTAGE
   stock?: string; // Required for non-variant products
   status?: InventoryStatus; // Optional, defaults to AVAILABLE
@@ -66,10 +68,15 @@ const ProductBaseSchema = z.object({
       value === "" || value === undefined ? undefined : Number(value),
     z.number().positive("Base price must be greater than zero").optional(),
   ),
-  discount: z.preprocess(
+  discountAmount: z.preprocess(
     (value) =>
       value === "" || value === undefined ? undefined : Number(value),
-    z.number().min(0, "Discount must be non-negative").optional(),
+    z.number().min(0, "Discount amount must be non-negative").optional(),
+  ),
+  discountPercent: z.preprocess(
+    (value) =>
+      value === "" || value === undefined ? undefined : Number(value),
+    z.number().min(0, "Discount percent must be non-negative").max(100, "Discount percent cannot exceed 100").optional(),
   ),
   discountType: z
     .enum([DiscountType.NONE, DiscountType.PERCENTAGE, DiscountType.FLAT])
@@ -111,10 +118,15 @@ const ProductBaseSchema = z.object({
             .positive("Variant price must be greater than zero")
             .optional(),
         ),
-        discount: z.preprocess(
+        discountAmount: z.preprocess(
           (value) =>
             value === "" || value === undefined ? undefined : Number(value),
-          z.number().min(0, "Variant discount must be non-negative").optional(),
+          z.number().min(0, "Variant discount amount must be non-negative").optional(),
+        ),
+        discountPercent: z.preprocess(
+          (value) =>
+            value === "" || value === undefined ? undefined : Number(value),
+          z.number().min(0, "Variant discount percent must be non-negative").max(100, "Variant discount percent cannot exceed 100").optional(),
         ),
         discountType: z
           .enum([DiscountType.NONE, DiscountType.PERCENTAGE, DiscountType.FLAT])
@@ -183,8 +195,7 @@ export const ProductCreateSchema = ProductBaseSchema.refine(
     (data) => {
       if (
         data.hasVariants !== true &&
-        data.discount !== undefined &&
-        data.discount > 0 &&
+        (data.discountAmount !== undefined || data.discountPercent !== undefined) &&
         data.basePrice === undefined
       ) {
         return false;
@@ -192,8 +203,23 @@ export const ProductCreateSchema = ProductBaseSchema.refine(
       return true;
     },
     {
-      message: "Discount requires discountType and basePrice to be provided.",
-      path: ["discount"],
+      message: "Discount requires basePrice to be provided.",
+      path: ["discountAmount", "discountPercent"],
+    },
+  )
+  .refine(
+    (data) => {
+      if (data.discountType === DiscountType.PERCENTAGE && data.discountPercent === undefined) {
+        return false;
+      }
+      if (data.discountType === DiscountType.FLAT && data.discountAmount === undefined) {
+        return false;
+      }
+      return true;
+    },
+    {
+      message: "Must provide discountPercent for PERCENTAGE discountType, or discountAmount for FLAT discountType.",
+      path: ["discountType"],
     },
   )
   .refine(

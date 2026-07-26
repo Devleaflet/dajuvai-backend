@@ -389,8 +389,7 @@ export class WishlistService {
                         price = resolveFinalPrice({
                             finalPrice: variant.finalPrice,
                             basePrice: variant.basePrice,
-                            discount: variant.discount,
-                            discountType: variant.discountType,
+                            discountAmount: variant.discountAmount,
                         });
                         if (variant.attributes?.name)
                             name = `${product.name} - ${variant.attributes.name}`;
@@ -444,8 +443,7 @@ export class WishlistService {
                         price = resolveFinalPrice({
                             finalPrice: product.finalPrice,
                             basePrice: product.basePrice,
-                            discount: product.discount,
-                            discountType: product.discountType,
+                            discountAmount: product.discountAmount,
                         });
 
                         if (existingCartItem) {
