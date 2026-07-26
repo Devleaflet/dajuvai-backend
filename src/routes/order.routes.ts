@@ -15,7 +15,6 @@ import {
     createOrderSchema,
     shippingAddressSchema,
     updateOrderStatusSchema,
-    updateVendorOrderStatusSchema,
 } from "../utils/zod_validations/order.zod";
 import { asyncHandler } from "../utils/asyncHandler.utils";
 
@@ -90,10 +89,10 @@ const orderController = new OrderController();
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "CASH_ON_DELIVERY"
@@ -128,10 +127,10 @@ const orderController = new OrderController();
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -239,10 +238,10 @@ router.post(
  *                         example: 200
  *                       status:
  *                         type: string
- *                         example: "PENDING"
+ *                         example: "CREATED"
  *                       paymentStatus:
  *                         type: string
- *                         example: "PENDING"
+ *                         example: "CREATED"
  *                       paymentMethod:
  *                         type: string
  *                         example: "CASH_ON_DELIVERY"
@@ -613,10 +612,10 @@ router.get(
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -787,10 +786,10 @@ router.get(
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -990,7 +989,7 @@ router.get(
 //  *                           example: "Pulchowk Road, Ward 3"
 //  *                     status:
 //  *                       type: string
-//  *                       example: "PENDING"
+//  *                       example: "CREATED"
 //  *                     orderedBy:
 //  *                       type: object
 //  *                       properties:
@@ -1108,10 +1107,10 @@ router.get(
 //  *                         example: 3500
 //  *                       paymentStatus:
 //  *                         type: string
-//  *                         example: "PENDING"
+//  *                         example: "CREATED"
 //  *                       status:
 //  *                         type: string
-//  *                         example: "PENDING"
+//  *                         example: "CREATED"
 //  *                       orderedBy:
 //  *                         type: object
 //  *                         properties:
@@ -1245,10 +1244,10 @@ router.get(
  *                       example: 3500
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "CREATED"
  *                     orderedBy:
  *                       type: object
  *                       properties:
@@ -1967,12 +1966,11 @@ router.get(
     vendorAuthMiddleware,
     asyncHandler(orderController.getVendorOrderDetails.bind(orderController)),
 );
-router.put(
-    "/vendor/:orderId/status",
+router.get(
+    "/vendor/:orderId/status-history",
     vendorAuthMiddleware,
     isVendor,
-    validateZod(updateVendorOrderStatusSchema),
-    asyncHandler(orderController.updateVendorOrderStatus.bind(orderController)),
+    asyncHandler(orderController.getVendorOrderStatusHistory.bind(orderController)),
 );
 
 /**

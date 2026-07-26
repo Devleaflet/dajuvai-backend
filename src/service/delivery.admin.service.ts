@@ -19,6 +19,7 @@ import {
     sanitizeOrderForDelivery,
     sanitizeRiderForDelivery,
 } from "../utils/deliveryResponseSanitizer.utils";
+import { OrderService } from "./order.service";
 
 export class DeliveryAdminService {
     private orderRepository: Repository<Order>;
@@ -26,6 +27,7 @@ export class DeliveryAdminService {
     private assignmentRepository: Repository<DeliveryAssignment>;
     private orderItemRepository: Repository<OrderItem>;
     private userRepository: Repository<User>;
+    private orderService: OrderService;
 
     // to verify status change
     readonly ALLOWED_STATUS_TRANSITIONS: Record<
@@ -55,6 +57,7 @@ export class DeliveryAdminService {
             AppDataSource.getRepository(DeliveryAssignment);
         this.orderItemRepository = AppDataSource.getRepository(OrderItem);
         this.userRepository = AppDataSource.getRepository(User);
+        this.orderService = new OrderService();
     }
 
     validateAndTransition(order: Order, target: DeliveryStatus): void {
@@ -220,6 +223,19 @@ export class DeliveryAdminService {
         this.validateAndTransition(order, DeliveryStatus.AT_WAREHOUSE);
         await this.orderRepository.save(order);
 
+        await this.orderService.changeOrderStatus(
+            orderId,
+            OrderStatus.ARRIVED_AT_WAREHOUSE,
+            {
+                actorRole: "SYSTEM",
+                reason: "Order arrived at warehouse",
+            },
+        );
+        // changeOrderStatus persists its own separately-fetched Order row —
+        // mirror the new value onto this local copy so the response we
+        // return here isn't stale.
+        order.status = OrderStatus.ARRIVED_AT_WAREHOUSE;
+
         return sanitizeOrderForDelivery(order);
     }
 
@@ -326,19 +342,32 @@ export class DeliveryAdminService {
             );
         }
 
-        return await AppDataSource.transaction(async (manager) => {
-            const assignment = manager.create(DeliveryAssignment, {
-                orderId,
-                riderId: data.riderId,
-            });
+        const savedAssignment = await AppDataSource.transaction(
+            async (manager) => {
+                const assignment = manager.create(DeliveryAssignment, {
+                    orderId,
+                    riderId: data.riderId,
+                });
 
-            const savedAssignment = await manager.save(assignment);
+                const saved = await manager.save(assignment);
 
-            this.validateAndTransition(order, DeliveryStatus.RIDER_ASSIGNED);
-            await manager.save(order);
+                this.validateAndTransition(order, DeliveryStatus.RIDER_ASSIGNED);
+                await manager.save(order);
 
-            return savedAssignment;
-        });
+                return saved;
+            },
+        );
+
+        await this.orderService.changeOrderStatus(
+            orderId,
+            OrderStatus.ASSIGNED_TO_RIDER,
+            {
+                actorRole: "SYSTEM",
+                reason: `Assigned to rider ${rider.fullName}`,
+            },
+        );
+
+        return savedAssignment;
     }
 
     async getAllAssignments(page: number = 1, limit: number = 20) {
@@ -389,8 +418,13 @@ export class DeliveryAdminService {
         const order = await this.findOrderById(orderId);
 
         this.validateAndTransition(order, DeliveryStatus.AT_WAREHOUSE);
-        order.status = OrderStatus.RETURNED;
         await this.orderRepository.save(order);
+
+        await this.orderService.changeOrderStatus(orderId, OrderStatus.RETURNED, {
+            actorRole: "SYSTEM",
+            reason: "Order returned to warehouse",
+        });
+        order.status = OrderStatus.RETURNED;
 
         return sanitizeOrderForDelivery(order);
     }

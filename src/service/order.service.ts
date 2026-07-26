@@ -25,10 +25,9 @@ import {
     OrderStatusChangedByRole,
 } from "../entities/orderStatusHistory.entity";
 import {
-    VendorOrderStatus,
-    VENDOR_ORDER_STATUS_TRANSITIONS,
-} from "../entities/orderVendorShipping.entity";
-import { ORDER_STATUS_TRANSITIONS } from "../constants/orderStatus.constants";
+    canTransition,
+    StatusActorRole,
+} from "../constants/orderStatus.constants";
 import {
     InvalidOrderStatusTransitionError,
     OrderStateChangedError,
@@ -68,6 +67,7 @@ import {
     ShippingCalculationService,
     calculateGrandTotal,
 } from "./shipping.service";
+import { emitOrderStatusUpdate } from "../socket/socket";
 
 /**
  * Service class responsible for managing orders.
@@ -453,7 +453,7 @@ export class OrderService {
             status:
                 orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
                     ? OrderStatus.CONFIRMED
-                    : OrderStatus.PENDING,
+                    : OrderStatus.CREATED,
             shippingAddress: address,
             shippingAddressSnapshot: {
                 province: address.province,
@@ -2460,24 +2460,25 @@ export class OrderService {
     }
 
     /**
-     * Update the status of an existing order by ID.
-     *
-     * @param {number} orderId - The ID of the order to update.
-     * @param {OrderStatus} status - The new status to set for the order.
-     * @returns {Promise<Order>} - The updated order entity.
-     * @throws {APIError} - Throws 404 if order not found, 400 if invalid status provided.
-     * @access Admin or authorized users
+     * The single function permitted to write Order.status anywhere in the
+     * codebase. Every other status-changing code path — the admin/staff
+     * free-form endpoint, delivery.admin.service.ts's markAtWarehouse/
+     * assignRider, delivery.rider.service.ts's markDelivered/
+     * markDeliveryFailed, payment webhooks — calls this instead of
+     * assigning order.status directly, so the permission check, audit
+     * log, customer/vendor emails, in-app notification, and socket push
+     * always happen together and never drift out of sync again.
      */
-    async updateOrderStatus(
+    async changeOrderStatus(
         orderId: number,
-        status: IUpdateOrderStatusRequest["status"],
+        targetStatus: OrderStatus,
         options: {
-            expectedCurrentStatus?: OrderStatus;
-            reason?: string;
-            note?: string;
+            actorRole: StatusActorRole;
             changedByUserId?: number;
-            changedByRole?: OrderStatusChangedByRole;
-        } = {},
+            reason: string;
+            note?: string;
+            expectedCurrentStatus?: OrderStatus;
+        },
     ): Promise<SanitizedOrderFull> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
@@ -2497,7 +2498,7 @@ export class OrderService {
         }
 
         // Optimistic-concurrency guard: reject if the order moved since the
-        // caller last read it (another admin, a vendor, or a payment webhook).
+        // caller last read it (another admin, a rider, or a payment webhook).
         if (
             options.expectedCurrentStatus &&
             options.expectedCurrentStatus !== order.status
@@ -2509,16 +2510,42 @@ export class OrderService {
 
         const previousStatus = order.status;
 
-        // Handle COD payment update on delivery
+        // Setting the same status again is a harmless no-op — match the
+        // pre-existing behavior (frontend already disables the submit
+        // button in this case) but skip every side effect below instead
+        // of re-sending a "status changed" email/notification for
+        // nothing changing.
+        if (previousStatus === targetStatus) {
+            return sanitizeOrderFull(order);
+        }
+
+        if (!canTransition(options.actorRole, previousStatus, targetStatus)) {
+            throw new InvalidOrderStatusTransitionError(
+                `${options.actorRole} cannot change order status from ${previousStatus} to ${targetStatus}.`,
+            );
+        }
+
+        // COD orders are marked PAID the moment they're confirmed delivered.
         if (
-            status === OrderStatus.DELIVERED &&
+            targetStatus === OrderStatus.DELIVERED &&
             order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
             order.paymentStatus !== PaymentStatus.PAID
         ) {
             order.paymentStatus = PaymentStatus.PAID;
         }
 
-        if (status === OrderStatus.CANCELLED && previousStatus !== OrderStatus.CANCELLED) {
+        // Restock whenever an order lands in a terminal not-fulfilled state,
+        // unless it was already in one (avoid double-crediting stock if an
+        // admin bounces between CANCELLED/NOT_RECEIVED/RETURNED).
+        const terminalUnfulfilled = [
+            OrderStatus.CANCELLED,
+            OrderStatus.NOT_RECEIVED,
+            OrderStatus.RETURNED,
+        ];
+        if (
+            terminalUnfulfilled.includes(targetStatus) &&
+            !terminalUnfulfilled.includes(previousStatus)
+        ) {
             for (const item of order.orderItems) {
                 if (item.variantId) {
                     const variant = await this.variantRepository.findOne({
@@ -2546,53 +2573,69 @@ export class OrderService {
             }
         }
 
-        order.status = status;
-
-        // Handle COD payment update on delivery
-        if (
-            status === OrderStatus.DELIVERED &&
-            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY &&
-            order.paymentStatus !== PaymentStatus.PAID
-        ) {
-            order.paymentStatus = PaymentStatus.PAID;
-        }
-
+        order.status = targetStatus;
         await this.orderRepository.save(order);
-        await this.recordStatusChange(
-            order.id,
-            previousStatus,
-            status,
-            options,
-        );
+
+        const changedByRole: OrderStatusChangedByRole =
+            options.actorRole === "RIDER"
+                ? OrderStatusChangedByRole.RIDER
+                : options.actorRole === "SYSTEM"
+                  ? OrderStatusChangedByRole.SYSTEM
+                  : OrderStatusChangedByRole.ADMIN;
+
+        await this.recordStatusChange(order.id, previousStatus, targetStatus, {
+            reason: options.reason,
+            note: options.note,
+            changedByUserId: options.changedByUserId,
+            changedByRole,
+        });
 
         if (order.orderedBy?.email) {
-            await sendOrderStatusEmail(
-                order.orderedBy.email,
-                order.orderNumber,
-                order.status,
+            try {
+                await sendOrderStatusEmail(
+                    order.orderedBy.email,
+                    order.orderNumber,
+                    order.status,
+                );
+            } catch (error) {
+                console.error("Failed to send customer status email:", error);
+            }
+        }
+
+        // CREATED is covered by the order-placed email already sent at
+        // checkout — every other transition gets a vendor notification.
+        if (targetStatus !== OrderStatus.CREATED) {
+            const vendorEmails = [
+                ...new Set(
+                    order.orderItems
+                        .filter((item) => item.vendorId && item.vendor?.email)
+                        .map((item) => item.vendor.email),
+                ),
+            ];
+
+            await Promise.all(
+                vendorEmails.map((email) =>
+                    sendVendorOrderStatusEmail(
+                        email,
+                        order.orderNumber,
+                        order.status,
+                    ).catch((error) => {
+                        console.error(
+                            "Failed to send vendor status email:",
+                            error,
+                        );
+                    }),
+                ),
             );
         }
 
-        const notifyVendor = [OrderStatus.CANCELLED, OrderStatus.DELAYED, OrderStatus.DELIVERED, OrderStatus.RETURNED]
-
-        if(notifyVendor.includes(status)){
-            let vendorEmails: string[] = []
-            for(const item of order.orderItems){
-                if(item.vendorId){
-                    vendorEmails.push(item.vendor.email)
-                }
-            }
-            vendorEmails = [...new Set(vendorEmails)]
-            
-            // send email to all vendor at once
-            await Promise.all(vendorEmails.map(email => {
-                return sendVendorOrderStatusEmail(
-                    email,
-                    order.orderNumber,
-                    order.status,
-                )
-            }))
+        try {
+            await this.notificationService.notifyOrderStatusUpdated(order);
+        } catch (error) {
+            console.error("Failed to send order status notification:", error);
         }
+
+        emitOrderStatusUpdate(order);
 
         return sanitizeOrderFull(order);
     }
@@ -2643,81 +2686,24 @@ export class OrderService {
     }
 
     /**
-     * Vendor-scoped fulfillment status update — moves only this vendor's own
-     * OrderVendorShipping.status, never the parent Order.status. A vendor
-     * cannot mark an order DELIVERED (courier/admin-only) or touch another
-     * vendor's row.
+     * Same timeline as getOrderStatusHistory, scoped to a vendor: throws if
+     * the vendor has no items on this order, so a vendor can never read
+     * another vendor's — or another customer's unrelated — order history.
      */
-    async updateVendorOrderStatus(
+    async getOrderStatusHistoryForVendor(
         vendorId: number,
         orderId: number,
-        status: VendorOrderStatus,
-        options: { reason?: string; note?: string } = {},
-    ): Promise<SanitizedVendorOrderView> {
-        const vendorShipping = await this.orderVendorShippingRepository.findOne(
-            {
-                where: { orderId, vendorId },
-            },
-        );
-
-        if (!vendorShipping) {
+    ): Promise<OrderStatusHistory[]> {
+        const hasAccess = await this.orderItemRepository.exists({
+            where: { orderId, vendorId },
+        });
+        if (!hasAccess) {
             throw new APIError(
                 404,
                 "Order not found or you are not authorized to view it",
             );
         }
-
-        if (status === VendorOrderStatus.DELIVERED) {
-            throw new InvalidOrderStatusTransitionError(
-                "Vendors cannot mark an order delivered — this requires courier or admin confirmation.",
-            );
-        }
-
-        const previousStatus = vendorShipping.status;
-        if (
-            previousStatus !== status &&
-            !VENDOR_ORDER_STATUS_TRANSITIONS[previousStatus].includes(status)
-        ) {
-            throw new InvalidOrderStatusTransitionError(
-                `This vendor's order cannot move from ${previousStatus} to ${status}.`,
-            );
-        }
-
-        vendorShipping.status = status;
-        await this.orderVendorShippingRepository.save(vendorShipping);
-
-        if (previousStatus !== status) {
-            await this.orderStatusHistoryRepository.save(
-                this.orderStatusHistoryRepository.create({
-                    orderId,
-                    vendorOrderId: vendorShipping.id,
-                    previousStatus: previousStatus as unknown as OrderStatus,
-                    newStatus: status as unknown as OrderStatus,
-                    changedByRole: OrderStatusChangedByRole.VENDOR,
-                    reason: options.reason ?? null,
-                    note: options.note ?? null,
-                }),
-            );
-        }
-
-        const order = await this.orderRepository
-            .createQueryBuilder("order")
-            .leftJoinAndSelect("order.orderItems", "orderItems")
-            .leftJoinAndSelect("order.orderedBy", "orderedBy")
-            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
-            .leftJoinAndSelect("orderItems.product", "product")
-            .leftJoinAndSelect("orderItems.vendor", "vendor")
-            .leftJoinAndSelect("orderItems.variant", "variant")
-            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
-            .where("order.id = :orderId", { orderId })
-            .andWhere("orderItems.vendorId = :vendorId", { vendorId })
-            .getOne();
-
-        if (!order) {
-            throw new APIError(404, "Order not found");
-        }
-
-        return sanitizeOrderForVendor(order, vendorId);
+        return this.getOrderStatusHistory(orderId);
     }
 
     /**
@@ -2786,7 +2772,7 @@ export class OrderService {
         if (params.status) {
             const statusMap: Record<string, string> = {
                 delivered: "DELIVERED",
-                pending: "PENDING",
+                pending: "CREATED",
                 canceled: "CANCELLED",
                 cancelled: "CANCELLED",
             };
@@ -2838,8 +2824,8 @@ export class OrderService {
                 const s = (row.status || "").toUpperCase();
                 const n = Number(row.count);
                 if (s === "DELIVERED") statusCounts.delivered += n;
-                else if (s === "PENDING") statusCounts.pending += n;
-                else if (s === "CANCELLED" || s === "CANCELED" || s === "RETURNED") statusCounts.canceled += n;
+                else if (s === "CREATED") statusCounts.pending += n;
+                else if (s === "CANCELLED" || s === "CANCELED" || s === "RETURNED" || s === "NOT_RECEIVED") statusCounts.canceled += n;
             }
         }
 

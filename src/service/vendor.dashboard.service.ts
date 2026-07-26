@@ -1,7 +1,7 @@
 import AppDataSource from "../config/db.config";
-import { OrderItem, OrderStatus } from "../entities/orderItems.entity";
+import { OrderItem } from "../entities/orderItems.entity";
 import { Product } from "../entities/product.entity";
-import { Order } from "../entities/order.entity";
+import { Order, OrderStatus } from "../entities/order.entity";
 import config from "../config/env.config";
 import { InventoryStatus } from "../entities/product.enum";
 
@@ -50,7 +50,7 @@ export class VendorDashBoardService {
             .createQueryBuilder('orderItem')
             .leftJoin('orderItem.order', 'order')
             .where('orderItem.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.PENDING })
+            .andWhere('order.status = :status', { status: OrderStatus.CREATED })
             .getCount();
 
         // Low-stock and out-of-stock counts, split, across ALL of the vendor's

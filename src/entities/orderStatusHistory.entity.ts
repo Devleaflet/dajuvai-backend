@@ -15,6 +15,7 @@ export enum OrderStatusChangedByRole {
     VENDOR = "VENDOR",
     SYSTEM = "SYSTEM",
     CUSTOMER = "CUSTOMER",
+    RIDER = "RIDER",
 }
 
 /**

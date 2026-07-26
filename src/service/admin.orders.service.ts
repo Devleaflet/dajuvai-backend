@@ -39,13 +39,13 @@ export class AdminOrdersService {
     }
 
     /**
-     * Count in-flight orders: PENDING, SHIPPED, CONFIRMED.
+     * Count in-flight orders: CREATED, ASSIGNED_TO_RIDER.
      */
     async getProcessingOrdersCount(): Promise<number> {
         return this.orderRepository
             .createQueryBuilder('order')
             .where('order.status IN (:...statuses)', {
-                statuses: [OrderStatus.PENDING, OrderStatus.SHIPPED],
+                statuses: [OrderStatus.CREATED, OrderStatus.ASSIGNED_TO_RIDER],
             })
             .getCount();
     }

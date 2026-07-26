@@ -9,7 +9,6 @@ import {
     IOrderCreateRequest,
     IShippingAddressRequest,
     IUpdateOrderStatusRequest,
-    IUpdateVendorOrderStatusRequest,
 } from "../interface/order.interface";
 import {
     BadRequestError,
@@ -26,7 +25,6 @@ import {
 import { VendorService } from "../service/vendor.service";
 import { PaymentService } from "../service/payment.service";
 import { Order, PaymentMethod } from "../entities/order.entity";
-import { OrderStatusChangedByRole } from "../entities/orderStatusHistory.entity";
 import AppDataSource from "../config/db.config";
 import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
@@ -460,21 +458,18 @@ export class OrderController {
 
         const { status, expectedCurrentStatus, reason, note } =
             req.body as IUpdateOrderStatusRequest;
-        const updatedOrder = await this.orderService.updateOrderStatus(
+
+        const updatedOrder = await this.orderService.changeOrderStatus(
             orderId,
             status,
             {
-                expectedCurrentStatus,
+                actorRole: "ADMIN",
+                changedByUserId: req.user.id,
                 reason,
                 note,
-                changedByUserId: req.user.id,
-                // This route is admin/staff-only (see order.routes.ts) — vendor
-                // status changes go through a separate vendor endpoint.
-                changedByRole: OrderStatusChangedByRole.ADMIN,
+                expectedCurrentStatus,
             },
         );
-
-        await this.notificationService.notifyOrderStatusUpdated(updatedOrder);
 
         res.status(200).json({ success: true, data: updatedOrder });
     }
@@ -493,6 +488,28 @@ export class OrderController {
         if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
 
         const history = await this.orderService.getOrderStatusHistory(orderId);
+        res.status(200).json({ success: true, data: history });
+    }
+
+    /**
+     * @desc Get the status-change timeline for an order, scoped to a vendor
+     * @route GET /order/vendor/:orderId/status-history
+     * @access Vendor
+     */
+    async getVendorOrderStatusHistory(
+        req: VendorAuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
+
+        const orderId = parseInt(req.params.orderId, 10);
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+
+        const history = await this.orderService.getOrderStatusHistoryForVendor(
+            req.vendor.id,
+            orderId,
+        );
         res.status(200).json({ success: true, data: history });
     }
 
@@ -585,36 +602,6 @@ export class OrderController {
         const order = await this.orderService.getVendorOrderDetails(
             req.vendor.id,
             orderId,
-        );
-        res.status(200).json({ success: true, data: order });
-    }
-
-    /**
-     * @desc Vendor updates its own fulfillment stage for an order (never the
-     * parent order's overall status, and never another vendor's row).
-     * @route PUT /vendor/:orderId/status
-     * @access Vendor
-     */
-    async updateVendorOrderStatus(
-        req: VendorAuthRequest<
-            { orderId: string },
-            {},
-            IUpdateVendorOrderStatusRequest
-        >,
-        res: Response,
-        _next: NextFunction,
-    ): Promise<void> {
-        if (!req.vendor) throw new AuthError("Vendor not authenticated");
-
-        const orderId = parseInt(req.params.orderId, 10);
-        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
-
-        const { status, reason, note } = req.body;
-        const order = await this.orderService.updateVendorOrderStatus(
-            req.vendor.id,
-            orderId,
-            status,
-            { reason, note },
         );
         res.status(200).json({ success: true, data: order });
     }

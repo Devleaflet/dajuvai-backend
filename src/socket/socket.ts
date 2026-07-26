@@ -6,6 +6,7 @@ import { User } from "../entities/user.entity";
 import { Vendor } from "../entities/vendor.entity";
 import { Cart } from "../entities/cart.entity";
 import { CommissionDocument } from "../entities/commissionDocument.entity";
+import { Order } from "../entities/order.entity";
 import { allowedOrigins } from "../config/cors.config";
 import config from "../config/env.config";
 
@@ -121,4 +122,24 @@ export const emitCommissionUpdate = (document: CommissionDocument) => {
 export const emitCommissionDelete = () => {
     if (!io) return;
     io.to(VENDORS_ROOM).emit("commission:delete");
+};
+
+// Pushes a live status update to the customer and every vendor on the
+// order the moment Order.status changes — closes the gap where status
+// changes only ever reached clients via poll/refresh/email.
+export const emitOrderStatusUpdate = (order: Order) => {
+    if (!io) return;
+    const payload = {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+    };
+    io.to(userRoom(order.orderedById)).emit("order:statusUpdated", payload);
+
+    const vendorIds = [
+        ...new Set((order.orderItems ?? []).map((item) => item.vendorId)),
+    ];
+    for (const vendorId of vendorIds) {
+        io.to(vendorRoom(vendorId)).emit("order:statusUpdated", payload);
+    }
 };

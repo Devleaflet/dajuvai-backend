@@ -393,7 +393,6 @@ export class DeliveryService {
 
         return await AppDataSource.transaction(async (manager) => {
             this.validateAndTransition(order, DeliveryStatus.OUT_FOR_DELIVERY);
-            order.status = OrderStatus.SHIPPED;
             await manager.save(order);
 
             assignment.assignmentStatus = AssignmentStatus.PICKED_UP;

@@ -26,8 +26,8 @@ const getOrderStatusEmailMeta = (status: string) => {
         string,
         { label: string; color: string; bg: string; copy: string }
     > = {
-        PENDING: {
-            label: "Pending",
+        CREATED: {
+            label: "Order Placed",
             color: "#92400e",
             bg: "#fef3c7",
             copy: "We have received your order and are waiting for confirmation.",
@@ -44,23 +44,35 @@ const getOrderStatusEmailMeta = (status: string) => {
             bg: "#ede9fe",
             copy: "Your order is being prepared by the seller.",
         },
+        ARRIVED_AT_WAREHOUSE: {
+            label: "At Warehouse",
+            color: "#7c3aed",
+            bg: "#ede9fe",
+            copy: "Your order has arrived at our warehouse and is being prepared for delivery.",
+        },
         DELAYED: {
             label: "Delayed",
             color: "#be123c",
             bg: "#ffe4e6",
             copy: "Order is taking longer than expected. We will keep you updated.",
         },
-        SHIPPED: {
-            label: "Shipped",
+        ASSIGNED_TO_RIDER: {
+            label: "Out for Delivery",
             color: "#0369a1",
             bg: "#e0f2fe",
-            copy: "Your order has been handed to delivery and is on the way.",
+            copy: "Your order has been handed to a delivery rider and is on the way.",
         },
         DELIVERED: {
             label: "Delivered",
             color: "#047857",
             bg: "#d1fae5",
             copy: "Your order has been delivered. Thank you for shopping with DajuVai.",
+        },
+        NOT_RECEIVED: {
+            label: "Not Received",
+            color: "#b45309",
+            bg: "#fef3c7",
+            copy: "We were unable to deliver your order. Our team will reach out shortly to reschedule.",
         },
         CANCELLED: {
             label: "Cancelled",
@@ -1082,11 +1094,23 @@ const getVendorOrderStatusEmailMeta = (status: string) => {
         string,
         { label: string; color: string; bg: string; copy: string }
     > = {
-        CANCELLED: {
-            label: "Cancelled",
-            color: "#b91c1c",
-            bg: "#fee2e2",
-            copy: "This order has been cancelled. Please do not fulfill this order if it hasn't been shipped yet.",
+        CREATED: {
+            label: "Order Placed",
+            color: "#92400e",
+            bg: "#fef3c7",
+            copy: "A new order has been placed for one of your products.",
+        },
+        PROCESSING: {
+            label: "Processing",
+            color: "#6d28d9",
+            bg: "#ede9fe",
+            copy: "This order is being prepared. Please ensure it is packed and ready for pickup.",
+        },
+        ARRIVED_AT_WAREHOUSE: {
+            label: "At Warehouse",
+            color: "#7c3aed",
+            bg: "#ede9fe",
+            copy: "This order has arrived at the warehouse.",
         },
         DELAYED: {
             label: "Delayed",
@@ -1094,11 +1118,29 @@ const getVendorOrderStatusEmailMeta = (status: string) => {
             bg: "#ffe4e6",
             copy: "This order is currently delayed. Please ensure it is fulfilled and dispatched as soon as possible.",
         },
+        ASSIGNED_TO_RIDER: {
+            label: "Out for Delivery",
+            color: "#0369a1",
+            bg: "#e0f2fe",
+            copy: "This order has been handed to a delivery rider.",
+        },
         DELIVERED: {
             label: "Delivered",
             color: "#047857",
             bg: "#d1fae5",
             copy: "This order has been successfully delivered to the customer.",
+        },
+        NOT_RECEIVED: {
+            label: "Not Received",
+            color: "#b45309",
+            bg: "#fef3c7",
+            copy: "The customer did not receive this order. Please check your dashboard for details.",
+        },
+        CANCELLED: {
+            label: "Cancelled",
+            color: "#b91c1c",
+            bg: "#fee2e2",
+            copy: "This order has been cancelled. Please do not fulfill this order if it hasn't been shipped yet.",
         },
         RETURNED: {
             label: "Returned",

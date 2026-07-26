@@ -352,9 +352,6 @@ export interface SanitizedVendorOrderView {
      * for its own shipment — never the order's other-vendor fees or total. */
     ownShippingFee: number | null;
     ownShippingZone: string | null;
-    /** This vendor's own fulfillment stage (OrderVendorShipping.status) —
-     * separate from the parent order's overall `status` above. */
-    fulfillmentStatus: string | null;
 }
 
 /**
@@ -397,6 +394,5 @@ export const sanitizeOrderForVendor = (
         vendorPayable: Number((itemsSubtotal - discountAllocation).toFixed(2)),
         ownShippingFee: ownShipping ? Number(ownShipping.shippingFee) : null,
         ownShippingZone: ownShipping?.shippingZone ?? null,
-        fulfillmentStatus: ownShipping?.status ?? null,
     };
 };

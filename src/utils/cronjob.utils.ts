@@ -161,7 +161,7 @@ export const startOrderCleanupJob = () => {
                     paymentMethod: In([PaymentMethod.ESEWA, PaymentMethod.NPX]),
                     paymentStatus: PaymentStatus.UNPAID,
                     createdAt: LessThan(fifteenMinutesAgo),
-                    status: OrderStatus.PENDING,
+                    status: OrderStatus.CREATED,
                 },
                 relations: ["orderedBy", "orderItems", "orderItems.vendor"],
             });

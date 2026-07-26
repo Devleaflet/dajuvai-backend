@@ -15,12 +15,14 @@ import { OrderItem } from "./orderItems.entity";
 import { OrderVendorShipping } from "./orderVendorShipping.entity";
 
 export enum OrderStatus {
-    PENDING = "PENDING",
+    CREATED = "CREATED",
     CONFIRMED = "CONFIRMED",
     PROCESSING = "PROCESSING",
+    ARRIVED_AT_WAREHOUSE = "ARRIVED_AT_WAREHOUSE",
     DELAYED = "DELAYED",
-    SHIPPED = "SHIPPED",
+    ASSIGNED_TO_RIDER = "ASSIGNED_TO_RIDER",
     DELIVERED = "DELIVERED",
+    NOT_RECEIVED = "NOT_RECEIVED",
     CANCELLED = "CANCELLED",
     RETURNED = "RETURNED",
 }
@@ -115,7 +117,7 @@ export class Order {
     @Column({
         type: "enum",
         enum: OrderStatus,
-        default: OrderStatus.CONFIRMED,
+        default: OrderStatus.CREATED,
     })
     status: OrderStatus;
 

@@ -1,7 +1,6 @@
 
 import { z } from 'zod';
 import { OrderStatus } from '../../entities/order.entity';
-import { VendorOrderStatus } from '../../entities/orderVendorShipping.entity';
 
 /**
  * Enum schema for Nepal provinces used in shipping addresses.
@@ -77,27 +76,17 @@ export const createOrderSchema = z.object({
 
 /**
  * Schema for validating updates to order status.
- * 
- * Requires:
- * - status: must be a valid OrderStatusEnum value.
+ *
+ * `reason` is now required — every admin/rider status change must be
+ * attributable, not just optionally so. `note` stays optional for
+ * additional free-text context.
  */
 export const updateOrderStatusSchema = z.object({
     status: OrderStatusEnum,
     // Optimistic-concurrency guard: if provided and it no longer matches the
     // order's current status, the update is rejected with 409 instead of
-    // silently overwriting a change another admin/vendor/webhook just made.
+    // silently overwriting a change another admin/rider/webhook just made.
     expectedCurrentStatus: OrderStatusEnum.optional(),
-    reason: z.string().max(500).optional(),
-    note: z.string().max(1000).optional(),
-});
-
-/**
- * Schema for a vendor updating its own fulfillment stage for an order.
- * Deliberately a separate, narrower enum than the admin order-status
- * schema — a vendor can never set DELIVERED or any parent-order-only value.
- */
-export const updateVendorOrderStatusSchema = z.object({
-    status: z.nativeEnum(VendorOrderStatus),
-    reason: z.string().max(500).optional(),
+    reason: z.string().min(1, "Reason is required").max(500),
     note: z.string().max(1000).optional(),
 });

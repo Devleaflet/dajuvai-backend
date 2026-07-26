@@ -77,7 +77,7 @@ export class AdminVendorsService {
             .addSelect('vendor.businessName', 'businessName')
             .addSelect('SUM(orderItem.quantity * orderItem.price)', 'totalRevenue')
             .where('order.status IN (:...statuses)', {
-                statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED, OrderStatus.SHIPPED],
+                statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED, OrderStatus.ASSIGNED_TO_RIDER],
             })
             .andWhere('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
             .andWhere('order.createdAt BETWEEN :start AND :end', {

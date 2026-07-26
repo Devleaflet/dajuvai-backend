@@ -22,26 +22,26 @@ export class VendorOrdersService {
     }
 
     /**
-     * Count order items for this vendor where the parent order is PENDING.
+     * Count order items for this vendor where the parent order is CREATED.
      */
     async getNeedingFulfillmentCount(vendorId: number): Promise<number> {
         return this.orderItemRepository
             .createQueryBuilder('oi')
             .innerJoin('oi.order', 'order')
             .where('oi.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.PENDING })
+            .andWhere('order.status = :status', { status: OrderStatus.CREATED })
             .getCount();
     }
 
     /**
-     * Count order items for this vendor where the parent order is SHIPPED or OUT_FOR_DELIVERY.
+     * Count order items for this vendor where the parent order is ASSIGNED_TO_RIDER.
      */
     async getInDeliveryCount(vendorId: number): Promise<number> {
         return this.orderItemRepository
             .createQueryBuilder('oi')
             .innerJoin('oi.order', 'order')
             .where('oi.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.SHIPPED })
+            .andWhere('order.status = :status', { status: OrderStatus.ASSIGNED_TO_RIDER })
             .getCount();
     }
 

@@ -53,13 +53,7 @@ export interface IVendorOrderResponse {
 export interface IUpdateOrderStatusRequest {
     status: OrderStatus;
     expectedCurrentStatus?: OrderStatus;
-    reason?: string;
-    note?: string;
-}
-
-export interface IUpdateVendorOrderStatusRequest {
-    status: import('../entities/orderVendorShipping.entity').VendorOrderStatus;
-    reason?: string;
+    reason: string;
     note?: string;
 }
 
