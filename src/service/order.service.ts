@@ -157,16 +157,14 @@ export class OrderService {
             return resolveFinalPrice({
                 finalPrice: item.variant.finalPrice,
                 basePrice: item.variant.basePrice,
-                discount: item.variant.discount,
-                discountType: item.variant.discountType,
+                discountAmount: item.variant.discountAmount,
             });
         }
 
         return resolveFinalPrice({
             finalPrice: item?.product?.finalPrice,
             basePrice: item?.product?.basePrice,
-            discount: item?.product?.discount,
-            discountType: item?.product?.discountType,
+            discountAmount: item?.product?.discountAmount,
         });
     }
 
@@ -2068,7 +2066,8 @@ export class OrderService {
                         sku: true,
                         basePrice: true,
                         finalPrice: true,
-                        discount: true,
+                        discountAmount: true,
+                        discountPercent: true,
                         discountType: true,
                         attributes: true,
                         variantImages: true,

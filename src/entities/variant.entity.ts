@@ -19,7 +19,13 @@ export class Variant {
     @Column({ type: 'decimal', precision: 8, scale: 2, default: 0 })
     discount: number;
 
-    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.PERCENTAGE })
+    @Column({ type: 'decimal', precision: 8, scale: 2, default: 0 })
+    discountAmount: number;
+
+    @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
+    discountPercent: number;
+
+    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.NONE })
     discountType: DiscountType;
 
     @Column({ type: 'jsonb', nullable: true })

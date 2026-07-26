@@ -254,37 +254,50 @@ export class ProductService {
 
   private normalizeDiscount(
     basePrice: number,
-    discount: unknown,
+    discountAmount: unknown,
+    discountPercent: unknown,
     discountType: unknown,
     fieldPrefix = "Discount",
-  ): { discount: number; discountType: DiscountType } {
-    const normalizedDiscount = this.parseNumber(discount ?? 0, fieldPrefix);
-    const normalizedDiscountType =
-      normalizedDiscount > 0
-        ? this.sanitizeDiscountType(discountType ?? DiscountType.PERCENTAGE)
-        : this.sanitizeDiscountType(discountType);
+  ): { discountAmount: number; discountPercent: number; discountType: DiscountType; discount: number } {
+    const normalizedDiscountType = this.sanitizeDiscountType(discountType);
 
     if (normalizedDiscountType === DiscountType.NONE) {
-      return { discount: 0, discountType: DiscountType.NONE };
+      return { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 };
     }
+
+    const parsedDiscountAmount = this.parseNumber(discountAmount ?? 0, fieldPrefix + " Amount");
+    const parsedDiscountPercent = this.parseNumber(discountPercent ?? 0, fieldPrefix + " Percent");
 
     if (
       normalizedDiscountType === DiscountType.PERCENTAGE &&
-      normalizedDiscount > 100
+      parsedDiscountPercent > 100
     ) {
-      throw new APIError(400, `${fieldPrefix} cannot exceed 100%`);
+      throw new APIError(400, `${fieldPrefix} percent cannot exceed 100%`);
     }
 
     if (
       normalizedDiscountType === DiscountType.FLAT &&
-      normalizedDiscount > basePrice
+      parsedDiscountAmount > basePrice
     ) {
-      throw new APIError(400, `${fieldPrefix} cannot exceed base price`);
+      throw new APIError(400, `${fieldPrefix} amount cannot exceed base price`);
+    }
+
+    let finalDiscountAmount = 0;
+    let finalDiscountPercent = 0;
+
+    if (normalizedDiscountType === DiscountType.FLAT) {
+        finalDiscountAmount = parsedDiscountAmount;
+        finalDiscountPercent = basePrice > 0 ? Number(((parsedDiscountAmount / basePrice) * 100).toFixed(2)) : 0;
+    } else if (normalizedDiscountType === DiscountType.PERCENTAGE) {
+        finalDiscountPercent = parsedDiscountPercent;
+        finalDiscountAmount = Number(((basePrice * parsedDiscountPercent) / 100).toFixed(2));
     }
 
     return {
-      discount: normalizedDiscount,
+      discountAmount: finalDiscountAmount,
+      discountPercent: finalDiscountPercent,
       discountType: normalizedDiscountType,
+      discount: normalizedDiscountType === DiscountType.FLAT ? finalDiscountAmount : finalDiscountPercent,
     };
   }
 
@@ -311,27 +324,30 @@ export class ProductService {
       },
     );
 
-    const { discount, discountType } = hasDeal
-      ? { discount: 0, discountType: DiscountType.NONE }
+    const { discountAmount, discountPercent, discountType, discount } = hasDeal
+      ? { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 }
       : this.normalizeDiscount(
           base,
-          variant?.discount,
+          variant?.discountAmount,
+          variant?.discountPercent,
           variant?.discountType,
           `Variant ${index + 1} discount`,
         );
 
     const priceAfterDiscount = this.calculateFinalPrice(
       base,
-      discount,
-      discountType,
+      discountAmount,
+      DiscountType.FLAT,
     );
 
     return {
       id: Number.isFinite(Number(variant?.id)) ? Number(variant.id) : undefined,
       sku,
       basePrice: base,
-      discount,
+      discountAmount,
+      discountPercent,
       discountType,
+      discount,
       attributes: this.normalizeAttributes(variant?.attributes),
       variantImages: this.normalizeImageUrls(
         variant?.variantImages ?? variant?.images ?? [],
@@ -373,7 +389,8 @@ export class ProductService {
       description,
       keywords,
       basePrice,
-      discount,
+      discountAmount,
+      discountPercent,
       discountType,
       stock,
       dealId,
@@ -460,10 +477,11 @@ export class ProductService {
           integer: true,
         });
     const normalizedProductDiscount = hasDeal
-      ? { discount: 0, discountType: DiscountType.NONE }
+      ? { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 }
       : this.normalizeDiscount(
           Number(normalizedBasePrice || 0),
-          discount,
+          discountAmount,
+          discountPercent,
           discountType,
         );
     const normalizedVariants = isVariantProduct
@@ -481,8 +499,8 @@ export class ProductService {
     if (!isVariantProduct) {
       const priceAfterDiscount = this.calculateFinalPrice(
         Number(normalizedBasePrice),
-        normalizedProductDiscount.discount,
-        normalizedProductDiscount.discountType,
+        normalizedProductDiscount.discountAmount,
+        DiscountType.FLAT,
       );
 
       finalPrice = this.applyDealPrice(priceAfterDiscount, deal);
@@ -497,8 +515,10 @@ export class ProductService {
       description,
       keywords,
       basePrice: isVariantProduct ? null : normalizedBasePrice,
-      discount: normalizedProductDiscount.discount,
+      discountAmount: normalizedProductDiscount.discountAmount,
+      discountPercent: normalizedProductDiscount.discountPercent,
       discountType: normalizedProductDiscount.discountType,
+      discount: normalizedProductDiscount.discount,
       stock: isVariantProduct ? variantInventory.stock : normalizedStock,
       status: isVariantProduct
         ? variantInventory.status
@@ -530,8 +550,10 @@ export class ProductService {
             .values({
               sku: variant.sku,
               basePrice: variant.basePrice,
-              discount: variant.discount,
+              discountAmount: variant.discountAmount,
+              discountPercent: variant.discountPercent,
               discountType: variant.discountType,
+              discount: variant.discount,
               attributes: variant.attributes,
               variantImages: variant.variantImages,
               stock: variant.stock,
@@ -593,7 +615,8 @@ export class ProductService {
       description,
       keywords,
       basePrice,
-      discount,
+      discountAmount,
+      discountPercent,
       discountType,
       stock,
       dealId,
@@ -690,21 +713,25 @@ export class ProductService {
       }
 
       const productDiscount = hasDeal
-        ? { discount: 0, discountType: DiscountType.NONE }
+        ? { discountAmount: 0, discountPercent: 0, discountType: DiscountType.NONE, discount: 0 }
         : this.normalizeDiscount(
             Number(resolvedBasePrice),
-            discount !== undefined ? discount : product.discount,
+            discountAmount !== undefined ? discountAmount : product.discountAmount,
+            discountPercent !== undefined ? discountPercent : product.discountPercent,
             discountType !== undefined ? discountType : product.discountType,
           );
 
       product.basePrice = resolvedBasePrice;
       product.stock = resolvedStock;
-      product.discount = productDiscount.discount;
+      product.discountAmount = productDiscount.discountAmount;
+      product.discountPercent = productDiscount.discountPercent;
       product.discountType = productDiscount.discountType;
+      product.discount = productDiscount.discount;
       product.status = this.determineOrderStatus(Number(product.stock));
     } else {
       product.basePrice = null;
-      product.discount = 0;
+      product.discountAmount = 0;
+      product.discountPercent = 0;
       product.discountType = DiscountType.NONE;
     }
 
@@ -740,8 +767,8 @@ export class ProductService {
     if (!effectiveHasVariants && product.basePrice !== null) {
       const priceAfterProductDiscount = this.calculateFinalPrice(
         product.basePrice,
-        product.discount ?? 0,
-        product.discountType ?? DiscountType.NONE,
+        product.discountAmount ?? 0,
+        DiscountType.FLAT,
       );
 
       product.finalPrice = this.applyDealPrice(
@@ -799,8 +826,10 @@ export class ProductService {
 
           if (existingVariant) {
             existingVariant.basePrice = variant.basePrice;
-            existingVariant.discount = variant.discount;
+            existingVariant.discountAmount = variant.discountAmount;
+            existingVariant.discountPercent = variant.discountPercent;
             existingVariant.discountType = variant.discountType;
+            existingVariant.discount = variant.discount;
             existingVariant.finalPrice = variant.finalPrice;
             existingVariant.attributes = variant.attributes;
             existingVariant.variantImages = variant.variantImages;
@@ -817,8 +846,10 @@ export class ProductService {
             .values({
               sku: variant.sku,
               basePrice: variant.basePrice,
-              discount: variant.discount,
+              discountAmount: variant.discountAmount,
+              discountPercent: variant.discountPercent,
               discountType: variant.discountType,
+              discount: variant.discount,
               finalPrice: variant.finalPrice,
               attributes: variant.attributes,
               variantImages: variant.variantImages,
