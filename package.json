@@ -73,6 +73,7 @@
     "check:merch": "ts-node src/scripts/merchandising.selfcheck.ts",
     "check:merch:db": "ts-node src/scripts/merchandising.dbcheck.ts",
     "check:product": "ts-node src/scripts/product.selfcheck.ts",
+    "check:orderstatus": "ts-node src/scripts/orderStatus.selfcheck.ts",
     "dev": "ts-node src/index.ts",
     "start": "nodemon src/index.ts",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js --dataSource src/data-source.ts",
