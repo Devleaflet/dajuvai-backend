@@ -575,13 +575,39 @@ export class OrderController {
             limit: q.limit ? Number(q.limit) : undefined,
             status: q.status,
             sort: q.sort as any,
+            search: q.search,
         });
         res.status(200).json({
             success: true,
             data: result.items,
             pagination: result.pagination,
-            statusCounts: result.statusCounts,
         });
+    }
+
+    /**
+     * @desc Export every order matching the current filters (no pagination)
+     *       for CSV/Excel — the frontend export buttons previously only
+     *       had access to whatever page was on screen.
+     * @route GET /vendor/orders/export
+     * @access Vendor
+     */
+    async exportVendorOrders(
+        req: VendorAuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
+
+        const q = req.query as Record<string, string>;
+        const items = await this.orderService.getAllVendorOrdersForExport(
+            req.vendor.id,
+            {
+                status: q.status,
+                sort: q.sort as any,
+                search: q.search,
+            },
+        );
+        res.status(200).json({ success: true, data: items });
     }
 
     /**

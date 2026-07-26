@@ -13,6 +13,10 @@ import { SubcategoryService } from "./subcategory.service";
 import { DealService } from "./deal.service";
 import { AuthProvider } from "../entities/user.entity";
 import { Subcategory } from "../entities/subcategory.entity";
+import {
+    normalizeLegacyProductDiscount,
+    normalizeLegacyVariantDiscount,
+} from "../utils/pricing.utils";
 
 /**
  * Service to manage homepage sections including create, update, delete,
@@ -548,7 +552,14 @@ export class HomePageSectionService {
                     break;
             }
 
-            return { ...section, products };
+            const normalizedProducts = products.map((p) => ({
+                ...normalizeLegacyProductDiscount(p),
+                variants: (p.variants ?? []).map((v) =>
+                    normalizeLegacyVariantDiscount(v),
+                ),
+            }));
+
+            return { ...section, products: normalizedProducts };
         });
     }
 
@@ -605,7 +616,15 @@ export class HomePageSectionService {
                 break;
         }
 
-        return { ...section, products };
+        return {
+            ...section,
+            products: products.map((p) => ({
+                ...normalizeLegacyProductDiscount(p),
+                variants: (p.variants ?? []).map((v) =>
+                    normalizeLegacyVariantDiscount(v),
+                ),
+            })),
+        };
     }
 
     /**

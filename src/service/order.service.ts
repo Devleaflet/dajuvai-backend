@@ -8,7 +8,6 @@ import {
     IAdminOrderQueryParams,
     IPaginatedResult,
     IVendorOrderQueryParams,
-    IVendorStatusCounts,
 } from "../interface/order.interface";
 import {
     Order,
@@ -2740,126 +2739,80 @@ export class OrderService {
      * @returns Paginated result with status counts for tab labels.
      * @access Vendor
      */
-    async getVendorOrders(
+    /**
+     * Shared filter/search builder for the vendor order list and its export
+     * — an ID-only query (see getVendorOrders' step-1 comment for why),
+     * with every status/search filter applied. Callers add sort + paging.
+     */
+    private buildVendorOrderIdQuery(
         vendorId: number,
-        params: IVendorOrderQueryParams = {},
-    ): Promise<{
-        items: SanitizedVendorOrderView[];
-        pagination: IPaginatedResult<SanitizedVendorOrderView>["pagination"];
-        statusCounts: IVendorStatusCounts;
-    }> {
-        const page = Math.max(1, Number(params.page) || 1);
-        const limit = Math.min(100, Math.max(1, Number(params.limit) || 10));
+        filters: Pick<IVendorOrderQueryParams, "status" | "search">,
+    ) {
+        const idQuery = this.orderRepository
+            .createQueryBuilder("order")
+            .innerJoin("order.orderItems", "orderItems", "orderItems.vendorId = :vendorId", { vendorId })
+            .leftJoin("orderItems.product", "product")
+            .leftJoin("order.orderedBy", "orderedBy")
+            .select("order.id", "id");
 
-        // ── Step 1: resolve a page of order IDs only ────────────────────────
-        // Paginating directly on a query that joins one-to-many orderItems would
-        // skip/take across joined *rows*, not orders, corrupting pagination.
-        // We first get just IDs (with filters applied), then load full relations
-        // for exactly those IDs in a second query.
-        const buildBaseIdQuery = () =>
-            this.orderRepository
-                .createQueryBuilder("order")
-                .innerJoin("order.orderItems", "orderItems", "orderItems.vendorId = :vendorId", { vendorId })
-                .leftJoin("orderItems.product", "product")
-                .leftJoin("order.orderedBy", "orderedBy")
-                .select("order.id", "id");
-
-        const idQuery = buildBaseIdQuery();
-
-
-
-        // Status filter — maps frontend tab values to DB enum values
-        if (params.status) {
+        if (filters.status) {
+            // Legacy tab values from before the 10-status unification map
+            // onto the closest real status; anything else (a real status
+            // value like "ASSIGNED_TO_RIDER") passes through unchanged.
             const statusMap: Record<string, string> = {
                 delivered: "DELIVERED",
                 pending: "CREATED",
                 canceled: "CANCELLED",
                 cancelled: "CANCELLED",
             };
-            const dbStatus = statusMap[params.status.toLowerCase()] ?? params.status.toUpperCase();
+            const dbStatus = statusMap[filters.status.toLowerCase()] ?? filters.status.toUpperCase();
             idQuery.andWhere("order.status = :status", { status: dbStatus });
         }
 
-        // Sort
-        let sortColumn = "order.createdAt";
-        let sortDirection: "ASC" | "DESC" = "DESC";
-        switch (params.sort) {
+        if (filters.search?.trim()) {
+            const search = `%${filters.search.trim()}%`;
+            idQuery.andWhere(
+                new Brackets((qb) => {
+                    qb.where("order.orderNumber ILIKE :search")
+                        .orWhere("orderedBy.fullName ILIKE :search")
+                        .orWhere("orderedBy.username ILIKE :search")
+                        .orWhere("orderedBy.email ILIKE :search")
+                        .orWhere("orderedBy.phoneNumber ILIKE :search")
+                        .orWhere("product.name ILIKE :search");
+                }),
+                { search },
+            );
+        }
+
+        return idQuery;
+    }
+
+    private vendorOrderSortColumn(
+        sort: IVendorOrderQueryParams["sort"],
+    ): { column: string; direction: "ASC" | "DESC" } {
+        switch (sort) {
             case "oldest":
-                sortColumn = "order.createdAt";
-                sortDirection = "ASC";
-                break;
+                return { column: "order.createdAt", direction: "ASC" };
             case "highestPrice":
-                sortColumn = "order.merchandiseSubtotal";
-                sortDirection = "DESC";
-                break;
+                return { column: "order.merchandiseSubtotal", direction: "DESC" };
             case "lowestPrice":
-                sortColumn = "order.merchandiseSubtotal";
-                sortDirection = "ASC";
-                break;
+                return { column: "order.merchandiseSubtotal", direction: "ASC" };
             case "newest":
             default:
-                sortColumn = "order.createdAt";
-                sortDirection = "DESC";
-                break;
+                return { column: "order.createdAt", direction: "DESC" };
         }
+    }
 
-        // ── Status counts (for tab labels) — run once without status filter ─
-        const countsQuery = buildBaseIdQuery();
+    /** Loads full relations for exactly the given order IDs and sanitizes
+     * them for vendor viewing, preserving the caller's id order (SQL
+     * `IN (...)` does not guarantee row order). Shared by the paginated
+     * list and the unpaginated export. */
+    private async loadVendorOrdersByIds(
+        orderIds: number[],
+        vendorId: number,
+    ): Promise<SanitizedVendorOrderView[]> {
+        if (orderIds.length === 0) return [];
 
-        const allOrderIds = await countsQuery.distinct(true).getRawMany<{ id: number }>();
-        const allIds = allOrderIds.map((r) => r.id);
-
-        let statusCounts: IVendorStatusCounts = { all: 0, pending: 0, delivered: 0, canceled: 0 };
-        if (allIds.length > 0) {
-            const countRows = await this.orderRepository
-                .createQueryBuilder("order")
-                .select("order.status", "status")
-                .addSelect("COUNT(DISTINCT order.id)", "count")
-                .where("order.id IN (:...allIds)", { allIds })
-                .groupBy("order.status")
-                .getRawMany<{ status: string; count: string }>();
-
-            statusCounts.all = allIds.length;
-            for (const row of countRows) {
-                const s = (row.status || "").toUpperCase();
-                const n = Number(row.count);
-                if (s === "DELIVERED") statusCounts.delivered += n;
-                else if (s === "CREATED") statusCounts.pending += n;
-                else if (s === "CANCELLED" || s === "CANCELED" || s === "RETURNED" || s === "NOT_RECEIVED") statusCounts.canceled += n;
-            }
-        }
-
-        // ── Paginate the filtered ID set ─────────────────────────────────────
-        const totalItems = await idQuery.distinct(true).getCount();
-        const totalPages = Math.max(1, Math.ceil(totalItems / limit));
-
-        const idRows = await idQuery
-            .distinct(true)
-            .addSelect(sortColumn, "sortValue")
-            .orderBy(sortColumn, sortDirection)
-            .addOrderBy("order.id", sortDirection)
-            .offset((page - 1) * limit)
-            .limit(limit)
-            .getRawMany<{ id: number }>();
-
-        const orderIds = idRows.map((r) => r.id);
-
-        if (orderIds.length === 0) {
-            return {
-                items: [],
-                pagination: {
-                    page,
-                    limit,
-                    totalItems,
-                    totalPages,
-                    hasNextPage: false,
-                    hasPreviousPage: page > 1,
-                },
-                statusCounts,
-            };
-        }
-
-        // ── Step 2: load full relations for this page only ───────────────────
         const orders = await this.orderRepository
             .createQueryBuilder("order")
             .leftJoinAndSelect("order.orderItems", "orderItems")
@@ -2873,14 +2826,46 @@ export class OrderService {
             .where("order.id IN (:...orderIds)", { orderIds })
             .getMany();
 
-        // Preserve the sort order from the ID step (IN(...) does not guarantee it)
         const ordersById = new Map(orders.map((o) => [o.id, o]));
-        const sortedOrders = orderIds
+        return orderIds
             .map((id) => ordersById.get(id))
-            .filter((o): o is Order => o !== undefined);
+            .filter((o): o is Order => o !== undefined)
+            .map((o) => sanitizeOrderForVendor(o, vendorId));
+    }
+
+    async getVendorOrders(
+        vendorId: number,
+        params: IVendorOrderQueryParams = {},
+    ): Promise<{
+        items: SanitizedVendorOrderView[];
+        pagination: IPaginatedResult<SanitizedVendorOrderView>["pagination"];
+    }> {
+        const page = Math.max(1, Number(params.page) || 1);
+        const limit = Math.min(100, Math.max(1, Number(params.limit) || 10));
+
+        const idQuery = this.buildVendorOrderIdQuery(vendorId, params);
+        const { column: sortColumn, direction: sortDirection } =
+            this.vendorOrderSortColumn(params.sort);
+
+        const totalItems = await idQuery.distinct(true).getCount();
+        const totalPages = Math.max(1, Math.ceil(totalItems / limit));
+
+        const idRows = await idQuery
+            .distinct(true)
+            .addSelect(sortColumn, "sortValue")
+            .orderBy(sortColumn, sortDirection)
+            .addOrderBy("order.id", sortDirection)
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .getRawMany<{ id: number }>();
+
+        const items = await this.loadVendorOrdersByIds(
+            idRows.map((r) => r.id),
+            vendorId,
+        );
 
         return {
-            items: sortedOrders.map((o) => sanitizeOrderForVendor(o, vendorId)),
+            items,
             pagination: {
                 page,
                 limit,
@@ -2889,8 +2874,34 @@ export class OrderService {
                 hasNextPage: page < totalPages,
                 hasPreviousPage: page > 1,
             },
-            statusCounts,
         };
+    }
+
+    /**
+     * Same filters as getVendorOrders but no pagination — every matching
+     * row, for CSV/Excel export. The frontend's export buttons used to
+     * build files from whatever page was currently displayed; this is the
+     * single place that returns the *complete* filtered result set instead.
+     */
+    async getAllVendorOrdersForExport(
+        vendorId: number,
+        params: Pick<IVendorOrderQueryParams, "status" | "search" | "sort"> = {},
+    ): Promise<SanitizedVendorOrderView[]> {
+        const idQuery = this.buildVendorOrderIdQuery(vendorId, params);
+        const { column: sortColumn, direction: sortDirection } =
+            this.vendorOrderSortColumn(params.sort);
+
+        const idRows = await idQuery
+            .distinct(true)
+            .addSelect(sortColumn, "sortValue")
+            .orderBy(sortColumn, sortDirection)
+            .addOrderBy("order.id", sortDirection)
+            .getRawMany<{ id: number }>();
+
+        return this.loadVendorOrdersByIds(
+            idRows.map((r) => r.id),
+            vendorId,
+        );
     }
 
     /**

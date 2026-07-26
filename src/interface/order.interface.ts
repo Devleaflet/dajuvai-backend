@@ -108,16 +108,12 @@ export type VendorOrderSort =
 export interface IVendorOrderQueryParams {
     page?: number;
     limit?: number;
-    /** Maps to order.status (e.g. PENDING, DELIVERED, CANCELLED) */
+    /** Maps to order.status (e.g. CREATED, DELIVERED, CANCELLED) */
     status?: string;
     sort?: VendorOrderSort;
-}
-
-export interface IVendorStatusCounts {
-    all: number;
-    pending: number;
-    delivered: number;
-    canceled: number;
+    /** Free-text search across order number, customer name/email/phone,
+     * and product name — see OrderService.buildVendorOrderIdQuery. */
+    search?: string;
 }
 
 export interface IPaginatedResult<T> {

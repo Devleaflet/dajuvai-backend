@@ -117,6 +117,77 @@ export const resolveFinalPrice = (input: ResolveFinalPriceInput): number => {
     }).finalPrice;
 };
 
+
+// Shape expected by the normalizers.
+// Both Product and Variant satisfy this interface.
+// Any extra fields are preserved via the spread in callers.
+export interface LegacyDiscountNormalizableRecord {
+    basePrice?: number | string | null;
+    discount?: number | string | null;
+    discountType?: DiscountType | string | null;
+    discountAmount?: number | string | null;
+    discountPercent?: number | string | null;
+}
+
+/**
+ * Given a record that may be a legacy product (discount stored in discount,
+ * discountAmount and discountPercent both 0), returns a **new** object
+ * with discountAmount and discountPercent correctly computed.
+ *
+ * Rules:
+ *  - discountType === NONE → no change
+ *  - discountAmount > 0 OR discountPercent > 0 → already new-system, no change
+ *  - otherwise → derive both fields from discount + discountType + basePrice
+ *
+ * The legacy discount field is always preserved.
+ */
+export function normalizeLegacyProductDiscount<
+    T extends LegacyDiscountNormalizableRecord,
+>(record: T): T {
+    const dType = record.discountType ?? DiscountType.NONE;
+
+    // Rule 1: NONE discount — nothing to fix
+    if (dType === DiscountType.NONE) return record;
+
+    const dAmount = Number(record.discountAmount ?? 0);
+    const dPercent = Number(record.discountPercent ?? 0);
+
+    // Rule 3: already on the new system — do not overwrite
+    if (dAmount > 0 || dPercent > 0) return record;
+
+    // Rule 2: legacy record — derive both fields
+    const base = Number(record.basePrice ?? 0);
+    const legacyDiscount = Number(record.discount ?? 0);
+
+    if (base <= 0 || legacyDiscount <= 0) return record;
+
+    let computedAmount = 0;
+    let computedPercent = 0;
+
+    if (dType === DiscountType.FLAT) {
+        computedAmount = legacyDiscount;
+        computedPercent = Number(((legacyDiscount / base) * 100).toFixed(2));
+    } else if (dType === DiscountType.PERCENTAGE) {
+        computedPercent = legacyDiscount;
+        computedAmount = Number(((base * legacyDiscount) / 100).toFixed(2));
+    }
+
+    return {
+        ...record,
+        discountAmount: computedAmount,
+        discountPercent: computedPercent,
+    };
+}
+
+
+// Same as normalize for product,
+// Separate so that we can call it explicitly
+export function normalizeLegacyVariantDiscount<
+    T extends LegacyDiscountNormalizableRecord,
+>(record: T): T {
+    return normalizeLegacyProductDiscount(record);
+}
+
 export const calculateLineTotal = (
     unitFinalPrice: number | string,
     quantity: number,

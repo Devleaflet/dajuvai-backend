@@ -1824,6 +1824,41 @@ router.get(
 
 /**
  * @swagger
+ * /api/order/vendor/orders/export:
+ *   get:
+ *     summary: Export every order matching the current filters (Vendor only, no pagination)
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: All matching orders, unpaginated
+ *       401:
+ *         description: Unauthorized
+ */
+router.get(
+    "/vendor/orders/export",
+    vendorAuthMiddleware,
+    isVendor,
+    asyncHandler(orderController.exportVendorOrders.bind(orderController)),
+);
+
+/**
+ * @swagger
  * /api/order/vendor/{orderId}:
  *   get:
  *     summary: Get details of a specific order for the authenticated vendor
