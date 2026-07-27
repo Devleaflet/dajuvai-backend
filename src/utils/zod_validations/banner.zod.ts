@@ -48,6 +48,15 @@ const baseBannerSchema = z.object({
         .optional()
         .nullable(),
 
+    // Homepage position for SIDEBAR (section) banners: render after this many
+    // visible catalog sections. Defaults to 3 when omitted (applied in the service layer).
+    placementAfterSection: z
+        .number()
+        .int()
+        .positive('placementAfterSection must be a positive integer')
+        .optional()
+        .nullable(),
+
     // For deal selection
     selectedDealId: z
         .number()

@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { AuthRequest, CombinedAuthRequest } from "../middlewares/auth.middleware";
 import { NotificationService } from "../service/notification.service";
 import { pushService } from "../service/push.service";
-import { NotFoundError } from "../errors";
+import { BadRequestError, NotFoundError } from "../errors";
 import {
     RegisterDeviceInput,
     SendToUserInput,
@@ -10,6 +10,7 @@ import {
     SendToTopicInput,
     DispatchQueryInput,
 } from "../utils/zod_validations/push.zod";
+import { GetNotificationsQuery } from "../utils/zod_validations/notification.zod";
 
 export class NotificationController {
     private notificationService: NotificationService;
@@ -18,9 +19,17 @@ export class NotificationController {
         this.notificationService = new NotificationService();
     }
 
-    async getNotificationController(req: CombinedAuthRequest, res: Response, _next: NextFunction) {
-        const notification = await this.notificationService.getNotifications(req.user || req.vendor);
-        res.status(200).json({ success: true, data: notification });
+    async getNotificationController(
+        req: CombinedAuthRequest<{}, {}, {}, GetNotificationsQuery>,
+        res: Response,
+        _next: NextFunction,
+    ) {
+        const { page, limit } = req.query;
+        const result = await this.notificationService.getNotifications(
+            req.user || req.vendor,
+            page && limit ? { page, limit } : undefined,
+        );
+        res.status(200).json({ success: true, ...result });
     }
 
     async markReadController(req: CombinedAuthRequest<{ id: string }>, res: Response, _next: NextFunction) {
@@ -48,7 +57,12 @@ export class NotificationController {
         const fcmToken = body.fcmToken ?? body.token;
 
         if (!fcmToken || fcmToken.length < 20) {
-            return res.status(400).json({ success: false, error: "Valid FCM token is required" });
+            // Thrown, not a manual res.json(...): every other error in this API
+            // goes through globalErrorHandler and comes back as
+            // { success, errorCode, message } — a manually-shaped body here
+            // (previously { success, error }) is the one response a client
+            // that uniformly reads `.message` would silently get `undefined` from.
+            throw new BadRequestError("Valid FCM token is required");
         }
 
         const ownerId = req.user ? req.user.id : req.vendor.id;

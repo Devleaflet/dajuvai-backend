@@ -29,7 +29,18 @@ const baseNotificationSchema = z.object({
 
 export const createNotificationSchema = baseNotificationSchema;
 
-export const updateNotificationSchema = baseNotificationSchema.partial(); 
+export const updateNotificationSchema = baseNotificationSchema.partial();
 
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
 export type UpdateNotificationInput = z.infer<typeof updateNotificationSchema>;
+
+// GET /api/notification list query. Both optional and left undefined when the
+// caller sends neither: the admin web app already calls this endpoint with no
+// query params and expects the full unpaginated array back, and that must keep
+// working. Mobile (or any new caller) opts into paging by sending both.
+export const getNotificationsQuerySchema = z.object({
+    page: z.coerce.number().int().min(1).optional(),
+    limit: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+export type GetNotificationsQuery = z.infer<typeof getNotificationsQuerySchema>;

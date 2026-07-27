@@ -54,7 +54,10 @@ export class Banner {
     
     @Column({ type: 'enum', enum: ProductSource, nullable: true })
     productSource: ProductSource;
-    
+
+    @Column({ type: 'int', nullable: true })
+    placementAfterSection: number | null;
+
     @ManyToMany(() => Product)
     @JoinTable({
         name: 'banner_products',

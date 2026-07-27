@@ -37,43 +37,57 @@ export class NotificationService {
     }
 
 
-    async getNotifications(authEntity: User | Vendor): Promise<Notification[]> {
+    /**
+     * `pagination` is opt-in: the existing admin web app calls this with
+     * neither page nor limit and expects the full, unpaginated array it has
+     * always gotten back, so that behavior is preserved exactly. A caller
+     * that sends both gets a sliced page instead — this is what a mobile
+     * notification screen should use, since an admin account here already
+     * accumulates hundreds of rows and only grows over time.
+     */
+    async getNotifications(
+        authEntity: User | Vendor,
+        pagination?: { page: number; limit: number },
+    ): Promise<{ data: Notification[]; total: number; page?: number; limit?: number; totalPages?: number }> {
         if (!authEntity) {
             throw new APIError(401, "Not authenticated");
         }
 
+        let where: Record<string, unknown>;
+
         // ADMIN & STAFF (from User)
         if (authEntity instanceof User &&
             (authEntity.role === UserRole.ADMIN || authEntity.role === UserRole.STAFF)) {
-            return this.notificationRepo.find({
-                where: { target: NotificationTarget.ADMIN },
-                order: { createdAt: "DESC" },
-            });
+            where = { target: NotificationTarget.ADMIN };
+        } else if (authEntity instanceof Vendor) {
+            // VENDOR
+            where = { target: NotificationTarget.VENDOR, vendorId: authEntity.id };
+        } else if (authEntity instanceof User && authEntity.role === UserRole.USER) {
+            // REGULAR USER
+            where = { target: NotificationTarget.USER, createdById: authEntity.id };
+        } else {
+            throw new APIError(403, "Invalid or unauthorized role");
         }
 
-        //  VENDOR
-        if (authEntity instanceof Vendor) {
-            return this.notificationRepo.find({
-                where: {
-                    target: NotificationTarget.VENDOR,
-                    vendorId: authEntity.id,
-                },
-                order: { createdAt: "DESC" },
-            });
-        }
+        const total = await this.notificationRepo.count({ where });
+        const data = await this.notificationRepo.find({
+            where,
+            order: { createdAt: "DESC" },
+            ...(pagination && {
+                skip: (pagination.page - 1) * pagination.limit,
+                take: pagination.limit,
+            }),
+        });
 
-        // 👤 REGULAR USER
-        if (authEntity instanceof User && authEntity.role === UserRole.USER) {
-            return this.notificationRepo.find({
-                where: {
-                    target: NotificationTarget.USER,
-                    createdById: authEntity.id,
-                },
-                order: { createdAt: "DESC" },
-            });
-        }
-
-        throw new APIError(403, "Invalid or unauthorized role");
+        return {
+            data,
+            total,
+            ...(pagination && {
+                page: pagination.page,
+                limit: pagination.limit,
+                totalPages: Math.ceil(total / pagination.limit),
+            }),
+        };
     }
 
 

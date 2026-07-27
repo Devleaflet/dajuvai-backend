@@ -19,6 +19,7 @@ import {
     sendToTopicSchema,
     dispatchQuerySchema,
 } from "../utils/zod_validations/push.zod";
+import { getNotificationsQuerySchema } from "../utils/zod_validations/notification.zod";
 
 const notificationRoutes = Router();
 const controller = new NotificationController();
@@ -38,6 +39,15 @@ const controller = new NotificationController();
  *     tags: [Notifications]
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1 }
+ *         description: Optional. Omit both page and limit to get the full unpaginated list (existing behavior).
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, maximum: 100 }
+ *         description: Optional. Must be sent together with page to enable pagination.
  *     responses:
  *       200:
  *         description: Successfully fetched all notifications for the authenticated entity
@@ -81,7 +91,12 @@ const controller = new NotificationController();
  *       500:
  *         description: Internal server error
  */
-notificationRoutes.get("/", combinedAuthMiddleware, controller.getNotificationController.bind(controller));
+notificationRoutes.get(
+    "/",
+    combinedAuthMiddleware,
+    validateZod(getNotificationsQuerySchema, "query"),
+    controller.getNotificationController.bind(controller),
+);
 
 /**
  * @swagger
