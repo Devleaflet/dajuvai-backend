@@ -139,8 +139,30 @@ adminDashboardRouter.get("/stats", adminDashboardController.getDashboardStats.bi
  *                     example: 12345.67
  *       401:
  *         description: Unauthorized - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error when fetching revenue data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bind(adminDashboardController));
 
@@ -237,8 +259,30 @@ adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bi
  *                   example: "Valid section ID is required"
  *       401:
  *         description: Unauthorized (missing or invalid token)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       403:
  *         description: Forbidden (only admin or staff can access this route)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -351,8 +395,30 @@ adminDashboardRouter.get("/vendors-sales-amount", adminDashboardController.getVe
  *                   example: "Invalid query parameters"
  *       401:
  *         description: Unauthorized (missing or invalid token)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       403:
  *         description: Forbidden (only admin or staff can access this route)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -633,11 +699,33 @@ adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardCon
  *                         example: "Best Traders"
  *                       revenue:
  *                         type: number
- *                         example: 45000.00
+ *                       example: 45000.00
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 adminDashboardRouter.get("/analytics/vendor/revenue", adminDashboardController.getRevenueByVendor.bind(adminDashboardController))
 
@@ -685,8 +773,30 @@ adminDashboardRouter.get("/analytics/vendor/revenue", adminDashboardController.g
  *                       example: 12500.00
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 adminDashboardRouter.get("/analytics/shipping/revenue", adminDashboardController.getTotalShippingRevenue.bind(adminDashboardController))
 
@@ -738,6 +848,17 @@ adminDashboardRouter.get("/analytics/shipping/revenue", adminDashboardController
  *                       example: "up"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -759,7 +880,7 @@ adminDashboardRouter.get("/gross-revenue-trend", adminDashboardController.getGro
  * /api/admin/dashboard/orders-today-count:
  *   get:
  *     summary: Get the count of orders placed today
- *     description: Returns the number of orders created on the current date (DATE(createdAt) = CURRENT_DATE).
+ *     description: Returns the number of orders placed on the current date (DATE(createdAt) = CURRENT_DATE).
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -784,6 +905,17 @@ adminDashboardRouter.get("/gross-revenue-trend", adminDashboardController.getGro
  *                       example: 14
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -837,6 +969,17 @@ adminDashboardRouter.get("/orders-today-count", adminDashboardController.getOrde
  *                       example: 3
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:

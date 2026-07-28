@@ -103,15 +103,17 @@ export const restrictToVendorOrAdmin = async (
  * Authenticates both vendors and users using JWT tokens.
  * Token can be in cookies (vendorToken or token) or Authorization header.
  * @route Middleware
- * @access Admin | Vendor
+ * @access Admin | Staff | Vendor | User
  */
 export const combinedAuthMiddleware = async (
   req: CombinedAuthRequest,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const token =
-    req.cookies.vendorToken || req.headers.authorization?.split(" ")[1];
+  const bearerToken = req.headers.authorization?.startsWith("Bearer ")
+    ? req.headers.authorization.split(" ")[1]
+    : undefined;
+  const token = bearerToken || req.cookies.vendorToken || req.cookies.token;
 
   if (!token) {
     return next(new AuthError("Authentication token is missing"));
@@ -126,8 +128,13 @@ export const combinedAuthMiddleware = async (
       [key: string]: any;
     };
 
+    const accountId = Number(decoded.id);
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return next(new AuthError("Invalid token: missing account id"));
+    }
+
     if (decoded.businessName) {
-      const vendor = await vendorDB.findOneBy({ id: decoded.id });
+      const vendor = await vendorDB.findOneBy({ id: accountId });
       if (!vendor) {
         return next(new AuthError("Invalid token: vendor not found"));
       }
@@ -136,7 +143,7 @@ export const combinedAuthMiddleware = async (
     }
 
     if (decoded.role) {
-      const user = await userDB.findOneBy({ id: decoded.id });
+      const user = await userDB.findOneBy({ id: accountId });
       if (!user) {
         return next(new AuthError("Invalid token: user not found"));
       }

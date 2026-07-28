@@ -22,14 +22,14 @@ export class VendorOrdersService {
     }
 
     /**
-     * Count order items for this vendor where the parent order is CREATED.
+     * Count order items for this vendor where the parent order is ORDER_PLACED.
      */
     async getNeedingFulfillmentCount(vendorId: number): Promise<number> {
         return this.orderItemRepository
             .createQueryBuilder('oi')
             .innerJoin('oi.order', 'order')
             .where('oi.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.CREATED })
+            .andWhere('order.status = :status', { status: OrderStatus.ORDER_PLACED })
             .getCount();
     }
 

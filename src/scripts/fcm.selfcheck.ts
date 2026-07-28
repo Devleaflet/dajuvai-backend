@@ -169,11 +169,38 @@ function checkLimiterRunsAfterAuth() {
     ok(`all ${checked} rate-limited routes run auth before the limiter`);
 }
 
+function checkCombinedAuthTokenSources() {
+    const src = readFileSync(join(__dirname, "../middlewares/auth.middleware.ts"), "utf8");
+    const block =
+        src.match(/export const combinedAuthMiddleware[\s\S]*?export const vendorAuthMiddleware/)?.[0] ??
+        "";
+
+    assert.ok(
+        block.includes("req.headers.authorization?.startsWith(\"Bearer \")"),
+        "combined auth must read Bearer tokens safely",
+    );
+    assert.ok(
+        block.includes("bearerToken || req.cookies.vendorToken || req.cookies.token"),
+        "combined auth must prefer Authorization header, then vendor/user cookies",
+    );
+    assert.ok(
+        block.includes("Invalid token: missing role or businessName"),
+        "combined auth must reject JWTs that lack user/vendor identity claims",
+    );
+    assert.ok(
+        block.includes("Invalid token: missing account id"),
+        "combined auth must reject JWTs that do not identify an account",
+    );
+
+    ok("combined auth accepts bearer/user-cookie/vendor-cookie tokens and rejects bad identity JWTs");
+}
+
 (async () => {
     console.log("fcm self-check");
     await checkSchemas();
     await checkQueryValidationApplies();
     checkLimiterRunsAfterAuth();
+    checkCombinedAuthTokenSources();
     console.log("\nall checks passed");
 })().catch((error) => {
     console.error("\nFAILED:", error.message);

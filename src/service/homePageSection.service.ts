@@ -49,7 +49,7 @@ export class HomePageSectionService {
      * Creates a new homepage section with given title, active status, and associated products.
      *
      * @param data {ICreateHomepageSectionInput} - Data containing title, isActive flag, and productIds
-     * @returns {Promise<HomePageSection>} - Created homepage section entity
+     * @returns {Promise<HomePageSection>} - created homepage section entity
      * @throws {APIError} - If title is missing, title already exists, or invalid product IDs
      * @access Admin
      */

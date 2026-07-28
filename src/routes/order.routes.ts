@@ -39,6 +39,7 @@ const orderController = new OrderController();
  *             required:
  *               - shippingAddress
  *               - paymentMethod
+ *               - phoneNumber
  *             properties:
  *               shippingAddress:
  *                 type: object
@@ -50,20 +51,59 @@ const orderController = new OrderController();
  *                 properties:
  *                   province:
  *                     type: string
+ *                     enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
  *                     example: "Bagmati"
  *                   city:
  *                     type: string
+ *                     minLength: 2
+ *                     maxLength: 100
  *                     example: "Kathmandu"
  *                   streetAddress:
  *                     type: string
+ *                     minLength: 5
+ *                     maxLength: 255
  *                     example: "Pulchowk 123"
  *                   district:
  *                     type: string
  *                     example: "Lalitpur"
+ *                   landmark:
+ *                     type: string
+ *                     description: Optional landmark near the address
  *               paymentMethod:
  *                 type: string
- *                 enum: [ESEWA, KHALTI, CASH_ON_DELIVERY]
+ *                 enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
  *                 example: CASH_ON_DELIVERY
+ *               phoneNumber:
+ *                 type: string
+ *                 minLength: 10
+ *                 maxLength: 10
+ *                 example: "9812345678"
+ *                 description: Must be exactly 10 digits
+ *               promoCode:
+ *                 type: string
+ *                 example: "SUMMER2025"
+ *                 description: Optional promo code
+ *               fullName:
+ *                 type: string
+ *                 example: "John Doe"
+ *                 description: Optional full name for the order
+ *               isBuyNow:
+ *                 type: boolean
+ *                 example: false
+ *                 description: If true, bypasses cart and uses productId/variantId/quantity instead
+ *               productId:
+ *                 type: integer
+ *                 example: 35
+ *                 description: Required if isBuyNow is true
+ *               variantId:
+ *                 type: integer
+ *                 example: 60
+ *                 description: Optional variant ID for buy-now
+ *               quantity:
+ *                 type: integer
+ *                 example: 1
+ *                 default: 1
+ *                 description: Quantity for buy-now (defaults to 1)
  *     responses:
  *       201:
  *         description: Order created successfully (for COD or without redirect)
@@ -89,10 +129,10 @@ const orderController = new OrderController();
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "UNPAID"
  *                     paymentMethod:
  *                       type: string
  *                       example: "CASH_ON_DELIVERY"
@@ -127,10 +167,10 @@ const orderController = new OrderController();
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "UNPAID"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -196,6 +236,83 @@ router.post(
 // Read-only checkout preview: same vendor-grouped shipping/discount calc as
 // createOrder, without writing an order — the frontend renders these
 // numbers instead of recomputing shipping itself.
+/**
+ * @swagger
+ * /api/order/estimate:
+ *   post:
+ *     summary: Preview checkout totals and transparent price breakdown
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     description: Returns backend-authoritative merchandise, shipping, promo, deal, and product-discount totals without creating an order. Used by web and mobile checkout.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               cartData:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                   properties:
+ *                     productId:
+ *                       type: integer
+ *                       example: 1
+ *                     quantity:
+ *                       type: integer
+ *                       example: 2
+ *               promoCode:
+ *                 type: string
+ *                 example: "SUMMER2025"
+ *     responses:
+ *       200:
+ *         description: Checkout estimate
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     merchandiseSubtotal:
+ *                       type: number
+ *                       example: 4200
+ *                     priceBreakdown:
+ *                       type: object
+ *                       properties:
+ *                         actualPrice:
+ *                           type: number
+ *                           example: 5000
+ *                         productDiscountTotal:
+ *                           type: number
+ *                           example: 300
+ *                         dealDiscountTotal:
+ *                           type: number
+ *                           example: 500
+ *                         promoDiscountTotal:
+ *                           type: number
+ *                           example: 100
+ *                         lineItems:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                     shippingTotal:
+ *                       type: number
+ *                       example: 200
+ *                     discountTotal:
+ *                       type: number
+ *                       example: 100
+ *                     grandTotal:
+ *                       type: number
+ *                       example: 4300
+ */
 router.post(
     "/estimate",
     authMiddleware,
@@ -238,10 +355,10 @@ router.post(
  *                         example: 200
  *                       status:
  *                         type: string
- *                         example: "CREATED"
+ *                         example: "ORDER_PLACED"
  *                       paymentStatus:
  *                         type: string
- *                         example: "CREATED"
+ *                         example: "ORDER_PLACED"
  *                       paymentMethod:
  *                         type: string
  *                         example: "CASH_ON_DELIVERY"
@@ -366,11 +483,11 @@ router.get(
  *                       example: 25
  *                     paymentStatus:
  *                       type: string
- *                       enum: [PENDING, COMPLETED, FAILED]
- *                       example: COMPLETED
+ *                       enum: [PAID, UNPAID]
+ *                       example: PAID
  *                     status:
  *                       type: string
- *                       enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, OUT_FOR_DELIVERY, DELIVERED]
+ *                       enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                       example: CONFIRMED
  *                     transactionId:
  *                       type: string
@@ -612,10 +729,10 @@ router.get(
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -672,6 +789,23 @@ router.get(
  *                               basePrice:
  *                                 type: number
  *                                 example: 899.99
+ *                           priceBreakdown:
+ *                             type: object
+ *                             description: Historical item price transparency snapshot.
+ *                             properties:
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: 999
+ *                               unitPrice:
+ *                                 type: number
+ *                                 example: 799
+ *                               productDiscount:
+ *                                 type: object
+ *                               dealDiscount:
+ *                                 type: object
+ *                     priceBreakdown:
+ *                       type: object
+ *                       description: Order-level actual price, product discount, deal discount, promo discount, and line totals for web/mobile checkout detail screens.
  *       400:
  *         description: Invalid order ID
  *         content:
@@ -746,7 +880,7 @@ router.get(
 
 /**
  * @swagger
- * /api/order/customer/order/{id}:
+ * /api/order/customer/order/{orderId}:
  *   get:
  *     summary: Get order details by order ID
  *     tags:
@@ -786,10 +920,10 @@ router.get(
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -846,6 +980,12 @@ router.get(
  *                               basePrice:
  *                                 type: number
  *                                 example: 899.99
+ *                           priceBreakdown:
+ *                             type: object
+ *                             description: Historical item price transparency snapshot.
+ *                     priceBreakdown:
+ *                       type: object
+ *                       description: Order-level actual price, product discount, deal discount, promo discount, and line totals for mobile checkout/order detail screens.
  *       400:
  *         description: Invalid order ID
  *         content:
@@ -989,7 +1129,7 @@ router.get(
 //  *                           example: "Pulchowk Road, Ward 3"
 //  *                     status:
 //  *                       type: string
-//  *                       example: "CREATED"
+//  *                       example: "ORDER_PLACED"
 //  *                     orderedBy:
 //  *                       type: object
 //  *                       properties:
@@ -1107,10 +1247,10 @@ router.get(
 //  *                         example: 3500
 //  *                       paymentStatus:
 //  *                         type: string
-//  *                         example: "CREATED"
+//  *                         example: "ORDER_PLACED"
 //  *                       status:
 //  *                         type: string
-//  *                         example: "CREATED"
+//  *                         example: "ORDER_PLACED"
 //  *                       orderedBy:
 //  *                         type: object
 //  *                         properties:
@@ -1244,10 +1384,10 @@ router.get(
  *                       example: 3500
  *                     paymentStatus:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     status:
  *                       type: string
- *                       example: "CREATED"
+ *                       example: "ORDER_PLACED"
  *                     orderedBy:
  *                       type: object
  *                       properties:
@@ -1370,13 +1510,29 @@ router.get(
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - status
+ *               - reason
  *             properties:
  *               status:
  *                 type: string
- *                 enum: [PENDING, CONFIRMED, CANCELLED, DELIVERED]
+ *                 enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                 example: CONFIRMED
- *             required:
- *               - status
+ *               expectedCurrentStatus:
+ *                 type: string
+ *                 enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
+ *                 description: Optimistic concurrency guard — rejects if order status has changed since client last fetched it
+ *               reason:
+ *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 500
+ *                 example: "Customer confirmed receipt of items"
+ *                 description: Required reason for the status change
+ *               note:
+ *                 type: string
+ *                 maxLength: 1000
+ *                 example: "Called customer to verify delivery"
+ *                 description: Optional additional context
  *     responses:
  *       200:
  *         description: Order status updated successfully
@@ -1462,7 +1618,7 @@ router.get(
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Invalid status transition from PENDING to DELIVERED"
+ *                   example: "Invalid status transition from ORDER_PLACED to DELIVERED"
  *       404:
  *         description: Order not found
  *         content:
@@ -1497,6 +1653,73 @@ router.put(
     validateZod(updateOrderStatusSchema),
     asyncHandler(orderController.updateOrderStatus.bind(orderController)),
 );
+
+/**
+ * @swagger
+ * /api/order/admin/{orderId}/status-history:
+ *   get:
+ *     summary: Get order status change history
+ *     description: Returns a chronological list of all status changes for a specific order. Admin/Staff only.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the order
+ *     responses:
+ *       200:
+ *         description: Status history retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       previousStatus:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "ORDER_PLACED"
+ *                       newStatus:
+ *                         type: string
+ *                         example: "CONFIRMED"
+ *                       changedBy:
+ *                         type: object
+ *                         nullable: true
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           username:
+ *                             type: string
+ *                             example: "admin"
+ *                       changedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-06-11T12:00:00Z"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin or Staff access required
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
 router.get(
     "/admin/:orderId/status-history",
     authMiddleware,
@@ -1639,25 +1862,19 @@ router.get(
 
 /**
  * @swagger
- * /api/order/user/track/{orderId}:
+ * /api/order/user/track:
  *   get:
  *     summary: Track order status by order ID
- *     description: Returns the status of a specific order by order ID.
+ *     description: Returns the status of a specific order by order ID (passed as query parameter).
  *     tags:
  *       - Orders
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - orderId
- *             properties:
- *               orderId:
- *                 type: number
- *                 example: 123
- *                 description: ID of the order to be tracked.
+ *     parameters:
+ *       - in: query
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the order to be tracked.
  *     responses:
  *       200:
  *         description: Order status retrieved successfully
@@ -1671,7 +1888,7 @@ router.get(
  *                   example: true
  *                 orderStatus:
  *                   type: string
- *                   enum: [PENDING, CONFIRMED, CANCELLED, DELIVERED]
+ *                   enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                   example: CONFIRMED
  *       400:
  *         description: Bad request - order ID missing or invalid
@@ -2001,6 +2218,73 @@ router.get(
     vendorAuthMiddleware,
     asyncHandler(orderController.getVendorOrderDetails.bind(orderController)),
 );
+
+/**
+ * @swagger
+ * /api/order/vendor/{orderId}/status-history:
+ *   get:
+ *     summary: Get order status change history for vendor
+ *     description: Returns a chronological list of all status changes for a specific order. Vendor only.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the order
+ *     responses:
+ *       200:
+ *         description: Status history retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       previousStatus:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "ORDER_PLACED"
+ *                       newStatus:
+ *                         type: string
+ *                         example: "CONFIRMED"
+ *                       changedBy:
+ *                         type: object
+ *                         nullable: true
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           username:
+ *                             type: string
+ *                             example: "vendor_user"
+ *                       changedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-06-11T12:00:00Z"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Vendor access required
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
 router.get(
     "/vendor/:orderId/status-history",
     vendorAuthMiddleware,
@@ -2050,12 +2334,12 @@ router.get(
  *                         example: PAID
  *                       paymentMethod:
  *                         type: string
- *                         enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA]
+ *                         enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
  *                         example: CASH_ON_DELIVERY
  *                       status:
  *                         type: string
- *                         enum: [PENDING, CONFIRMED, CANCELLED]
- *                         example: CONFIRMED
+ *                         enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
+ *                         example: ORDER_PLACED
  *                       shippingAddress:
  *                         type: object
  *                         properties:
@@ -2116,13 +2400,19 @@ router.get(
  *       - Orders
  *     security:
  *       - bearerAuth: []  # Adjust according to your security scheme (e.g., JWT bearer token)
- *     parameters:
- *       - in: body
- *         name: mTransactionId
- *         description: Merchant transaction ID to search for
- *         required: true
- *         schema:
- *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - mTransactionId
+ *             properties:
+ *               mTransactionId:
+ *                 type: string
+ *                 description: Merchant transaction ID to search for
+ *                 example: "TXN123456"
  *     responses:
  *       200:
  *         description: Successfully retrieved order details
@@ -2202,11 +2492,35 @@ router.post(
  *     summary: Delete all orders (dev/test only)
  *     tags:
  *       - Orders
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: All orders deleted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "All orders deleted successfully"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.delete(
     "/order/delete/all",
@@ -2289,7 +2603,7 @@ router.post(
  *     tags:
  *       - Orders
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:

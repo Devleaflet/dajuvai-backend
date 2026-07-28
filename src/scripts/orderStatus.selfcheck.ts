@@ -39,10 +39,22 @@ function checkAdminIsFreeForm() {
 
 function checkSystemIsFreeForm() {
     assert.ok(
-        canTransition("SYSTEM", OrderStatus.CREATED, OrderStatus.CANCELLED),
+        canTransition("SYSTEM", OrderStatus.ORDER_PLACED, OrderStatus.CANCELLED),
         "system must be free-form too (internal webhook transitions)",
     );
     ok("system role is free-form");
+}
+
+function checkInitialStatusName() {
+    assert.ok(
+        Object.values(OrderStatus).includes(OrderStatus.ORDER_PLACED),
+        "OrderStatus must include ORDER_PLACED as the initial order state",
+    );
+    assert.ok(
+        !("CREATED" in OrderStatus),
+        "OrderStatus.CREATED must not remain as the initial order state",
+    );
+    ok("initial order status is ORDER_PLACED");
 }
 
 function checkRiderIsRestrictedToTwoMoves() {
@@ -98,6 +110,47 @@ async function checkReasonIsRequired() {
     ok("updateOrderStatusSchema requires a non-empty reason");
 }
 
+function checkAdminOrderPlacedEmailPath() {
+    const service = readFileSync(
+        join(__dirname, "..", "service", "order.service.ts"),
+        "utf8",
+    );
+    const controller = readFileSync(
+        join(__dirname, "..", "controllers", "order.controller.ts"),
+        "utf8",
+    );
+
+    assert.ok(
+        service.includes("private async sendAdminOrderPlacedEmail"),
+        "admin order-placed email must live in OrderService",
+    );
+    assert.ok(
+        service.includes("await this.sendAdminOrderPlacedEmail(order.id);"),
+        "createOrder must send admin order-placed email after saving a new order",
+    );
+
+    const serviceAdminPlacedSends =
+        service.match(/sendCustomerOrderEmail\(\s*config\.USER_EMAIL/g) ?? [];
+    assert.strictEqual(
+        serviceAdminPlacedSends.length,
+        1,
+        "admin order-placed email must be sent once from the service",
+    );
+    assert.ok(
+        !/sendCustomerOrderEmail\(\s*config\.USER_EMAIL/.test(controller),
+        "controller must not send a duplicate admin order-placed email",
+    );
+    assert.ok(
+        service.includes("targetStatus === OrderStatus.DELIVERED && config.USER_EMAIL"),
+        "delivered status change must email admin",
+    );
+    assert.ok(
+        service.includes("Order Delivered - #${order.orderNumber}"),
+        "admin delivered email must use delivered-specific subject",
+    );
+    ok("admin receives order-placed and delivered emails from the order service");
+}
+
 /**
  * Regression guard: removed enum members must not silently creep back in
  * via a copy-pasted string literal anywhere in src/.
@@ -110,6 +163,7 @@ function checkNoStaleEnumReferences() {
     const staleTokens = [
         /\bOrderStatus\.PENDING\b/,
         /\bOrderStatus\.SHIPPED\b/,
+        /\bOrderStatus\.CREATED\b/,
         /\bVendorOrderStatus\b/,
     ];
     const srcDir = join(__dirname, "..");
@@ -151,8 +205,10 @@ function checkNoStaleEnumReferences() {
     console.log("order status self-check");
     checkAdminIsFreeForm();
     checkSystemIsFreeForm();
+    checkInitialStatusName();
     checkRiderIsRestrictedToTwoMoves();
     await checkReasonIsRequired();
+    checkAdminOrderPlacedEmailPath();
     checkNoStaleEnumReferences();
     console.log("\nall checks passed");
 })().catch((error) => {

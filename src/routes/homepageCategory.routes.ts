@@ -13,6 +13,8 @@ const homepageCategoryController = new HomepageCategoryController();
  *     description: Admin can select up to 5 categories to show on the homepage with their subcategories.
  *     tags:
  *       - HomeCategory
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:

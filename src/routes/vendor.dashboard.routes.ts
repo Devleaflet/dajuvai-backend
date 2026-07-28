@@ -321,7 +321,7 @@ vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDa
  *     tags:
  *       - Vendor Dashboard
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: Top selling products retrieved successfully
@@ -360,7 +360,7 @@ vendorDashBoardRouter.get("/analytics/top-selling-products", vendorAuthMiddlewar
  *     tags:
  *       - Vendor Dashboard
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: startDate
@@ -412,7 +412,7 @@ vendorDashBoardRouter.get("/analytics/revenue-by-category", vendorAuthMiddleware
  *     tags:
  *       - Vendor Dashboard
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: query
  *         name: startDate

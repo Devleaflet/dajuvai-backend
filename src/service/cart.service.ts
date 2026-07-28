@@ -7,8 +7,10 @@ import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
 import { Variant } from '../entities/variant.entity';
 import { NotificationService } from './notification.service';
-import { resolveFinalPrice } from '../utils/pricing.utils';
+import { calculatePriceSnapshot, normalizeDiscountType, resolveFinalPrice } from '../utils/pricing.utils';
 import { emitCartUpdate } from '../socket/socket';
+import { DealStatus } from '../entities/deal.entity';
+import { DiscountType } from '../entities/product.enum';
 
 /**
  * Service class for managing shopping cart operations.
@@ -25,6 +27,88 @@ export class CartService {
         this.cartItemRepository = AppDataSource.getRepository(CartItem);
         this.productRepository = AppDataSource.getRepository(Product);
         this.variantRepository = AppDataSource.getRepository(Variant);
+    }
+
+    private getDiscountValue(source: Product | Variant | null | undefined): number {
+        if (!source) return 0;
+
+        const discountType = normalizeDiscountType(source.discountType);
+        if (discountType === DiscountType.FLAT) {
+            return Number(source.discountAmount ?? source.discount ?? 0) || 0;
+        }
+        if (discountType === DiscountType.PERCENTAGE) {
+            return Number(source.discountPercent ?? source.discount ?? 0) || 0;
+        }
+        return 0;
+    }
+
+    private buildCartItemPriceBreakdown(item: CartItem, unitPrice: number) {
+        const product = item.product;
+        const source = item.variant ?? product;
+        const basePrice = Number(source?.basePrice ?? unitPrice) || unitPrice;
+        const quantity = Number(item.quantity) || 0;
+        const activeDeal =
+            product?.deal && product.deal.status === DealStatus.ENABLED
+                ? product.deal
+                : null;
+
+        const lineBaseTotal = Number((basePrice * quantity).toFixed(2));
+        const lineTotal = Number((unitPrice * quantity).toFixed(2));
+        let productDiscountUnit = 0;
+        let dealDiscountUnit = 0;
+        let productDiscountType = DiscountType.NONE;
+
+        try {
+            const snapshot = calculatePriceSnapshot({
+                basePrice,
+                discount: this.getDiscountValue(source),
+                discountType: source?.discountType ?? DiscountType.NONE,
+                dealDiscountPercentage: activeDeal?.discountPercentage ?? 0,
+            });
+            productDiscountUnit = snapshot.discountAmount;
+            productDiscountType = snapshot.discountType;
+            dealDiscountUnit = Math.max(
+                0,
+                basePrice - snapshot.discountAmount - unitPrice,
+            );
+        } catch {
+            const savingsUnit = Math.max(0, basePrice - unitPrice);
+            if (activeDeal) {
+                dealDiscountUnit = savingsUnit;
+            } else {
+                productDiscountUnit = savingsUnit;
+                productDiscountType = normalizeDiscountType(source?.discountType);
+            }
+        }
+
+        const productDiscountTotal = Number(
+            (productDiscountUnit * quantity).toFixed(2),
+        );
+        const dealDiscountTotal = Number(
+            (dealDiscountUnit * quantity).toFixed(2),
+        );
+
+        return {
+            basePrice,
+            unitPrice,
+            lineBaseTotal,
+            lineTotal,
+            productDiscount: {
+                label: productDiscountType === DiscountType.NONE ? null : 'Discount',
+                type: productDiscountType,
+                amount: productDiscountTotal,
+            },
+            dealDiscount: {
+                label: activeDeal?.name ?? null,
+                percent: activeDeal
+                    ? Number(activeDeal.discountPercentage) || null
+                    : null,
+                amount: dealDiscountTotal,
+            },
+            savingsTotal: Number(
+                (productDiscountTotal + dealDiscountTotal).toFixed(2),
+            ),
+        };
     }
 
     /**
@@ -47,7 +131,7 @@ export class CartService {
         // Validate product
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            relations: ['variants'],
+            relations: ['variants', 'deal'],
         });
         if (!product) throw new APIError(404, 'Product not found');
 
@@ -102,7 +186,7 @@ export class CartService {
         // Get or create cart
         let cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: ['items', 'items.product', 'items.product.deal', 'items.variant'],
         });
 
         if (!cart) {
@@ -180,7 +264,7 @@ export class CartService {
         // Fetch cart with items and their product and variant relations
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: ['items', 'items.product', 'items.product.deal', 'items.variant'],
         });
 
         if (!cart) throw new APIError(404, 'Cart not found');
@@ -224,7 +308,7 @@ export class CartService {
     async getCart(userId: number): Promise<Cart> {
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: ['items', 'items.product', 'items.product.deal', 'items.variant'],
         });
 
         if (!cart) {
@@ -254,6 +338,7 @@ export class CartService {
                     if (!variant) {
                         warningMessage = 'Associated variant no longer exists';
                     } else {
+                        item.variant = variant;
                         if (variant.status === 'OUT_OF_STOCK') {
                             warningMessage = 'Variant is not available';
                         } else if (item.quantity > variant.stock) {
@@ -267,10 +352,11 @@ export class CartService {
                     }
                 } else {
                     // Check product stock
-                    const product = await this.productRepository.findOne({ where: { id: item.product.id } });
+                    const product = await this.productRepository.findOne({ where: { id: item.product.id }, relations: ['deal'] });
                     if (!product) {
                         warningMessage = 'Associated product no longer exists';
                     } else {
+                        item.product = product;
                         if (product.hasVariants) {
                             warningMessage = 'Product requires a variant but none is selected';
                         } else if (product.status === 'OUT_OF_STOCK') {
@@ -294,6 +380,10 @@ export class CartService {
                 return {
                     ...item,
                     price: currentPrice,
+                    priceBreakdown: this.buildCartItemPriceBreakdown(
+                        item,
+                        currentPrice,
+                    ),
                     warningMessage,
                 };
             })

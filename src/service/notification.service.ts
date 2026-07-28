@@ -16,6 +16,14 @@ export class NotificationService {
     private orderRepo = AppDataSource.getRepository(Order);
     private userRepo = AppDataSource.getRepository(User);
 
+    private isUserEntity(authEntity: User | Vendor): authEntity is User {
+        return "role" in authEntity;
+    }
+
+    private isVendorEntity(authEntity: User | Vendor): authEntity is Vendor {
+        return "businessName" in authEntity && !("role" in authEntity);
+    }
+
     /**
      * Sends and reaps dead tokens in one step. Every automated push in this
      * service goes through here, so invalid tokens get retired no matter which
@@ -46,7 +54,7 @@ export class NotificationService {
      * accumulates hundreds of rows and only grows over time.
      */
     async getNotifications(
-        authEntity: User | Vendor,
+        authEntity: User | Vendor | undefined,
         pagination?: { page: number; limit: number },
     ): Promise<{ data: Notification[]; total: number; page?: number; limit?: number; totalPages?: number }> {
         if (!authEntity) {
@@ -56,13 +64,13 @@ export class NotificationService {
         let where: Record<string, unknown>;
 
         // ADMIN & STAFF (from User)
-        if (authEntity instanceof User &&
+        if (this.isUserEntity(authEntity) &&
             (authEntity.role === UserRole.ADMIN || authEntity.role === UserRole.STAFF)) {
             where = { target: NotificationTarget.ADMIN };
-        } else if (authEntity instanceof Vendor) {
+        } else if (this.isVendorEntity(authEntity)) {
             // VENDOR
             where = { target: NotificationTarget.VENDOR, vendorId: authEntity.id };
-        } else if (authEntity instanceof User && authEntity.role === UserRole.USER) {
+        } else if (this.isUserEntity(authEntity) && authEntity.role === UserRole.USER) {
             // REGULAR USER
             where = { target: NotificationTarget.USER, createdById: authEntity.id };
         } else {
@@ -360,17 +368,17 @@ export class NotificationService {
      * the row is fetched by primary key alone, so any authenticated account
      * could read anyone else's notifications (and the ADMIN feed) by id.
      */
-    canAccess(notification: Notification, authEntity: User | Vendor): boolean {
+    canAccess(notification: Notification, authEntity: User | Vendor | undefined): boolean {
         if (!authEntity) return false;
 
-        if (authEntity instanceof Vendor) {
+        if (this.isVendorEntity(authEntity)) {
             return (
                 notification.target === NotificationTarget.VENDOR &&
                 notification.vendorId === authEntity.id
             );
         }
 
-        if (authEntity instanceof User) {
+        if (this.isUserEntity(authEntity)) {
             if (authEntity.role === UserRole.ADMIN || authEntity.role === UserRole.STAFF) {
                 return notification.target === NotificationTarget.ADMIN;
             }

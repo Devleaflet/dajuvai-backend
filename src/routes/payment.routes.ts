@@ -53,8 +53,31 @@ function getAuthHeader(): string {
  *     responses:
  *       200:
  *         description: List of available payment instruments
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
  *       500:
  *         description: Failed to get payment instruments
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to get payment instruments"
  */
 // 1. Get Payment Instruments
 paymentRouter.get(
@@ -115,8 +138,29 @@ paymentRouter.get(
  *     responses:
  *       200:
  *         description: Service charge retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
  *       500:
  *         description: Failed to get service charge
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to get service charge"
  */
 // 2. Get Service Charge
 paymentRouter.post("/service-charge", async (req: Request, res: Response) => {
@@ -177,8 +221,29 @@ paymentRouter.post("/service-charge", async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Process ID retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
  *       500:
  *         description: Failed to get process ID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to get process ID"
  */
 // 3. Get Process ID
 paymentRouter.post("/process-id", async (req: Request, res: Response) => {
@@ -266,6 +331,17 @@ paymentRouter.post("/process-id", async (req: Request, res: Response) => {
  *         description: Order not found
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 // 4. Initiate Payment (Complete Flow)
 paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
@@ -377,8 +453,29 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Transaction status retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
  *       500:
  *         description: Failed to check transaction status
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Failed to check transaction status"
  */
 // 5. Check Transaction Status
 paymentRouter.post("/check-status", async (req: Request, res: Response) => {
@@ -473,12 +570,31 @@ paymentRouter.get("/response", (req: Request, res: Response) => {
  *     responses:
  *       200:
  *         description: Notification received and processed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *       400:
  *         description: Invalid or missing MerchantTxnId
  *       404:
  *         description: Order not found
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 paymentRouter.get("/notification", async (req: Request, res: Response) => {
     try {

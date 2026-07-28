@@ -29,7 +29,6 @@ import AppDataSource from "../config/db.config";
 import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
 import { NotificationService } from "../service/notification.service";
-import config from "../config/env.config";
 import {
     sanitizeOrderFull,
     sanitizeOrderForVendor,
@@ -59,6 +58,7 @@ export class OrderController {
             const numeric = Number(value ?? 0);
             return Number.isFinite(numeric) ? numeric : 0;
         };
+        const sanitized = sanitizeOrderFull(order);
 
         return {
             orderId: order.id,
@@ -74,6 +74,7 @@ export class OrderController {
                 (sum, item) => sum + toNumber(item.quantity),
                 0,
             ),
+            priceBreakdown: sanitized.priceBreakdown,
         };
     }
 
@@ -143,23 +144,6 @@ export class OrderController {
                     );
                 } catch (error) {
                     console.log("Failed to send customer order email:", error);
-                }
-
-                // Admin copy — full breakdown including shipping, same as the customer email.
-                if (config.USER_EMAIL) {
-                    try {
-                        await sendCustomerOrderEmail(
-                            config.USER_EMAIL,
-                            order.orderNumber,
-                            order.totalPrice,
-                            order.shippingFee,
-                            customerEmailItems,
-                            userDistrict,
-                            `New Order Placed - #${order.orderNumber}`,
-                        );
-                    } catch (error) {
-                        console.log("Failed to send admin order email:", error);
-                    }
                 }
 
                 const orderItems = order.orderItems;

@@ -191,6 +191,7 @@ deliveryAdminRouter.post(
  *                   type: array
  *                   items:
  *                     type: object
+ *                     description: Rider entity (see POST /riders response for shape)
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -234,6 +235,19 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 12
+ *                     fullName:
+ *                       type: string
+ *                       example: "Sita Sharma"
+ *                     email:
+ *                       type: string
+ *                       example: "rider1@dajuvai.com"
+ *                     onDelivery:
+ *                       type: boolean
+ *                       example: false
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -345,6 +359,7 @@ deliveryAdminRouter.put(
  *                   type: array
  *                   items:
  *                     type: object
+ *                     description: Processing order entity
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -390,6 +405,16 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "ORDER_PROCESSING"
+ *                     customerName:
+ *                       type: string
+ *                       example: "John Doe"
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -426,6 +451,13 @@ deliveryAdminRouter.get(
  *         schema:
  *           type: integer
  *         example: 101
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: No request body required (status transition only)
  *     responses:
  *       200:
  *         description: Order status updated successfully
@@ -439,6 +471,16 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "AT_WAREHOUSE"
+ *                     message:
+ *                       type: string
+ *                       example: "Order marked at warehouse"
  *       400:
  *         description: Invalid delivery status transition
  *       401:
@@ -476,6 +518,13 @@ deliveryAdminRouter.patch(
  *         schema:
  *           type: integer
  *         example: 555
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: No request body required
  *     responses:
  *       201:
  *         description: Order item collected successfully
@@ -489,6 +538,16 @@ deliveryAdminRouter.patch(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 555
+ *                     orderId:
+ *                       type: integer
+ *                       example: 101
+ *                     collectedAtWarehouse:
+ *                       type: boolean
+ *                       example: true
  *                 message:
  *                   type: string
  *                   example: "Order Item Collected"
@@ -553,6 +612,7 @@ deliveryAdminRouter.put(
  *                   type: array
  *                   items:
  *                     type: object
+ *                     description: Warehouse queue order entity
  *                 pagination:
  *                   type: object
  *                   properties:
@@ -711,6 +771,7 @@ deliveryAdminRouter.post(
  *                   type: array
  *                   items:
  *                     type: object
+ *                     description: Delivery assignment entity
  *                 pagination:
  *                   type: object
  *                   properties:
@@ -769,6 +830,19 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 9001
+ *                     orderId:
+ *                       type: integer
+ *                       example: 101
+ *                     riderId:
+ *                       type: integer
+ *                       example: 12
+ *                     assignmentStatus:
+ *                       type: string
+ *                       example: "assigned"
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -806,6 +880,13 @@ deliveryAdminRouter.get(
  *         schema:
  *           type: integer
  *         example: 101
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: No request body required (status transition only)
  *     responses:
  *       200:
  *         description: Order reset successfully
@@ -819,6 +900,16 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "AT_WAREHOUSE"
+ *                     message:
+ *                       type: string
+ *                       example: "Order reset to warehouse"
  *       400:
  *         description: Invalid delivery status transition
  *       401:

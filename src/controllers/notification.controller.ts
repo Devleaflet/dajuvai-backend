@@ -2,7 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { AuthRequest, CombinedAuthRequest } from "../middlewares/auth.middleware";
 import { NotificationService } from "../service/notification.service";
 import { pushService } from "../service/push.service";
-import { BadRequestError, NotFoundError } from "../errors";
+import { AuthError, BadRequestError, NotFoundError } from "../errors";
 import {
     RegisterDeviceInput,
     SendToUserInput,
@@ -19,6 +19,12 @@ export class NotificationController {
         this.notificationService = new NotificationService();
     }
 
+    private getAuthEntity(req: CombinedAuthRequest) {
+        const authEntity = req.user || req.vendor;
+        if (!authEntity) throw new AuthError("Authentication required");
+        return authEntity;
+    }
+
     async getNotificationController(
         req: CombinedAuthRequest<{}, {}, {}, GetNotificationsQuery>,
         res: Response,
@@ -26,7 +32,7 @@ export class NotificationController {
     ) {
         const { page, limit } = req.query;
         const result = await this.notificationService.getNotifications(
-            req.user || req.vendor,
+            this.getAuthEntity(req),
             page && limit ? { page, limit } : undefined,
         );
         res.status(200).json({ success: true, ...result });
@@ -34,12 +40,13 @@ export class NotificationController {
 
     async markReadController(req: CombinedAuthRequest<{ id: string }>, res: Response, _next: NextFunction) {
         const id = req.params.id;
+        const authEntity = this.getAuthEntity(req);
         const notification = await this.notificationService.getNotificationById(id);
         if (!notification) throw new NotFoundError("Notification");
 
         // 404 rather than 403: a 403 would confirm the id exists to someone who
         // has no business knowing that.
-        if (!this.notificationService.canAccess(notification, req.user || req.vendor)) {
+        if (!this.notificationService.canAccess(notification, authEntity)) {
             throw new NotFoundError("Notification");
         }
 
@@ -55,6 +62,7 @@ export class NotificationController {
     async saveFcmTokenController(req: CombinedAuthRequest, res: Response, _next: NextFunction) {
         const body = req.body as Partial<RegisterDeviceInput> & { token?: string };
         const fcmToken = body.fcmToken ?? body.token;
+        const authEntity = this.getAuthEntity(req);
 
         if (!fcmToken || fcmToken.length < 20) {
             // Thrown, not a manual res.json(...): every other error in this API
@@ -65,7 +73,7 @@ export class NotificationController {
             throw new BadRequestError("Valid FCM token is required");
         }
 
-        const ownerId = req.user ? req.user.id : req.vendor.id;
+        const ownerId = authEntity.id;
         const ownerType = req.user ? "user" : "vendor";
 
         await this.notificationService.saveFcmToken(ownerId, ownerType, { ...body, fcmToken });
@@ -78,7 +86,8 @@ export class NotificationController {
         res: Response,
         _next: NextFunction,
     ) {
-        const ownerId = req.user ? req.user.id : req.vendor.id;
+        const authEntity = this.getAuthEntity(req);
+        const ownerId = authEntity.id;
         const ownerType = req.user ? "user" : "vendor";
 
         const removed = await this.notificationService.removeFcmDevice(
@@ -92,10 +101,11 @@ export class NotificationController {
     }
 
     async getNotificationByIdController(req: CombinedAuthRequest<{ id: string }>, res: Response, _next: NextFunction) {
+        const authEntity = this.getAuthEntity(req);
         const notification = await this.notificationService.getNotificationById(req.params.id);
         if (!notification) throw new NotFoundError("Notification");
 
-        if (!this.notificationService.canAccess(notification, req.user || req.vendor)) {
+        if (!this.notificationService.canAccess(notification, authEntity)) {
             throw new NotFoundError("Notification");
         }
 

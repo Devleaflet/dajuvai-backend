@@ -78,6 +78,13 @@ deliveryRiderRouter.get(
  *         schema:
  *           type: integer
  *         example: 101
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: No request body required
  *     responses:
  *       200:
  *         description: Pickup confirmed successfully
@@ -91,6 +98,16 @@ deliveryRiderRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "OUT_FOR_DELIVERY"
+ *                     message:
+ *                       type: string
+ *                       example: "Pickup confirmed"
  *       400:
  *         description: Bad request (business rule failure)
  *       401:
@@ -127,6 +144,13 @@ deliveryRiderRouter.patch(
  *         schema:
  *           type: integer
  *         example: 101
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             description: No request body required
  *     responses:
  *       200:
  *         description: Order marked delivered successfully
@@ -140,6 +164,16 @@ deliveryRiderRouter.patch(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "DELIVERED"
+ *                     message:
+ *                       type: string
+ *                       example: "Order delivered"
  *       400:
  *         description: Bad request (business rule failure)
  *       401:
@@ -204,6 +238,16 @@ deliveryRiderRouter.patch(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "FAILED_DELIVERY"
+ *                     message:
+ *                       type: string
+ *                       example: "Delivery marked as failed"
  *       400:
  *         description: Bad request (Zod validation error or business rule failure)
  *       401:

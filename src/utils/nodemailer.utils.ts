@@ -26,7 +26,7 @@ const getOrderStatusEmailMeta = (status: string) => {
         string,
         { label: string; color: string; bg: string; copy: string }
     > = {
-        CREATED: {
+        ORDER_PLACED: {
             label: "Order Placed",
             color: "#92400e",
             bg: "#fef3c7",
@@ -1094,7 +1094,7 @@ const getVendorOrderStatusEmailMeta = (status: string) => {
         string,
         { label: string; color: string; bg: string; copy: string }
     > = {
-        CREATED: {
+        ORDER_PLACED: {
             label: "Order Placed",
             color: "#92400e",
             bg: "#fef3c7",

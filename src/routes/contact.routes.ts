@@ -29,9 +29,11 @@ const contactController = new ContactController();
  *             properties:
  *               firstName:
  *                 type: string
+ *                 minLength: 1
  *                 example: John
  *               lastName:
  *                 type: string
+ *                 minLength: 1
  *                 example: Doe
  *               email:
  *                 type: string
@@ -39,12 +41,17 @@ const contactController = new ContactController();
  *                 example: john.doe@example.com
  *               phone:
  *                 type: string
+ *                 minLength: 10
+ *                 maxLength: 10
  *                 example: 9876543210
  *               subject:
  *                 type: string
+ *                 minLength: 1
+ *                 maxLength: 255
  *                 example: Inquiry about services
  *               message:
  *                 type: string
+ *                 minLength: 1
  *                 example: I would like to know more about your offerings.
  *     responses:
  *       201:
@@ -95,8 +102,30 @@ const contactController = new ContactController();
  *                       example: 2025-05-30T12:34:56Z
  *       400:
  *         description: Bad request due to invalid input
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 
 router.post('/', validateZod(contactSchema), contactController.createContact.bind(contactController));
@@ -179,12 +208,56 @@ router.post('/', validateZod(contactSchema), contactController.createContact.bin
  *                       example: 42
  *       400:
  *         description: Invalid query parameters
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       403:
  *         description: Forbidden (not admin)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.get('/admin', authMiddleware, isAdminOrStaff, validateZod(adminContactQuerySchema, "query"), contactController.getAdminContacts.bind(contactController));
 

@@ -41,6 +41,7 @@ export interface IVerifyTokenRequest {
 }
 
 export interface IResetPasswordRequest {
+    email: string;
     newPass: string;
     confirmPass: string;
     token: string;

@@ -15,6 +15,7 @@ import {
 import { OrderItem } from "../entities/orderItems.entity";
 import bcrypt from "bcryptjs";
 import { User, UserRole } from "../entities/user.entity";
+import { OrderService } from "./order.service";
 
 export class DeliveryService {
     private orderRepository: Repository<Order>;
@@ -22,6 +23,7 @@ export class DeliveryService {
     private assignmentRepository: Repository<DeliveryAssignment>;
     private orderItemRepository: Repository<OrderItem>;
     private userRepository: Repository<User>;
+    private orderService: OrderService;
 
     // to verify status change
     private readonly ALLOWED_STATUS_TRANSITIONS: Record<
@@ -48,6 +50,7 @@ export class DeliveryService {
             AppDataSource.getRepository(DeliveryAssignment);
         this.orderItemRepository = AppDataSource.getRepository(OrderItem);
         this.userRepository = AppDataSource.getRepository(User);
+        this.orderService = new OrderService();
     }
 
     private validateAndTransition(order: Order, target: DeliveryStatus): void {
@@ -432,9 +435,8 @@ export class DeliveryService {
             );
         }
 
-        return await AppDataSource.transaction(async (manager) => {
+        const updatedAssignment = await AppDataSource.transaction(async (manager) => {
             this.validateAndTransition(order, DeliveryStatus.DELIVERED);
-            order.status = OrderStatus.DELIVERED;
             await manager.save(order);
 
             assignment.assignmentStatus = AssignmentStatus.DELIVERED;
@@ -451,6 +453,13 @@ export class DeliveryService {
 
             return assignment;
         });
+
+        await this.orderService.changeOrderStatus(orderId, OrderStatus.DELIVERED, {
+            actorRole: "RIDER",
+            reason: "Delivered by rider",
+        });
+
+        return updatedAssignment;
     }
 
     async markDeliveryFailed(

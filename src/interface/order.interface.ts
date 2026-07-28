@@ -108,7 +108,7 @@ export type VendorOrderSort =
 export interface IVendorOrderQueryParams {
     page?: number;
     limit?: number;
-    /** Maps to order.status (e.g. CREATED, DELIVERED, CANCELLED) */
+    /** Maps to order.status (e.g. ORDER_PLACED, DELIVERED, CANCELLED) */
     status?: string;
     sort?: VendorOrderSort;
     /** Free-text search across order number, customer name/email/phone,

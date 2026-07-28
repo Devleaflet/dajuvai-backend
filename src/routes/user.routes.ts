@@ -453,12 +453,35 @@ userRouter.delete(
  *           schema:
  *             type: object
  *             properties:
- *               data:
- *                 type: object
- *                 description: Fields to update for the staff user
- *                 example:
- *                   username: "newStaffName"
- *                   email: "newstaff@example.com"
+ *               username:
+ *                 type: string
+ *                 minLength: 3
+ *                 description: Username (at least 3 characters)
+ *                 example: "newStaffName"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Staff email address
+ *                 example: "newstaff@example.com"
+ *               fullName:
+ *                 type: string
+ *                 description: Full name of the staff member
+ *                 example: "John Doe"
+ *               phoneNumber:
+ *                 type: string
+ *                 pattern: "^[0-9]{7,15}$"
+ *                 description: Phone number (7-15 digits)
+ *                 example: "9812345678"
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: New password (min 8 characters, must contain uppercase, lowercase, number, and special character)
+ *                 example: "NewPass123!@#"
+ *               confirmPassword:
+ *                 type: string
+ *                 format: password
+ *                 description: Confirm new password (must match password if provided)
  *     responses:
  *       200:
  *         description: Staff updated successfully
@@ -643,8 +666,6 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *     summary: Get all users
  *     description: Retrieves a list of all users. Admin access only.
  *     tags: [Users]
- *     security:
- *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: A list of users
@@ -704,6 +725,7 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *               - username
  *               - email
  *               - password
+ *               - confirmPassword
  *             properties:
  *               username:
  *                 type: string
@@ -715,12 +737,12 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *               password:
  *                 type: string
  *                 format: password
- *                 description: User password (min 8 characters)
- *               role:
+ *                 description: User password (min 8 characters, must contain uppercase, lowercase, number, and special character)
+ *               confirmPassword:
  *                 type: string
- *                 enum: [admin, user, customer]
- *                 description: User role (optional)
- *           example:
+ *                 format: password
+ *                 description: Confirm password (must match password)
+ *             example:
  *             username: "johndoe"
  *             email: "admin@gmail.com"
  *             password: "Password123!@#"
@@ -1227,12 +1249,6 @@ userRouter.get(
  *                 message:
  *                   type: string
  *                   example: Internal server error
- *     securityDefinitions:
- *       bearerAuth:
- *         type: http
- *         scheme: bearer
- *         bearerFormat: JWT
- *         description: JWT token stored in an httpOnly cookie, extracted by the cookieExtractor function
  */
 userRouter.get(
     "/me",
@@ -1487,10 +1503,15 @@ userRouter.post(
  *           schema:
  *             type: object
  *             required:
+ *               - email
  *               - newPass
  *               - confirmPass
  *               - token
  *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User email address
  *               newPass:
  *                 type: string
  *                 format: password
@@ -1535,6 +1556,69 @@ userRouter.post(
     userController.resetPassword.bind(userController),
 );
 
+/**
+ * @swagger
+ * /api/auth/admin/vendors/{vendorId}/change-vendor-password:
+ *   put:
+ *     summary: Admin change vendor password
+ *     description: Allows an admin to forcibly reset a vendor's password. Only accessible by admin users.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: vendorId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the vendor whose password should be changed
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPass
+ *               - confirmPass
+ *             properties:
+ *               newPass:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: New password for the vendor account (must contain uppercase, number, and symbol)
+ *                 example: "AdminResetPass123!"
+ *               confirmPass:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: Confirm new password
+ *                 example: "AdminResetPass123!"
+ *     responses:
+ *       200:
+ *         description: Vendor password changed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor password updated successfully"
+ *       400:
+ *         description: Invalid input or validation error
+ *       401:
+ *         description: Unauthorized - Not authenticated
+ *       403:
+ *         description: Forbidden - Not an admin
+ *       404:
+ *         description: Vendor not found
+ *       500:
+ *         description: Internal server error
+ */
 userRouter.put(
     "/admin/vendors/:vendorId/change-vendor-password",
     authMiddleware,
@@ -1811,6 +1895,59 @@ userRouter.post(
     userController.verifyEmailChange.bind(userController),
 );
 
+/**
+ * @swagger
+ * /api/auth/user/{id}:
+ *   delete:
+ *     summary: Delete a user account
+ *     description: Permanently deletes a user account by ID. Admin/Staff only.
+ *     tags:
+ *       - User
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the user to delete
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "User deleted successfully"
+ *       400:
+ *         description: Invalid user ID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid user ID"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin or Staff access required
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
 userRouter.delete("/:id", userController.deleteUserHandler);
 // isAdminOrStaff,
 

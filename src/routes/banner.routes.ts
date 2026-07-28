@@ -26,21 +26,49 @@ const upload = multer({ storage: multer.memoryStorage() });
  *     requestBody:
  *       required: true
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - name
+ *               - type
+ *               - productSource
+ *               - startDate
+ *               - endDate
  *             properties:
  *               name:
  *                 type: string
+ *                 maxLength: 100
  *                 example: "Summer Sale Banner"
  *               type:
  *                 type: string
  *                 enum: [HERO, SIDEBAR, PRODUCT, SPECIAL_DEALS]
  *                 example: HERO
- *               status:
+ *               productSource:
  *                 type: string
- *                 enum: [ACTIVE, EXPIRED, SCHEDULED]
- *                 example: SCHEDULED
+ *                 enum: [manual, category, subcategory, deal, external]
+ *                 example: manual
+ *               selectedProducts:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Required if productSource is manual
+ *               selectedCategoryId:
+ *                 type: integer
+ *                 description: Required if productSource is category or subcategory
+ *               selectedSubcategoryId:
+ *                 type: integer
+ *                 description: Required if productSource is subcategory
+ *               placementAfterSection:
+ *                 type: integer
+ *                 description: Homepage position for SIDEBAR banners (positive integer)
+ *               selectedDealId:
+ *                 type: integer
+ *                 description: Required if productSource is deal
+ *               externalLink:
+ *                 type: string
+ *                 format: uri
+ *                 description: Required if productSource is external
  *               startDate:
  *                 type: string
  *                 format: date-time
@@ -51,21 +79,52 @@ const upload = multer({ storage: multer.memoryStorage() });
  *                 example: "2025-06-30T23:59:59Z"
  *               desktopImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for desktop view (required)
+ *                 description: URL for desktop view image (optional)
  *               mobileImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for mobile view (required)
+ *                 description: URL for mobile view image (optional)
  *     responses:
  *       201:
  *         description: Banner created successfully
  *       400:
  *         description: Bad request (validation errors)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.post(
 	"/",
@@ -93,18 +152,34 @@ router.post(
  *     requestBody:
  *       required: false
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
  *             properties:
  *               name:
  *                 type: string
+ *                 maxLength: 100
  *               type:
  *                 type: string
  *                 enum: [HERO, SIDEBAR, PRODUCT, SPECIAL_DEALS]
- *               status:
+ *               productSource:
  *                 type: string
- *                 enum: [ACTIVE, EXPIRED, SCHEDULED]
+ *                 enum: [manual, category, subcategory, deal, external]
+ *               selectedProducts:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *               selectedCategoryId:
+ *                 type: integer
+ *               selectedSubcategoryId:
+ *                 type: integer
+ *               placementAfterSection:
+ *                 type: integer
+ *               selectedDealId:
+ *                 type: integer
+ *               externalLink:
+ *                 type: string
+ *                 format: uri
  *               startDate:
  *                 type: string
  *                 format: date-time
@@ -113,23 +188,65 @@ router.post(
  *                 format: date-time
  *               desktopImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for desktop view (optional)
+ *                 description: URL for desktop view image (optional)
  *               mobileImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for mobile view (optional)
+ *                 description: URL for mobile view image (optional)
  *     responses:
  *       200:
  *         description: Banner updated successfully
  *       400:
  *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       404:
  *         description: Banner not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.patch(
 	"/:id",
@@ -160,10 +277,43 @@ router.patch(
  *         description: Banner details
  *       404:
  *         description: Banner not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.get("/:id", bannerController.getBannerById.bind(bannerController));
 
@@ -178,6 +328,17 @@ router.get("/:id", bannerController.getBannerById.bind(bannerController));
  *         description: List of banners
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.get("/", bannerController.getAllBanners.bind(bannerController));
 
@@ -301,7 +462,7 @@ router.delete(
  *                         example: "https://example.com/banner.jpg"
  *                       type:
  *                         type: string
- *                         example: "Hero"
+ *                         example: "HERO"
  *                       status:
  *                         type: string
  *                         example: "ACTIVE"

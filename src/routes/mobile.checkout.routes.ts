@@ -11,8 +11,10 @@ const controller = new MobileCheckoutController();
  *   get:
  *     summary: Get all data required for mobile checkout in a single request
  *     description: >
- *       Returns the authenticated user's profile (including saved address),
- *       their current cart with each item's vendor details
+ *       Returns the authenticated user's profile, saved checkout defaults,
+ *       available payment methods, cart items, vendor data, shipping estimate,
+ *       and backend-authoritative priceBreakdown when the saved address is
+ *       complete enough to estimate checkout.
  *     tags:
  *       - Checkout
  *     security:
@@ -52,7 +54,7 @@ const controller = new MobileCheckoutController();
  *                           example: "9841000000"
  *                         role:
  *                           type: string
- *                           enum: [admin, user, staff, driver]
+ *                           enum: [admin, user, staff, rider]
  *                           example: "user"
  *                         address:
  *                           type: object
@@ -70,6 +72,10 @@ const controller = new MobileCheckoutController();
  *                               example: "Kathmandu"
  *                             localAddress:
  *                               type: string
+ *                               example: "Thamel, Ward 26"
+ *                             streetAddress:
+ *                               type: string
+ *                               description: Alias of localAddress used by order creation APIs.
  *                               example: "Thamel, Ward 26"
  *                             landmark:
  *                               type: string
@@ -145,6 +151,87 @@ const controller = new MobileCheckoutController();
  *                                       name:
  *                                         type: string
  *                                         example: "Kathmandu"
+ *                     checkoutReady:
+ *                       type: boolean
+ *                       description: True when cart and saved profile/address can produce a checkout estimate.
+ *                       example: true
+ *                     missingCheckoutFields:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                       example: []
+ *                     checkoutDefaults:
+ *                       type: object
+ *                       description: Values the mobile app can prefill in checkout.
+ *                       properties:
+ *                         fullName:
+ *                           type: string
+ *                           example: "Ramesh Shah"
+ *                         phoneNumber:
+ *                           type: string
+ *                           example: "9841000000"
+ *                         paymentMethod:
+ *                           type: string
+ *                           enum: [CASH_ON_DELIVERY, ESEWA, NPX]
+ *                           example: CASH_ON_DELIVERY
+ *                         shippingAddress:
+ *                           type: object
+ *                           nullable: true
+ *                           description: Uses order creation field names, including streetAddress.
+ *                     availablePaymentMethods:
+ *                       type: array
+ *                       items:
+ *                         type: string
+ *                         enum: [CASH_ON_DELIVERY, ESEWA, NPX]
+ *                       example: [CASH_ON_DELIVERY, ESEWA, NPX]
+ *                     checkoutEstimate:
+ *                       type: object
+ *                       nullable: true
+ *                       description: Same totals returned by /api/order/estimate when checkoutReady is true.
+ *                     checkoutEstimateError:
+ *                       type: string
+ *                       nullable: true
+ *                       example: null
+ *                     priceBreakdown:
+ *                       type: object
+ *                       nullable: true
+ *                       description: Actual price, product discount, deal discount, promo discount, and line totals.
+ *                       properties:
+ *                         actualPrice:
+ *                           type: number
+ *                           example: 5000
+ *                         merchandiseSubtotal:
+ *                           type: number
+ *                           example: 4200
+ *                         productDiscountTotal:
+ *                           type: number
+ *                           example: 500
+ *                         dealDiscountTotal:
+ *                           type: number
+ *                           example: 300
+ *                         promoDiscountTotal:
+ *                           type: number
+ *                           example: 0
+ *                         lineItems:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                     vendorShippingBreakdown:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                     totals:
+ *                       type: object
+ *                       nullable: true
+ *                       properties:
+ *                         merchandiseSubtotal:
+ *                           type: number
+ *                         shippingTotal:
+ *                           type: number
+ *                         discountTotal:
+ *                           type: number
+ *                         grandTotal:
+ *                           type: number
  *       401:
  *         description: Unauthorized - missing or invalid token
  *         content:

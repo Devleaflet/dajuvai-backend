@@ -27,10 +27,12 @@ const wishlistController = new WishlistController();
  *             properties:
  *               productId:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 35
  *                 description: ID of the product to add
  *               variantId:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 60
  *                 description: Optional variant ID if the product has variants
  *     responses:
@@ -133,8 +135,8 @@ const wishlistController = new WishlistController();
  *                                 type: string
  *                                 example: "AVAILABLE"
  *                               productId:
- *                                 type: string
- *                                 example: "35"
+ *                                 type: integer
+ *                                 example: 35
  *                               created_at:
  *                                 type: string
  *                                 format: date-time
@@ -173,6 +175,7 @@ router.post('/', authMiddleware, requireUserRole, validateZod(addToWishlistSchem
  *             properties:
  *               wishlistItemId:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 456
  *                 description: The ID of the wishlist item to remove
  *     responses:
@@ -253,6 +256,68 @@ router.delete('/', authMiddleware, requireUserRole, validateZod(removeFromWishli
  */
 router.get('/', authMiddleware, requireUserRole, wishlistController.getWishlist.bind(wishlistController));
 
+/**
+ * @swagger
+ * /api/wishlist/move-to-cart/batch:
+ *   post:
+ *     summary: Move multiple wishlist items to cart
+ *     description: Moves multiple items from the authenticated user's wishlist to their cart in a single batch operation.
+ *     tags: [Wishlist]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       description: Array of wishlist items with quantities to move
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - items
+ *             properties:
+ *               items:
+ *                 type: array
+ *                 minItems: 1
+ *                 maxItems: 100
+ *                 items:
+ *                   type: object
+ *                   required:
+ *                     - wishlistItemId
+ *                     - quantity
+ *                   properties:
+ *                     wishlistItemId:
+ *                       type: integer
+ *                       minimum: 1
+ *                       example: 123
+ *                       description: ID of the wishlist item to move
+ *                     quantity:
+ *                       type: integer
+ *                       minimum: 1
+ *                       example: 2
+ *                       description: Quantity to move to cart
+ *     responses:
+ *       200:
+ *         description: Wishlist items moved to cart successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   description: Updated wishlist object
+ *       400:
+ *         description: Bad request (invalid input)
+ *       401:
+ *         description: Unauthorized (user not authenticated)
+ *       404:
+ *         description: Wishlist or wishlist item not found
+ *       500:
+ *         description: Internal server error
+ */
 router.post('/move-to-cart/batch', authMiddleware, requireUserRole, validateZod(moveManyToCartSchema), wishlistController.moveManyToCart.bind(wishlistController));
 
 /**
@@ -277,10 +342,12 @@ router.post('/move-to-cart/batch', authMiddleware, requireUserRole, validateZod(
  *             properties:
  *               wishlistItemId:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 123
  *                 description: The ID of the wishlist item to move
  *               quantity:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 2
  *                 description: Quantity to move to cart
  *     responses:

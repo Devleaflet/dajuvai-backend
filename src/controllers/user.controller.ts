@@ -1114,49 +1114,33 @@ export class UserController {
             }
 
             // Extract email from validated data
-            const { email } = parsed.data;
-
-            // Attempt to find a user with the provided email
-            let user = await findUserByEmail(email);
-
-            if (user) {
-                if (user.provider === AuthProvider.GOOGLE) {
-                    throw new APIError(
-                        400,
-                        "Google login users cannot change password.",
-                    );
-                }
-            }
-
-            let vendor = null;
-            let isVendor = false;
-
-            // If user is not found, attempt to find a vendor with the email
+            const email = this.toLowerEmail(parsed.data.email);
+            const user = await findUserByEmail(email);
             if (!user) {
-                vendor = await findVendorByEmail(email);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor exists, respond with 404 Not Found
-                    throw new APIError(404, "User or vendor not found");
-                }
+                throw new APIError(404, "User does not exist");
             }
 
-            // Select the correct entity (user or vendor) to update
-            const entity = isVendor ? vendor : user;
+            if (user.provider === AuthProvider.GOOGLE) {
+                throw new APIError(
+                    400,
+                    "google registered users cannot change password, please login through google.",
+                );
+            }
 
             // Generate a new password reset token and set its expiration time (1 minutes from now)
             const token = TokenUtils.generateToken();
-            const tokenExpire = new Date(Date.now() + 1 * 60 * 1000);
+            const hashedToken = await TokenUtils.hashToken(token);
+            const tokenExpire = new Date(Date.now() + 15 * 60 * 1000);
 
             // Store the reset token and expiration time in the entity
-            entity.resetToken = token;
-            entity.resetTokenExpire = tokenExpire;
+            user.resetToken = hashedToken;
+            user.resetTokenExpire = tokenExpire;
 
             // Save the updated entity to the database
-            await (isVendor ? saveVendor(vendor) : saveUser(user));
+            await saveUser(user);
 
             // Send an email to the user or vendor with the reset token and instructions
-            await sendVerificationEmail(entity.email, "Reset Password", token);
+            await sendVerificationEmail(user.email, "Reset Password", token);
 
             // Respond with 202 Accepted indicating the reset email has been sent successfully
             res.status(202).json({
@@ -1211,37 +1195,42 @@ export class UserController {
 
             // Extract new password and reset token from validated data
             const { newPass, token } = parsed.data;
-
-            // Attempt to find a user associated with the reset token
-            let user = await findUserByResetToken(token);
-            let vendor = null;
-            let isVendor = false;
-
-            // If no user found, try to find a vendor associated with the reset token
+            const email = this.toLowerEmail(parsed.data.email);
+            const user = await findUserByEmail(email);
             if (!user) {
-                vendor = await findVendorByResetToken(token);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor found, respond with 410 Gone (token no longer valid)
-                    throw new APIError(410, "Reset token no longer valid");
-                }
+                throw new APIError(404, "User does not exist");
             }
-
-            // Select the correct entity (user or vendor) to update
-            const entity = isVendor ? vendor : user;
+            if (user.provider === AuthProvider.GOOGLE) {
+                throw new APIError(
+                    400,
+                    "google registered users cannot change password, please login through google.",
+                );
+            }
+            if (!user.resetToken || !user.resetTokenExpire) {
+                throw new APIError(410, "Reset token no longer valid");
+            }
+            if (user.resetTokenExpire < new Date()) {
+                throw new APIError(410, "Reset token expired");
+            }
+            const isMatch =
+                user.resetToken === token ||
+                (await bcrypt.compare(token, user.resetToken));
+            if (!isMatch) {
+                throw new APIError(400, "Invalid reset token");
+            }
 
             // Hash the new password securely using bcrypt with salt rounds = 10
             const hashedPassword = await bcrypt.hash(newPass, 10);
 
             // Update the entity's password with the hashed password
-            entity.password = hashedPassword;
+            user.password = hashedPassword;
 
             // Clear reset token and expiration to prevent reuse
-            entity.resetToken = null;
-            entity.resetTokenExpire = null;
+            user.resetToken = null;
+            user.resetTokenExpire = null;
 
             // Save the updated entity to the database
-            await (isVendor ? saveVendor(vendor) : saveUser(user));
+            await saveUser(user);
 
             // Respond with 200 OK indicating password reset was successful
             res.status(200).json({

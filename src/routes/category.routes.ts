@@ -1005,19 +1005,22 @@ router.delete(
  *               basePrice:
  *                 type: number
  *                 nullable: true
- *               discount:
+ *               discountAmount:
+ *                 type: number
+ *                 default: 0
+ *               discountPercent:
  *                 type: number
  *                 default: 0
  *               discountType:
  *                 type: string
- *                 enum: [PERCENTAGE, FLAT]
- *                 default: PERCENTAGE
+ *                 enum: [NONE, PERCENTAGE, FLAT]
+ *                 default: NONE
  *               stock:
  *                 type: integer
  *                 nullable: true
  *               status:
  *                 type: string
- *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *               hasVariants:
  *                 type: boolean
  *               productImages:
@@ -1033,6 +1036,9 @@ router.delete(
  *                 description: Required if hasVariants is true
  *                 items:
  *                   type: object
+ *                   required:
+ *                     - sku
+ *                     - stock
  *                   properties:
  *                     sku:
  *                       type: string
@@ -1040,13 +1046,19 @@ router.delete(
  *                     basePrice:
  *                       type: number
  *                       example: 25.00
- *                     discount:
+ *                     price:
+ *                       type: number
+ *                       example: 25.00
+ *                     discountAmount:
+ *                       type: number
+ *                       default: 0
+ *                     discountPercent:
  *                       type: number
  *                       default: 0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       default: PERCENTAGE
+ *                       enum: [NONE, PERCENTAGE, FLAT]
+ *                       default: NONE
  *                     attributes:
  *                       type: object
  *                       description: Key-value pairs of attributes
@@ -1058,12 +1070,17 @@ router.delete(
  *                         type: string
  *                         format: uri
  *                         example: https://res.cloudinary.com/.../variants/white_l_1.jpg
+ *                     images:
+ *                       type: array
+ *                       description: Array of image objects or URLs for this variant
+ *                       items:
+ *                         type: string
  *                     stock:
  *                       type: integer
  *                       example: 50
  *                     status:
  *                       type: string
- *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *               dealId:
  *                 type: integer
  *                 nullable: true
@@ -1072,14 +1089,44 @@ router.delete(
  *                 nullable: true
  *             required:
  *               - name
- *               - subcategoryId
  *               - hasVariants
  *               - productImages
  *     responses:
  *       201:
  *         description: Product created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product created successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     name:
+ *                       type: string
+ *                       example: "T-Shirt"
  *       400:
  *         description: Bad request (missing fields or no product images)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Missing required fields"
  */
 router.post(
     "/:categoryId/subcategories/:subcategoryId/products",
@@ -1215,7 +1262,7 @@ router.post(
  *                         example: 10.5
  *                       discountType:
  *                         type: string
- *                         enum: [PERCENTAGE, FLAT]
+ *                         enum: [NONE, PERCENTAGE, FLAT]
  *                         example: "PERCENTAGE"
  *                       size:
  *                         type: array
@@ -1366,7 +1413,7 @@ router.get(
  *                       example: 5.0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
+ *                       enum: [NONE, PERCENTAGE, FLAT]
  *                       example: "FLAT"
  *                     size:
  *                       type: array
@@ -1492,18 +1539,22 @@ router.get(
  *                 type: number
  *                 description: Base price for non-variant products (optional, ignored if hasVariants is true)
  *                 example: 20
- *               discount:
+ *               discountAmount:
  *                 type: number
- *                 description: Discount amount (optional)
+ *                 description: Discount amount for FLAT discount type (optional)
  *                 example: 5
+ *               discountPercent:
+ *                 type: number
+ *                 description: Discount percent for PERCENTAGE discount type (optional)
+ *                 example: 10
  *               discountType:
  *                 type: string
- *                 enum: [PERCENTAGE, FLAT]
+ *                 enum: [NONE, PERCENTAGE, FLAT]
  *                 description: Discount type (optional)
- *                 example: FLAT
+ *                 example: NONE
  *               status:
  *                 type: string
- *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *                 description: Inventory status (optional)
  *                 example: AVAILABLE
  *               stock:
@@ -1526,13 +1577,19 @@ router.get(
  *                     basePrice:
  *                       type: number
  *                       example: 25
- *                     discount:
+ *                     price:
+ *                       type: number
+ *                       example: 25
+ *                     discountAmount:
+ *                       type: number
+ *                       example: 0
+ *                     discountPercent:
  *                       type: number
  *                       example: 0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       example: PERCENTAGE
+ *                       enum: [NONE, PERCENTAGE, FLAT]
+ *                       example: NONE
  *                     attributes:
  *                       type: object
  *                       example: { "color": "Red", "size": "L" }
@@ -1541,12 +1598,16 @@ router.get(
  *                       items:
  *                         type: string
  *                       example: ["https://res.cloudinary.com/.../variants/red_l.jpg"]
+ *                     images:
+ *                       type: array
+ *                       items:
+ *                         type: string
  *                     stock:
  *                       type: integer
  *                       example: 50
  *                     status:
  *                       type: string
- *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *                       example: AVAILABLE
  *               productImages:
  *                 type: array
@@ -1580,6 +1641,29 @@ router.get(
  *                   example: "Product updated successfully"
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 13
+ *                     name:
+ *                       type: string
+ *                       example: "Updated T-Shirt"
+ *                     brand:
+ *                       type: string
+ *                       example: "Nike"
+ *                     description:
+ *                       type: string
+ *                       example: "Premium Cotton T-shirt"
+ *                     basePrice:
+ *                       type: number
+ *                       example: 20
+ *                     stock:
+ *                       type: integer
+ *                       example: 100
+ *               status:
+ *                 type: string
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
+ *                 example: AVAILABLE
  *       400:
  *         description: Bad request (e.g., invalid productId or variant data)
  *         content:

@@ -75,6 +75,27 @@ export class OrderItem {
     @Column("decimal", { precision: 8, scale: 2, nullable: true })
     unitPriceSnapshot?: number;
 
+    @Column("decimal", { precision: 8, scale: 2, nullable: true })
+    basePriceSnapshot?: number;
+
+    @Column("decimal", { precision: 8, scale: 2, default: 0 })
+    productDiscountSnapshot: number;
+
+    @Column("decimal", { precision: 8, scale: 2, default: 0 })
+    dealDiscountSnapshot: number;
+
+    @Column({ nullable: true })
+    discountTypeSnapshot?: string;
+
+    @Column({ nullable: true })
+    discountLabelSnapshot?: string;
+
+    @Column({ nullable: true })
+    dealNameSnapshot?: string;
+
+    @Column("decimal", { precision: 5, scale: 2, nullable: true })
+    dealPercentSnapshot?: number;
+
     // did this item reach warehouse from vendor
     @Column({ default: false })
     collectedAtWarehouse: boolean;

@@ -1,6 +1,26 @@
 import { z } from "zod";
 import { PaymentOption } from "../../entities/vendor.entity";
 
+const vendorTelephoneSchema = z
+  .string()
+  .trim()
+  .regex(
+    /^(?:\d{9}|\d{2}-\d{7})$/,
+    "Telephone number must be 9 digits or use the format 01-1234567",
+  );
+
+const optionalVendorTelephoneSchema = z
+  .preprocess((value) => {
+    if (typeof value !== "string") return value;
+    const trimmed = value.trim();
+    return trimmed === "" ? undefined : trimmed;
+  }, vendorTelephoneSchema.optional());
+
+const nepalMobileNumberSchema = z
+  .string()
+  .trim()
+  .regex(/^\d{10}$/, "Phone number should be 10 digits");
+
 /**
  * Schema for vendor signup input validation.
  * Validates businessName, email, password, phoneNumber, and district.
@@ -10,8 +30,8 @@ export const vendorSignupSchema = z.object({
   businessName: z.string().min(3).max(100),
   email: z.string().email(),
   password: z.string().min(8).max(25),
-  phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/),
-  telePhone: z.string().optional().nullable(),
+  phoneNumber: nepalMobileNumberSchema,
+  telePhone: optionalVendorTelephoneSchema.nullable(),
   district: z.string().min(1),
 
   businessRegNumber: z
@@ -73,6 +93,7 @@ export const resetPasswordSchema = z
       .string()
       .min(8, "Password must be at least 8 characters long")
       .max(100, "Password must not exceed 100 characters"),
+    email: z.string().email("Invalid email format"),
     token: z.string().regex(/^\d{6}$/, "Token must be 6 digits"),
   })
   .refine((data) => data.newPass === data.confirmPass, {
@@ -146,8 +167,8 @@ export const vendorSignupSchemav2 = z.object({
   businessName: z.string().min(3).max(100),
   email: z.string().email(),
   password: z.string().min(8).max(100),
-  phoneNumber: z.string().regex(/^\+?[1-9]\d{1,14}$/),
-  telePhone: z.string().optional(),
+  phoneNumber: nepalMobileNumberSchema,
+  telePhone: optionalVendorTelephoneSchema,
   district: z.string().min(1),
 
   businessRegNumber: z
@@ -187,9 +208,9 @@ export const updateVendorSchema2 = z.object({
   businessName: z.string().min(3).max(100).optional(),
   phoneNumber: z
     .string()
-    .regex(/^\+?[1-9]\d{1,14}$/)
+    .regex(/^\d{10}$/, "Phone number should be 10 digits")
     .optional(),
-  telePhone: z.string().optional().nullable(),
+  telePhone: optionalVendorTelephoneSchema.nullable(),
 
   taxNumber: z.string().optional(),
   taxDocuments: z.array(z.string().url()).optional(),

@@ -13,6 +13,60 @@ import { responseCache } from "../middlewares/responseCache.middleware";
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
 
+/**
+ * @swagger
+ * /api/product/archived:
+ *   get:
+ *     summary: Get archived (soft-deleted) products
+ *     description: Retrieves a list of products that have been soft-deleted/archived. Requires vendor or admin authentication.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of archived products retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 15
+ *                       name:
+ *                         type: string
+ *                         example: "Discontinued Widget"
+ *                       basePrice:
+ *                         type: number
+ *                         format: float
+ *                         example: 29.99
+ *                       status:
+ *                         type: string
+ *                         example: "DISCONTINUED"
+ *                       deletedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-06-10T12:00:00Z"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Not a vendor or admin
+ *       500:
+ *         description: Internal server error
+ */
 // /api/product/archived — must be registered before GET /:id below,
 // otherwise Express would match "archived" as an :id value and route there.
 productRouter.get(
@@ -78,7 +132,7 @@ productRouter.get(
  *                       example: 10.0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
+ *                       enum: [NONE, PERCENTAGE, FLAT]
  *                       example: PERCENTAGE
  *                     size:
  *                       type: array
@@ -162,7 +216,7 @@ productRouter.get(
  *     tags:
  *       - Products
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -190,6 +244,69 @@ productRouter.delete(
     productController.deleteProductById.bind(productController),
 );
 
+/**
+ * @swagger
+ * /api/product/{id}/restore:
+ *   patch:
+ *     summary: Restore an archived (soft-deleted) product
+ *     description: Restores a product that was previously soft-deleted/archived, making it active again. Requires vendor or admin authentication.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the archived product to restore
+ *     responses:
+ *       200:
+ *         description: Product restored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product restored successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 15
+ *                     name:
+ *                       type: string
+ *                       example: "Restored Widget"
+ *                     status:
+ *                       type: string
+ *                       example: "AVAILABLE"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *       403:
+ *         description: Forbidden - Not a vendor or admin
+ *       404:
+ *         description: Product not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Product not found"
+ *       500:
+ *         description: Internal server error
+ */
 // /api/product/:id/restore — restores an archived (soft-deleted) product.
 productRouter.patch(
     "/:id/restore",
@@ -198,6 +315,75 @@ productRouter.patch(
     productController.restoreProductById.bind(productController),
 );
 
+/**
+ * @swagger
+ * /api/product/{id}/variant/{variantId}/restore:
+ *   patch:
+ *     summary: Restore a single archived variant
+ *     description: Restores a specific variant that was previously soft-deleted/archived under a product. Requires vendor or admin authentication.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the parent product
+ *       - in: path
+ *         name: variantId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the archived variant to restore
+ *     responses:
+ *       200:
+ *         description: Variant restored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Variant restored successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 60
+ *                     sku:
+ *                       type: string
+ *                       example: "SKU-GRAY"
+ *                     status:
+ *                       type: string
+ *                       example: "AVAILABLE"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *       403:
+ *         description: Forbidden - Not a vendor or admin
+ *       404:
+ *         description: Product or variant not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Variant not found"
+ *       500:
+ *         description: Internal server error
+ */
 // /api/product/:id/variant/:variantId/restore — restores a single archived variant.
 productRouter.patch(
     "/:id/variant/:variantId/restore",
@@ -341,10 +527,29 @@ export default productRouter;
  *         sku:
  *           type: string
  *           example: "SKU12345"
+ *         basePrice:
+ *           type: number
+ *           format: float
+ *           example: 499.99
  *         price:
  *           type: number
  *           format: float
  *           example: 499.99
+ *         discountAmount:
+ *           type: number
+ *           format: float
+ *           example: 10.0
+ *         discountPercent:
+ *           type: number
+ *           format: float
+ *           example: 10.0
+ *         discountType:
+ *           type: string
+ *           enum:
+ *             - NONE
+ *             - PERCENTAGE
+ *             - FLAT
+ *           example: "NONE"
  *         stock:
  *           type: integer
  *           example: 50
@@ -365,9 +570,7 @@ export default productRouter;
  *             $ref: "#/components/schemas/Image"
  *       required:
  *         - sku
- *         - price
  *         - stock
- *         - status
  *
  *     Product:
  *       type: object
@@ -400,9 +603,10 @@ export default productRouter;
  *         discountType:
  *           type: string
  *           enum:
+ *             - NONE
  *             - PERCENTAGE
  *             - FLAT
- *           example: "PERCENTAGE"
+ *           example: "NONE"
  *         status:
  *           type: string
  *           enum:

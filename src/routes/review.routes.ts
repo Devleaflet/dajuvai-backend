@@ -36,10 +36,12 @@ const reviewController = new ReviewController();
  *                 format: float
  *                 minimum: 1.0
  *                 maximum: 5.0
+ *                 multipleOf: 0.1
  *                 example: 4.5
  *                 description: Rating must be between 1.0 and 5.0 (one decimal place)
  *               comment:
  *                 type: string
+ *                 minLength: 1
  *                 maxLength: 500
  *                 example: "Great product, highly recommend!"
  *     responses:
@@ -187,7 +189,7 @@ router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewCont
  *     description: Allows an authenticated user to update their own review's rating or comment.
  *     tags: [Reviews]
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -236,7 +238,7 @@ router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), re
  *     description: Allows an authenticated user (or admin) to delete a review. Only the review owner or admin can delete.
  *     tags: [Reviews]
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id

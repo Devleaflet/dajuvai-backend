@@ -15,6 +15,42 @@ const controller = new MerchandisingController();
  *     responses:
  *       200:
  *         description: Ordered, visible-only mega menu
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       name:
+ *                         type: string
+ *                         example: "Electronics"
+ *                       slug:
+ *                         type: string
+ *                         example: "electronics"
+ *                       subcategories:
+ *                         type: array
+ *                         items:
+ *                           type: object
+ *                           properties:
+ *                             id:
+ *                               type: integer
+ *                               example: 10
+ *                             name:
+ *                               type: string
+ *                               example: "Mobile Phones"
+ *                             slug:
+ *                               type: string
+ *                               example: "mobile-phones"
  */
 storefrontRoutes.get("/mega-menu", controller.getStorefrontMegaMenu.bind(controller));
 
@@ -29,6 +65,35 @@ storefrontRoutes.get("/mega-menu", controller.getStorefrontMegaMenu.bind(control
  *     responses:
  *       200:
  *         description: Ordered, visible-only category grid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       name:
+ *                         type: string
+ *                         example: "Fashion"
+ *                       slug:
+ *                         type: string
+ *                         example: "fashion"
+ *                       imageUrl:
+ *                         type: string
+ *                         format: uri
+ *                         example: "https://example.com/categories/fashion.jpg"
+ *                       displayOrder:
+ *                         type: integer
+ *                         example: 1
  */
 storefrontRoutes.get("/category-grid", controller.getStorefrontCategoryGrid.bind(controller));
 

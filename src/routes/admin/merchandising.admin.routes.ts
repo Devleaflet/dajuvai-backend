@@ -14,9 +14,29 @@ const controller = new MerchandisingController();
  *       - Admin Placements
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "featured-categories"
  *     responses:
  *       200:
  *         description: Items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     description: Placement item entity
  *   post:
  *     summary: Add one or more items to a placement (appended last)
  *     description: Unknown or already-present items are silently skipped.
@@ -24,6 +44,13 @@ const controller = new MerchandisingController();
  *       - Admin Placements
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "featured-categories"
  *     requestBody:
  *       required: true
  *       content:
@@ -44,6 +71,17 @@ const controller = new MerchandisingController();
  *     responses:
  *       201:
  *         description: Added
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Items added to placement"
  */
 merchandisingAdminRouter.get(
     "/:slug/items",
@@ -67,18 +105,76 @@ merchandisingAdminRouter.post(
  *       - Admin Placements
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "featured-categories"
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 42
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               visible:
+ *                 type: boolean
+ *                 example: false
  *     responses:
  *       200:
  *         description: Updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Visibility toggled"
  *   delete:
  *     summary: Remove an item from a placement (the catalog row is untouched)
  *     tags:
  *       - Admin Placements
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "featured-categories"
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         example: 42
  *     responses:
  *       200:
  *         description: Removed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Item removed from placement"
  */
 merchandisingAdminRouter.patch(
     "/:slug/items/:itemId",
@@ -103,6 +199,13 @@ merchandisingAdminRouter.delete(
  *       - Admin Placements
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "featured-categories"
  *     requestBody:
  *       required: true
  *       content:
@@ -122,6 +225,17 @@ merchandisingAdminRouter.delete(
  *     responses:
  *       200:
  *         description: Order updated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Reordering applied"
  *       400:
  *         description: An id in the payload is not in the placement
  */
@@ -142,6 +256,12 @@ merchandisingAdminRouter.put(
  *     security:
  *       - bearerAuth: []
  *     parameters:
+ *       - in: path
+ *         name: slug
+ *         required: true
+ *         schema:
+ *           type: string
+ *         example: "featured-categories"
  *       - in: query
  *         name: entityType
  *         schema:
@@ -155,6 +275,19 @@ merchandisingAdminRouter.put(
  *     responses:
  *       200:
  *         description: Available items
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     description: Available catalog entity (category/subcategory)
  */
 merchandisingAdminRouter.get(
     "/:slug/available-items",

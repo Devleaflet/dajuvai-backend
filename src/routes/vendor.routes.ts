@@ -13,6 +13,7 @@ import {
     vendorSignupSchema,
     vendorLoginSchema,
     updateVendorSchema,
+    resetPasswordSchema,
     vendorSignupSchemav2,
     updateVendorSchema2,
     updateVendorPaymentOptionSchema,
@@ -156,6 +157,53 @@ router.get(
     vendorController.getVendors.bind(vendorController),
 );
 
+/**
+ * @swagger
+ * /api/vendors/partial/vendors:
+ *   get:
+ *     summary: Get partial vendor list (public)
+ *     description: Retrieves a lightweight list of approved vendors (id, businessName, logo). Used for vendor selection dropdowns and public displays.
+ *     tags: [Vendors]
+ *     responses:
+ *       200:
+ *         description: Successfully retrieved partial vendor list
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       businessName:
+ *                         type: string
+ *                         example: "ABC Electronics Store"
+ *                       logo:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "https://res.cloudinary.com/.../logo.jpg"
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ */
 router.get(
     "/partial/vendors",
     vendorController.getPartialVendors.bind(vendorController),
@@ -393,8 +441,6 @@ router.get(
  *     summary: Get vendor by ID
  *     description: Retrieves a single vendor's details using the vendor ID. Accessible by authenticated admins.
  *     tags: [Vendors]
- *     security:
- *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -459,6 +505,69 @@ router.get(
 router.get("/:id", vendorController.getVendorById.bind(vendorController));
 
 // /api/vendors/auth/vendor
+/**
+ * @swagger
+ * /api/vendors/auth/vendor:
+ *   get:
+ *     summary: Get authenticated vendor profile
+ *     description: Returns the currently authenticated vendor's profile data. Requires a valid vendor JWT token.
+ *     tags: [Vendors]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Vendor profile retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     businessName:
+ *                       type: string
+ *                       example: "ABC Electronics Store"
+ *                     email:
+ *                       type: string
+ *                       format: email
+ *                       example: "vendor@abcelectronics.com"
+ *                     phoneNumber:
+ *                       type: string
+ *                       example: "+1234567890"
+ *                     district:
+ *                       type: string
+ *                       example: "Kathmandu"
+ *                     isApproved:
+ *                       type: boolean
+ *                       example: true
+ *                     isVerified:
+ *                       type: boolean
+ *                       example: true
+ *       401:
+ *         description: Unauthorized - Invalid or missing vendor token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
+ *       404:
+ *         description: Vendor not found
+ *       500:
+ *         description: Internal server error
+ */
 router.get(
     "/auth/vendor",
     vendorAuthMiddleware,
@@ -485,6 +594,8 @@ router.get(
  *               - password
  *               - phoneNumber
  *               - district
+ *               - businessRegNumber
+ *               - taxDocuments
  *             properties:
  *               businessName:
  *                 type: string
@@ -501,26 +612,76 @@ router.get(
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 maxLength: 100
- *                 description: Secure password for account access (required, 8-100 characters).
+ *                 maxLength: 25
+ *                 description: Secure password for account access (required, 8-25 characters).
  *                 example: "securepassword123"
  *               phoneNumber:
  *                 type: string
- *                 pattern: "^\\+?[1-9]\\d{1,14}$"
- *                 description: Business contact phone number (required, international format supported).
- *                 example: "+1234567890"
+ *                 pattern: "^\\d{10}$"
+ *                 description: Business contact phone number (required, 10 digits).
+ *                 example: "9800000000"
+ *               telePhone:
+ *                 type: string
+ *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
+ *                 description: Optional telephone number (9 digits or 01-1234567 format).
+ *                 example: "01-1234567"
  *               district:
  *                 type: string
- *                 minLength: 2
- *                 maxLength: 100
- *                 description: District where the vendor's business is located (required, must match an existing district).
- *                 example: "Downtown District"
+ *                 minLength: 1
+ *                 description: District where the vendor's business is located (required).
+ *                 example: "Kathmandu"
+ *               businessRegNumber:
+ *                 type: string
+ *                 minLength: 1
+ *                 description: Business registration number (required).
+ *                 example: "BRN-12345"
+ *               taxNumber:
+ *                 type: string
+ *                 description: Tax registration number (optional).
+ *                 example: "PAN-123456"
+ *               taxDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: Array of tax document URLs (required, at least 1).
+ *                 example: ["https://example.com/tax.pdf"]
+ *               citizenshipDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: Array of citizenship document URLs (optional).
+ *                 example: ["https://example.com/citizenship.pdf"]
+ *               accountName:
+ *                 type: string
+ *                 description: Bank account name (optional).
+ *                 example: "ABC Store"
+ *               bankName:
+ *                 type: string
+ *                 description: Bank name (optional).
+ *                 example: "Nepal Bank"
+ *               accountNumber:
+ *                 type: string
+ *                 description: Bank account number (optional).
+ *                 example: "1234567890"
+ *               bankBranch:
+ *                 type: string
+ *                 description: Bank branch (optional).
+ *                 example: "Kathmandu"
+ *               profilePicture:
+ *                 type: string
+ *                 format: uri
+ *                 description: Profile picture URL (optional).
+ *                 example: "https://example.com/logo.jpg"
  *           example:
  *             businessName: "ABC Electronics Store"
  *             email: "vendor@abcelectronics.com"
  *             password: "securepassword123"
- *             phoneNumber: "+1234567890"
- *             district: "Downtown District"
+ *             phoneNumber: "9800000000"
+ *             district: "Kathmandu"
+ *             businessRegNumber: "BRN-12345"
+ *             taxDocuments: ["https://example.com/tax.pdf"]
  *     responses:
  *       201:
  *         description: Vendor registered successfully, verification email sent, and JWT cookie set.
@@ -686,6 +847,8 @@ router.post(
  *               - password
  *               - phoneNumber
  *               - district
+ *               - businessRegNumber
+ *               - taxDocuments
  *             properties:
  *               businessName:
  *                 type: string
@@ -702,26 +865,76 @@ router.post(
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 maxLength: 100
- *                 description: Secure password for account access (required, 8-100 characters).
+ *                 maxLength: 25
+ *                 description: Secure password for account access (required, 8-25 characters).
  *                 example: "securepassword123"
  *               phoneNumber:
  *                 type: string
- *                 pattern: "^\\+?[1-9]\\d{1,14}$"
- *                 description: Business contact phone number (required, international format supported).
- *                 example: "+1234567890"
+ *                 pattern: "^\\d{10}$"
+ *                 description: Business contact phone number (required, 10 digits).
+ *                 example: "9800000000"
+ *               telePhone:
+ *                 type: string
+ *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
+ *                 description: Optional telephone number (9 digits or 01-1234567 format).
+ *                 example: "01-1234567"
  *               district:
  *                 type: string
- *                 minLength: 2
- *                 maxLength: 100
- *                 description: District where the vendor's business is located (required, must match an existing district).
- *                 example: "Downtown District"
+ *                 minLength: 1
+ *                 description: District where the vendor's business is located (required).
+ *                 example: "Kathmandu"
+ *               businessRegNumber:
+ *                 type: string
+ *                 minLength: 1
+ *                 description: Business registration number (required).
+ *                 example: "BRN-12345"
+ *               taxNumber:
+ *                 type: string
+ *                 description: Tax registration number (optional).
+ *                 example: "PAN-123456"
+ *               taxDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: Array of tax document URLs (required, at least 1).
+ *                 example: ["https://example.com/tax.pdf"]
+ *               citizenshipDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: Array of citizenship document URLs (optional).
+ *                 example: ["https://example.com/citizenship.pdf"]
+ *               accountName:
+ *                 type: string
+ *                 description: Bank account name (optional).
+ *                 example: "ABC Store"
+ *               bankName:
+ *                 type: string
+ *                 description: Bank name (optional).
+ *                 example: "Nepal Bank"
+ *               accountNumber:
+ *                 type: string
+ *                 description: Bank account number (optional).
+ *                 example: "1234567890"
+ *               bankBranch:
+ *                 type: string
+ *                 description: Bank branch (optional).
+ *                 example: "Kathmandu"
+ *               profilePicture:
+ *                 type: string
+ *                 format: uri
+ *                 description: Profile picture URL (optional).
+ *                 example: "https://example.com/logo.jpg"
  *           example:
  *             businessName: "ABC Electronics Store"
  *             email: "vendor@abcelectronics.com"
  *             password: "securepassword123"
- *             phoneNumber: "+1234567890"
- *             district: "Downtown District"
+ *             phoneNumber: "9800000000"
+ *             district: "Kathmandu"
+ *             businessRegNumber: "BRN-12345"
+ *             taxDocuments: ["https://example.com/tax.pdf"]
  *     responses:
  *       201:
  *         description: Vendor registered successfully, verification email sent, and JWT cookie set.
@@ -892,8 +1105,8 @@ router.post(
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 maxLength: 15
- *                 description: Vendor's account password (required, 8-15 characters)
+ *                 maxLength: 25
+ *                 description: Vendor's account password (required, 8-25 characters)
  *                 example: "securepassword123"
  *           example:
  *             email: "vendor@abcelectronics.com"
@@ -1041,8 +1254,30 @@ router.post(
  *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *       401:
  *         description: Refresh token missing or invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Refresh token missing or invalid"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.post(
     "/refresh-token",
@@ -1072,6 +1307,17 @@ router.post(
  *                   example: "Logged out successfully"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.post("/logout", vendorController.logout.bind(vendorController));
 
@@ -1079,14 +1325,195 @@ router.post("/logout", vendorController.logout.bind(vendorController));
 
 // router.post('/verify', validateZod(verifyTokenSchema), vendorController.verifyToken.bind(vendorController));
 
-// router.post(
-//     "/forgot-password",
-//     authRateLimiter,
-//     validateZod(verificationTokenSchema),
-//     vendorController.forgotPassword.bind(vendorController),
-// );
+/**
+ * @swagger
+ * /api/vendors/forgot-password:
+ *   post:
+ *     summary: Request vendor password reset
+ *     description: Sends a password reset token to the vendor's registered email address. Rate limited to 5 requests per 15 minutes.
+ *     tags: [Vendors]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Registered vendor email address
+ *                 example: "vendor@abcelectronics.com"
+ *     responses:
+ *       200:
+ *         description: Password reset email sent successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset email sent successfully"
+ *       400:
+ *         description: Invalid email format
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid email format"
+ *       404:
+ *         description: Vendor not found with this email
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor not found with this email"
+ *       429:
+ *         description: Too many requests - rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Too many requests. Please try again later."
+ *       500:
+ *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
+ */
+router.post(
+    "/forgot-password",
+    authRateLimiter,
+    validateZod(verificationTokenSchema),
+    vendorController.forgotPassword.bind(vendorController),
+);
 
-// router.post('/reset-password', authRateLimiter, vendorController.resetPassword.bind(vendorController));
+/**
+ * @swagger
+ * /api/vendors/reset-password:
+ *   post:
+ *     summary: Reset vendor password with token
+ *     description: Resets the vendor's password using a valid reset token received via email. Rate limited to 5 requests per 15 minutes.
+ *     tags: [Vendors]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - newPass
+ *               - confirmPass
+ *               - token
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Vendor email address
+ *                 example: "vendor@abcelectronics.com"
+ *               newPass:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: New password (minimum 8 characters)
+ *                 example: "NewSecurePass123!"
+ *               confirmPass:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: Confirm new password (must match newPass)
+ *                 example: "NewSecurePass123!"
+ *               token:
+ *                 type: string
+ *                 pattern: "^\\d{6}$"
+ *                 description: Password reset token received via email (6 digits)
+ *                 example: "123456"
+ *     responses:
+ *       200:
+ *         description: Password reset successful
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Password reset successful"
+ *       400:
+ *         description: Invalid token, password mismatch, or validation error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid or expired reset token"
+ *       404:
+ *         description: Vendor not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor not found"
+ *       410:
+ *         description: Reset token expired
+ *       429:
+ *         description: Too many requests - rate limit exceeded
+ *       500:
+ *         description: Internal server error
+ */
+router.post(
+    "/reset-password",
+    authRateLimiter,
+    validateZod(resetPasswordSchema),
+    vendorController.resetPassword.bind(vendorController),
+);
 
 /**
  * @swagger
@@ -1112,42 +1539,89 @@ router.post("/logout", vendorController.logout.bind(vendorController));
  *         application/json:
  *           schema:
  *             type: object
- *             required:
- *               - id
  *             properties:
- *               id:
- *                 type: integer
- *                 minimum: 1
- *                 description: Vendor ID that must match the URL parameter (required)
- *                 example: 123
  *               businessName:
  *                 type: string
- *                 minLength: 1
- *                 maxLength: 255
+ *                 minLength: 3
+ *                 maxLength: 100
  *                 description: Name of the vendor's business (optional)
  *                 example: "Acme Food Supplies"
  *               email:
  *                 type: string
  *                 format: email
- *                 maxLength: 255
  *                 description: Vendor's email address (optional)
  *                 example: "vendor@acmefood.com"
- *               businessAddress:
+ *               password:
  *                 type: string
- *                 maxLength: 500
- *                 description: Physical address of the business (optional)
- *                 example: "123 Main Street, City, State 12345"
+ *                 format: password
+ *                 minLength: 8
+ *                 maxLength: 25
+ *                 description: New password (optional, 8-25 characters)
+ *                 example: "newSecurePass123"
  *               phoneNumber:
  *                 type: string
- *                 pattern: "^[+]?[0-9\\s\\-\\(\\)]{10,20}$"
- *                 description: Vendor's contact phone number (optional)
- *                 example: "+1-555-123-4567"
+ *                 pattern: "^\\d{10}$"
+ *                 description: Vendor's contact phone number (optional, 10 digits)
+ *                 example: "9800000000"
+ *               telePhone:
+ *                 type: string
+ *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
+ *                 description: Optional telephone number (9 digits or 01-1234567 format)
+ *                 example: "01-1234567"
+ *               district:
+ *                 type: string
+ *                 minLength: 1
+ *                 description: District (optional)
+ *                 example: "Kathmandu"
+ *               businessRegNumber:
+ *                 type: string
+ *                 minLength: 1
+ *                 description: Business registration number (optional)
+ *                 example: "BRN-12345"
+ *               taxNumber:
+ *                 type: string
+ *                 description: Tax registration number (optional)
+ *                 example: "PAN-123456"
+ *               taxDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: Tax document URLs (optional)
+ *                 example: ["https://example.com/tax.pdf"]
+ *               citizenshipDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 description: Citizenship document URLs (optional)
+ *                 example: ["https://example.com/citizenship.pdf"]
+ *               accountName:
+ *                 type: string
+ *                 description: Bank account name (optional)
+ *                 example: "Acme Food Supplies"
+ *               bankName:
+ *                 type: string
+ *                 description: Bank name (optional)
+ *                 example: "Nepal Bank"
+ *               accountNumber:
+ *                 type: string
+ *                 description: Bank account number (optional)
+ *                 example: "1234567890"
+ *               bankBranch:
+ *                 type: string
+ *                 description: Bank branch (optional)
+ *                 example: "Kathmandu"
+ *               profilePicture:
+ *                 type: string
+ *                 format: uri
+ *                 description: Profile picture URL (optional)
+ *                 example: "https://example.com/logo.jpg"
  *           example:
- *             id: 123
  *             businessName: "Acme Food Supplies"
  *             email: "vendor@acmefood.com"
- *             businessAddress: "123 Main Street, City, State 12345"
- *             phoneNumber: "+1-555-123-4567"
+ *             phoneNumber: "9800000000"
+ *             district: "Kathmandu"
  *     responses:
  *       200:
  *         description: Vendor updated successfully
@@ -1341,6 +1815,8 @@ router.put(
  *     description: Approves a verified vendor. Only accessible by admin or staff. Vendor must be verified before approval.
  *     tags:
  *       - Vendors
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1404,6 +1880,8 @@ router.put(
  *     description: Rejects a verified vendor. Only accessible by admin or staff.
  *     tags:
  *       - Vendors
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1467,6 +1945,8 @@ router.put(
  *     description: Permanently deletes a vendor from the system. Only accessible by admin or staff.
  *     tags:
  *       - Vendors
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -1542,9 +2022,14 @@ router.delete(
  *               - email
  *               - password
  *               - phoneNumber
+ *               - district
+ *               - businessRegNumber
+ *               - taxDocuments
  *             properties:
  *               businessName:
  *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 100
  *                 example: "Fresh Farms"
  *               email:
  *                 type: string
@@ -1552,13 +2037,55 @@ router.delete(
  *                 example: "vendor@freshfarms.com"
  *               password:
  *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 maxLength: 100
  *                 example: "SecurePass123!"
  *               phoneNumber:
  *                 type: string
+ *                 pattern: "^\\d{10}$"
+ *                 description: Phone number (10 digits)
  *                 example: "9800000000"
- *               businessAddress:
+ *               telePhone:
  *                 type: string
- *                 example: "Thamel, Kathmandu"
+ *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
+ *                 description: Optional telephone number
+ *                 example: "01-1234567"
+ *               district:
+ *                 type: string
+ *                 minLength: 1
+ *                 example: "Kathmandu"
+ *               businessRegNumber:
+ *                 type: string
+ *                 minLength: 1
+ *                 example: "BRN-12345"
+ *               taxNumber:
+ *                 type: string
+ *                 example: "PAN-123456"
+ *               taxDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 example: ["https://example.com/tax.pdf"]
+ *               citizenshipDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 example: ["https://example.com/citizenship.pdf"]
+ *               accountName:
+ *                 type: string
+ *                 example: "Fresh Farms"
+ *               bankName:
+ *                 type: string
+ *                 example: "Nepal Bank"
+ *               accountNumber:
+ *                 type: string
+ *                 example: "1234567890"
+ *               bankBranch:
+ *                 type: string
+ *                 example: "Kathmandu"
  *     responses:
  *       201:
  *         description: Vendor registration request submitted successfully
@@ -1600,17 +2127,49 @@ router.post(
  *             properties:
  *               businessName:
  *                 type: string
+ *                 minLength: 3
+ *                 maxLength: 100
  *                 example: "Fresh Farms Updated"
- *               email:
- *                 type: string
- *                 format: email
- *                 example: "newemail@freshfarms.com"
  *               phoneNumber:
  *                 type: string
+ *                 pattern: "^\\d{10}$"
+ *                 description: Phone number (10 digits)
  *                 example: "9811111111"
- *               businessAddress:
+ *               telePhone:
  *                 type: string
- *                 example: "New Road, Kathmandu"
+ *                 nullable: true
+ *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
+ *                 description: Optional telephone number (set to null to clear)
+ *                 example: "01-1234567"
+ *               taxNumber:
+ *                 type: string
+ *                 example: "PAN-123456"
+ *               taxDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 example: ["https://example.com/tax.pdf"]
+ *               citizenshipDocuments:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                   format: uri
+ *                 example: ["https://example.com/citizenship.pdf"]
+ *               district:
+ *                 type: string
+ *                 example: "Kathmandu"
+ *               profilePicture:
+ *                 type: string
+ *                 format: uri
+ *                 nullable: true
+ *                 description: Profile picture URL
+ *                 example: "https://example.com/logo.jpg"
+ *               paymentOptions:
+ *                 type: array
+ *                 items:
+ *                   type: object
+ *                 description: Vendor payment options
  *     responses:
  *       200:
  *         description: Vendor updated successfully
@@ -1662,15 +2221,20 @@ router.put(
  *           schema:
  *             type: object
  *             properties:
- *               accountName:
+ *               details:
+ *                 type: object
+ *                 description: Payment option details (key-value pairs)
+ *                 example: {"accountName": "Fresh Farms Business", "walletNumber": "9800000000"}
+ *               qrCodeImage:
  *                 type: string
- *                 example: "Fresh Farms Business"
- *               accountNumber:
- *                 type: string
- *                 example: "9800000000"
- *               paymentMethod:
- *                 type: string
- *                 example: "ESEWA"
+ *                 format: uri
+ *                 nullable: true
+ *                 description: QR code image URL
+ *                 example: "https://example.com/qr.png"
+ *               isActive:
+ *                 type: boolean
+ *                 description: Whether this payment option is active
+ *                 example: true
  *     responses:
  *       200:
  *         description: Payment option updated successfully

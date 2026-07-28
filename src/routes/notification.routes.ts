@@ -1,23 +1,23 @@
 import { Router } from "express";
-import { NotificationController } from '../controllers/notification.controller';
+import { NotificationController } from "../controllers/notification.controller";
 import {
-    combinedAuthMiddleware,
-    authMiddleware,
-    isAdminOrStaff,
-    validateZod,
+  combinedAuthMiddleware,
+  authMiddleware,
+  isAdminOrStaff,
+  validateZod,
 } from "../middlewares/auth.middleware";
 import {
-    readLimiter,
-    generalNotificationLimiter,
-    multicastLimiter,
-    broadcastLimiter,
-    deviceRegistrationLimiter,
+  readLimiter,
+  generalNotificationLimiter,
+  multicastLimiter,
+  broadcastLimiter,
+  deviceRegistrationLimiter,
 } from "../middlewares/pushRateLimiter.middleware";
 import {
-    sendToUserSchema,
-    sendToUsersSchema,
-    sendToTopicSchema,
-    dispatchQuerySchema,
+  sendToUserSchema,
+  sendToUsersSchema,
+  sendToTopicSchema,
+  dispatchQuerySchema,
 } from "../utils/zod_validations/push.zod";
 import { getNotificationsQuerySchema } from "../utils/zod_validations/notification.zod";
 
@@ -88,14 +88,36 @@ const controller = new NotificationController();
  *                         format: date-time
  *       401:
  *         description: Unauthorized, user or vendor not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 notificationRoutes.get(
-    "/",
-    combinedAuthMiddleware,
-    validateZod(getNotificationsQuerySchema, "query"),
-    controller.getNotificationController.bind(controller),
+  "/",
+  combinedAuthMiddleware,
+  validateZod(getNotificationsQuerySchema, "query"),
+  controller.getNotificationController.bind(controller),
 );
 
 /**
@@ -123,14 +145,25 @@ notificationRoutes.get(
  *         description: FCM token saved successfully
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 notificationRoutes.post(
-    "/fcm-token",
-    // Auth first: the limiter keys off req.user/req.vendor, which only exist
-    // once an auth middleware has run. Reversed, it silently falls back to IP.
-    combinedAuthMiddleware,
-    deviceRegistrationLimiter,
-    controller.saveFcmTokenController.bind(controller),
+  "/fcm-token",
+  // Auth first: the limiter keys off req.user/req.vendor, which only exist
+  // once an auth middleware has run. Reversed, it silently falls back to IP.
+  combinedAuthMiddleware,
+  deviceRegistrationLimiter,
+  controller.saveFcmTokenController.bind(controller),
 );
 
 /**
@@ -152,14 +185,36 @@ notificationRoutes.post(
  *         description: Device unregistered
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       404:
  *         description: Device not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Device not found"
  */
 notificationRoutes.delete(
-    "/devices/:deviceId",
-    combinedAuthMiddleware,
-    deviceRegistrationLimiter,
-    controller.removeFcmDeviceController.bind(controller),
+  "/devices/:deviceId",
+  combinedAuthMiddleware,
+  deviceRegistrationLimiter,
+  controller.removeFcmDeviceController.bind(controller),
 );
 
 // ── Admin push ───────────────────────────────────────────────────────────────
@@ -183,8 +238,8 @@ notificationRoutes.delete(
  *             required: [userId, title, body]
  *             properties:
  *               userId: { type: integer, example: 42 }
- *               title: { type: string, maxLength: 200, example: "Flash sale" }
- *               body: { type: string, maxLength: 1000, example: "50% off today only" }
+ *               title: { type: string, minLength: 1, maxLength: 200, example: "Flash sale" }
+ *               body: { type: string, minLength: 1, maxLength: 1000, example: "50% off today only" }
  *               imageUrl: { type: string, format: uri }
  *               data:
  *                 type: object
@@ -195,20 +250,64 @@ notificationRoutes.delete(
  *         description: Dispatch record with success/failure counts
  *       400:
  *         description: Validation failed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Validation failed"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       403:
  *         description: Not an admin or staff
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin or staff access required"
  *       429:
  *         description: Rate limit exceeded
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Too many requests, please try again later"
  */
 notificationRoutes.post(
-    "/admin/send/user",
-    authMiddleware,
-    generalNotificationLimiter,
-    isAdminOrStaff,
-    validateZod(sendToUserSchema),
-    controller.sendToUserController.bind(controller),
+  "/admin/send/user",
+  authMiddleware,
+  generalNotificationLimiter,
+  isAdminOrStaff,
+  validateZod(sendToUserSchema),
+  controller.sendToUserController.bind(controller),
 );
 
 /**
@@ -232,8 +331,8 @@ notificationRoutes.post(
  *                 minItems: 1
  *                 maxItems: 1000
  *                 items: { type: integer }
- *               title: { type: string, maxLength: 200 }
- *               body: { type: string, maxLength: 1000 }
+ *               title: { type: string, minLength: 1, maxLength: 200 }
+ *               body: { type: string, minLength: 1, maxLength: 1000 }
  *               imageUrl: { type: string, format: uri }
  *               data:
  *                 type: object
@@ -244,14 +343,25 @@ notificationRoutes.post(
  *         description: Dispatch record with success/failure counts
  *       429:
  *         description: Rate limit exceeded (10/min)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Rate limit exceeded"
  */
 notificationRoutes.post(
-    "/admin/send/multicast",
-    authMiddleware,
-    multicastLimiter,
-    isAdminOrStaff,
-    validateZod(sendToUsersSchema),
-    controller.sendToUsersController.bind(controller),
+  "/admin/send/multicast",
+  authMiddleware,
+  multicastLimiter,
+  isAdminOrStaff,
+  validateZod(sendToUsersSchema),
+  controller.sendToUsersController.bind(controller),
 );
 
 /**
@@ -271,8 +381,8 @@ notificationRoutes.post(
  *             required: [topic, title, body]
  *             properties:
  *               topic: { type: string, maxLength: 100, example: "all-users" }
- *               title: { type: string, maxLength: 200 }
- *               body: { type: string, maxLength: 1000 }
+ *               title: { type: string, minLength: 1, maxLength: 200 }
+ *               body: { type: string, minLength: 1, maxLength: 1000 }
  *               imageUrl: { type: string, format: uri }
  *               data:
  *                 type: object
@@ -283,14 +393,25 @@ notificationRoutes.post(
  *         description: Dispatch accepted by FCM. Per-device counts are not available for topics.
  *       429:
  *         description: Rate limit exceeded (5/min)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Rate limit exceeded"
  */
 notificationRoutes.post(
-    "/admin/send/topic",
-    authMiddleware,
-    broadcastLimiter,
-    isAdminOrStaff,
-    validateZod(sendToTopicSchema),
-    controller.sendToTopicController.bind(controller),
+  "/admin/send/topic",
+  authMiddleware,
+  broadcastLimiter,
+  isAdminOrStaff,
+  validateZod(sendToTopicSchema),
+  controller.sendToTopicController.bind(controller),
 );
 
 /**
@@ -315,12 +436,12 @@ notificationRoutes.post(
  *         description: Paginated dispatch records, newest first
  */
 notificationRoutes.get(
-    "/admin/history",
-    authMiddleware,
-    readLimiter,
-    isAdminOrStaff,
-    validateZod(dispatchQuerySchema, "query"),
-    controller.getDispatchHistoryController.bind(controller),
+  "/admin/history",
+  authMiddleware,
+  readLimiter,
+  isAdminOrStaff,
+  validateZod(dispatchQuerySchema, "query"),
+  controller.getDispatchHistoryController.bind(controller),
 );
 
 /**
@@ -336,11 +457,11 @@ notificationRoutes.get(
  *         description: Combined device and dispatch statistics
  */
 notificationRoutes.get(
-    "/admin/stats",
-    authMiddleware,
-    readLimiter,
-    isAdminOrStaff,
-    controller.getPushStatsController.bind(controller),
+  "/admin/stats",
+  authMiddleware,
+  readLimiter,
+  isAdminOrStaff,
+  controller.getPushStatsController.bind(controller),
 );
 
 /**
@@ -349,6 +470,8 @@ notificationRoutes.get(
  *   get:
  *     summary: Get notification details by ID
  *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -391,12 +514,36 @@ notificationRoutes.get(
  *                       format: date-time
  *       404:
  *         description: Notification not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Notification not found"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
-notificationRoutes.get("/:id", combinedAuthMiddleware, controller.getNotificationByIdController.bind(controller));
-
-
+notificationRoutes.get(
+  "/:id",
+  combinedAuthMiddleware,
+  controller.getNotificationByIdController.bind(controller),
+);
 
 /**
  * @swagger
@@ -404,6 +551,18 @@ notificationRoutes.get("/:id", combinedAuthMiddleware, controller.getNotificatio
  *   patch:
  *     summary: Mark a notification as read
  *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: false
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               isRead:
+ *                 type: boolean
+ *                 example: true
  *     parameters:
  *       - in: path
  *         name: id
@@ -437,9 +596,35 @@ notificationRoutes.get("/:id", combinedAuthMiddleware, controller.getNotificatio
  *                       example: true
  *       404:
  *         description: Notification not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Notification not found"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
-notificationRoutes.patch("/:id", combinedAuthMiddleware, controller.markReadController.bind(controller));
+notificationRoutes.patch(
+  "/:id",
+  combinedAuthMiddleware,
+  controller.markReadController.bind(controller),
+);
 
 export default notificationRoutes;

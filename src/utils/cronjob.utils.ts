@@ -90,7 +90,7 @@ export const tokenCleanUp = () => {
  *
  * Logic:
  * - Calculate threshold date as current time minus 24 hours.
- * - Find orders with status 'PENDING' created before threshold date.
+ * - Find orders with status 'ORDER_PLACED' created before threshold date.
  * - For each such order:
  *    - Remove order entity from DB, deleting it permanently.
  *
@@ -161,7 +161,7 @@ export const startOrderCleanupJob = () => {
                     paymentMethod: In([PaymentMethod.ESEWA, PaymentMethod.NPX]),
                     paymentStatus: PaymentStatus.UNPAID,
                     createdAt: LessThan(fifteenMinutesAgo),
-                    status: OrderStatus.CREATED,
+                    status: OrderStatus.ORDER_PLACED,
                 },
                 relations: ["orderedBy", "orderItems", "orderItems.vendor"],
             });

@@ -35,6 +35,7 @@ import {
     NotFoundError,
     ConflictError,
     RateLimitError,
+    GoneError,
     APIError,
 } from "../errors";
 import { DistrictService } from "../service/district.service";
@@ -316,7 +317,7 @@ export class VendorController {
             );
         }
 
-        const { email } = parsed.data;
+        const email = parsed.data.email.trim().toLowerCase();
         const vendor = await this.vendorService.findVendorByEmail(email);
         if (!vendor) throw new NotFoundError("Vendor");
 
@@ -376,13 +377,19 @@ export class VendorController {
             );
         }
 
-        const { email } = parsed.data;
+        const email = parsed.data.email.trim().toLowerCase();
         const vendor = await this.vendorService.findVendorByEmail(email);
-        if (!vendor) throw new NotFoundError("Vendor");
+        if (!vendor) {
+            throw new APIError(
+                404,
+                "vendor does not exist for provided mail.",
+            );
+        }
 
         const token = TokenUtils.generateToken();
+        const hashedToken = await TokenUtils.hashToken(token);
         const tokenExpire = new Date(Date.now() + 15 * 60 * 1000);
-        vendor.resetToken = token;
+        vendor.resetToken = hashedToken;
         vendor.resetTokenExpire = tokenExpire;
         await this.vendorService.saveVendor(vendor);
 
@@ -411,8 +418,24 @@ export class VendorController {
         }
 
         const { newPass, token } = parsed.data;
-        const vendor = await this.vendorService.findVendorByResetToken(token);
-        if (!vendor) throw new BadRequestError("Reset token no longer valid");
+        const email = parsed.data.email.trim().toLowerCase();
+        const vendor = await this.vendorService.findVendorByEmail(email);
+        if (!vendor) {
+            throw new APIError(
+                404,
+                "vendor does not exist for provided mail.",
+            );
+        }
+        if (!vendor.resetToken || !vendor.resetTokenExpire) {
+            throw new GoneError("Reset token no longer valid");
+        }
+        if (vendor.resetTokenExpire < new Date()) {
+            throw new GoneError("Reset token expired");
+        }
+        const isMatch =
+            vendor.resetToken === token ||
+            (await bcrypt.compare(token, vendor.resetToken));
+        if (!isMatch) throw new BadRequestError("Invalid reset token");
 
         const hashedPassword = await bcrypt.hash(newPass, 10);
         vendor.password = hashedPassword;

@@ -19,8 +19,6 @@ const promoController = new PromoController();
  *       User must have admin or staff privileges.
  *     tags:
  *       - Promo Code
- *     security:
- *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Successfully retrieved promo codes.
@@ -114,12 +112,22 @@ promoRouter.get("/", promoController.getPromoCode.bind(promoController));
  *             properties:
  *               promoCode:
  *                 type: string
+ *                 minLength: 1
  *                 example: SUMMER2025
  *               discountPercentage:
- *                 type: integer
+ *                 type: number
  *                 minimum: 1
  *                 maximum: 100
  *                 example: 15
+ *               applyOn:
+ *                 type: string
+ *                 enum: [LINE_TOTAL, SHIPPING]
+ *                 description: Where the discount applies
+ *                 example: LINE_TOTAL
+ *               isValid:
+ *                 type: boolean
+ *                 description: Whether the promo code is valid
+ *                 example: true
  *     responses:
  *       201:
  *         description: Promo code created successfully.
@@ -320,6 +328,7 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePro
  *             properties:
  *               promoCode:
  *                 type: string
+ *                 minLength: 1
  *                 example: "NEWYEAR25"
  *               discountPercentage:
  *                 type: number
@@ -341,12 +350,12 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePro
  *             schema:
  *               type: object
  *               properties:
- *                 sucess:
+ *                 success:
  *                   type: boolean
  *                   example: true
  *                 msg:
  *                   type: string
- *                   example: Promo code update succesfully
+ *                   example: Promo code updated successfully
  *                 data:
  *                   type: object
  *                   properties:

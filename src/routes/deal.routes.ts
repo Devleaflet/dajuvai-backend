@@ -31,6 +31,7 @@ const dealController = new DealController();
  *                 type: string
  *                 description: Unique name of the deal
  *                 example: "Summer Bonanza"
+ *                 minLength: 1
  *                 maxLength: 100
  *               discountPercentage:
  *                 type: number
@@ -76,10 +77,43 @@ const dealController = new DealController();
  *                       example: 101
  *       400:
  *         description: Validation error or duplicate deal name
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized – Admin authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.post('/', authMiddleware, isAdminOrStaff, validateZod(createDealSchema), dealController.createDeal.bind(dealController));
 
@@ -436,7 +470,7 @@ router.get('/', dealController.getAllDeals.bind(dealController));
  *                   example: true
  *                 msg:
  *                   type: string
- *                   example: Deal deleted successfully
+ *                   example: "Deal deleted successfully"
  *                 deletedDeal:
  *                   type: object
  *                   properties:
@@ -476,7 +510,7 @@ router.get('/', dealController.getAllDeals.bind(dealController));
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: Unauthorized
+ *                   example: "Unauthorized"
  *       404:
  *         description: Deal not found
  *         content:

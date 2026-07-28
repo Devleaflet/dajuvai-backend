@@ -53,6 +53,7 @@ import { NotificationService } from "./notification.service";
 import crypto from "crypto";
 import axios from "axios";
 import { PromoType } from "../entities/promo.entity";
+import { DealStatus } from "../entities/deal.entity";
 import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
 import config from "../config/env.config";
@@ -167,6 +168,99 @@ export class OrderService {
         });
     }
 
+    private buildLinePriceSnapshot(item: any) {
+        const source = item?.variant || item?.product || {};
+        const product = item?.product || {};
+        const basePrice = Number(source.basePrice ?? item?.price ?? 0) || 0;
+        const unitPrice = this.calculateLineItemPrice(item);
+        const discountType = source.discountType ?? DiscountType.NONE;
+        const hasProductDiscount =
+            discountType !== DiscountType.NONE &&
+            Number(source.discountAmount ?? 0) > 0;
+        const deal =
+            product.deal && product.deal.status === DealStatus.ENABLED
+                ? product.deal
+                : null;
+
+        const productDiscountAmount = hasProductDiscount
+            ? Math.min(Number(source.discountAmount) || 0, basePrice)
+            : !deal
+              ? Math.max(0, basePrice - unitPrice)
+              : 0;
+        const dealDiscountAmount = deal
+            ? Math.max(0, basePrice - productDiscountAmount - unitPrice)
+            : 0;
+
+        return {
+            basePrice,
+            unitPrice,
+            productDiscountAmount,
+            dealDiscountAmount,
+            discountType,
+            discountLabel: hasProductDiscount
+                ? discountType === DiscountType.FLAT
+                    ? `Flat discount`
+                    : `${Number(source.discountPercent ?? source.discount ?? 0) || 0}% discount`
+                : null,
+            dealName: deal?.name ?? null,
+            dealPercent: deal ? Number(deal.discountPercentage) || null : null,
+        };
+    }
+
+    private buildCheckoutPriceBreakdown(
+        items: any[],
+        promoDiscountAmount = 0,
+        appliedPromoCode: string | null = null,
+    ) {
+        const lineItems = items.map((item) => {
+            const snapshot = this.buildLinePriceSnapshot(item);
+            const quantity = Number(item.quantity) || 0;
+            const lineBaseTotal = snapshot.basePrice * quantity;
+            const lineTotal = snapshot.unitPrice * quantity;
+            const productDiscountTotal =
+                snapshot.productDiscountAmount * quantity;
+            const dealDiscountTotal = snapshot.dealDiscountAmount * quantity;
+
+            return {
+                productId: item.product?.id ?? null,
+                variantId: item.variant?.id ?? null,
+                name: item.product?.name ?? "Product",
+                quantity,
+                basePrice: snapshot.basePrice,
+                unitPrice: snapshot.unitPrice,
+                lineBaseTotal,
+                lineTotal,
+                productDiscount: {
+                    label: snapshot.discountLabel,
+                    type: snapshot.discountType,
+                    amount: productDiscountTotal,
+                },
+                dealDiscount: {
+                    label: snapshot.dealName,
+                    percent: snapshot.dealPercent,
+                    amount: dealDiscountTotal,
+                },
+                savingsTotal: productDiscountTotal + dealDiscountTotal,
+            };
+        });
+
+        return {
+            actualPrice: lineItems.reduce((sum, item) => sum + item.lineBaseTotal, 0),
+            merchandiseSubtotal: lineItems.reduce((sum, item) => sum + item.lineTotal, 0),
+            productDiscountTotal: lineItems.reduce(
+                (sum, item) => sum + item.productDiscount.amount,
+                0,
+            ),
+            dealDiscountTotal: lineItems.reduce(
+                (sum, item) => sum + item.dealDiscount.amount,
+                0,
+            ),
+            promoDiscountTotal: promoDiscountAmount,
+            appliedPromoCode,
+            lineItems,
+        };
+    }
+
     private determineInventoryStatus(stock: number): InventoryStatus {
         if (stock <= 0) return InventoryStatus.OUT_OF_STOCK;
         if (stock < 5) return InventoryStatus.LOW_STOCK;
@@ -250,6 +344,7 @@ export class OrderService {
             relations: [
                 "items",
                 "items.product",
+                "items.product.deal",
                 "items.product.vendor",
                 "items.product.vendor.district",
                 "items.variant",
@@ -368,6 +463,7 @@ export class OrderService {
     private createOrderItems(items: any[]): OrderItem[] {
         return items.map((item) => {
             const price = this.calculateLineItemPrice(item);
+            const priceSnapshot = this.buildLinePriceSnapshot(item);
             return this.orderItemRepository.create({
                 productId: item.product.id,
                 quantity: item.quantity,
@@ -381,6 +477,13 @@ export class OrderService {
                     item.product.productImages?.[0] ||
                     null,
                 unitPriceSnapshot: price,
+                basePriceSnapshot: priceSnapshot.basePrice,
+                productDiscountSnapshot: priceSnapshot.productDiscountAmount,
+                dealDiscountSnapshot: priceSnapshot.dealDiscountAmount,
+                discountTypeSnapshot: priceSnapshot.discountType,
+                discountLabelSnapshot: priceSnapshot.discountLabel,
+                dealNameSnapshot: priceSnapshot.dealName,
+                dealPercentSnapshot: priceSnapshot.dealPercent,
             });
         });
     }
@@ -449,10 +552,7 @@ export class OrderService {
             paymentStatus: PaymentStatus.UNPAID,
             paymentMethod: orderData.paymentMethod,
             appliedPromoCode,
-            status:
-                orderData.paymentMethod === PaymentMethod.CASH_ON_DELIVERY
-                    ? OrderStatus.CONFIRMED
-                    : OrderStatus.CREATED,
+            status: OrderStatus.ORDER_PLACED,
             shippingAddress: address,
             shippingAddressSnapshot: {
                 province: address.province,
@@ -533,7 +633,7 @@ export class OrderService {
         if (isBuyNow) {
             const product = await this.productRepository.findOne({
                 where: { id: productId },
-                relations: ["variants", "vendor", "vendor.district"],
+                relations: ["variants", "vendor", "vendor.district", "deal"],
             });
             if (!product) throw new APIError(404, "Product not found");
 
@@ -598,6 +698,11 @@ export class OrderService {
 
         return {
             merchandiseSubtotal,
+            priceBreakdown: this.buildCheckoutPriceBreakdown(
+                items,
+                discountAmount,
+                appliedPromoCode,
+            ),
             vendorShippingBreakdown: vendorShippingBreakdown.map((vs) => {
                 const group = vendorGroups.find(
                     (g) => g.vendorId === vs.vendorId,
@@ -739,7 +844,7 @@ export class OrderService {
                 // 🔹 Buy Now: create a temporary item list from product/variant
                 const product = await this.productRepository.findOne({
                     where: { id: productId },
-                    relations: ["variants", "vendor", "vendor.district"],
+                    relations: ["variants", "vendor", "vendor.district", "deal"],
                 });
 
                 if (!product) throw new APIError(404, "Product not found");
@@ -862,6 +967,12 @@ export class OrderService {
                 throw new APIError(400, "Invalid payment method");
             }
 
+            try {
+                await this.sendAdminOrderPlacedEmail(order.id);
+            } catch (error) {
+                console.error("Failed to send admin order placed email:", error);
+            }
+
             await this.recordStatusChange(order.id, null, order.status, {
                 reason: "Order placed",
                 changedByUserId: userId,
@@ -973,6 +1084,50 @@ export class OrderService {
 
     //         }
 
+    private async sendAdminOrderPlacedEmail(orderId: number): Promise<void> {
+        if (!config.USER_EMAIL) return;
+
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.product.deal",
+                "orderItems.variant",
+                "orderItems.vendor",
+                "orderItems.vendor.district",
+            ],
+            withDeleted: true,
+        });
+
+        if (!order) {
+            throw new APIError(404, `Order with ID ${orderId} not found`);
+        }
+
+        const customerEmailItems = (order.orderItems || []).map((item) => ({
+            name: item.product?.name || item.productNameSnapshot || "Product",
+            sku: item.variant?.sku || item.skuSnapshot || null,
+            quantity: item.quantity,
+            price: Number(item.price) || 0,
+            variantAttributes: item.variant?.attributes || null,
+            vendorDistrict: item.vendor?.district?.name || null,
+            vendorName: item.vendor?.businessName || null,
+        }));
+
+        await sendCustomerOrderEmail(
+            config.USER_EMAIL,
+            order.orderNumber,
+            Number(order.totalPrice) || 0,
+            Number(order.shippingFee) || 0,
+            customerEmailItems,
+            order.shippingAddress?.district || null,
+            `New Order Placed - #${order.orderNumber}`,
+            Number(order.discountTotal) || 0,
+            order.appliedPromoCode,
+        );
+    }
+
     async sendOrderEmails(orderId: number) {
         // Fetch the order with all relations
         const order = await this.orderRepository.findOne({
@@ -1038,25 +1193,6 @@ export class OrderService {
             );
         } catch (error) {
             console.error("Failed to send customer order email:", error);
-        }
-
-        // Admin copy — full breakdown including shipping, same as the customer email.
-        if (config.USER_EMAIL) {
-            try {
-                await sendCustomerOrderEmail(
-                    config.USER_EMAIL,
-                    order.orderNumber,
-                    order.totalPrice,
-                    order.shippingFee,
-                    customerEmailItems,
-                    user.address.district || null,
-                    `New Order Placed - #${order.id}`,
-                    order.discountTotal,
-                    order.appliedPromoCode,
-                );
-            } catch (error) {
-                console.error("Failed to send admin order email:", error);
-            }
         }
 
         // Send emails to vendors
@@ -1164,20 +1300,11 @@ export class OrderService {
                 throw new APIError(404, "Order not found");
             }
 
-            const previousStatus = order.status;
-            // Update order status and transaction ID
-            order.status = OrderStatus.CONFIRMED;
+            // Update payment state only. Fulfillment confirmation remains an
+            // admin action, even after successful online payment.
             order.paymentStatus = PaymentStatus.PAID;
             order.mTransactionId = transactionId;
             await this.orderRepository.save(order);
-            await this.recordStatusChange(
-                order.id,
-                previousStatus,
-                OrderStatus.CONFIRMED,
-                {
-                    reason: "eSewa payment confirmed",
-                },
-            );
             await this.notificationService.notifyPaymentSuccess(
                 order.id,
                 order.orderedById,
@@ -1762,7 +1889,6 @@ export class OrderService {
 
         if (isSuccessful) {
             order.paymentStatus = PaymentStatus.PAID;
-            order.status = OrderStatus.CONFIRMED;
         } else {
             await this.restoreStock(order.orderItems);
             order.paymentStatus = PaymentStatus.UNPAID;
@@ -1962,7 +2088,10 @@ export class OrderService {
                 "orderItems",
                 "shippingAddress",
                 "orderItems.product",
+                "orderItems.product.deal",
                 "orderItems.variant",
+                "orderItems.vendor",
+                "orderItems.vendor.district",
                 "vendorShippings",
             ],
             order: { createdAt: "desc" },
@@ -1986,6 +2115,7 @@ export class OrderService {
             .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
             .leftJoinAndSelect("order.orderItems", "orderItems")
             .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("product.deal", "deal")
             .leftJoinAndSelect("orderItems.vendor", "vendor")
             .leftJoinAndSelect("vendor.district", "district")
             .leftJoinAndSelect("orderItems.variant", "variant")
@@ -2016,7 +2146,7 @@ export class OrderService {
         return order;
     }
 
-    async getOrderById(orderId: number): Promise<Order> {
+    async getOrderById(orderId: number): Promise<SanitizedOrderFull> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
@@ -2024,64 +2154,12 @@ export class OrderService {
                 "shippingAddress",
                 "orderItems",
                 "orderItems.product",
+                "orderItems.product.deal",
                 "orderItems.vendor",
+                "orderItems.vendor.district",
+                "orderItems.variant",
+                "vendorShippings",
             ],
-            select: {
-                id: true,
-                totalPrice: true,
-                shippingFee: true,
-                status: true,
-                paymentStatus: true,
-                paymentMethod: true,
-                createdAt: true,
-
-                orderedBy: {
-                    id: true,
-                    fullName: true,
-                    email: true,
-                    phoneNumber: true,
-                },
-
-                shippingAddress: {
-                    id: true,
-                    province: true,
-                    district: true,
-                    city: true,
-                    localAddress: true,
-                    landmark: true,
-                },
-
-                orderItems: {
-                    id: true,
-                    quantity: true,
-                    price: true,
-
-                    product: {
-                        id: true,
-                        name: true,
-                        productImages: true,
-                    },
-
-                    vendor: {
-                        id: true,
-                        businessName: true,
-                    },
-
-                    variant: {
-                        id: true,
-                        sku: true,
-                        basePrice: true,
-                        finalPrice: true,
-                        discountAmount: true,
-                        discountPercent: true,
-                        discountType: true,
-                        attributes: true,
-                        variantImages: true,
-                        stock: true,
-                        status: true,
-                    },
-                },
-            },
             withDeleted: true,
         });
         // Handle case when order does not exist
@@ -2089,7 +2167,7 @@ export class OrderService {
             throw new APIError(404, "Order not found");
         }
 
-        return order;
+        return sanitizeOrderFull(order);
     }
 
     /**
@@ -2112,7 +2190,7 @@ export class OrderService {
             where: {
                 id: orderId,
                 orderedById: userId,
-                status: OrderStatus.CONFIRMED,
+                status: OrderStatus.ORDER_PLACED,
                 paymentStatus: PaymentStatus.UNPAID,
             },
             relations: ["orderedBy", "orderItems", "orderItems.vendor"],
@@ -2601,9 +2679,9 @@ export class OrderService {
             }
         }
 
-        // CREATED is covered by the order-placed email already sent at
+        // ORDER_PLACED is covered by the order-placed email already sent at
         // checkout — every other transition gets a vendor notification.
-        if (targetStatus !== OrderStatus.CREATED) {
+        if (targetStatus !== OrderStatus.ORDER_PLACED) {
             const vendorEmails = [
                 ...new Set(
                     order.orderItems
@@ -2626,6 +2704,19 @@ export class OrderService {
                     }),
                 ),
             );
+        }
+
+        if (targetStatus === OrderStatus.DELIVERED && config.USER_EMAIL) {
+            try {
+                await sendOrderStatusEmail(
+                    config.USER_EMAIL,
+                    order.orderNumber,
+                    order.status,
+                    `Order Delivered - #${order.orderNumber}`,
+                );
+            } catch (error) {
+                console.error("Failed to send admin delivered email:", error);
+            }
         }
 
         try {
@@ -2761,7 +2852,7 @@ export class OrderService {
             // value like "ASSIGNED_TO_RIDER") passes through unchanged.
             const statusMap: Record<string, string> = {
                 delivered: "DELIVERED",
-                pending: "CREATED",
+                pending: "ORDER_PLACED",
                 canceled: "CANCELLED",
                 cancelled: "CANCELLED",
             };

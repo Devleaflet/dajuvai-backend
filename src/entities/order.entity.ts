@@ -15,7 +15,7 @@ import { OrderItem } from "./orderItems.entity";
 import { OrderVendorShipping } from "./orderVendorShipping.entity";
 
 export enum OrderStatus {
-    CREATED = "CREATED",
+    ORDER_PLACED = "ORDER_PLACED",
     CONFIRMED = "CONFIRMED",
     PROCESSING = "PROCESSING",
     ARRIVED_AT_WAREHOUSE = "ARRIVED_AT_WAREHOUSE",
@@ -117,7 +117,7 @@ export class Order {
     @Column({
         type: "enum",
         enum: OrderStatus,
-        default: OrderStatus.CREATED,
+        default: OrderStatus.ORDER_PLACED,
     })
     status: OrderStatus;
 

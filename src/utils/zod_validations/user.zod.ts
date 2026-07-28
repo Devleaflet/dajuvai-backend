@@ -118,6 +118,7 @@ export const updateUserSchema = z.object({
  * Ensures newPass and confirmPass match.
  */
 export const resetPasswordSchema = z.object({
+    email: z.string().email('Invalid email format'),
     newPass: z.string().min(8, 'New password must be at least 8 characters long'),
     confirmPass: z.string().min(1, 'Confirm password is required'),
     token: z.string().min(1, 'Token is required'),

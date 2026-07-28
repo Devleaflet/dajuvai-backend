@@ -10,6 +10,7 @@ import {
 import { OrderItem } from "../entities/orderItems.entity";
 import { Address } from "../entities/address.entity";
 import { PaymentOption } from "../entities/vendorPaymentOption";
+import { DiscountType } from "../entities/product.enum";
 
 export interface SanitizedVendor {
     id: number;
@@ -179,6 +180,23 @@ export interface SanitizedOrderItem {
     skuSnapshot?: string | null;
     imageSnapshot?: string | null;
     unitPriceSnapshot?: number | null;
+    priceBreakdown: {
+        basePrice: number;
+        unitPrice: number;
+        lineBaseTotal: number;
+        lineTotal: number;
+        productDiscount: {
+            label: string | null;
+            type: string | null;
+            amount: number;
+        };
+        dealDiscount: {
+            label: string | null;
+            percent: number | null;
+            amount: number;
+        };
+        savingsTotal: number;
+    };
     product: {
         id: number;
         name: string;
@@ -202,43 +220,94 @@ export interface SanitizedOrderItem {
     vendor: SanitizedVendor;
 }
 
-export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => ({
-    id: item.id,
-    productId: item.productId,
-    quantity: item.quantity,
-    price: item.price,
-    variantId: item.variantId ?? null,
-    collectedAtWarehouse: item.collectedAtWarehouse,
-    productNameSnapshot: item.productNameSnapshot ?? null,
-    skuSnapshot: item.skuSnapshot ?? null,
-    imageSnapshot: item.imageSnapshot ?? null,
-    unitPriceSnapshot: item.unitPriceSnapshot ?? null,
-    product: item.product
-        ? {
-              id: item.product.id,
-              name: item.product.name,
-              productImages: item.product.productImages ?? [],
-              finalPrice: item.product.finalPrice ?? null,
-              basePrice: item.product.basePrice ?? null,
-              description: item.product.description,
-              subcategoryId: item.product.subcategoryId,
-              vendorId: item.product.vendorId,
-          }
-        : null,
-    variant: item.variant
-        ? {
-              id: item.variant.id,
-              productId: item.productId,
-              sku: item.variant.sku,
-              attributes: item.variant.attributes,
-              finalPrice: item.variant.finalPrice ?? null,
-              basePrice: item.variant.basePrice ?? null,
-              variantImages: item.variant.variantImages ?? [],
-          }
-        : null,
-    vendorId: item.vendorId ?? item.product?.vendorId,
-    vendor: item.vendor ? sanitizeVendor(item.vendor) : null,
-});
+const toNumber = (value: unknown, fallback = 0): number => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+};
+
+const buildOrderItemPriceBreakdown = (item: OrderItem) => {
+    const unitPrice = toNumber(item.unitPriceSnapshot ?? item.price);
+    const basePrice = toNumber(
+        item.basePriceSnapshot ??
+            item.variant?.basePrice ??
+            item.product?.basePrice ??
+            unitPrice,
+        unitPrice,
+    );
+    const quantity = toNumber(item.quantity);
+    const discountType = item.discountTypeSnapshot ?? null;
+    const productDiscount = toNumber(
+        item.productDiscountSnapshot ??
+            (discountType && discountType !== DiscountType.NONE
+                ? Math.max(0, basePrice - unitPrice)
+                : 0),
+    );
+    const dealDiscount = toNumber(item.dealDiscountSnapshot ?? 0);
+    const savings = productDiscount + dealDiscount;
+
+    return {
+        basePrice,
+        unitPrice,
+        lineBaseTotal: basePrice * quantity,
+        lineTotal: unitPrice * quantity,
+        productDiscount: {
+            label: item.discountLabelSnapshot ?? null,
+            type: discountType,
+            amount: productDiscount * quantity,
+        },
+        dealDiscount: {
+            label: item.dealNameSnapshot ?? null,
+            percent: item.dealPercentSnapshot
+                ? toNumber(item.dealPercentSnapshot)
+                : null,
+            amount: dealDiscount * quantity,
+        },
+        savingsTotal: savings * quantity,
+    };
+};
+
+export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => {
+    const priceBreakdown = buildOrderItemPriceBreakdown(item);
+
+    return {
+        id: item.id,
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price,
+        variantId: item.variantId ?? null,
+        collectedAtWarehouse: item.collectedAtWarehouse,
+        productNameSnapshot: item.productNameSnapshot ?? null,
+        skuSnapshot: item.skuSnapshot ?? null,
+        imageSnapshot: item.imageSnapshot ?? null,
+        unitPriceSnapshot: item.unitPriceSnapshot ?? null,
+        priceBreakdown,
+        product: item.product
+            ? {
+                  id: item.product.id,
+                  name: item.product.name,
+                  productImages: item.product.productImages ?? [],
+                  finalPrice: item.product.finalPrice ?? null,
+                  basePrice: item.product.basePrice ?? null,
+                  description: item.product.description,
+                  subcategoryId: item.product.subcategoryId,
+                  vendorId: item.product.vendorId,
+              }
+            : null,
+        variant: item.variant
+            ? {
+                  id: item.variant.id,
+                  productId: item.productId,
+                  sku: item.variant.sku,
+                  attributes: item.variant.attributes,
+                  finalPrice: item.variant.finalPrice ?? null,
+                  basePrice: item.variant.basePrice ?? null,
+                  variantImages: item.variant.variantImages ?? [],
+              }
+            : null,
+        vendorId: item.vendorId ?? item.product?.vendorId,
+        vendor: item.vendor ? sanitizeVendor(item.vendor) : null,
+    };
+};
 
 export interface SanitizedVendorShipping {
     vendorId: number;
@@ -273,6 +342,15 @@ export interface SanitizedOrderFull {
     orderedBy: SanitizedUser | null;
     shippingAddress: Address | null;
     orderItems: SanitizedOrderItem[];
+    priceBreakdown: {
+        actualPrice: number;
+        merchandiseSubtotal: number;
+        productDiscountTotal: number;
+        dealDiscountTotal: number;
+        promoDiscountTotal: number;
+        appliedPromoCode: string | null;
+        lineItems: SanitizedOrderItem["priceBreakdown"][];
+    };
     vendorShippingBreakdown: SanitizedVendorShipping[];
 }
 
@@ -307,29 +385,55 @@ function buildVendorShippingBreakdown(order: Order): SanitizedVendorShipping[] {
     });
 }
 
-export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => ({
-    id: order.id,
-    orderNumber: order.orderNumber,
-    totalPrice: order.totalPrice,
-    shippingFee: order.shippingFee,
-    merchandiseSubtotal: order.merchandiseSubtotal,
-    discountTotal: order.discountTotal,
-    taxTotal: order.taxTotal,
-    serviceCharge: order.serviceCharge,
-    status: order.status,
-    deliveryStatus: order.deliveryStatus,
-    paymentStatus: order.paymentStatus,
-    paymentMethod: order.paymentMethod,
-    appliedPromoCode: order.appliedPromoCode ?? null,
-    phoneNumber: order.phoneNumber ?? null,
-    isBuyNow: order.isBuyNow ?? false,
-    createdAt: order.createdAt,
-    updatedAt: order.updatedAt,
-    orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
-    shippingAddress: order.shippingAddress ?? null,
-    orderItems: (order.orderItems ?? []).map(sanitizeOrderItem),
-    vendorShippingBreakdown: buildVendorShippingBreakdown(order),
-});
+export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
+    const orderItems = (order.orderItems ?? []).map(sanitizeOrderItem);
+    const lineBreakdowns = orderItems.map((item) => item.priceBreakdown);
+
+    return {
+        id: order.id,
+        orderNumber: order.orderNumber,
+        totalPrice: order.totalPrice,
+        shippingFee: order.shippingFee,
+        merchandiseSubtotal: order.merchandiseSubtotal,
+        discountTotal: order.discountTotal,
+        taxTotal: order.taxTotal,
+        serviceCharge: order.serviceCharge,
+        status: order.status,
+        deliveryStatus: order.deliveryStatus,
+        paymentStatus: order.paymentStatus,
+        paymentMethod: order.paymentMethod,
+        appliedPromoCode: order.appliedPromoCode ?? null,
+        phoneNumber: order.phoneNumber ?? null,
+        isBuyNow: order.isBuyNow ?? false,
+        createdAt: order.createdAt,
+        updatedAt: order.updatedAt,
+        orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
+        shippingAddress: order.shippingAddress ?? null,
+        orderItems,
+        priceBreakdown: {
+            actualPrice: lineBreakdowns.reduce(
+                (sum, line) => sum + line.lineBaseTotal,
+                0,
+            ),
+            merchandiseSubtotal: lineBreakdowns.reduce(
+                (sum, line) => sum + line.lineTotal,
+                0,
+            ),
+            productDiscountTotal: lineBreakdowns.reduce(
+                (sum, line) => sum + line.productDiscount.amount,
+                0,
+            ),
+            dealDiscountTotal: lineBreakdowns.reduce(
+                (sum, line) => sum + line.dealDiscount.amount,
+                0,
+            ),
+            promoDiscountTotal: Number(order.discountTotal) || 0,
+            appliedPromoCode: order.appliedPromoCode ?? null,
+            lineItems: lineBreakdowns,
+        },
+        vendorShippingBreakdown: buildVendorShippingBreakdown(order),
+    };
+};
 
 export interface SanitizedVendorOrderView {
     id: number;

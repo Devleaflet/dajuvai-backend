@@ -50,7 +50,7 @@ export class VendorDashBoardService {
             .createQueryBuilder('orderItem')
             .leftJoin('orderItem.order', 'order')
             .where('orderItem.vendorId = :vendorId', { vendorId })
-            .andWhere('order.status = :status', { status: OrderStatus.CREATED })
+            .andWhere('order.status = :status', { status: OrderStatus.ORDER_PLACED })
             .getCount();
 
         // Low-stock and out-of-stock counts, split, across ALL of the vendor's

@@ -24,10 +24,12 @@ const cartController = new CartController();
  *             properties:
  *               productId:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 35
  *                 description: ID of the product to add
  *               quantity:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 2
  *                 description: Number of items to add
  *               variantId:
@@ -230,6 +232,7 @@ cartRouter.post('/', authMiddleware, requireUserRole, validateZod(addToCartSchem
  *             properties:
  *               cartItemId:
  *                 type: integer
+ *                 minimum: 1
  *                 example: 9
  *                 description: ID of the cart item to remove or decrease
  *               decreaseOnly:
@@ -475,6 +478,53 @@ cartRouter.delete(
  *                             format: decimal
  *                             description: Price per unit of the product
  *                             example: 14.99
+ *                           priceBreakdown:
+ *                             type: object
+ *                             description: Backend-authoritative item price transparency for cart display.
+ *                             properties:
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: 19.99
+ *                               unitPrice:
+ *                                 type: number
+ *                                 example: 14.99
+ *                               lineBaseTotal:
+ *                                 type: number
+ *                                 example: 39.98
+ *                               lineTotal:
+ *                                 type: number
+ *                                 example: 29.98
+ *                               productDiscount:
+ *                                 type: object
+ *                                 properties:
+ *                                   label:
+ *                                     type: string
+ *                                     nullable: true
+ *                                     example: "Discount"
+ *                                   type:
+ *                                     type: string
+ *                                     nullable: true
+ *                                     example: "PERCENTAGE"
+ *                                   amount:
+ *                                     type: number
+ *                                     example: 4
+ *                               dealDiscount:
+ *                                 type: object
+ *                                 properties:
+ *                                   label:
+ *                                     type: string
+ *                                     nullable: true
+ *                                     example: "Summer Deal"
+ *                                   percent:
+ *                                     type: number
+ *                                     nullable: true
+ *                                     example: 10
+ *                                   amount:
+ *                                     type: number
+ *                                     example: 6
+ *                               savingsTotal:
+ *                                 type: number
+ *                                 example: 10
  *                           name:
  *                             type: string
  *                             description: Product name
@@ -510,6 +560,23 @@ cartRouter.delete(
  *                                 type: integer
  *                                 description: Available stock quantity
  *                                 example: 50
+ *                               deal:
+ *                                 type: object
+ *                                 nullable: true
+ *                                 description: Active product deal, when assigned.
+ *                                 properties:
+ *                                   id:
+ *                                     type: integer
+ *                                     example: 7
+ *                                   name:
+ *                                     type: string
+ *                                     example: "Summer Deal"
+ *                                   discountPercentage:
+ *                                     type: number
+ *                                     example: 10
+ *                                   status:
+ *                                     type: string
+ *                                     example: "ENABLED"
  *             example:
  *               success: true
  *               data:
@@ -520,6 +587,20 @@ cartRouter.delete(
  *                   - id: 789
  *                     quantity: 2
  *                     price: 14.99
+ *                     priceBreakdown:
+ *                       basePrice: 19.99
+ *                       unitPrice: 14.99
+ *                       lineBaseTotal: 39.98
+ *                       lineTotal: 29.98
+ *                       productDiscount:
+ *                         label: "Discount"
+ *                         type: "PERCENTAGE"
+ *                         amount: 4
+ *                       dealDiscount:
+ *                         label: "Summer Deal"
+ *                         percent: 10
+ *                         amount: 6
+ *                       savingsTotal: 10
  *                     name: "Premium Coffee Beans"
  *                     description: "Freshly roasted arabica coffee beans"
  *                     image: "https://example.com/images/coffee-beans.jpg"
@@ -528,6 +609,11 @@ cartRouter.delete(
  *                       name: "Premium Coffee Beans"
  *                       basePrice: 14.99
  *                       stock: 50
+ *                       deal:
+ *                         id: 7
+ *                         name: "Summer Deal"
+ *                         discountPercentage: 10
+ *                         status: "ENABLED"
  *       401:
  *         description: Authentication required
  *         content:

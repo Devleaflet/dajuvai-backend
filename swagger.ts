@@ -25,7 +25,8 @@ const options: swaggerJSDoc.Options = {
           type: "http",
           scheme: "bearer",
           bearerFormat: "JWT",
-          description: "Enter JWT Bearer token **_only_**",
+          description:
+            "Enter the access JWT returned by login. User/admin tokens must include id and role; vendor tokens must include id and businessName. Do not use refresh, email-change, or test tokens.",
         },
       },
     },
