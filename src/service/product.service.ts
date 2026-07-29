@@ -34,6 +34,8 @@ import { calculatePriceSnapshot, normalizeLegacyProductDiscount, normalizeLegacy
 import { OrderItem } from "../entities/orderItems.entity";
 import { CartItem } from "../entities/cartItem.entity";
 import { WishlistItem } from "../entities/wishlistItem.entity";
+import { Review } from "../entities/reviews.entity";
+import { buildCatalogTaxonomyFilter } from "../utils/catalog-query";
 
 interface GetProductsOptions {
   search?: string;
@@ -1068,6 +1070,268 @@ export class ProductService {
   }
 
   async filterProducts(params: IProductQueryParams) {
+    const {
+      page,
+      limit,
+      search,
+      categoryIds = [],
+      subcategoryIds = [],
+      minPrice,
+      maxPrice,
+      minRating,
+      hasDeal,
+      dealId,
+      bannerId,
+      vendorId,
+    } = params;
+    const sort =
+      params.sort === "low-to-high"
+        ? "price_low_high"
+        : params.sort === "high-to-low"
+          ? "price_high_low"
+          : params.sort === "all" || !params.sort
+            ? "newest"
+            : params.sort;
+    const effectivePrice = `COALESCE(
+      NULLIF("product"."finalPrice", 0),
+      MIN(NULLIF("variants"."finalPrice", 0)),
+      NULLIF("product"."basePrice", 0),
+      MIN(NULLIF("variants"."basePrice", 0)),
+      0
+    )`;
+    const ratingQuery = this.dataSource
+      .getRepository(Review)
+      .createQueryBuilder("review")
+      .select("review.productId", "product_id")
+      .addSelect("AVG(review.rating)", "avg_rating")
+      .addSelect("COUNT(*)", "review_count")
+      .groupBy("review.productId");
+    const salesQuery = this.dataSource
+      .getRepository(OrderItem)
+      .createQueryBuilder("order_item")
+      .select("order_item.productId", "product_id")
+      .addSelect("SUM(order_item.quantity)", "sold_quantity")
+      .groupBy("order_item.productId");
+    const ratingAverage = `COALESCE("rating"."avg_rating", 0)`;
+    const reviewCount = `COALESCE("rating"."review_count", 0)`;
+    const soldQuantity = `COALESCE("sales"."sold_quantity", 0)`;
+    const discountPercent = `GREATEST(
+      COALESCE("product"."discountPercent", 0),
+      COALESCE(MAX("variants"."discountPercent"), 0),
+      COALESCE("deal"."discountPercentage", 0)
+    )`;
+    const taxonomyFilter = buildCatalogTaxonomyFilter(categoryIds, subcategoryIds);
+
+    const query = this.productRepository
+      .createQueryBuilder("product")
+      .leftJoin("product.subcategory", "subcategory")
+      .leftJoin("subcategory.category", "category")
+      .leftJoin("product.deal", "deal")
+      .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
+      .leftJoin(`(${ratingQuery.getQuery()})`, "rating", "rating.product_id = product.id")
+      .leftJoin(`(${salesQuery.getQuery()})`, "sales", "sales.product_id = product.id")
+      .where("product.deletedAt IS NULL")
+      .select("product.id", "id")
+      .addSelect(effectivePrice, "effective_price")
+      .addSelect(ratingAverage, "avg_rating")
+      .addSelect(reviewCount, "review_count")
+      .addSelect(soldQuantity, "sold_quantity")
+      .addSelect(discountPercent, "discount_percent")
+      .groupBy("product.id")
+      .addGroupBy("deal.id")
+      .addGroupBy("rating.product_id")
+      .addGroupBy("rating.avg_rating")
+      .addGroupBy("rating.review_count")
+      .addGroupBy("sales.product_id")
+      .addGroupBy("sales.sold_quantity");
+
+    if (taxonomyFilter) query.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
+    if (bannerId !== undefined) query.andWhere("product.bannerId = :bannerId", { bannerId });
+    if (dealId !== undefined) query.andWhere("product.dealId = :dealId", { dealId });
+    if (hasDeal === true) {
+      query.andWhere("deal.status = :enabledDealStatus", { enabledDealStatus: DealStatus.ENABLED });
+    }
+    if (hasDeal === false) {
+      query.andWhere("(deal.id IS NULL OR deal.status != :enabledDealStatus)", {
+        enabledDealStatus: DealStatus.ENABLED,
+      });
+    }
+    if (vendorId) query.andWhere("product.vendorId = :vendorId", { vendorId });
+
+    if (search?.trim()) {
+      const term = search.trim();
+      const searchPattern = `%${term}%`;
+      const conditions = [
+        "product.name ILIKE :searchPattern",
+        "product.brand ILIKE :searchPattern",
+        "product.keywords ILIKE :searchPattern",
+        "variants.sku ILIKE :searchPattern",
+        "subcategory.name ILIKE :searchPattern",
+        "category.name ILIKE :searchPattern",
+      ];
+      if (term.length >= 4) conditions.push("product.description ILIKE :searchPattern");
+      query.andWhere(`(${conditions.join(" OR ")})`, { searchPattern });
+      query.addSelect(
+        `MIN(CASE
+          WHEN "product"."name" ILIKE :searchPattern THEN 0
+          WHEN "product"."keywords" ILIKE :searchPattern THEN 1
+          WHEN "product"."brand" ILIKE :searchPattern THEN 2
+          WHEN "variants"."sku" ILIKE :searchPattern THEN 3
+          WHEN "subcategory"."name" ILIKE :searchPattern THEN 4
+          WHEN "category"."name" ILIKE :searchPattern THEN 4
+          ${term.length >= 4 ? 'WHEN "product"."description" ILIKE :searchPattern THEN 5' : ""}
+          ELSE 6 END)`,
+        "search_relevance",
+      );
+      query.addOrderBy("search_relevance", "ASC");
+    }
+    if (minPrice !== undefined) query.having(`${effectivePrice} >= :minPrice`, { minPrice });
+    if (maxPrice !== undefined) query.andHaving(`${effectivePrice} <= :maxPrice`, { maxPrice });
+    if (minRating !== undefined) query.andHaving(`${ratingAverage} >= :minRating`, { minRating });
+
+    switch (sort) {
+      case "price_low_high":
+        query.addOrderBy("effective_price", "ASC");
+        break;
+      case "price_high_low":
+        query.addOrderBy("effective_price", "DESC");
+        break;
+      case "discount_high_low":
+        query.addOrderBy("discount_percent", "DESC");
+        break;
+      case "best_selling":
+        query.addOrderBy("sold_quantity", "DESC");
+        break;
+      default:
+        query.addOrderBy("product.createdAt", "DESC");
+        break;
+    }
+    query.addOrderBy("product.id", "DESC");
+
+    let total: number;
+    if (minPrice === undefined && maxPrice === undefined && minRating === undefined) {
+      const countQuery = this.productRepository
+        .createQueryBuilder("product")
+        .leftJoin("product.subcategory", "subcategory")
+        .leftJoin("subcategory.category", "category")
+        .leftJoin("product.deal", "deal")
+        .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
+        .where("product.deletedAt IS NULL");
+      if (taxonomyFilter) countQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
+      if (bannerId !== undefined) countQuery.andWhere("product.bannerId = :bannerId", { bannerId });
+      if (dealId !== undefined) countQuery.andWhere("product.dealId = :dealId", { dealId });
+      if (hasDeal === true) countQuery.andWhere("deal.status = :enabledDealStatus", { enabledDealStatus: DealStatus.ENABLED });
+      if (hasDeal === false) countQuery.andWhere("(deal.id IS NULL OR deal.status != :enabledDealStatus)", { enabledDealStatus: DealStatus.ENABLED });
+      if (vendorId) countQuery.andWhere("product.vendorId = :vendorId", { vendorId });
+      if (search?.trim()) {
+        const term = search.trim();
+        const conditions = ["product.name ILIKE :searchPattern", "product.brand ILIKE :searchPattern", "product.keywords ILIKE :searchPattern", "variants.sku ILIKE :searchPattern", "subcategory.name ILIKE :searchPattern", "category.name ILIKE :searchPattern"];
+        if (term.length >= 4) conditions.push("product.description ILIKE :searchPattern");
+        countQuery.andWhere(`(${conditions.join(" OR ")})`, { searchPattern: `%${term}%` });
+      }
+      const countRow = await countQuery.select("COUNT(DISTINCT product.id)", "total").getRawOne<{ total: string }>();
+      total = Number(countRow?.total ?? 0);
+    } else {
+      total = (await query.clone().getRawMany()).length;
+    }
+    const simplePage = sort === "newest" && minPrice === undefined && maxPrice === undefined && minRating === undefined;
+    let metricRows: Array<{
+      id: string;
+      effective_price: string;
+      avg_rating: string;
+      review_count: string;
+      sold_quantity: string;
+    }>;
+    if (simplePage) {
+      const pageQuery = this.productRepository
+        .createQueryBuilder("product")
+        .leftJoin("product.subcategory", "subcategory")
+        .leftJoin("subcategory.category", "category")
+        .leftJoin("product.deal", "deal")
+        .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
+        .where("product.deletedAt IS NULL")
+        .select("product.id", "id")
+        .addSelect("product.createdAt", "created_at")
+        .distinct(true)
+        .orderBy("product.createdAt", "DESC")
+        .addOrderBy("product.id", "DESC");
+      if (taxonomyFilter) pageQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
+      if (bannerId !== undefined) pageQuery.andWhere("product.bannerId = :bannerId", { bannerId });
+      if (dealId !== undefined) pageQuery.andWhere("product.dealId = :dealId", { dealId });
+      if (hasDeal === true) pageQuery.andWhere("deal.status = :enabledDealStatus", { enabledDealStatus: DealStatus.ENABLED });
+      if (hasDeal === false) pageQuery.andWhere("(deal.id IS NULL OR deal.status != :enabledDealStatus)", { enabledDealStatus: DealStatus.ENABLED });
+      if (vendorId) pageQuery.andWhere("product.vendorId = :vendorId", { vendorId });
+      if (search?.trim()) {
+        const term = search.trim();
+        const conditions = ["product.name ILIKE :searchPattern", "product.brand ILIKE :searchPattern", "product.keywords ILIKE :searchPattern", "variants.sku ILIKE :searchPattern", "subcategory.name ILIKE :searchPattern", "category.name ILIKE :searchPattern"];
+        if (term.length >= 4) conditions.push("product.description ILIKE :searchPattern");
+        pageQuery.andWhere(`(${conditions.join(" OR ")})`, { searchPattern: `%${term}%` });
+      }
+      const ids = await pageQuery.offset((page - 1) * limit).limit(limit).getRawMany<{ id: string }>();
+      metricRows = ids.map((row) => ({ id: row.id, effective_price: "0", avg_rating: "0", review_count: "0", sold_quantity: "0" }));
+    } else {
+      metricRows = await query.clone().offset((page - 1) * limit).limit(limit).getRawMany();
+    }
+    const productIds = metricRows.map((row) => Number(row.id));
+    if (!productIds.length) {
+      return { data: [], total, page, limit, totalPages: Math.ceil(total / limit) };
+    }
+
+    const products = await this.productRepository
+      .createQueryBuilder("product")
+      .leftJoinAndSelect("product.subcategory", "subcategory")
+      .leftJoinAndSelect("subcategory.category", "category")
+      .leftJoin("product.vendor", "vendor")
+      .addSelect(["vendor.id", "vendor.businessName", "vendor.districtId", "vendor.createdAt", "vendor.updatedAt"])
+      .leftJoinAndSelect("product.deal", "deal")
+      .leftJoinAndSelect("product.variants", "variants", "variants.deletedAt IS NULL")
+      .where("product.id IN (:...productIds)", { productIds })
+      .andWhere("product.deletedAt IS NULL")
+      .getMany();
+    const productsById = new Map(products.map((product) => [product.id, product]));
+    const metricsById = new Map(metricRows.map((row) => [Number(row.id), row]));
+    if (simplePage) {
+      const ratingRows = await this.dataSource.getRepository(Review).createQueryBuilder("review")
+        .select("review.productId", "product_id").addSelect("AVG(review.rating)", "avg_rating")
+        .addSelect("COUNT(*)", "review_count").where("review.productId IN (:...productIds)", { productIds }).groupBy("review.productId").getRawMany();
+      const salesRows = await this.dataSource.getRepository(OrderItem).createQueryBuilder("order_item")
+        .select("order_item.productId", "product_id").addSelect("SUM(order_item.quantity)", "sold_quantity")
+        .where("order_item.productId IN (:...productIds)", { productIds }).groupBy("order_item.productId").getRawMany();
+      const ratingsById = new Map(ratingRows.map((row) => [Number(row.product_id), row]));
+      const salesById = new Map(salesRows.map((row) => [Number(row.product_id), row]));
+      for (const productId of productIds) {
+        const product = productsById.get(productId)!;
+        const variantPrices = (product.variants ?? []).map((variant) => Number(variant.finalPrice ?? variant.basePrice ?? 0)).filter((price) => price > 0);
+        const effectivePrice = Number(product.finalPrice ?? product.basePrice ?? Math.min(...variantPrices, 0));
+        metricsById.set(productId, {
+          id: String(productId), effective_price: String(effectivePrice),
+          avg_rating: String(ratingsById.get(productId)?.avg_rating ?? 0),
+          review_count: String(ratingsById.get(productId)?.review_count ?? 0),
+          sold_quantity: String(salesById.get(productId)?.sold_quantity ?? 0),
+        });
+      }
+    }
+    const data = productIds
+      .map((id) => productsById.get(id))
+      .filter((product): product is Product => Boolean(product))
+      .map((product) => {
+        const metric = metricsById.get(product.id)!;
+        return {
+          ...normalizeLegacyProductDiscount(product),
+          variants: (product.variants ?? []).map(normalizeLegacyVariantDiscount),
+          effectivePrice: Number(metric.effective_price),
+          avgRating: Number(metric.avg_rating),
+          count: Number(metric.review_count),
+          reviewCount: Number(metric.review_count),
+          soldQuantity: Number(metric.sold_quantity),
+        };
+      });
+
+    return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
+  }
+
+  /** @deprecated Kept temporarily while the public catalog query is migrated below. */
+  private async filterProductsLegacy(params: IProductQueryParams) {
     const { page, limit, search } = params;
     const skip = (page - 1) * limit;
     const {

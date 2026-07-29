@@ -14,6 +14,7 @@ import {
     IAdminProductQueryParams,
     IProductQueryParams,
 } from "../interface/product.interface";
+import { normalizeCatalogQuery } from "../utils/catalog-query";
 import { v2 as cloudinary } from "cloudinary";
 import { DataSource } from "typeorm";
 import { ReviewService } from "../service/review.service";
@@ -153,44 +154,22 @@ export class ProductController {
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const { page, limit, ...filters } = req.query;
-
-        const queryParams: IProductQueryParams = {
-            page: Number(page) || 1,
-            limit: Number(limit) || 40,
-            sort: (filters.sort as IProductQueryParams["sort"]) ?? "all",
-            ...(filters.categoryId !== undefined && {
-                categoryId: Number(filters.categoryId),
-            }),
-            ...(filters.subcategoryId !== undefined && {
-                subcategoryId: Number(filters.subcategoryId),
-            }),
-            ...(filters.dealId !== undefined && {
-                dealId: Number(filters.dealId),
-            }),
-            ...(filters.bannerId !== undefined && {
-                bannerId: Number(filters.bannerId),
-            }),
-            ...(filters.vendorId !== undefined && {
-                vendorId: String(filters.vendorId),
-            }),
-            ...(filters.search !== undefined && {
-                search: String(filters.search),
-            }),
-        };
+        const queryParams: IProductQueryParams = normalizeCatalogQuery(
+            req.query as Record<string, string | string[] | undefined>,
+        );
 
         const result = await this.productService.filterProducts(queryParams);
-        const productWithRatings = await this.returnProuctRatings(result.data);
 
         res.status(200).json({
             success: true,
             message: "All products retrieved successfully",
-            data: productWithRatings,
+            data: result.data,
             meta: {
                 total: result.total,
                 page: result.page,
                 limit: result.limit,
                 totalPages: result.totalPages,
+                hasNextPage: result.page < result.totalPages,
             },
         });
     }

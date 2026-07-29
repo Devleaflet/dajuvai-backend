@@ -8,12 +8,25 @@
 //     imageUrl: string;
 // }
 
+export type CatalogSort =
+    | "newest"
+    | "price_low_high"
+    | "price_high_low"
+    | "discount_high_low"
+    | "best_selling";
+
 export interface IProductQueryParams {
-    // brandId?: number;
+    /** Legacy single-value aliases retained for older internal callers. */
     categoryId?: number;
     subcategoryId?: number;
+    categoryIds?: number[];
+    subcategoryIds?: number[];
+    minPrice?: number;
+    maxPrice?: number;
+    minRating?: number;
+    hasDeal?: boolean;
     dealId?: number;
-    sort?: "all" | "low-to-high" | "high-to-low";
+    sort?: CatalogSort | "all" | "low-to-high" | "high-to-low";
     bannerId?: number;
     page: number;
     limit: number;

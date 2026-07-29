@@ -67,7 +67,7 @@
     "zod": "^3.24.3"
   },
   "scripts": {
-    "test": "npm run check:routes && npm run check:fcm && npm run check:merch && npm run check:product && npm run check:orderstatus && npm run check:mobile-checkout && ts-node src/scripts/authVendorValidation.selfcheck.ts",
+    "test": "npm run check:routes && npm run check:fcm && npm run check:merch && npm run check:product && npm run check:orderstatus && npm run check:mobile-checkout && ts-node src/scripts/authVendorValidation.selfcheck.ts && ts-node src/utils/catalog-query.test.ts",
     "check:fcm": "ts-node src/scripts/fcm.selfcheck.ts",
     "check:merch": "ts-node src/scripts/merchandising.selfcheck.ts",
     "check:product": "ts-node src/scripts/product.selfcheck.ts",

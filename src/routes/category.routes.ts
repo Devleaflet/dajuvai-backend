@@ -1139,25 +1139,27 @@ router.post(
  * @swagger
  * /api/categories/all/products:
  *   get:
- *     summary: Retrieve all products with optional filtering and search
+ *     summary: Browse the public product catalog
  *     description: >
- *       Fetches products with optional filtering by brand, category, subcategory, deal, vendor, and banner.
- *       Supports case-insensitive search across product name and description using partial matching.
- *       Results where the product name matches the search term are prioritized over description-only matches.
+ *       Returns public products using server-side filters. Repeated or comma-separated categoryId and
+ *       subcategoryId values are ORed within their own group; all other active filters are ANDed together.
+ *       Search is case-insensitive. `q` is the preferred search parameter and `search` remains supported.
+ *       Prices are NPR effective product prices. Results are deterministically ordered by the selected sort
+ *       and product ID, so page/limit Load More requests do not duplicate items.
  *     tags: [Product]
  *     parameters:
  *       - in: query
  *         name: categoryId
  *         schema:
  *           type: string
- *         description: Filter by category ID (positive integer)
- *         example: "2"
+ *         description: One or more positive category IDs, separated by commas or repeated. Matches any selected category.
+ *         example: "2,8"
  *       - in: query
  *         name: subcategoryId
  *         schema:
  *           type: string
- *         description: Filter by subcategory ID (positive integer)
- *         example: "5"
+ *         description: One or more positive subcategory IDs, separated by commas or repeated. Matches any selected subcategory.
+ *         example: "5,11"
  *       - in: query
  *         name: dealId
  *         schema:
@@ -1168,10 +1170,10 @@ router.post(
  *         name: sort
  *         schema:
  *           type: string
- *           enum: [all, low-to-high, high-to-low]
- *           default: all
- *         description: Sort products by price
- *         example: "low-to-high"
+ *           enum: [newest, price_low_high, price_high_low, discount_high_low, best_selling, all, low-to-high, high-to-low]
+ *           default: newest
+ *         description: Sort order. The last three values are backward-compatible aliases for newest, price_low_high, and price_high_low.
+ *         example: "best_selling"
  *       - in: query
  *         name: bannerId
  *         schema:
@@ -1180,35 +1182,61 @@ router.post(
  *         example: "3"
  *       - in: query
  *         name: page
- *         required: true
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: Page number for pagination
+ *         description: One-based page number. Defaults to 1.
  *         example: 1
  *       - in: query
  *         name: limit
- *         required: true
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: Number of items per page
- *         example: 10
+ *           maximum: 100
+ *           default: 40
+ *         description: Number of products per page. Shop uses 24.
+ *         example: 24
  *       - in: query
- *         name: isAdmin
+ *         name: q
  *         schema:
- *           type: boolean
- *         description: Optional flag used by clients to indicate admin context
- *         example: false
+ *           type: string
+ *           maxLength: 100
+ *         description: Preferred case-insensitive product search. Matches name, keywords, brand, SKU, category, subcategory, and description for terms of four or more characters.
+ *         example: "wireless headphone"
  *       - in: query
  *         name: search
  *         schema:
  *           type: string
- *         description: >
- *           Case-insensitive search across product name, description, and brand using ILIKE.
- *           Performs partial matching using wildcard (%search%).
- *           Products with name matches are ranked higher than those matching only in description or brand.
+ *         description: Backward-compatible alias for q.
  *         example: "headphone"
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *           minimum: 0
+ *         description: Inclusive minimum effective price in NPR.
+ *         example: 500
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *           minimum: 0
+ *         description: Inclusive maximum effective price in NPR. Must be greater than or equal to minPrice.
+ *         example: 5000
+ *       - in: query
+ *         name: minRating
+ *         schema:
+ *           type: number
+ *           minimum: 1
+ *           maximum: 5
+ *         description: Inclusive minimum average review rating.
+ *         example: 4
+ *       - in: query
+ *         name: hasDeal
+ *         schema:
+ *           type: boolean
+ *         description: true returns products with an enabled deal; false excludes enabled-deal products.
+ *         example: true
  *       - in: query
  *         name: vendorId
  *         schema:
@@ -1253,6 +1281,22 @@ router.post(
  *                         type: number
  *                         format: float
  *                         example: 199.99
+ *                       effectivePrice:
+ *                         type: number
+ *                         format: float
+ *                         description: Lowest active sell price used for filtering and sorting.
+ *                         example: 179.99
+ *                       avgRating:
+ *                         type: number
+ *                         format: float
+ *                         example: 4.5
+ *                       reviewCount:
+ *                         type: integer
+ *                         example: 18
+ *                       soldQuantity:
+ *                         type: integer
+ *                         description: Sum of purchased order-item quantities for best-selling sort.
+ *                         example: 42
  *                       stock:
  *                         type: integer
  *                         example: 25
@@ -1334,6 +1378,25 @@ router.post(
  *                               name:
  *                                 type: string
  *                                 example: "Electronics"
+ *                 meta:
+ *                   type: object
+ *                   required: [total, page, limit, totalPages, hasNextPage]
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 83
+ *                     page:
+ *                       type: integer
+ *                       example: 1
+ *                     limit:
+ *                       type: integer
+ *                       example: 24
+ *                     totalPages:
+ *                       type: integer
+ *                       example: 4
+ *                     hasNextPage:
+ *                       type: boolean
+ *                       example: true
  *       400:
  *         description: Bad request - Invalid query parameters
  *       500:
