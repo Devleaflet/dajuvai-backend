@@ -166,7 +166,7 @@ export class VendorService {
     //         where: { id }
     //     });
     // }
-    async getVendorByIdService(id: number) {
+    async getVendorByIdService(id: number): Promise<ReturnType<typeof sanitizeVendor> | null> {
         // Straightforward ID-based lookup
         const vendor = await this.vendorRepository.findOne({
             where: { id },
@@ -174,7 +174,7 @@ export class VendorService {
                 paymentOptions: true,
             },
         });
-        return sanitizeVendor(vendor);
+        return vendor ? sanitizeVendor(vendor) : null;
     }
 
     /**

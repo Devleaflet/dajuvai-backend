@@ -227,6 +227,9 @@ productRouter.get(
  *     responses:
  *       200:
  *         description: Product deleted successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Product deleted successfully" }
  *       401:
  *         description: Unauthorized
  *       403:
@@ -471,9 +474,27 @@ productRouter.post(
  *       - Products
  *     security:
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, default: 10 }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
  *     responses:
  *       200:
  *         description: List of all products for admin
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 products: []
+ *                 total: 0
+ *                 pagination: { page: 1, limit: 10, totalItems: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false }
  *       401:
  *         description: Unauthorized
  *       403:

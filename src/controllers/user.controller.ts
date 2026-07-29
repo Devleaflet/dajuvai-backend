@@ -196,6 +196,10 @@ export class UserController {
     async adminLogin(req: Request, res: Response): Promise<void> {
         // Extract login credentials
         const { email, password } = req.body;
+        if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "email and password are required" });
+            return;
+        }
 
         // Get user repository and find user by email
         const userRepo = AppDataSource.getRepository(User);

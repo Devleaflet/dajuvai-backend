@@ -4,9 +4,12 @@ import { PaymentOption } from "../../entities/vendor.entity";
 const vendorTelephoneSchema = z
   .string()
   .trim()
-  .regex(
-    /^(?:\d{9}|\d{2}-\d{7})$/,
-    "Telephone number must be 9 digits or use the format 01-1234567",
+  .refine(
+    (value) =>
+      (value.match(/-/g) ?? []).length <= 1 &&
+      (value.includes("-") ? /^\d+-\d+$/.test(value) : /^\d+$/.test(value)) &&
+      value.replace(/\D/g, "").length === 9,
+    "Telephone number must contain 9 digits with or without one hyphen",
   );
 
 const optionalVendorTelephoneSchema = z

@@ -67,14 +67,13 @@
     "zod": "^3.24.3"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run check:routes && npm run check:fcm && npm run check:merch && npm run check:product && npm run check:orderstatus && npm run check:mobile-checkout && ts-node src/scripts/authVendorValidation.selfcheck.ts",
     "check:fcm": "ts-node src/scripts/fcm.selfcheck.ts",
-    "check:fcm:db": "ts-node src/scripts/fcm.dbcheck.ts",
     "check:merch": "ts-node src/scripts/merchandising.selfcheck.ts",
-    "check:merch:db": "ts-node src/scripts/merchandising.dbcheck.ts",
     "check:product": "ts-node src/scripts/product.selfcheck.ts",
     "check:orderstatus": "ts-node src/scripts/orderStatus.selfcheck.ts",
     "check:mobile-checkout": "ts-node src/scripts/mobileCheckout.selfcheck.ts",
+    "check:routes": "ts-node src/scripts/routeInventory.ts",
     "dev": "ts-node src/index.ts",
     "start": "nodemon src/index.ts",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js --dataSource src/data-source.ts",

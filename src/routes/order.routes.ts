@@ -880,7 +880,7 @@ router.get(
 
 /**
  * @swagger
- * /api/order/customer/order/{orderId}:
+ * /api/order/customer/order/{id}:
  *   get:
  *     summary: Get order details by order ID
  *     tags:
@@ -888,7 +888,7 @@ router.get(
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - name: orderId
+ *       - name: id
  *         in: path
  *         required: true
  *         description: ID of the order to retrieve
@@ -2064,6 +2064,11 @@ router.get(
  *     responses:
  *       200:
  *         description: All matching orders, unpaginated
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data: []
  *       401:
  *         description: Unauthorized
  */
@@ -2393,7 +2398,7 @@ router.get(
 /**
  * @swagger
  * /api/order/search/merchant-transactionId:
- *   get:
+ *   post:
  *     summary: Get order details by Merchant Transaction ID
  *     description: Fetches order details using the merchant transaction ID. Requires admin authentication.
  *     tags:
@@ -2543,14 +2548,22 @@ router.delete(
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [token, orderId]
  *             properties:
- *               data:
+ *               token:
  *                 type: string
- *                 description: Base64-encoded payment response from eSewa
+ *                 description: eSewa payment token returned for the order
  *                 example: "eyJ0cmFuc2FjdGlvbl9jb2RlIjoiMDAwMEFCQyJ9"
+ *               orderId:
+ *                 type: integer
+ *                 description: Internal order ID being paid
+ *                 example: 42
  *     responses:
  *       200:
  *         description: Payment verified and order updated successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, data: { id: 101, paymentStatus: "PAID" } }
  *       400:
  *         description: Invalid payment data
  *       404:
@@ -2577,13 +2590,18 @@ router.post(
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [orderId]
  *             properties:
- *               data:
- *                 type: string
- *                 description: Base64-encoded failure response from eSewa
+ *               orderId:
+ *                 type: integer
+ *                 description: Internal order ID whose payment failed
+ *                 example: 42
  *     responses:
  *       200:
  *         description: Payment failure handled
+ *         content:
+ *           application/json:
+ *             example: { success: false, message: "Payment cancelled" }
  *       404:
  *         description: Order not found
  *       500:

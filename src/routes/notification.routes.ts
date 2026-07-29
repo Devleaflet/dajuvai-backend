@@ -143,6 +143,9 @@ notificationRoutes.get(
  *     responses:
  *       200:
  *         description: FCM token saved successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "FCM token saved" }
  *       401:
  *         description: Unauthorized
  *         content:
@@ -183,6 +186,9 @@ notificationRoutes.post(
  *     responses:
  *       200:
  *         description: Device unregistered
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Device unregistered" }
  *       401:
  *         description: Unauthorized
  *         content:
@@ -248,6 +254,12 @@ notificationRoutes.delete(
  *     responses:
  *       200:
  *         description: Dispatch record with success/failure counts
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Notification dispatched"
+ *               data: { dispatchId: 17, status: "sent", successCount: 1, failureCount: 0 }
  *       400:
  *         description: Validation failed
  *         content:
@@ -341,6 +353,12 @@ notificationRoutes.post(
  *     responses:
  *       200:
  *         description: Dispatch record with success/failure counts
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Notification dispatched"
+ *               data: { dispatchId: 18, status: "partial", successCount: 98, failureCount: 2 }
  *       429:
  *         description: Rate limit exceeded (10/min)
  *         content:
@@ -391,6 +409,12 @@ notificationRoutes.post(
  *     responses:
  *       200:
  *         description: Dispatch accepted by FCM. Per-device counts are not available for topics.
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Topic notification dispatched"
+ *               data: { dispatchId: 19, status: "sent" }
  *       429:
  *         description: Rate limit exceeded (5/min)
  *         content:
@@ -434,6 +458,14 @@ notificationRoutes.post(
  *     responses:
  *       200:
  *         description: Paginated dispatch records, newest first
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data: [{ id: 17, type: "single", status: "sent", createdAt: "2026-07-29T10:30:00.000Z" }]
+ *               page: 1
+ *               limit: 20
+ *               total: 1
  */
 notificationRoutes.get(
   "/admin/history",
@@ -455,6 +487,11 @@ notificationRoutes.get(
  *     responses:
  *       200:
  *         description: Combined device and dispatch statistics
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data: { activeDevices: 42, totalDispatches: 17, successRate: 98.5 }
  */
 notificationRoutes.get(
   "/admin/stats",

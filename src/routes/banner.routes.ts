@@ -86,6 +86,14 @@ const upload = multer({ storage: multer.memoryStorage() });
  *     responses:
  *       201:
  *         description: Banner created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       400:
  *         description: Bad request (validation errors)
  *         content:
@@ -195,6 +203,14 @@ router.post(
  *     responses:
  *       200:
  *         description: Banner updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       400:
  *         description: Bad request
  *         content:
@@ -213,14 +229,7 @@ router.post(
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Error message describing what went wrong"
+ *               $ref: '#/components/schemas/ApiError'
  *       401:
  *         description: Unauthorized
  *         content:
@@ -275,19 +284,14 @@ router.patch(
  *     responses:
  *       200:
  *         description: Banner details
- *       404:
- *         description: Banner not found
  *         content:
  *           application/json:
  *             schema:
  *               type: object
+ *               required: [success, data]
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Error message describing what went wrong"
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       401:
  *         description: Unauthorized
  *         content:
@@ -323,9 +327,28 @@ router.get("/:id", bannerController.getBannerById.bind(bannerController));
  *   get:
  *     summary: Get all banners
  *     tags: [Banners]
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: false
+ *         description: Filter banners by banner type.
+ *         schema:
+ *           type: string
+ *           enum: [HERO, SIDEBAR, PRODUCT, SPECIAL_DEALS]
+ *         example: HERO
  *     responses:
  *       200:
  *         description: List of banners
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Banner' }
  *       500:
  *         description: Internal server error
  *         content:
@@ -446,43 +469,7 @@ router.delete(
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: integer
- *                         example: 1
- *                       name:
- *                         type: string
- *                         example: "Summer Sale"
- *                       image:
- *                         type: string
- *                         example: "https://example.com/banner.jpg"
- *                       type:
- *                         type: string
- *                         example: "HERO"
- *                       status:
- *                         type: string
- *                         example: "ACTIVE"
- *                       startDate:
- *                         type: string
- *                         format: date-time
- *                         example: "2025-06-01T00:00:00.000Z"
- *                       endDate:
- *                         type: string
- *                         format: date-time
- *                         example: "2025-06-30T23:59:59.000Z"
- *                       createdBy:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                             example: 10
- *                           name:
- *                             type: string
- *                             example: "Admin User"
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       404:
  *         description: Banner name is missing or no banner found
  *         content:

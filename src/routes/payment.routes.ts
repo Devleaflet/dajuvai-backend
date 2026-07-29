@@ -24,6 +24,14 @@ const CONFIG = {
     GATEWAY_URL: config.NPS_GATEWAY_URL,
 };
 
+const requirePaymentFields = (body: Record<string, unknown>, fields: string[]) => {
+    const missing = fields.filter((field) => body[field] === undefined || body[field] === null || body[field] === "");
+    if (missing.length > 0) {
+        return { success: false, errorCode: "VALIDATION_ERROR", message: `Missing required field(s): ${missing.join(", ")}` };
+    }
+    return null;
+};
+
 // Generate HMAC SHA512 Signature
 function generateSignature(
     data: Record<string, string>,
@@ -166,6 +174,15 @@ paymentRouter.get(
 paymentRouter.post("/service-charge", async (req: Request, res: Response) => {
     try {
         const { amount, instrumentCode } = req.body;
+        const validationError = requirePaymentFields(req.body, ["amount", "instrumentCode"]);
+        if (validationError) {
+            res.status(400).json(validationError);
+            return;
+        }
+        if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "amount must be a positive number" });
+            return;
+        }
 
         const requestData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
@@ -249,6 +266,15 @@ paymentRouter.post("/service-charge", async (req: Request, res: Response) => {
 paymentRouter.post("/process-id", async (req: Request, res: Response) => {
     try {
         const { amount, merchantTxnId } = req.body;
+        const validationError = requirePaymentFields(req.body, ["amount", "merchantTxnId"]);
+        if (validationError) {
+            res.status(400).json(validationError);
+            return;
+        }
+        if (!Number.isFinite(Number(amount)) || Number(amount) <= 0) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "amount must be a positive number" });
+            return;
+        }
 
         const requestData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
@@ -348,6 +374,15 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
     try {
         const { amount, instrumentCode, transactionRemarks, orderId } =
             req.body;
+        const validationError = requirePaymentFields(req.body, ["amount", "orderId"]);
+        if (validationError) {
+            res.status(400).json(validationError);
+            return;
+        }
+        if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !Number.isInteger(Number(orderId))) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "amount must be positive and orderId must be an integer" });
+            return;
+        }
 
         const merchantTxnId = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 

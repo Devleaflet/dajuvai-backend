@@ -2136,6 +2136,7 @@ export class OrderService {
             ])
             .leftJoinAndSelect("orderedBy.address", "address")
             .where("order.id = :orderId", { orderId })
+            .withDeleted()
             .getOne();
 
         // Handle case when order does not exist
@@ -2147,22 +2148,21 @@ export class OrderService {
     }
 
     async getOrderById(orderId: number): Promise<SanitizedOrderFull> {
-        const order = await this.orderRepository.findOne({
-            where: { id: orderId },
-            relations: [
-                "orderedBy",
-                "shippingAddress",
-                "orderItems",
-                "orderItems.product",
-                "orderItems.product.deal",
-                "orderItems.vendor",
-                "orderItems.vendor.district",
-                "orderItems.variant",
-                "vendorShippings",
-            ],
-            withDeleted: true,
-        });
-        // Handle case when order does not exist
+        const order = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("product.deal", "deal")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("vendor.district", "district")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.id = :orderId", { orderId })
+            .withDeleted()
+            .getOne();
+
         if (!order) {
             throw new APIError(404, "Order not found");
         }
@@ -3049,22 +3049,19 @@ export class OrderService {
     async getOrderHistoryForCustomer(
         userId: number,
     ): Promise<SanitizedOrderFull[]> {
-        // Find all orders where orderedById matches the userId
-        // Include relations: orderItems, the products within those items, and shipping address
-        const orders = await this.orderRepository.find({
-            where: { orderedById: userId },
-            relations: [
-                "orderItems",
-                "orderItems.product",
-                "orderItems.variant",
-                "orderItems.vendor",
-                "orderItems.vendor.district",
-                "shippingAddress",
-                "vendorShippings",
-            ],
-            order: { createdAt: "DESC" }, // Sort orders by creation date descending
-            withDeleted: true,
-        });
+        const orders = await this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("vendor.district", "district")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("order.vendorShippings", "vendorShippings")
+            .where("order.orderedById = :userId", { userId })
+            .orderBy("order.createdAt", "DESC")
+            .withDeleted()
+            .getMany();
 
         return orders.map(sanitizeOrderFull);
     }

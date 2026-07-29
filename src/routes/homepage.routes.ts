@@ -73,10 +73,7 @@ const homePageSectionController = new HomePageSectionController();
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Home page section created successfully"
- *                 data:
+ *                 homepage:
  *                   type: object
  *                   properties:
  *                     id:
@@ -429,10 +426,12 @@ router.put(
  *                               type: string
  *                             price:
  *                               type: number
- *                 count:
- *                   type: integer
- *                   description: Total number of sections returned
- *                   example: 3
+ *                             avgRating:
+ *                               type: number
+ *                               example: 4.5
+ *                             reviewCount:
+ *                               type: integer
+ *                               example: 12
  *       400:
  *         description: Bad request (invalid query parameters)
  *         content:
@@ -496,32 +495,32 @@ router.get(
  *                   type: string
  *                   example: "Home page section retrieved successfully"
  *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 1
- *                     title:
- *                       type: string
- *                       example: "Best of Oils"
- *                     isActive:
- *                       type: boolean
- *                       example: true
- *                     products:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                           name:
- *                             type: string
- *                           price:
- *                             type: number
- *                           image:
- *                             type: string
- *                           description:
- *                             type: string
+ *                   type: array
+ *                   description: Products in the requested homepage section, enriched with review data.
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 42
+ *                       name:
+ *                         type: string
+ *                         example: "Premium Cooking Oil"
+ *                       price:
+ *                         type: number
+ *                         example: 450
+ *                       image:
+ *                         type: string
+ *                         nullable: true
+ *                       description:
+ *                         type: string
+ *                       avgRating:
+ *                         type: number
+ *                         example: 4.5
+ *                       count:
+ *                         type: integer
+ *                         description: Number of reviews for this product.
+ *                         example: 12
  *       400:
  *         description: Bad request (invalid ID format)
  *         content:

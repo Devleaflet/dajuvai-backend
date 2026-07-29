@@ -927,7 +927,7 @@ router.put(
  *           type: integer
  *         description: ID of the subcategory to delete
  *     responses:
- *       204:
+ *       200:
  *         description: Subcategory deleted successfully
  *         content:
  *           application/json:
@@ -1480,7 +1480,7 @@ router.get(
 
 /**
  * @swagger
- * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{productId}:
+ * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{id}:
  *   put:
  *     summary: Update an existing product
  *     description: Updates a product with individual optional fields. Supports partial updates for product details and variants. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
@@ -1505,7 +1505,7 @@ router.get(
  *         description: ID of the subcategory
  *         example: 1
  *       - in: path
- *         name: productId
+ *         name: id
  *         required: true
  *         schema:
  *           type: integer

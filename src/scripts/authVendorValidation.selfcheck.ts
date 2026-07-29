@@ -73,9 +73,24 @@ function checkVendorTelephoneFormats() {
         "01-1234567",
     );
     assert.strictEqual(
-        vendorSignupSchemav2.parse({ ...base, telePhone: " 011234567 " })
+        vendorSignupSchemav2.parse({ ...base, telePhone: "232-231232" })
             .telePhone,
-        "011234567",
+        "232-231232",
+    );
+    assert.strictEqual(
+        vendorSignupSchemav2.parse({ ...base, telePhone: "056-234567" })
+            .telePhone,
+        "056-234567",
+    );
+    assert.strictEqual(
+        vendorSignupSchemav2.parse({ ...base, telePhone: "05-6234567" })
+            .telePhone,
+        "05-6234567",
+    );
+    assert.strictEqual(
+        vendorSignupSchemav2.parse({ ...base, telePhone: " 232-231232 " })
+            .telePhone,
+        "232-231232",
     );
 
     for (const telePhone of [
@@ -85,13 +100,15 @@ function checkVendorTelephoneFormats() {
         "01 1234567",
         "ab-1234567",
         "01_1234567",
+        "-011234567",
+        "011234567-",
     ]) {
         assert.throws(
             () => vendorSignupSchemav2.parse({ ...base, telePhone }),
             `telePhone ${telePhone} must be rejected`,
         );
     }
-    ok("vendor telephone accepts only 011234567 or 01-1234567 style values");
+    ok("vendor telephone accepts 9 digits with or without one hyphen");
 }
 
 function checkForgotPasswordSourceFlow() {

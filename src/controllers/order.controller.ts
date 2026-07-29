@@ -679,6 +679,9 @@ export class OrderController {
             token: string;
             orderId: number;
         };
+        if (typeof token !== "string" || !token || !Number.isInteger(Number(orderId))) {
+            throw new BadRequestError("token and integer orderId are required");
+        }
         const order = await this.orderService.esewaSuccess(token, orderId);
         if (order.success) {
             res.status(200).json({ success: true, msg: "Payment successful" });
@@ -693,6 +696,9 @@ export class OrderController {
         _next: NextFunction,
     ): Promise<void> {
         const { orderId } = req.body as { orderId: number };
+        if (!Number.isInteger(Number(orderId))) {
+            throw new BadRequestError("integer orderId is required");
+        }
         const order = await this.orderService.esewaFailed(orderId);
         if (order.success) {
             res.status(200).json({ success: true, msg: "Payment failed" });

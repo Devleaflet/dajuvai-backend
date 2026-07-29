@@ -204,6 +204,11 @@ router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewCont
  *           schema:
  *             type: object
  *             properties:
+ *               productId:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Product whose review is being updated
+ *                 example: 42
  *               rating:
  *                 type: number
  *                 format: float
@@ -217,6 +222,9 @@ router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewCont
  *     responses:
  *       200:
  *         description: Review updated successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Review updated successfully", data: { id: 7, rating: 4, comment: "Updated: Still a great product!" } }
  *       400:
  *         description: Validation error
  *       401:
@@ -249,6 +257,9 @@ router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), re
  *     responses:
  *       200:
  *         description: Review deleted successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Review deleted successfully" }
  *       401:
  *         description: Unauthorized
  *       403:

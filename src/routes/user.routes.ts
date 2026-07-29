@@ -562,17 +562,23 @@ userRouter.put(
  *           schema:
  *             type: object
  *             required:
- *               - username
+ *               - email
  *               - password
  *             properties:
- *               username:
+ *               email:
  *                 type: string
- *                 example: admin_user
+ *                 format: email
+ *                 example: admin@example.com
  *               password:
  *                 type: string
  *                 format: password
  *                 example: StrongPassword123
  *     responses:
+ *       400:
+ *         description: Email and password are required
+ *         content:
+ *           application/json:
+ *             example: { success: false, errorCode: "VALIDATION_ERROR", message: "email and password are required" }
  *       200:
  *         description: Admin logged in successfully
  *         content:
@@ -742,7 +748,7 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *                 type: string
  *                 format: password
  *                 description: Confirm password (must match password)
- *             example:
+ *           example:
  *             username: "johndoe"
  *             email: "admin@gmail.com"
  *             password: "Password123!@#"
@@ -755,23 +761,57 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 user:
+ *                   type: object
+ *                   required: [id, username, email, role]
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     username:
+ *                       type: string
+ *                       example: "johndoe"
+ *                     email:
+ *                       type: string
+ *                       format: email
+ *                       example: "admin@gmail.com"
+ *                     role:
+ *                       type: string
+ *                       example: "user"
+ *                 token:
+ *                   type: string
+ *                   description: Short-lived access JWT; also set in an HTTP-only cookie.
+ *             example:
+ *               success: true
+ *               user:
+ *                 id: 1
+ *                 username: "johndoe"
+ *                 email: "admin@gmail.com"
+ *                 role: "user"
+ *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example"
+ *       200:
+ *         description: Existing unverified account updated and verification code resent
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, message]
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 message:
  *                   type: string
- *                   example: User registered successfully. Please verify your email.
- *                 userId:
- *                   type: number
- *                   description: ID of the newly created user
- *                 username:
- *                   type: string
- *                   description: Username of the newly created user
- *             example:
- *               message: "User registered successfully. Please verify your email."
- *               userId: 1
- *               username: "johndoe"
+ *                   example: Verification code resent. Please check your email.
  *       400:
  *         description: Invalid input data
  *       409:
  *         description: Email or username already in use
+ *       503:
+ *         description: Registration service temporarily unavailable
  */
 userRouter.post(
     "/signup",
@@ -802,7 +842,7 @@ userRouter.post(
  *           example:
  *             email: "admin@gmail.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Verification email sent successfully
  *         content:
  *           application/json:
@@ -820,6 +860,8 @@ userRouter.post(
  *         description: User not found
  *       429:
  *         description: Too many requests, please try again later
+ *       503:
+ *         description: Verification service temporarily unavailable
  */
 userRouter.post(
     "/verify/resend",
@@ -886,7 +928,7 @@ userRouter.post(
  * /api/auth/login:
  *   post:
  *     summary: User login
- *     description: Authenticates a user and returns a JWT token
+ *     description: Authenticates a local user and returns access/refresh JWTs. Both tokens are also written to HTTP-only cookies.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -916,41 +958,48 @@ userRouter.post(
  *           application/json:
  *             schema:
  *               type: object
+ *               required: [success, token, refreshToken, data]
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 token:
  *                   type: string
- *                   description: JWT authentication token
- *                 user:
+ *                   description: 15-minute access JWT
+ *                 refreshToken:
+ *                   type: string
+ *                   description: 1-day refresh JWT
+ *                 data:
  *                   type: object
  *                   properties:
- *                     id:
- *                       type: number
- *                       description: User ID
- *                     username:
- *                       type: string
- *                       description: Username
+ *                     userId:
+ *                       type: integer
+ *                       example: 1
  *                     email:
  *                       type: string
- *                       description: User email
+ *                       format: email
+ *                       example: "admin@gmail.com"
  *                     role:
  *                       type: string
- *                       enum: [admin, user, customer]
- *                       description: User role
- *                     isVerified:
- *                       type: boolean
- *                       description: Email verification status
+ *                       example: "user"
  *             example:
- *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
- *               user:
- *                 id: 1
- *                 username: "johndoe"
+ *               success: true
+ *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access"
+ *               refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh"
+ *               data:
+ *                 userId: 1
  *                 email: "admin@gmail.com"
  *                 role: "user"
- *                 isVerified: true
  *       400:
- *         description: Invalid credentials
+ *         description: Request validation failed
+ *       403:
+ *         description: Account uses an external provider or email is not verified
+ *       404:
+ *         description: User does not exist
  *       401:
- *         description: Email not verified
+ *         description: Invalid credentials
+ *       503:
+ *         description: Authentication service temporarily unavailable
  */
 userRouter.post(
     "/login",
@@ -1366,6 +1415,10 @@ userRouter.post(
     async (req: Request, res: Response) => {
         try {
             const { user_id } = req.body;
+            if (typeof user_id !== "string" || !user_id.trim()) {
+                res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "user_id is required" });
+                return;
+            }
             const deleteUser = await deleteUserDataByFacebookId(user_id);
             res.status(200).json({
                 success: true,
@@ -1463,7 +1516,7 @@ userRouter.get(
  *           example:
  *             email: "admin@gmail.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Password reset email sent successfully
  *         content:
  *           application/json:
@@ -1481,6 +1534,8 @@ userRouter.get(
  *         description: User not found
  *       429:
  *         description: Too many requests, please try again later
+ *       503:
+ *         description: Password reset service temporarily unavailable
  */
 userRouter.post(
     "/forgot-password",
@@ -1801,7 +1856,7 @@ userRouter.put(
  *           example:
  *             newEmail: "john.new@example.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Email change verification sent
  *         content:
  *           application/json:
@@ -1819,6 +1874,8 @@ userRouter.put(
  *         description: Unauthorized - Invalid or missing token
  *       409:
  *         description: Email already in use
+ *       503:
+ *         description: Email change service temporarily unavailable
  */
 userRouter.patch(
     "/change-email",
@@ -1897,7 +1954,7 @@ userRouter.post(
 
 /**
  * @swagger
- * /api/auth/user/{id}:
+ * /api/auth/{id}:
  *   delete:
  *     summary: Delete a user account
  *     description: Permanently deletes a user account by ID. Admin/Staff only.

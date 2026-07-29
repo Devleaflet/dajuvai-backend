@@ -380,6 +380,28 @@ router.get(
  *           type: integer
  *           default: 10
  *         description: Number of products per page
+ *       - in: query
+ *         name: search
+ *         required: false
+ *         schema:
+ *           type: string
+ *           minLength: 1
+ *           maxLength: 100
+ *         description: Case-insensitive product search text.
+ *       - in: query
+ *         name: sortBy
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [a-z, z-a, price-high-low, price-low-high, stock-high-low, stock-low-high, newest, oldest]
+ *         description: Product sort order.
+ *       - in: query
+ *         name: status
+ *         required: false
+ *         schema:
+ *           type: string
+ *           enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
+ *         description: Inventory status filter.
  *     responses:
  *       200:
  *         description: List of products for the given vendor
@@ -622,8 +644,8 @@ router.get(
  *                 example: "9800000000"
  *               telePhone:
  *                 type: string
- *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
- *                 description: Optional telephone number (9 digits or 01-1234567 format).
+ *                 pattern: "^(?:\\d{9}|(?=(?:\\D*\\d){9}\\D*$)\\d+-\\d+)$"
+ *                 description: Optional telephone number (9 digits, with or without one hyphen).
  *                 example: "01-1234567"
  *               district:
  *                 type: string
@@ -875,8 +897,8 @@ router.post(
  *                 example: "9800000000"
  *               telePhone:
  *                 type: string
- *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
- *                 description: Optional telephone number (9 digits or 01-1234567 format).
+ *                 pattern: "^(?:\\d{9}|(?=(?:\\D*\\d){9}\\D*$)\\d+-\\d+)$"
+ *                 description: Optional telephone number (9 digits, with or without one hyphen).
  *                 example: "01-1234567"
  *               district:
  *                 type: string
@@ -1146,17 +1168,28 @@ router.post(
  *                       type: string
  *                       description: Name of the vendor's business
  *                       example: "ABC Electronics Store"
+ *                     profilePicture:
+ *                       type: string
+ *                       format: uri
+ *                       nullable: true
+ *                       example: "https://cdn.example.com/vendor.jpg"
  *                 token:
  *                   type: string
  *                   description: JWT authentication token (expires in 2 hours)
  *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *                 refreshToken:
+ *                   type: string
+ *                   description: JWT refresh token (expires in 7 days)
+ *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh"
  *             example:
  *               success: true
  *               vendor:
  *                 id: 1
  *                 email: "vendor@abcelectronics.com"
  *                 businessName: "ABC Electronics Store"
+ *                 profilePicture: "https://cdn.example.com/vendor.jpg"
  *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *               refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh"
  *       400:
  *         description: Invalid input data or validation errors
  *         content:
@@ -1347,7 +1380,7 @@ router.post("/logout", vendorController.logout.bind(vendorController));
  *                 description: Registered vendor email address
  *                 example: "vendor@abcelectronics.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Password reset email sent successfully
  *         content:
  *           application/json:
@@ -1565,8 +1598,8 @@ router.post(
  *                 example: "9800000000"
  *               telePhone:
  *                 type: string
- *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
- *                 description: Optional telephone number (9 digits or 01-1234567 format)
+ *                 pattern: "^(?:\\d{9}|(?=(?:\\D*\\d){9}\\D*$)\\d+-\\d+)$"
+ *                 description: Optional telephone number (9 digits, with or without one hyphen)
  *                 example: "01-1234567"
  *               district:
  *                 type: string
@@ -2048,8 +2081,8 @@ router.delete(
  *                 example: "9800000000"
  *               telePhone:
  *                 type: string
- *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
- *                 description: Optional telephone number
+ *                 pattern: "^(?:\\d{9}|(?=(?:\\D*\\d){9}\\D*$)\\d+-\\d+)$"
+ *                 description: Optional telephone number (9 digits, with or without one hyphen)
  *                 example: "01-1234567"
  *               district:
  *                 type: string
@@ -2086,9 +2119,38 @@ router.delete(
  *               bankBranch:
  *                 type: string
  *                 example: "Kathmandu"
+ *               paymentOptions:
+ *                 type: array
+ *                 description: Optional payment options. Payment types must be unique.
+ *                 items:
+ *                   type: object
+ *                   required: [paymentType]
+ *                   properties:
+ *                     paymentType:
+ *                       type: string
+ *                       enum: [ESEWA, KHALTI, NPS, BANK]
+ *                       example: "ESEWA"
+ *                     accountName:
+ *                       type: string
+ *                       example: "Fresh Farms"
+ *                     accountNumber:
+ *                       type: string
+ *                       example: "9800000000"
+ *                     bankName:
+ *                       type: string
+ *                       example: "Nepal Bank"
+ *                     bankBranch:
+ *                       type: string
+ *                       example: "Kathmandu"
  *     responses:
  *       201:
  *         description: Vendor registration request submitted successfully
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Your account has been successfully registered. Our admin team will review your application within 5 business days"
+ *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *       400:
  *         description: Validation error
  *       409:
@@ -2138,8 +2200,8 @@ router.post(
  *               telePhone:
  *                 type: string
  *                 nullable: true
- *                 pattern: "^(?:\\d{9}|\\d{2}-\\d{7})$"
- *                 description: Optional telephone number (set to null to clear)
+ *                 pattern: "^(?:\\d{9}|(?=(?:\\D*\\d){9}\\D*$)\\d+-\\d+)$"
+ *                 description: Optional telephone number (9 digits, with or without one hyphen; set to null to clear)
  *                 example: "01-1234567"
  *               taxNumber:
  *                 type: string
@@ -2173,6 +2235,12 @@ router.post(
  *     responses:
  *       200:
  *         description: Vendor updated successfully
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Vendor updated successfully"
+ *               data: { id: 12, businessName: "Fresh Farms Updated", email: "vendor@freshfarms.com" }
  *       400:
  *         description: Validation error
  *       401:
@@ -2186,9 +2254,9 @@ router.post(
  */
 router.put(
     "/v2/:id",
-    validateZod(updateVendorSchema2, "body"),
     combinedAuthMiddleware,
     restrictToVendorOrAdmin,
+    validateZod(updateVendorSchema2, "body"),
     vendorController.updateVendorV2.bind(vendorController),
 );
 
@@ -2238,6 +2306,12 @@ router.put(
  *     responses:
  *       200:
  *         description: Payment option updated successfully
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               message: "Payment option updated successfully"
+ *               data: { id: 4, paymentType: "ESEWA", isActive: true, details: { accountName: "Fresh Farms Business" } }
  *       400:
  *         description: Validation error
  *       401:
@@ -2251,9 +2325,9 @@ router.put(
  */
 router.patch(
     "/:vendorId/payment-options/:paymentOptionId",
-    validateZod(updateVendorPaymentOptionSchema),
     combinedAuthMiddleware,
     restrictToVendorOrAdmin,
+    validateZod(updateVendorPaymentOptionSchema),
     vendorController.updatePaymentOption.bind(vendorController),
 );
 
