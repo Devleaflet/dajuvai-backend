@@ -36,6 +36,12 @@ export class Product {
   @Column({ type: "text", nullable: true })
   keywords?: string;
 
+  @Column({ name: "normalized_name", type: "text", default: "" })
+  normalizedName: string;
+
+  @Column({ name: "search_text", type: "text", default: "" })
+  searchText: string;
+
   // Only used if hasVariants = false
   @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
   basePrice?: number;

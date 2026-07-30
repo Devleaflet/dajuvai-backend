@@ -10,6 +10,8 @@
 
 export type CatalogSort =
     | "newest"
+    | "relevance"
+    | "rating"
     | "price_low_high"
     | "price_high_low"
     | "discount_high_low"
@@ -25,6 +27,7 @@ export interface IProductQueryParams {
     maxPrice?: number;
     minRating?: number;
     hasDeal?: boolean;
+    dealIds?: number[];
     dealId?: number;
     sort?: CatalogSort | "all" | "low-to-high" | "high-to-low";
     bannerId?: number;

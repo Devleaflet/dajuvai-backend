@@ -19,6 +19,7 @@ export interface IOrderCreateRequest {
     promoCode?: string;
     fullName?: string;
     idempotencyKey?: string;
+    ageRestrictedAcknowledged?: boolean;
 
     // buy now 
     isBuyNow?: boolean;   

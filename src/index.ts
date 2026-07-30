@@ -22,6 +22,7 @@ import {
 // Route imports
 import userRouter from "./routes/user.routes";
 import categoryRoutes from "./routes/category.routes";
+import searchRoutes from "./routes/search.routes";
 import cartRouter from "./routes/cart.routes";
 import vendorRoutes from "./routes/vendor.routes";
 import wishlistRoutes from "./routes/wishlist.routes";
@@ -142,6 +143,7 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/search", searchRoutes);
 app.use("/api/placements", merchandisingRoutes);
 app.use("/api/storefront", storefrontRoutes);
 app.use("/api/vendors", vendorRoutes);

@@ -71,6 +71,7 @@ export const createOrderSchema = z.object({
     productId: z.number().int().optional(),
     variantId: z.number().optional(),
     quantity: z.number().int().positive().optional().default(1), 
+    ageRestrictedAcknowledged: z.boolean().optional().default(false),
 });
 
 

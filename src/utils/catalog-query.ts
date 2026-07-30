@@ -1,5 +1,6 @@
 import { BadRequestError } from "../errors";
 import type { CatalogSort, IProductQueryParams } from "../interface/product.interface";
+import { normalizeSearchQuery } from "../search/normalize-search-query";
 
 type QueryValue = string | string[] | undefined;
 type QueryInput = Record<string, QueryValue>;
@@ -7,6 +8,8 @@ type QueryInput = Record<string, QueryValue>;
 const SORT_ALIASES: Record<string, CatalogSort> = {
   all: "newest",
   newest: "newest",
+  relevance: "relevance",
+  rating: "rating",
   "low-to-high": "price_low_high",
   price_low_high: "price_low_high",
   "high-to-low": "price_high_low",
@@ -103,7 +106,7 @@ export const normalizeCatalogQuery = (query: QueryInput): IProductQueryParams =>
   const page = parseNumber(query.page, "page", { min: 1, integer: true }) ?? 1;
   const limit = parseNumber(query.limit, "limit", {
     min: 1,
-    max: 100,
+    max: 48,
     integer: true,
   }) ?? 40;
   const hasDeal = parseBoolean(query.hasDeal, "hasDeal");
@@ -117,12 +120,16 @@ export const normalizeCatalogQuery = (query: QueryInput): IProductQueryParams =>
     throw new BadRequestError("minimum price cannot exceed maximum price");
   }
 
-  const search = (valuesOf(query.q)[0] ?? valuesOf(query.search)[0] ?? "").trim();
-  if (search.length > 100) {
-    throw new BadRequestError("search must be 100 characters or fewer");
+  const rawSearch = valuesOf(query.q)[0] ?? valuesOf(query.search)[0] ?? "";
+  if (rawSearch.length > 80) {
+    throw new BadRequestError("search must be 80 characters or fewer");
+  }
+  const search = normalizeSearchQuery(rawSearch);
+  if (rawSearch.trim() && !search) {
+    throw new BadRequestError("search must contain searchable characters");
   }
 
-  const dealId = parseNumber(query.dealId, "dealId", { min: 1, integer: true });
+  const dealIds = parseIdList(query.dealId ?? query.dealIds, "dealId");
   const bannerId = parseNumber(query.bannerId, "bannerId", { min: 1, integer: true });
   const vendorId = valuesOf(query.vendorId)[0];
 
@@ -133,11 +140,11 @@ export const normalizeCatalogQuery = (query: QueryInput): IProductQueryParams =>
     maxPrice,
     minRating,
     hasDeal,
-    sort,
+    sort: sort === "relevance" && !search ? "newest" : sort,
     page,
     limit,
     ...(search && { search }),
-    ...(dealId !== undefined && { dealId }),
+    ...(dealIds.length && { dealIds }),
     ...(bannerId !== undefined && { bannerId }),
     ...(vendorId && { vendorId }),
   };

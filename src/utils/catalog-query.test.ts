@@ -8,6 +8,7 @@ const normalized = normalizeCatalogQuery({
   maxPrice: "900",
   minRating: "4",
   hasDeal: "true",
+  dealId: "4,9",
   sort: "best_selling",
   page: "2",
   limit: "24",
@@ -20,6 +21,7 @@ assert.deepEqual(normalized, {
   maxPrice: 900,
   minRating: 4,
   hasDeal: true,
+  dealIds: [4, 9],
   sort: "best_selling",
   page: 2,
   limit: 24,
@@ -38,6 +40,32 @@ assert.deepEqual(
     page: 1,
     limit: 40,
   },
+);
+
+assert.deepEqual(
+  normalizeCatalogQuery({ search: " Nike--Black ", sort: "relevance", limit: "48" }),
+  {
+    categoryIds: [],
+    subcategoryIds: [],
+    minPrice: undefined,
+    maxPrice: undefined,
+    minRating: undefined,
+    hasDeal: undefined,
+    sort: "relevance",
+    page: 1,
+    limit: 48,
+    search: "nike black",
+  },
+);
+
+assert.throws(
+  () => normalizeCatalogQuery({ search: "x".repeat(81) }),
+  /80 characters/i,
+);
+
+assert.throws(
+  () => normalizeCatalogQuery({ search: "--" }),
+  /searchable characters/i,
 );
 
 assert.throws(

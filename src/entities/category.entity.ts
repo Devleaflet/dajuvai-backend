@@ -13,6 +13,15 @@ export class Category {
 
     @Column({ nullable: true })
     image: string;
+
+    @Column({ type: 'boolean', default: false })
+    isAgeRestricted: boolean;
+
+    @Column({ type: 'integer', nullable: true })
+    minimumAge: number | null;
+
+    @Column({ type: 'varchar', nullable: true })
+    restrictionMessage: string | null;
     
     @CreateDateColumn()
     createdAt: Date;

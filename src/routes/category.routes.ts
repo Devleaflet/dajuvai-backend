@@ -1164,8 +1164,8 @@ router.post(
  *         name: dealId
  *         schema:
  *           type: string
- *         description: Filter by deal ID (positive integer)
- *         example: "1"
+ *         description: One or more enabled deal IDs, separated by commas or repeated. Matches any selected deal.
+ *         example: "1,7"
  *       - in: query
  *         name: sort
  *         schema:

@@ -16,6 +16,9 @@ const baseCategorySchema = z.object({
         .url('Image must be a valid URL')
         .optional()
         .nullable(),
+    isAgeRestricted: z.union([z.boolean(), z.string().transform(value => value.toLowerCase() === 'true')]).optional(),
+    minimumAge: z.coerce.number().int().min(1).max(130).nullable().optional(),
+    restrictionMessage: z.string().trim().max(500).nullable().optional(),
 });
 
 /**

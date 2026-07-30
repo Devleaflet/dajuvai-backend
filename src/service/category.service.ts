@@ -107,6 +107,9 @@ export class CategoryService {
             name: dto.name,
             createdBy: user,
             image: imageUrl,
+            isAgeRestricted: dto.isAgeRestricted ?? false,
+            minimumAge: dto.isAgeRestricted ? (dto.minimumAge ?? 18) : null,
+            restrictionMessage: dto.isAgeRestricted ? (dto.restrictionMessage ?? null) : null,
         });
 
         return this.categoryRepository.save(category);
@@ -224,6 +227,11 @@ export class CategoryService {
         await this.categoryRepository.update(id, {
             name: dto.name ?? category.name,
             image: imageUrl,
+            ...(dto.isAgeRestricted === undefined ? {} : {
+                isAgeRestricted: dto.isAgeRestricted,
+                minimumAge: dto.isAgeRestricted ? (dto.minimumAge ?? 18) : null,
+                restrictionMessage: dto.isAgeRestricted ? (dto.restrictionMessage ?? null) : null,
+            }),
         });
 
         // Return updated category

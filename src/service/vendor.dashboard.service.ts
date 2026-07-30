@@ -4,6 +4,7 @@ import { Product } from "../entities/product.entity";
 import { Order, OrderStatus } from "../entities/order.entity";
 import config from "../config/env.config";
 import { InventoryStatus } from "../entities/product.enum";
+import { getVendorInventoryAlertCounts } from "./vendor-inventory-alerts.service";
 
 export class VendorDashBoardService {
     // Repositories for DB operations on Products and OrderItems
@@ -65,32 +66,8 @@ export class VendorDashBoardService {
             relations: ["variants"],
         });
 
-        let lowStockCount = 0;
-        let outOfStockCount = 0;
-        for (const p of productsForStock) {
-            let effective: InventoryStatus;
-            if (p.hasVariants) {
-                const variants = p.variants || [];
-                if (variants.length === 0) {
-                    effective = InventoryStatus.OUT_OF_STOCK;
-                } else if (variants.every((v) => v.status === InventoryStatus.OUT_OF_STOCK)) {
-                    effective = InventoryStatus.OUT_OF_STOCK;
-                } else if (
-                    variants.some(
-                        (v) => v.status === InventoryStatus.LOW_STOCK || v.status === InventoryStatus.OUT_OF_STOCK,
-                    )
-                ) {
-                    effective = InventoryStatus.LOW_STOCK;
-                } else {
-                    effective = InventoryStatus.AVAILABLE;
-                }
-            } else {
-                effective = p.status ?? InventoryStatus.AVAILABLE;
-            }
-
-            if (effective === InventoryStatus.OUT_OF_STOCK) outOfStockCount++;
-            else if (effective === InventoryStatus.LOW_STOCK) lowStockCount++;
-        }
+        const { lowStockCount, outOfStockCount } =
+            getVendorInventoryAlertCounts(productsForStock);
 
         // Return all stats in one object
         return {

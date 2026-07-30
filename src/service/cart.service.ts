@@ -11,6 +11,7 @@ import { calculatePriceSnapshot, normalizeDiscountType, resolveFinalPrice } from
 import { emitCartUpdate } from '../socket/socket';
 import { DealStatus } from '../entities/deal.entity';
 import { DiscountType } from '../entities/product.enum';
+import { withAgeRestriction } from './age-restriction.service';
 
 /**
  * Service class for managing shopping cart operations.
@@ -186,7 +187,7 @@ export class CartService {
         // Get or create cart
         let cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.product.deal', 'items.variant'],
+            relations: ['items', 'items.product', 'items.product.subcategory', 'items.product.subcategory.category', 'items.product.deal', 'items.variant'],
         });
 
         if (!cart) {
@@ -264,7 +265,7 @@ export class CartService {
         // Fetch cart with items and their product and variant relations
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.product.deal', 'items.variant'],
+            relations: ['items', 'items.product', 'items.product.subcategory', 'items.product.subcategory.category', 'items.product.deal', 'items.variant'],
         });
 
         if (!cart) throw new APIError(404, 'Cart not found');
@@ -352,7 +353,7 @@ export class CartService {
                     }
                 } else {
                     // Check product stock
-                    const product = await this.productRepository.findOne({ where: { id: item.product.id }, relations: ['deal'] });
+                    const product = await this.productRepository.findOne({ where: { id: item.product.id }, relations: ['subcategory', 'subcategory.category', 'deal'] });
                     if (!product) {
                         warningMessage = 'Associated product no longer exists';
                     } else {
@@ -379,6 +380,7 @@ export class CartService {
 
                 return {
                     ...item,
+                    product: item.product ? withAgeRestriction(item.product) : item.product,
                     price: currentPrice,
                     priceBreakdown: this.buildCartItemPriceBreakdown(
                         item,

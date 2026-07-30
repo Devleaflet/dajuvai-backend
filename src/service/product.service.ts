@@ -36,6 +36,9 @@ import { CartItem } from "../entities/cartItem.entity";
 import { WishlistItem } from "../entities/wishlistItem.entity";
 import { Review } from "../entities/reviews.entity";
 import { buildCatalogTaxonomyFilter } from "../utils/catalog-query";
+import { ProductSearchIndexer } from "./product-search-indexer.service";
+import { buildCatalogSearchCondition } from "../search/catalog-search";
+import { withAgeRestriction } from "./age-restriction.service";
 
 interface GetProductsOptions {
   search?: string;
@@ -86,6 +89,7 @@ export class ProductService {
   private variantRepository: Repository<Variant>;
   private cartItemRepository: Repository<CartItem>;
   private wishlistItemRepository: Repository<WishlistItem>;
+  private productSearchIndexer: ProductSearchIndexer;
 
   constructor(private dataSource: DataSource) {
     this.productRepository = this.dataSource.getRepository(Product);
@@ -106,6 +110,7 @@ export class ProductService {
     this.variantRepository = this.dataSource.getRepository(Variant);
     this.cartItemRepository = this.dataSource.getRepository(CartItem);
     this.wishlistItemRepository = this.dataSource.getRepository(WishlistItem);
+    this.productSearchIndexer = new ProductSearchIndexer(this.dataSource);
     cloudinary.config({
       cloud_name: config.CLOUDINARY_CLOUD_NAME,
       api_key: config.CLOUDINARY_API_KEY,
@@ -115,13 +120,13 @@ export class ProductService {
 
   async getAlllProducts(page: number = 1, limit: number = 50) {
     const products = await this.productRepository.find({
-      relations: ["subcategory", "vendor", "deal", "reviews"],
+      relations: ["subcategory", "subcategory.category", "vendor", "deal", "reviews"],
       order: { createdAt: "DESC" },
       skip: (page - 1) * limit,
       take: limit,
     });
     const sanitizedProducts = products.map((p) => ({
-      ...normalizeLegacyProductDiscount(p),
+      ...withAgeRestriction(normalizeLegacyProductDiscount(p)),
       vendor: p.vendor ? sanitizeVendor(p.vendor) : null,
     }));
 
@@ -131,7 +136,7 @@ export class ProductService {
   async getProductDetailsById(productId: number) {
     const product = await this.productRepository.findOne({
       where: { id: productId },
-      relations: ["vendor", "variants", "reviews", "deal"],
+      relations: ["vendor", "subcategory", "subcategory.category", "variants", "reviews", "deal"],
     });
 
     if (!product) {
@@ -139,7 +144,7 @@ export class ProductService {
     }
 
     const sanitizedProduct = {
-      ...normalizeLegacyProductDiscount(product),
+      ...withAgeRestriction(normalizeLegacyProductDiscount(product)),
       vendor: product.vendor ? sanitizeVendor(product.vendor) : null,
       variants: (product.variants ?? []).map((v) =>
         normalizeLegacyVariantDiscount(v),
@@ -672,6 +677,7 @@ export class ProductService {
       return savedProduct;
     });
 
+    await this.productSearchIndexer.refreshProduct(savedProduct.id);
     return savedProduct;
   }
 
@@ -1057,6 +1063,7 @@ export class ProductService {
     if (variantsForResponse !== undefined) {
       savedProduct.variants = variantsForResponse;
     }
+    await this.productSearchIndexer.refreshProduct(savedProduct.id);
     return savedProduct;
   }
 
@@ -1080,7 +1087,7 @@ export class ProductService {
       maxPrice,
       minRating,
       hasDeal,
-      dealId,
+      dealIds = [],
       bannerId,
       vendorId,
     } = params;
@@ -1121,6 +1128,9 @@ export class ProductService {
       COALESCE("deal"."discountPercentage", 0)
     )`;
     const taxonomyFilter = buildCatalogTaxonomyFilter(categoryIds, subcategoryIds);
+    const searchCondition = search
+      ? buildCatalogSearchCondition(search)
+      : undefined;
 
     const query = this.productRepository
       .createQueryBuilder("product")
@@ -1147,7 +1157,10 @@ export class ProductService {
 
     if (taxonomyFilter) query.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
     if (bannerId !== undefined) query.andWhere("product.bannerId = :bannerId", { bannerId });
-    if (dealId !== undefined) query.andWhere("product.dealId = :dealId", { dealId });
+    if (dealIds.length) {
+      query.andWhere("product.dealId IN (:...dealIds)", { dealIds });
+      query.andWhere("deal.status = :selectedDealStatus", { selectedDealStatus: DealStatus.ENABLED });
+    }
     if (hasDeal === true) {
       query.andWhere("deal.status = :enabledDealStatus", { enabledDealStatus: DealStatus.ENABLED });
     }
@@ -1158,38 +1171,18 @@ export class ProductService {
     }
     if (vendorId) query.andWhere("product.vendorId = :vendorId", { vendorId });
 
-    if (search?.trim()) {
-      const term = search.trim();
-      const searchPattern = `%${term}%`;
-      const conditions = [
-        "product.name ILIKE :searchPattern",
-        "product.brand ILIKE :searchPattern",
-        "product.keywords ILIKE :searchPattern",
-        "variants.sku ILIKE :searchPattern",
-        "subcategory.name ILIKE :searchPattern",
-        "category.name ILIKE :searchPattern",
-      ];
-      if (term.length >= 4) conditions.push("product.description ILIKE :searchPattern");
-      query.andWhere(`(${conditions.join(" OR ")})`, { searchPattern });
-      query.addSelect(
-        `MIN(CASE
-          WHEN "product"."name" ILIKE :searchPattern THEN 0
-          WHEN "product"."keywords" ILIKE :searchPattern THEN 1
-          WHEN "product"."brand" ILIKE :searchPattern THEN 2
-          WHEN "variants"."sku" ILIKE :searchPattern THEN 3
-          WHEN "subcategory"."name" ILIKE :searchPattern THEN 4
-          WHEN "category"."name" ILIKE :searchPattern THEN 4
-          ${term.length >= 4 ? 'WHEN "product"."description" ILIKE :searchPattern THEN 5' : ""}
-          ELSE 6 END)`,
-        "search_relevance",
-      );
-      query.addOrderBy("search_relevance", "ASC");
+    if (searchCondition) {
+      query.andWhere(searchCondition.where, searchCondition.parameters);
+      query.addSelect(`MIN(${searchCondition.score})`, "search_relevance");
     }
     if (minPrice !== undefined) query.having(`${effectivePrice} >= :minPrice`, { minPrice });
     if (maxPrice !== undefined) query.andHaving(`${effectivePrice} <= :maxPrice`, { maxPrice });
     if (minRating !== undefined) query.andHaving(`${ratingAverage} >= :minRating`, { minRating });
 
     switch (sort) {
+      case "relevance":
+        if (searchCondition) query.addOrderBy("search_relevance", "DESC");
+        break;
       case "price_low_high":
         query.addOrderBy("effective_price", "ASC");
         break;
@@ -1201,6 +1194,10 @@ export class ProductService {
         break;
       case "best_selling":
         query.addOrderBy("sold_quantity", "DESC");
+        break;
+      case "rating":
+        query.addOrderBy("avg_rating", "DESC");
+        query.addOrderBy("review_count", "DESC");
         break;
       default:
         query.addOrderBy("product.createdAt", "DESC");
@@ -1219,15 +1216,15 @@ export class ProductService {
         .where("product.deletedAt IS NULL");
       if (taxonomyFilter) countQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
       if (bannerId !== undefined) countQuery.andWhere("product.bannerId = :bannerId", { bannerId });
-      if (dealId !== undefined) countQuery.andWhere("product.dealId = :dealId", { dealId });
+      if (dealIds.length) {
+        countQuery.andWhere("product.dealId IN (:...dealIds)", { dealIds });
+        countQuery.andWhere("deal.status = :selectedDealStatus", { selectedDealStatus: DealStatus.ENABLED });
+      }
       if (hasDeal === true) countQuery.andWhere("deal.status = :enabledDealStatus", { enabledDealStatus: DealStatus.ENABLED });
       if (hasDeal === false) countQuery.andWhere("(deal.id IS NULL OR deal.status != :enabledDealStatus)", { enabledDealStatus: DealStatus.ENABLED });
       if (vendorId) countQuery.andWhere("product.vendorId = :vendorId", { vendorId });
-      if (search?.trim()) {
-        const term = search.trim();
-        const conditions = ["product.name ILIKE :searchPattern", "product.brand ILIKE :searchPattern", "product.keywords ILIKE :searchPattern", "variants.sku ILIKE :searchPattern", "subcategory.name ILIKE :searchPattern", "category.name ILIKE :searchPattern"];
-        if (term.length >= 4) conditions.push("product.description ILIKE :searchPattern");
-        countQuery.andWhere(`(${conditions.join(" OR ")})`, { searchPattern: `%${term}%` });
+      if (searchCondition) {
+        countQuery.andWhere(searchCondition.where, searchCondition.parameters);
       }
       const countRow = await countQuery.select("COUNT(DISTINCT product.id)", "total").getRawOne<{ total: string }>();
       total = Number(countRow?.total ?? 0);
@@ -1257,15 +1254,15 @@ export class ProductService {
         .addOrderBy("product.id", "DESC");
       if (taxonomyFilter) pageQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
       if (bannerId !== undefined) pageQuery.andWhere("product.bannerId = :bannerId", { bannerId });
-      if (dealId !== undefined) pageQuery.andWhere("product.dealId = :dealId", { dealId });
+      if (dealIds.length) {
+        pageQuery.andWhere("product.dealId IN (:...dealIds)", { dealIds });
+        pageQuery.andWhere("deal.status = :selectedDealStatus", { selectedDealStatus: DealStatus.ENABLED });
+      }
       if (hasDeal === true) pageQuery.andWhere("deal.status = :enabledDealStatus", { enabledDealStatus: DealStatus.ENABLED });
       if (hasDeal === false) pageQuery.andWhere("(deal.id IS NULL OR deal.status != :enabledDealStatus)", { enabledDealStatus: DealStatus.ENABLED });
       if (vendorId) pageQuery.andWhere("product.vendorId = :vendorId", { vendorId });
-      if (search?.trim()) {
-        const term = search.trim();
-        const conditions = ["product.name ILIKE :searchPattern", "product.brand ILIKE :searchPattern", "product.keywords ILIKE :searchPattern", "variants.sku ILIKE :searchPattern", "subcategory.name ILIKE :searchPattern", "category.name ILIKE :searchPattern"];
-        if (term.length >= 4) conditions.push("product.description ILIKE :searchPattern");
-        pageQuery.andWhere(`(${conditions.join(" OR ")})`, { searchPattern: `%${term}%` });
+      if (searchCondition) {
+        pageQuery.andWhere(searchCondition.where, searchCondition.parameters);
       }
       const ids = await pageQuery.offset((page - 1) * limit).limit(limit).getRawMany<{ id: string }>();
       metricRows = ids.map((row) => ({ id: row.id, effective_price: "0", avg_rating: "0", review_count: "0", sold_quantity: "0" }));
@@ -1301,8 +1298,16 @@ export class ProductService {
       const salesById = new Map(salesRows.map((row) => [Number(row.product_id), row]));
       for (const productId of productIds) {
         const product = productsById.get(productId)!;
-        const variantPrices = (product.variants ?? []).map((variant) => Number(variant.finalPrice ?? variant.basePrice ?? 0)).filter((price) => price > 0);
-        const effectivePrice = Number(product.finalPrice ?? product.basePrice ?? Math.min(...variantPrices, 0));
+        const variantPrices = (product.variants ?? [])
+          .map((variant) => Number(variant.finalPrice ?? variant.basePrice ?? 0))
+          .filter((price) => price > 0);
+        const productFinalPrice = Number(product.finalPrice ?? 0);
+        const productBasePrice = Number(product.basePrice ?? 0);
+        const effectivePrice = productFinalPrice > 0
+          ? productFinalPrice
+          : variantPrices.length > 0
+            ? Math.min(...variantPrices)
+            : productBasePrice;
         metricsById.set(productId, {
           id: String(productId), effective_price: String(effectivePrice),
           avg_rating: String(ratingsById.get(productId)?.avg_rating ?? 0),
@@ -1796,7 +1801,7 @@ export class ProductService {
     if (!product) return null;
 
     // Normalize legacy discount fields in-place for all callers
-    const normalized = normalizeLegacyProductDiscount(product);
+    const normalized = withAgeRestriction(normalizeLegacyProductDiscount(product));
     normalized.variants = (product.variants ?? []).map((v) =>
       normalizeLegacyVariantDiscount(v),
     );
@@ -2053,7 +2058,7 @@ export class ProductService {
 
     const products = await this.productRepository.find({
       where: { id: In(orderedIds) },
-      relations: ["subcategory", "vendor", "variants", "deal"],
+      relations: ["subcategory", "subcategory.category", "vendor", "variants", "deal"],
     });
 
     const productMap = new Map(products.map((p) => [p.id, p]));
@@ -2062,7 +2067,7 @@ export class ProductService {
       .filter((p): p is Product => Boolean(p));
 
     const sanitizedProducts = orderedProducts.map((p) => ({
-      ...normalizeLegacyProductDiscount(p),
+      ...withAgeRestriction(normalizeLegacyProductDiscount(p)),
       vendor: sanitizeVendor(p.vendor),
       variants: (p.variants ?? []).map((v) =>
         normalizeLegacyVariantDiscount(v),
@@ -2159,6 +2164,7 @@ export class ProductService {
       where: { id },
       relations: ["variants", "vendor", "subcategory", "deal"],
     });
+    await this.productSearchIndexer.refreshProduct(id);
     return restored!;
   }
 
@@ -2220,6 +2226,7 @@ export class ProductService {
     product.stock = inventory.stock;
     product.status = inventory.status;
     await this.productRepository.save(product);
+    await this.productSearchIndexer.refreshProduct(productId);
 
     return variant;
   }

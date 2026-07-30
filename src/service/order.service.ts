@@ -35,6 +35,7 @@ import { Cart } from "../entities/cart.entity";
 import { CartItem } from "../entities/cartItem.entity";
 import { User } from "../entities/user.entity";
 import { CartService } from "./cart.service";
+import { getAgeRestrictionSummary } from "./age-restriction.service";
 import { PaymentService } from "./payment.service";
 import { District } from "../entities/district.entity";
 import { Product } from "../entities/product.entity";
@@ -344,6 +345,8 @@ export class OrderService {
             relations: [
                 "items",
                 "items.product",
+                "items.product.subcategory",
+                "items.product.subcategory.category",
                 "items.product.deal",
                 "items.product.vendor",
                 "items.product.vendor.district",
@@ -844,7 +847,7 @@ export class OrderService {
                 // 🔹 Buy Now: create a temporary item list from product/variant
                 const product = await this.productRepository.findOne({
                     where: { id: productId },
-                    relations: ["variants", "vendor", "vendor.district", "deal"],
+                    relations: ["variants", "subcategory", "subcategory.category", "vendor", "vendor.district", "deal"],
                 });
 
                 if (!product) throw new APIError(404, "Product not found");
@@ -867,6 +870,11 @@ export class OrderService {
             } else {
                 const cart = await this.getCart(userId);
                 items = cart.items;
+            }
+
+            const ageSummary = getAgeRestrictionSummary(items.map((item) => item.product));
+            if (ageSummary.containsRestrictedItems && !orderData.ageRestrictedAcknowledged) {
+                throw new APIError(400, "Age confirmation is required for restricted products");
             }
 
             // Check stock before creating the order
