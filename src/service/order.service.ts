@@ -53,7 +53,7 @@ import {
 import { NotificationService } from "./notification.service";
 import crypto from "crypto";
 import axios from "axios";
-import { PromoType } from "../entities/promo.entity";
+import { Promo, PromoType } from "../entities/promo.entity";
 import { DealStatus } from "../entities/deal.entity";
 import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
@@ -584,6 +584,16 @@ export class OrderService {
         if (!promoCode) return { discountAmount: 0, appliedPromoCode: null };
 
         const promo = await this.promoService.findPromoByCode(promoCode);
+        if (!promo || !promo.isValid) {
+            return { discountAmount: 0, appliedPromoCode: null };
+        }
+
+        // Check global usage limit
+        if (promo.maxUsageCount > 0 && promo.usageCount >= promo.maxUsageCount) {
+            return { discountAmount: 0, appliedPromoCode: null };
+        }
+
+        // Check if user already used this promo on a completed/delivered order
         const pastOrderTransaction = await this.orderRepository.find({
             where: {
                 appliedPromoCode: promoCode,
@@ -592,7 +602,7 @@ export class OrderService {
             },
         });
 
-        if (!promo || !promo.isValid || pastOrderTransaction.length > 0) {
+        if (pastOrderTransaction.length > 0) {
             return { discountAmount: 0, appliedPromoCode: null };
         }
 
@@ -602,6 +612,14 @@ export class OrderService {
                 : (shippingTotal * promo.discountPercentage) / 100;
 
         return { discountAmount, appliedPromoCode: promo.promoCode };
+    }
+
+    private async incrementPromoUsage(promoCode: string): Promise<void> {
+        const promo = await this.promoService.findPromoByCode(promoCode);
+        if (promo) {
+            promo.usageCount = (promo.usageCount || 0) + 1;
+            await AppDataSource.getRepository(Promo).save(promo);
+        }
     }
 
     /**
@@ -730,10 +748,16 @@ export class OrderService {
 
     async checkAvailablePromocode(promoCode: string, userId: number) {
         const promo = await this.promoService.findPromoByCode(promoCode);
-        if (!promo) {
+        if (!promo || !promo.isValid) {
             return null;
         }
-        let pastOrderTransaction = await this.orderRepository.find({
+
+        // Check global usage limit
+        if (promo.maxUsageCount > 0 && promo.usageCount >= promo.maxUsageCount) {
+            return null;
+        }
+
+        const pastOrderTransaction = await this.orderRepository.find({
             where: {
                 appliedPromoCode: promoCode,
                 orderedById: userId,
@@ -973,6 +997,13 @@ export class OrderService {
                 }
             } else {
                 throw new APIError(400, "Invalid payment method");
+            }
+
+            // Increment promo usage count if a promo code was applied
+            if (order.appliedPromoCode && orderData.promoCode) {
+                await this.incrementPromoUsage(orderData.promoCode).catch((err) =>
+                    console.error("Failed to increment promo usage count:", err),
+                );
             }
 
             try {

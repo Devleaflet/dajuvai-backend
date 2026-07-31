@@ -1,4 +1,4 @@
-import { Column, Entity, PrimaryGeneratedColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 
 export enum PromoType {
     LINE_TOTAL = "LINE_TOTAL",
@@ -26,4 +26,15 @@ export class Promo {
     @Column({ type: "boolean", nullable: true, default: true })
     isValid: boolean;
 
+    @Column({ type: "int", default: 0 })
+    maxUsageCount: number;
+
+    @Column({ type: "int", default: 0 })
+    usageCount: number;
+
+    @CreateDateColumn()
+    createdAt: Date;
+
+    @UpdateDateColumn()
+    updatedAt: Date;
 }

@@ -451,6 +451,7 @@ export interface SanitizedVendorOrderView {
     orderItems: SanitizedOrderItem[];
     itemsSubtotal: number;
     discountAllocation: number;
+    appliedPromoCode: string | null;
     vendorPayable: number;
     /** Only present so a vendor responsible for fulfillment can see the fee
      * for its own shipment — never the order's other-vendor fees or total. */
@@ -495,6 +496,7 @@ export const sanitizeOrderForVendor = (
         orderItems: vendorItems.map(sanitizeOrderItem),
         itemsSubtotal,
         discountAllocation: Number(discountAllocation.toFixed(2)),
+        appliedPromoCode: order.appliedPromoCode ?? null,
         vendorPayable: Number((itemsSubtotal - discountAllocation).toFixed(2)),
         ownShippingFee: ownShipping ? Number(ownShipping.shippingFee) : null,
         ownShippingZone: ownShipping?.shippingZone ?? null,

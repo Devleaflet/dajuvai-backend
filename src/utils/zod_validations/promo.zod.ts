@@ -16,6 +16,12 @@ export const createPromoSchema = z.object({
     isValid: z
         .boolean()
         .optional(),
+
+    maxUsageCount: z
+        .number()
+        .int()
+        .min(0, "maxUsageCount must be non-negative")
+        .default(0),
 })
 
 export const deletePromoSchema = z.object({
