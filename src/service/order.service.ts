@@ -68,7 +68,7 @@ import {
     ShippingCalculationService,
     calculateGrandTotal,
 } from "./shipping.service";
-import { emitOrderStatusUpdate } from "../socket/socket";
+import { emitOrderStatusUpdate, emitProductStockUpdate } from "../socket/socket";
 
 /**
  * Service class responsible for managing orders.
@@ -999,6 +999,26 @@ export class OrderService {
                 throw new APIError(400, "Invalid payment method");
             }
 
+            // Emit only after reserveStockAndSaveOrder commits. Browsers use
+            // this to invalidate their product/cart view, while the database
+            // transaction above remains the only authority for stock.
+            emitProductStockUpdate({
+                productIds: [
+                    ...new Set(
+                        order.orderItems
+                            .map((item) => Number(item.productId))
+                            .filter((id) => Number.isInteger(id) && id > 0),
+                    ),
+                ],
+                variantIds: [
+                    ...new Set(
+                        order.orderItems
+                            .map((item) => Number(item.variantId))
+                            .filter((id) => Number.isInteger(id) && id > 0),
+                    ),
+                ],
+            });
+
             // Increment promo usage count if a promo code was applied
             if (order.appliedPromoCode && orderData.promoCode) {
                 await this.incrementPromoUsage(orderData.promoCode).catch((err) =>
@@ -1132,6 +1152,8 @@ export class OrderService {
                 "shippingAddress",
                 "orderItems",
                 "orderItems.product",
+                "orderItems.product.subcategory",
+                "orderItems.product.subcategory.category",
                 "orderItems.product.deal",
                 "orderItems.variant",
                 "orderItems.vendor",
@@ -1154,6 +1176,12 @@ export class OrderService {
             vendorName: item.vendor?.businessName || null,
         }));
 
+        const adminAgeSummary = getAgeRestrictionSummary(
+            (order.orderItems || [])
+                .map((item) => item.product)
+                .filter(Boolean),
+        );
+
         await sendCustomerOrderEmail(
             config.USER_EMAIL,
             order.orderNumber,
@@ -1164,6 +1192,10 @@ export class OrderService {
             `New Order Placed - #${order.orderNumber}`,
             Number(order.discountTotal) || 0,
             order.appliedPromoCode,
+            {
+                required: adminAgeSummary.containsRestrictedItems,
+                minimumAge: adminAgeSummary.minimumRequiredAge,
+            },
         );
     }
 
@@ -1176,6 +1208,8 @@ export class OrderService {
                 "orderedBy.address",
                 "orderItems",
                 "orderItems.product",
+                "orderItems.product.subcategory",
+                "orderItems.product.subcategory.category",
                 "orderItems.variant",
             ],
             withDeleted: true,
@@ -1217,6 +1251,10 @@ export class OrderService {
             };
         });
 
+        const ageSummary = getAgeRestrictionSummary(
+            order.orderItems.map((item) => item.product),
+        );
+
         // Send customer email
         try {
             await sendCustomerOrderEmail(
@@ -1229,6 +1267,10 @@ export class OrderService {
                 undefined,
                 order.discountTotal,
                 order.appliedPromoCode,
+                {
+                    required: ageSummary.containsRestrictedItems,
+                    minimumAge: ageSummary.minimumRequiredAge,
+                },
             );
         } catch (error) {
             console.error("Failed to send customer order email:", error);

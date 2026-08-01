@@ -17,6 +17,7 @@ import {
     normalizeLegacyProductDiscount,
     normalizeLegacyVariantDiscount,
 } from "../utils/pricing.utils";
+import { withAgeRestriction } from "./age-restriction.service";
 
 /**
  * Service to manage homepage sections including create, update, delete,
@@ -423,6 +424,11 @@ export class HomePageSectionService {
                 "variants",
                 "variants.deletedAt IS NULL",
             )
+            .leftJoinAndSelect("products.subcategory", "productsSubcategory")
+            .leftJoinAndSelect(
+                "productsSubcategory.category",
+                "productsSubcategoryCategory",
+            )
             .leftJoinAndSelect("section.selectedCategory", "selectedCategory")
             .leftJoinAndSelect(
                 "section.selectedSubcategory",
@@ -446,6 +452,14 @@ export class HomePageSectionService {
                     "product.variants",
                     "variants",
                     "variants.deletedAt IS NULL",
+                )
+                .leftJoinAndSelect(
+                    "product.subcategory",
+                    "productSubcategory",
+                )
+                .leftJoinAndSelect(
+                    "productSubcategory.category",
+                    "productSubcategoryCategory",
                 )
                 .where("product.dealId IN (:...dealIds)", { dealIds })
                 .andWhere("product.deletedAt IS NULL")
@@ -474,6 +488,14 @@ export class HomePageSectionService {
                     "product.variants",
                     "variants",
                     "variants.deletedAt IS NULL",
+                )
+                .leftJoinAndSelect(
+                    "product.subcategory",
+                    "productSubcategory",
+                )
+                .leftJoinAndSelect(
+                    "productSubcategory.category",
+                    "productSubcategoryCategory",
                 )
                 .where("product.subcategoryId IN (:...subcategoryIds)", {
                     subcategoryIds,
@@ -506,9 +528,8 @@ export class HomePageSectionService {
                     "variants",
                     "variants.deletedAt IS NULL",
                 )
-                    .leftJoin("product.subcategory", "subcategory")
-                    .leftJoin("subcategory.category", "category")
-                    .addSelect("category.id")
+                    .leftJoinAndSelect("product.subcategory", "subcategory")
+                    .leftJoinAndSelect("subcategory.category", "category")
                     .where("category.id IN (:...categoryIds)", { categoryIds })
                     .andWhere("product.deletedAt IS NULL")
                     .getRawAndEntities();
@@ -552,12 +573,14 @@ export class HomePageSectionService {
                     break;
             }
 
-            const normalizedProducts = products.map((p) => ({
-                ...normalizeLegacyProductDiscount(p),
-                variants: (p.variants ?? []).map((v) =>
-                    normalizeLegacyVariantDiscount(v),
-                ),
-            }));
+            const normalizedProducts = products.map((p) =>
+                withAgeRestriction({
+                    ...normalizeLegacyProductDiscount(p),
+                    variants: (p.variants ?? []).map((v) =>
+                        normalizeLegacyVariantDiscount(v),
+                    ),
+                }),
+            );
 
             return { ...section, products: normalizedProducts };
         });
@@ -574,7 +597,12 @@ export class HomePageSectionService {
     async getHomePageSectionById(sectionId: number) {
         const section = await this.homepageSectionRepository.findOne({
             where: { id: sectionId },
-            relations: ["products", "products.variants"],
+            relations: [
+                "products",
+                "products.variants",
+                "products.subcategory",
+                "products.subcategory.category",
+            ],
         });
 
         console.log(section);
@@ -588,7 +616,11 @@ export class HomePageSectionService {
             case ProductSource.DEAL:
                 products = await this.productRepository.find({
                     where: { dealId: section.selectedDeal?.id },
-                    relations: ["variants"],
+                    relations: [
+                        "variants",
+                        "subcategory",
+                        "subcategory.category",
+                    ],
                 });
                 break;
 
@@ -599,14 +631,22 @@ export class HomePageSectionService {
                             category: { id: section.selectedCategory?.id },
                         },
                     },
-                    relations: ["variants"],
+                    relations: [
+                        "variants",
+                        "subcategory",
+                        "subcategory.category",
+                    ],
                 });
                 break;
 
             case ProductSource.SUBCATEGORY:
                 products = await this.productRepository.find({
                     where: { subcategoryId: section.selectedSubcategory?.id },
-                    relations: ["variants"],
+                    relations: [
+                        "variants",
+                        "subcategory",
+                        "subcategory.category",
+                    ],
                 });
                 break;
 
@@ -618,12 +658,14 @@ export class HomePageSectionService {
 
         return {
             ...section,
-            products: products.map((p) => ({
-                ...normalizeLegacyProductDiscount(p),
-                variants: (p.variants ?? []).map((v) =>
-                    normalizeLegacyVariantDiscount(v),
-                ),
-            })),
+            products: products.map((p) =>
+                withAgeRestriction({
+                    ...normalizeLegacyProductDiscount(p),
+                    variants: (p.variants ?? []).map((v) =>
+                        normalizeLegacyVariantDiscount(v),
+                    ),
+                }),
+            ),
         };
     }
 

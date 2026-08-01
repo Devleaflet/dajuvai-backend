@@ -10,6 +10,7 @@ export const allowedOrigins = [
   "http://localhost:3000",
   "https://project-f6q8p.vercel.app",
   "https://dajuvai-nextjs-frontend.vercel.app",
+  "https://lens-boneless-able.ngrok-free.dev",
 ];
 
 export const corsOptions: CorsOptions = {

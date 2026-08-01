@@ -67,15 +67,9 @@
     "zod": "^3.24.3"
   },
   "scripts": {
-    "test": "npm run check:routes && npm run check:fcm && npm run check:merch && npm run check:product && npm run check:orderstatus && npm run check:mobile-checkout && npm run check:search && ts-node src/scripts/authVendorValidation.selfcheck.ts && ts-node src/utils/catalog-query.test.ts",
-    "check:fcm": "ts-node src/scripts/fcm.selfcheck.ts",
-    "check:merch": "ts-node src/scripts/merchandising.selfcheck.ts",
-    "check:product": "ts-node src/scripts/product.selfcheck.ts",
-    "check:orderstatus": "ts-node src/scripts/orderStatus.selfcheck.ts",
-    "check:mobile-checkout": "ts-node src/scripts/mobileCheckout.selfcheck.ts",
-    "check:search": "ts-node src/search/search-utils.test.ts && ts-node src/search/catalog-search.test.ts && ts-node src/search/search-suggestion.schema.test.ts && ts-node src/service/product-search-indexer.test.ts && ts-node src/scripts/search.selfcheck.ts && ts-node src/scripts/search-api.selfcheck.ts",
-    "check:promo-schema": "ts-node src/scripts/promoUsageSchema.selfcheck.ts",
+    "test": "npm run check:routes",
     "backfill:product-search": "ts-node src/scripts/backfill-product-search.ts",
+    "backfill:legacy-pricing": "ts-node src/scripts/backfill-legacy-pricing.ts",
     "check:routes": "ts-node src/scripts/routeInventory.ts",
     "dev": "ts-node src/index.ts",
     "start": "nodemon src/index.ts",

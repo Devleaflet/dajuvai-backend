@@ -36,9 +36,11 @@ import { CartItem } from "../entities/cartItem.entity";
 import { WishlistItem } from "../entities/wishlistItem.entity";
 import { Review } from "../entities/reviews.entity";
 import { buildCatalogTaxonomyFilter } from "../utils/catalog-query";
+import { buildCatalogDiscountPercentExpression } from "../utils/catalog-sort";
 import { ProductSearchIndexer } from "./product-search-indexer.service";
 import { buildCatalogSearchCondition } from "../search/catalog-search";
 import { withAgeRestriction } from "./age-restriction.service";
+import { getManualBannerProductIds } from "../utils/bannerProductSelection";
 
 interface GetProductsOptions {
   search?: string;
@@ -1099,6 +1101,15 @@ export class ProductService {
           : params.sort === "all" || !params.sort
             ? "newest"
             : params.sort;
+    const manualBannerProductIds =
+      bannerId !== undefined
+        ? getManualBannerProductIds(
+            (await this.bannerRepository.findOne({
+              where: { id: bannerId },
+              relations: ["selectedProducts"],
+            })) ?? { productSource: null },
+          )
+        : null;
     const effectivePrice = `COALESCE(
       NULLIF("product"."finalPrice", 0),
       MIN(NULLIF("variants"."finalPrice", 0)),
@@ -1122,11 +1133,7 @@ export class ProductService {
     const ratingAverage = `COALESCE("rating"."avg_rating", 0)`;
     const reviewCount = `COALESCE("rating"."review_count", 0)`;
     const soldQuantity = `COALESCE("sales"."sold_quantity", 0)`;
-    const discountPercent = `GREATEST(
-      COALESCE("product"."discountPercent", 0),
-      COALESCE(MAX("variants"."discountPercent"), 0),
-      COALESCE("deal"."discountPercentage", 0)
-    )`;
+    const discountPercent = buildCatalogDiscountPercentExpression();
     const taxonomyFilter = buildCatalogTaxonomyFilter(categoryIds, subcategoryIds);
     const searchCondition = search
       ? buildCatalogSearchCondition(search)
@@ -1156,7 +1163,17 @@ export class ProductService {
       .addGroupBy("sales.sold_quantity");
 
     if (taxonomyFilter) query.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
-    if (bannerId !== undefined) query.andWhere("product.bannerId = :bannerId", { bannerId });
+    if (bannerId !== undefined) {
+      if (manualBannerProductIds !== null) {
+        if (manualBannerProductIds.length) {
+          query.andWhere("product.id IN (:...manualBannerProductIds)", { manualBannerProductIds });
+        } else {
+          query.andWhere("1 = 0");
+        }
+      } else {
+        query.andWhere("product.bannerId = :bannerId", { bannerId });
+      }
+    }
     if (dealIds.length) {
       query.andWhere("product.dealId IN (:...dealIds)", { dealIds });
       query.andWhere("deal.status = :selectedDealStatus", { selectedDealStatus: DealStatus.ENABLED });
@@ -1215,7 +1232,17 @@ export class ProductService {
         .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
         .where("product.deletedAt IS NULL");
       if (taxonomyFilter) countQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
-      if (bannerId !== undefined) countQuery.andWhere("product.bannerId = :bannerId", { bannerId });
+      if (bannerId !== undefined) {
+        if (manualBannerProductIds !== null) {
+          if (manualBannerProductIds.length) {
+            countQuery.andWhere("product.id IN (:...manualBannerProductIds)", { manualBannerProductIds });
+          } else {
+            countQuery.andWhere("1 = 0");
+          }
+        } else {
+          countQuery.andWhere("product.bannerId = :bannerId", { bannerId });
+        }
+      }
       if (dealIds.length) {
         countQuery.andWhere("product.dealId IN (:...dealIds)", { dealIds });
         countQuery.andWhere("deal.status = :selectedDealStatus", { selectedDealStatus: DealStatus.ENABLED });
@@ -1253,7 +1280,17 @@ export class ProductService {
         .orderBy("product.createdAt", "DESC")
         .addOrderBy("product.id", "DESC");
       if (taxonomyFilter) pageQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
-      if (bannerId !== undefined) pageQuery.andWhere("product.bannerId = :bannerId", { bannerId });
+      if (bannerId !== undefined) {
+        if (manualBannerProductIds !== null) {
+          if (manualBannerProductIds.length) {
+            pageQuery.andWhere("product.id IN (:...manualBannerProductIds)", { manualBannerProductIds });
+          } else {
+            pageQuery.andWhere("1 = 0");
+          }
+        } else {
+          pageQuery.andWhere("product.bannerId = :bannerId", { bannerId });
+        }
+      }
       if (dealIds.length) {
         pageQuery.andWhere("product.dealId IN (:...dealIds)", { dealIds });
         pageQuery.andWhere("deal.status = :selectedDealStatus", { selectedDealStatus: DealStatus.ENABLED });
@@ -1323,6 +1360,7 @@ export class ProductService {
         const metric = metricsById.get(product.id)!;
         return {
           ...normalizeLegacyProductDiscount(product),
+          ...withAgeRestriction(product),
           variants: (product.variants ?? []).map(normalizeLegacyVariantDiscount),
           effectivePrice: Number(metric.effective_price),
           avgRating: Number(metric.avg_rating),

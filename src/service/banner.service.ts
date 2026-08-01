@@ -1,4 +1,4 @@
-import { ILike, Repository } from "typeorm";
+import { ILike, In, Repository } from "typeorm";
 import {
     Banner,
     BannerStatus,
@@ -19,6 +19,7 @@ import { DealService } from "./deal.service";
 import { SubcategoryService } from "./subcategory.service";
 import config from "../config/env.config";
 import { Product } from "../entities/product.entity";
+import { normalizeManualBannerProductIds } from "../utils/bannerProductSelection";
 
 let cronScheduled = false;
 
@@ -52,6 +53,28 @@ export class BannerService {
         }
     }
 
+    private async resolveManualProducts(
+        selectedProducts: unknown,
+    ): Promise<Product[]> {
+        const ids = normalizeManualBannerProductIds(selectedProducts);
+        if (!ids.length) {
+            throw new APIError(400, "At least one valid product must be selected");
+        }
+
+        const products = await AppDataSource.getRepository(Product).find({
+            where: { id: In(ids) },
+            select: { id: true },
+        });
+        if (products.length !== ids.length) {
+            const found = new Set(products.map((product) => product.id));
+            const missing = ids.filter((id) => !found.has(id));
+            throw new APIError(400, `Selected product no longer exists: ${missing.join(", ")}`);
+        }
+
+        const byId = new Map(products.map((product) => [product.id, product]));
+        return ids.map((id) => byId.get(id)!);
+    }
+
     async createBanner(dto: CreateBannerInput, adminId: number) {
         const status = this.determineStatus(
             new Date(dto.startDate),
@@ -75,15 +98,7 @@ export class BannerService {
 
         switch (dto.productSource) {
             case ProductSource.MANUAL: {
-                const productService = new ProductService(AppDataSource);
-                const products = await Promise.all(
-                    dto.selectedProducts.map(async (id) => {
-                        const product =
-                            await productService.getProductDetailsById(id);
-                        return product as unknown as Product;
-                    }),
-                );
-                banner.selectedProducts = products;
+                banner.selectedProducts = await this.resolveManualProducts(dto.selectedProducts);
                 break;
             }
 
@@ -132,7 +147,10 @@ export class BannerService {
         dto: UpdateBannerInput,
         adminId?: number,
     ): Promise<Banner> {
-        const banner = await this.bannerRepository.findOne({ where: { id } });
+        const banner = await this.bannerRepository.findOne({
+            where: { id },
+            relations: ["selectedProducts"],
+        });
 
         if (!banner) {
             throw new APIError(404, "Banner not found");
@@ -143,29 +161,7 @@ export class BannerService {
 
             switch (dto.productSource) {
                 case ProductSource.MANUAL: {
-                    if (!Array.isArray(dto.selectedProducts)) {
-                        throw new APIError(
-                            400,
-                            "selectedProducts must be an array",
-                        );
-                    }
-                    const productService = new ProductService(AppDataSource);
-                    const products = await Promise.all(
-                        dto.selectedProducts.map(async (productId) => {
-                            const product =
-                                await productService.getProductDetailsById(
-                                    productId,
-                                );
-                            if (!product) {
-                                throw new APIError(
-                                    400,
-                                    `Product with ID ${productId} does not exist`,
-                                );
-                            }
-                            return product as unknown as Product;
-                        }),
-                    );
-                    banner.selectedProducts = products;
+                    banner.selectedProducts = await this.resolveManualProducts(dto.selectedProducts);
                     break;
                 }
 
@@ -254,6 +250,7 @@ export class BannerService {
                 "selectedProducts.variants",
                 "selectedCategory",
                 "selectedSubcategory",
+                "selectedDeal",
             ],
         });
 
@@ -278,6 +275,7 @@ export class BannerService {
                 "selectedCategory",
                 "selectedSubcategory",
                 "selectedSubcategory.category",
+                "selectedDeal",
             ],
             select: {
                 id: true,
@@ -298,6 +296,17 @@ export class BannerService {
                     email: true,
                     phoneNumber: true,
                     role: true,
+                },
+                selectedProducts: {
+                    id: true,
+                },
+                selectedCategory: {
+                    id: true,
+                    name: true,
+                },
+                selectedDeal: {
+                    id: true,
+                    name: true,
                 },
                 selectedSubcategory: {
                     id: true,

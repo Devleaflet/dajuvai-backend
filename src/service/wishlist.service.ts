@@ -20,6 +20,7 @@ import {
     normalizeLegacyProductDiscount,
     normalizeLegacyVariantDiscount,
 } from "../utils/pricing.utils";
+import { withAgeRestriction } from "./age-restriction.service";
 
 
 /**
@@ -235,7 +236,13 @@ export class WishlistService {
     async getWishlist(userId: number): Promise<Wishlist | null> {
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ["items", "items.product", "items.variant"],
+            relations: [
+                "items",
+                "items.product",
+                "items.product.subcategory",
+                "items.product.subcategory.category",
+                "items.variant",
+            ],
         });
 
         if (!wishlist) {
@@ -251,7 +258,7 @@ export class WishlistService {
         wishlist.items = wishlist.items.map((item) => ({
             ...item,
             product: item.product
-                ? normalizeLegacyProductDiscount(item.product)
+                ? withAgeRestriction(normalizeLegacyProductDiscount(item.product))
                 : item.product,
             variant: item.variant
                 ? normalizeLegacyVariantDiscount(item.variant)

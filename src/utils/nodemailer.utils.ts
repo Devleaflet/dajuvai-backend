@@ -258,6 +258,7 @@ export const sendCustomerOrderEmail = async (
     subject = "Your Order Has Been Placed",
     discountTotal = 0,
     appliedPromoCode?: string | null,
+    manualIdVerification?: { required: boolean; minimumAge: number | null },
 ) => {
     // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
     // as strings — coerce here or `.toFixed()` throws and `+` silently
@@ -390,6 +391,28 @@ export const sendCustomerOrderEmail = async (
                     <p style="font-size:15px; color:#333; margin:0 0 24px;">
                       Thank you for shopping with us. We've received your order and it's now being prepared. Here's a summary of your purchase:
                     </p>
+
+                    ${
+                        manualIdVerification?.required
+                            ? `
+                    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin:0 0 24px; background-color:#fff4e5; border:2px solid #d97706; border-radius:8px; overflow:hidden;">
+                      <tr>
+                        <td style="padding:14px 16px;">
+                          <span style="display:inline-block; font-size:11px; font-weight:700; letter-spacing:0.6px; text-transform:uppercase; color:#92400e; background-color:#fde68a; padding:3px 8px; border-radius:4px; margin-bottom:8px;">Age-Restricted Item</span>
+                          <strong style="display:block; font-size:15px; color:#92400e; margin:0 0 6px;">Manual ID Verification Required</strong>
+                          <p style="margin:0; font-size:13.5px; line-height:1.6; color:#78350f;">
+                            This order contains age-restricted products${
+                                manualIdVerification.minimumAge
+                                    ? ` (minimum age ${manualIdVerification.minimumAge}+)`
+                                    : ""
+                            }. Our delivery team will verify your government-issued photo ID before handing over these items — please keep a valid ID ready.
+                          </p>
+                        </td>
+                      </tr>
+                    </table>
+                    `
+                            : ""
+                    }
 
                     <h3 style="margin:0 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Order Summary</h3>
                     ${vendorSections.join("")}

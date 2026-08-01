@@ -29,6 +29,8 @@ import AppDataSource from "../config/db.config";
 import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
 import { NotificationService } from "../service/notification.service";
+import { getAgeRestrictionSummary } from "../service/age-restriction.service";
+import { Product } from "../entities/product.entity";
 import {
     sanitizeOrderFull,
     sanitizeOrderForVendor,
@@ -120,6 +122,18 @@ export class OrderController {
                     relations: ["district"],
                 });
 
+                const orderProductIds = order.orderItems.map(
+                    (item) => item.productId,
+                );
+                const ageCheckProducts = await AppDataSource.getRepository(
+                    Product,
+                ).find({
+                    where: { id: In(orderProductIds) },
+                    relations: ["subcategory", "subcategory.category"],
+                });
+                const codAgeSummary =
+                    getAgeRestrictionSummary(ageCheckProducts);
+
                 const customerEmailItems = order.orderItems.map((item) => {
                     const vendor = vendors.find((v) => v.id === item.vendorId);
                     return {
@@ -141,6 +155,13 @@ export class OrderController {
                         order.shippingFee,
                         customerEmailItems,
                         userDistrict,
+                        undefined,
+                        order.discountTotal,
+                        order.appliedPromoCode,
+                        {
+                            required: codAgeSummary.containsRestrictedItems,
+                            minimumAge: codAgeSummary.minimumRequiredAge,
+                        },
                     );
                 } catch (error) {
                     console.log("Failed to send customer order email:", error);

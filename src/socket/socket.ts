@@ -112,6 +112,17 @@ export const emitCartUpdate = (userId: number, cart: Cart) => {
     io.to(userRoom(userId)).emit("cart:count", { count });
 };
 
+// Catalog stock can be affected by any customer's completed order. Product
+// screens use this as an invalidation signal and refetch the authoritative
+// product payload; stock values themselves are never trusted from a socket.
+export const emitProductStockUpdate = (payload: {
+    productIds: number[];
+    variantIds: number[];
+}) => {
+    if (!io) return;
+    io.emit("product:stockUpdated", payload);
+};
+
 // Notifies every connected vendor dashboard the moment admin uploads/replaces the commission document.
 export const emitCommissionUpdate = (document: CommissionDocument) => {
     if (!io) return;
