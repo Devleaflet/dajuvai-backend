@@ -49,6 +49,9 @@ import {
     sendOrderStatusEmail,
     sendVendorOrderEmail,
     sendVendorOrderStatusEmail,
+    sendAdminOrderCreatedEmail,
+    sendAdminOrderDeliveredEmail,
+    AdminOrderEmailData,
 } from "../utils/nodemailer.utils";
 import { NotificationService } from "./notification.service";
 import crypto from "crypto";
@@ -1079,12 +1082,6 @@ export class OrderService {
             // transaction (see above), so it commits/rolls back with the order
             // save and stock reservation — nothing to do here.
 
-            try {
-                await this.sendAdminOrderPlacedEmail(order.id);
-            } catch (error) {
-                console.error("Failed to send admin order placed email:", error);
-            }
-
             await this.recordStatusChange(order.id, null, order.status, {
                 reason: "Order placed",
                 changedByUserId: userId,
@@ -1196,12 +1193,13 @@ export class OrderService {
 
     //         }
 
-    private async sendAdminOrderPlacedEmail(orderId: number): Promise<void> {
+    public async sendAdminOrderPlacedEmail(orderId: number): Promise<void> {
         if (!config.USER_EMAIL) return;
 
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
+                "orderedBy",
                 "shippingAddress",
                 "orderItems",
                 "orderItems.product",
@@ -1211,6 +1209,7 @@ export class OrderService {
                 "orderItems.variant",
                 "orderItems.vendor",
                 "orderItems.vendor.district",
+                "vendorShippings",
             ],
             withDeleted: true,
         });
@@ -1219,37 +1218,157 @@ export class OrderService {
             throw new APIError(404, `Order with ID ${orderId} not found`);
         }
 
-        const customerEmailItems = (order.orderItems || []).map((item) => ({
-            name: item.product?.name || item.productNameSnapshot || "Product",
-            sku: item.variant?.sku || item.skuSnapshot || null,
-            quantity: item.quantity,
-            price: Number(item.price) || 0,
-            variantAttributes: item.variant?.attributes || null,
-            vendorDistrict: item.vendor?.district?.name || null,
-            vendorName: item.vendor?.businessName || null,
-        }));
+        const adminEmailData = await this.buildAdminOrderEmailData(order);
+        await sendAdminOrderCreatedEmail(config.USER_EMAIL, adminEmailData);
+    }
 
-        const adminAgeSummary = getAgeRestrictionSummary(
-            (order.orderItems || [])
-                .map((item) => item.product)
-                .filter(Boolean),
+    private async buildAdminOrderEmailData(order: any): Promise<AdminOrderEmailData> {
+        const addr = order.shippingAddress || {};
+        const addrParts = [
+            addr.localAddress,
+            addr.city,
+            addr.district,
+        ].filter(Boolean);
+        const formattedAddress = addrParts.join(", ") || "N/A";
+
+        const orderDate = order.createdAt
+            ? new Date(order.createdAt).toLocaleString("en-US", {
+                  year: "numeric",
+                  month: "long",
+                  day: "numeric",
+                  hour: "2-digit",
+                  minute: "2-digit",
+              })
+            : "N/A";
+
+        // Group items by vendor
+        const itemsByVendorId = new Map<number, any[]>();
+        for (const item of order.orderItems || []) {
+            const vid = item.vendorId;
+            if (!itemsByVendorId.has(vid)) itemsByVendorId.set(vid, []);
+            itemsByVendorId.get(vid)!.push(item);
+        }
+
+        // Build per-vendor shipping lookup from vendorShippings snapshot
+        const shippingByVendorId = new Map<number, number>();
+        for (const vs of order.vendorShippings || []) {
+            shippingByVendorId.set(vs.vendorId, Number(vs.shippingFee) || 0);
+        }
+
+        // Build district shipping breakdown de-duplicated by vendor district
+        const districtShippingMap = new Map<string, number>();
+        for (const vs of order.vendorShippings || []) {
+            const district = vs.vendorDistrictSnapshot ||
+                vs.vendor?.district?.name ||
+                "Unknown";
+            const existing = districtShippingMap.get(district) || 0;
+            districtShippingMap.set(district, existing + (Number(vs.shippingFee) || 0));
+        }
+        const districtShipping = Array.from(districtShippingMap.entries()).map(
+            ([district, fee]) => ({ district, fee }),
         );
 
-        await sendCustomerOrderEmail(
-            config.USER_EMAIL,
-            order.orderNumber,
-            Number(order.totalPrice) || 0,
-            Number(order.shippingFee) || 0,
-            customerEmailItems,
-            order.shippingAddress?.district || null,
-            `New Order Placed - #${order.orderNumber}`,
-            Number(order.discountTotal) || 0,
-            order.appliedPromoCode,
-            {
-                required: adminAgeSummary.containsRestrictedItems,
-                minimumAge: adminAgeSummary.minimumRequiredAge,
+        // Build vendor sections
+        const vendors = Array.from(itemsByVendorId.entries()).map(
+            ([vendorId, items]) => {
+                const sampleItem = items[0];
+                const vendor = sampleItem?.vendor;
+
+                const vendorItems = items.map((item: any) => {
+                    const unitPrice = Number(item.unitPriceSnapshot ?? item.price) || 0;
+                    const basePrice = Number(item.basePriceSnapshot ?? unitPrice) || 0;
+                    const productDiscount =
+                        Number(item.productDiscountSnapshot) || 0;
+                    const dealDiscount = Number(item.dealDiscountSnapshot) || 0;
+                    const totalDiscount =
+                        (productDiscount + dealDiscount) * item.quantity;
+                    const lineTotal = unitPrice * item.quantity;
+
+                    const variantAttrs = item.variant?.attributes;
+                    const variantStr = variantAttrs
+                        ? Object.entries(variantAttrs)
+                              .map(([k, v]) => `${k}: ${v}`)
+                              .join(", ")
+                        : null;
+
+                    return {
+                        name:
+                            item.product?.name ||
+                            item.productNameSnapshot ||
+                            "Product",
+                        variant: variantStr,
+                        sku:
+                            item.variant?.sku ||
+                            item.skuSnapshot ||
+                            null,
+                        quantity: item.quantity,
+                        unitPrice,
+                        discount: totalDiscount > 0 ? totalDiscount : null,
+                        lineTotal,
+                    };
+                });
+
+                const subtotal = vendorItems.reduce(
+                    (sum: number, i: any) => sum + i.lineTotal,
+                    0,
+                );
+
+                return {
+                    name: vendor?.businessName || "Vendor",
+                    email: vendor?.email || "",
+                    phone: vendor?.phoneNumber || "",
+                    district:
+                        vendor?.district?.name ||
+                        order.vendorShippings?.find(
+                            (vs: any) => vs.vendorId === vendorId,
+                        )?.vendorDistrictSnapshot ||
+                        "Unknown",
+                    items: vendorItems,
+                    subtotal,
+                    shippingFee: shippingByVendorId.get(vendorId) || 0,
+                };
             },
         );
+
+        // Look up promo type so the email can display it in the right place
+        let promoApplyOn: string | null = null;
+        if (order.appliedPromoCode) {
+            try {
+                const promo = await this.promoService.findPromoByCode(order.appliedPromoCode);
+                promoApplyOn = promo?.applyOn || null;
+            } catch {
+                // Non-fatal: fall back to null — email will still show the discount amount
+            }
+        }
+
+        return {
+            orderNumber: order.orderNumber || String(order.id),
+            orderDate,
+            paymentMethod: order.paymentMethod || "",
+            paymentStatus: order.paymentStatus || "",
+            orderStatus: order.status || "",
+            customer: {
+                fullName:
+                    order.orderedBy?.fullName ||
+                    order.shippingAddress?.fullName ||
+                    "N/A",
+                email: order.orderedBy?.email || "N/A",
+                phone:
+                    order.phoneNumber ||
+                    order.orderedBy?.phoneNumber ||
+                    "N/A",
+                address: formattedAddress,
+                landmark: addr.landmark || null,
+            },
+            vendors,
+            subtotal: Number(order.merchandiseSubtotal) || 0,
+            shippingTotal: Number(order.shippingFee) || 0,
+            discountTotal: Number(order.discountTotal) || 0,
+            grandTotal: Number(order.totalPrice) || 0,
+            districtShipping,
+            appliedPromoCode: order.appliedPromoCode || null,
+            promoApplyOn,
+        };
     }
 
     async sendOrderEmails(orderId: number) {
@@ -1264,6 +1383,7 @@ export class OrderService {
                 "orderItems.product.subcategory",
                 "orderItems.product.subcategory.category",
                 "orderItems.variant",
+                "vendorShippings",
             ],
             withDeleted: true,
         });
@@ -1292,6 +1412,17 @@ export class OrderService {
             relations: ["district"],
         });
 
+        // Look up promo type so emails can display it in the correct location
+        let promoApplyOn: string | null = null;
+        if (order.appliedPromoCode) {
+            try {
+                const promo = await this.promoService.findPromoByCode(order.appliedPromoCode);
+                promoApplyOn = promo?.applyOn || null;
+            } catch {
+                // Non-fatal
+            }
+        }
+
         const customerEmailItems = order.orderItems.map((item) => {
             const vendor = vendors.find((v) => v.id === item.vendorId);
             return {
@@ -1301,6 +1432,11 @@ export class OrderService {
                 price: item.price,
                 variantAttributes: item.variant?.attributes || null,
                 vendorDistrict: vendor?.district?.name || null,
+                basePriceSnapshot: Number(item.basePriceSnapshot) || 0,
+                productDiscountSnapshot: Number(item.productDiscountSnapshot) || 0,
+                dealDiscountSnapshot: Number(item.dealDiscountSnapshot) || 0,
+                discountLabelSnapshot: item.discountLabelSnapshot || null,
+                dealNameSnapshot: item.dealNameSnapshot || null,
             };
         });
 
@@ -1324,6 +1460,8 @@ export class OrderService {
                     required: ageSummary.containsRestrictedItems,
                     minimumAge: ageSummary.minimumRequiredAge,
                 },
+                promoApplyOn,
+                order.vendorShippings,
             );
         } catch (error) {
             console.error("Failed to send customer order email:", error);
@@ -1342,6 +1480,11 @@ export class OrderService {
                     quantity: item.quantity,
                     price: item.price,
                     variantAttributes: item.variant?.attributes || null,
+                    basePriceSnapshot: Number(item.basePriceSnapshot) || 0,
+                    productDiscountSnapshot: Number(item.productDiscountSnapshot) || 0,
+                    dealDiscountSnapshot: Number(item.dealDiscountSnapshot) || 0,
+                    discountLabelSnapshot: item.discountLabelSnapshot || null,
+                    dealNameSnapshot: item.dealNameSnapshot || null,
                 }));
 
             if (itemsForVendor.length === 0) continue;
@@ -2737,6 +2880,8 @@ export class OrderService {
                 "orderItems",
                 "orderItems.product",
                 "orderItems.vendor",
+                "orderItems.vendor.district",
+                "orderItems.variant",
                 "vendorShippings",
             ],
             withDeleted: true,
@@ -2884,11 +3029,10 @@ export class OrderService {
 
         if (targetStatus === OrderStatus.DELIVERED && config.USER_EMAIL) {
             try {
-                await sendOrderStatusEmail(
+                const deliveredEmailData = await this.buildAdminOrderEmailData(order);
+                await sendAdminOrderDeliveredEmail(
                     config.USER_EMAIL,
-                    order.orderNumber,
-                    order.status,
-                    `Order Delivered - #${order.orderNumber}`,
+                    deliveredEmailData,
                 );
             } catch (error) {
                 console.error("Failed to send admin delivered email:", error);

@@ -252,13 +252,20 @@ export const sendCustomerOrderEmail = async (
         price: number;
         variantAttributes?: Record<string, string> | null;
         vendorDistrict?: string | null;
-        vendorName?: string | null; // optional if you want vendor name
+        vendorName?: string | null;
+        basePriceSnapshot?: number | null;
+        productDiscountSnapshot?: number | null;
+        dealDiscountSnapshot?: number | null;
+        discountLabelSnapshot?: string | null;
+        dealNameSnapshot?: string | null;
     }[],
     userDistrict?: string | null,
     subject = "Your Order Has Been Placed",
     discountTotal = 0,
     appliedPromoCode?: string | null,
     manualIdVerification?: { required: boolean; minimumAge: number | null },
+    promoApplyOn?: string | null,
+    vendorShippings?: any[],
 ) => {
     // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
     // as strings — coerce here or `.toFixed()` throws and `+` silently
@@ -296,6 +303,11 @@ export const sendCustomerOrderEmail = async (
                     }
                 }
 
+                const itemProductDiscount = Number(item.productDiscountSnapshot) || 0;
+                const itemDealDiscount = Number(item.dealDiscountSnapshot) || 0;
+                const itemBasePrice = Number(item.basePriceSnapshot) || 0;
+                const hasItemDiscount = (itemProductDiscount + itemDealDiscount) > 0;
+
                 return `
                       <tr>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8;">
@@ -309,13 +321,16 @@ export const sendCustomerOrderEmail = async (
                                         .join(", ")}</span>`
                                   : ""
                           }
+                          ${itemProductDiscount > 0 && item.discountLabelSnapshot ? `<br><span style="color:#2e7d32; font-size:11px;">🏷️ ${item.discountLabelSnapshot}</span>` : ""}
+                          ${itemDealDiscount > 0 && item.dealNameSnapshot ? `<br><span style="color:#1565c0; font-size:11px;">⚡ Deal: ${item.dealNameSnapshot}</span>` : ""}
                         </td>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#444;">${
                             item.quantity
                         }</td>
-                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">Rs ${
-                            item.price
-                        }</td>
+                        <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">
+                          ${hasItemDiscount && itemBasePrice > 0 ? `<span style="text-decoration:line-through; color:#bbb; font-size:11px; display:block;">Rs ${Number(itemBasePrice).toFixed(2)}</span>` : ""}
+                          Rs ${item.price}
+                        </td>
                         <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:600; color:#2b2b2b;">Rs ${(
                             item.price * item.quantity
                         ).toFixed(2)}</td>
@@ -363,6 +378,75 @@ export const sendCustomerOrderEmail = async (
 
     const discount = Number(discountTotal) || 0;
     const orderTotal = totalPrice + shippingFee - discount;
+
+    let vendorSubtotalsSection = "";
+    let shippingByVendorSection = "";
+
+    if (vendorShippings && vendorShippings.length > 0) {
+        const vendorSubtotalRows = vendorShippings.map((vs) => {
+            return `
+                <tr>
+                    <td style="padding:8px 10px; color:#555;">${vs.vendorNameSnapshot || "Vendor"}, ${vs.vendorDistrictSnapshot || "Unknown District"}</td>
+                    <td style="padding:8px 10px; text-align:right; color:#555; width:120px;">Rs ${Number(vs.vendorMerchandiseSubtotal || 0).toFixed(2)}</td>
+                </tr>
+            `;
+        });
+
+        const shippingByVendorRows = vendorShippings.map((vs) => {
+            return `
+                <tr>
+                    <td style="padding:8px 10px; color:#555;">${vs.vendorNameSnapshot || "Vendor"}, ${vs.vendorDistrictSnapshot || "Unknown District"}</td>
+                    <td style="padding:8px 10px; text-align:right; color:#555; width:120px;">Rs ${Number(vs.shippingFee || 0).toFixed(2)}</td>
+                </tr>
+            `;
+        });
+
+        vendorSubtotalsSection = `
+            <h3 style="margin:24px 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Vendor Subtotals</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:24px; border:1px solid #f0e3d8; border-radius:8px; overflow:hidden;">
+                <tbody>
+                    ${vendorSubtotalRows.join("")}
+                    ${
+                        discount > 0 && promoApplyOn !== "SHIPPING"
+                            ? `<tr>
+                      <td style="padding:8px 10px; color:#2e7d32;">Promo Code (${appliedPromoCode || ""})</td>
+                      <td style="padding:8px 10px; text-align:right; color:#2e7d32;">-Rs ${discount.toFixed(2)}</td>
+                    </tr>`
+                            : ""
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                      <td style="padding:12px 10px; font-weight:700; color:#2b2b2b; background-color:#fafafa;">Total Vendor Subtotal</td>
+                      <td style="padding:12px 10px; text-align:right; font-weight:700; color:#c05a00; background-color:#fafafa;">Rs ${(totalPrice - (promoApplyOn !== "SHIPPING" ? discount : 0)).toFixed(2)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        `;
+
+        shippingByVendorSection = `
+            <h3 style="margin:24px 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Shipping by Vendor</h3>
+            <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:24px; border:1px solid #f0e3d8; border-radius:8px; overflow:hidden;">
+                <tbody>
+                    ${shippingByVendorRows.join("")}
+                    ${
+                        discount > 0 && promoApplyOn === "SHIPPING"
+                            ? `<tr>
+                      <td style="padding:8px 10px; color:#2e7d32;">Promo Code (${appliedPromoCode || ""})</td>
+                      <td style="padding:8px 10px; text-align:right; color:#2e7d32;">-Rs ${discount.toFixed(2)}</td>
+                    </tr>`
+                            : ""
+                    }
+                </tbody>
+                <tfoot>
+                    <tr>
+                      <td style="padding:12px 10px; font-weight:700; color:#2b2b2b; background-color:#fafafa;">Total Shipping</td>
+                      <td style="padding:12px 10px; text-align:right; font-weight:700; color:#c05a00; background-color:#fafafa;">Rs ${(shippingFee - (promoApplyOn === "SHIPPING" ? discount : 0)).toFixed(2)}</td>
+                    </tr>
+                </tfoot>
+            </table>
+        `;
+    }
 
     const mailOptions = {
         from: `<${config.USER_EMAIL}>`,
@@ -417,20 +501,17 @@ export const sendCustomerOrderEmail = async (
                     <h3 style="margin:0 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Order Summary</h3>
                     ${vendorSections.join("")}
 
+                    ${vendorSubtotalsSection}
+                    
+                    ${shippingByVendorSection}
+
+                    <h3 style="margin:24px 0 14px; font-size:16px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Pricing Summary</h3>
                     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-top:10px;">
                       <tfoot>
                         <tr>
                           <td style="padding:8px 10px; text-align:right; color:#555;">Subtotal:</td>
                           <td style="padding:8px 10px; text-align:right; color:#555; width:120px;">Rs ${totalPrice.toFixed(2)}</td>
                         </tr>
-                        ${
-                            discount > 0
-                                ? `<tr>
-                          <td style="padding:8px 10px; text-align:right; color:#2e7d32;">Discount${appliedPromoCode ? ` (${appliedPromoCode})` : ""}:</td>
-                          <td style="padding:8px 10px; text-align:right; color:#2e7d32;">-Rs ${discount.toFixed(2)}</td>
-                        </tr>`
-                                : ""
-                        }
                         <tr>
                           <td style="padding:8px 10px; text-align:right; color:#555;">Shipping Fee:</td>
                           <td style="padding:8px 10px; text-align:right; color:#555;">Rs ${shippingFee.toFixed(2)}</td>
@@ -474,6 +555,11 @@ interface VendorOrderItem {
     quantity: number;
     price: number;
     variantAttributes?: Record<string, string> | null;
+    basePriceSnapshot?: number | null;
+    productDiscountSnapshot?: number | null;
+    dealDiscountSnapshot?: number | null;
+    discountLabelSnapshot?: string | null;
+    dealNameSnapshot?: string | null;
 }
 
 interface CustomerInfo {
@@ -498,6 +584,11 @@ export const sendVendorOrderEmail = async (
 ) => {
     // Generate HTML rows for each product
     const rows = products.map((item) => {
+        const itemProductDiscount = Number(item.productDiscountSnapshot) || 0;
+        const itemDealDiscount = Number(item.dealDiscountSnapshot) || 0;
+        const itemBasePrice = Number(item.basePriceSnapshot) || 0;
+        const hasItemDiscount = (itemProductDiscount + itemDealDiscount) > 0;
+
         return `
               <tr>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8;">
@@ -511,9 +602,14 @@ export const sendVendorOrderEmail = async (
                                 .join(", ")}</span>`
                           : ""
                   }
+                  ${itemProductDiscount > 0 && item.discountLabelSnapshot ? `<br><span style="color:#2e7d32; font-size:11px;">🏷️ ${item.discountLabelSnapshot}</span>` : ""}
+                  ${itemDealDiscount > 0 && item.dealNameSnapshot ? `<br><span style="color:#1565c0; font-size:11px;">⚡ Deal: ${item.dealNameSnapshot}</span>` : ""}
                 </td>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#444;">${item.quantity}</td>
-                <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">Rs ${item.price}</td>
+                <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#444;">
+                  ${hasItemDiscount && itemBasePrice > 0 ? `<span style="text-decoration:line-through; color:#bbb; font-size:11px; display:block;">Rs ${Number(itemBasePrice).toFixed(2)}</span>` : ""}
+                  Rs ${item.price}
+                </td>
                 <td style="padding:12px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:600; color:#2b2b2b;">Rs ${(
                     item.price * item.quantity
                 ).toFixed(2)}</td>
@@ -1181,6 +1277,358 @@ const getVendorOrderStatusEmailMeta = (status: string) => {
             copy: "The status of this order has changed. Please check your dashboard for details.",
         }
     );
+};
+
+export interface AdminOrderEmailItem {
+    name: string;
+    variant?: string | null;
+    sku?: string | null;
+    quantity: number;
+    unitPrice: number;
+    discount?: number | null;
+    lineTotal: number;
+}
+
+export interface AdminOrderEmailVendor {
+    name: string;
+    email: string;
+    phone: string;
+    district: string;
+    items: AdminOrderEmailItem[];
+    subtotal: number;
+    shippingFee: number;
+}
+
+export interface AdminOrderEmailData {
+    orderNumber: string;
+    orderDate: string;
+    paymentMethod: string;
+    paymentStatus: string;
+    orderStatus: string;
+    customer: {
+        fullName: string;
+        email: string;
+        phone: string;
+        address: string;
+        landmark?: string | null;
+    };
+    vendors: AdminOrderEmailVendor[];
+    subtotal: number;
+    shippingTotal: number;
+    discountTotal: number;
+    grandTotal: number;
+    districtShipping: Array<{ district: string; fee: number }>;
+    appliedPromoCode?: string | null;
+    promoApplyOn?: string | null;
+}
+
+const buildAdminOrderEmailHtml = (
+    data: AdminOrderEmailData,
+    mode: "created" | "delivered",
+): string => {
+
+    const headerGradient =
+        mode === "created"
+            ? "linear-gradient(135deg, #ff7a1a, #ff9a3d)"
+            : "linear-gradient(135deg, #059669, #10b981)";
+
+    const emailTitle =
+        mode === "created" ? "New Order Received" : "Order Delivered";
+
+    const infoStripBg = mode === "created" ? "#fff4e9" : "#ecfdf5";
+    const infoStripColor = mode === "created" ? "#7a4a1f" : "#065f46";
+    const infoStripText =
+        mode === "created"
+            ? "A new order has been placed. Please review the details and begin processing. <strong>This is an internal admin notification.</strong>"
+            : "The order has been successfully delivered to the customer. Delivery is complete. <strong>This is an internal completion notification.</strong>";
+
+
+    const orderInfoRows = [
+        { label: "Order ID", value: `#${escapeHtml(data.orderNumber)}` },
+        { label: "Order Date", value: escapeHtml(data.orderDate) },
+        { label: "Payment Method", value: escapeHtml(data.paymentMethod) },
+        { label: "Payment Status", value: escapeHtml(data.paymentStatus) },
+        { label: "Order Status", value: escapeHtml(data.orderStatus) },
+    ]
+        .map(
+            (row) => `
+        <tr>
+          <td style="padding:10px 14px; width:160px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa; border-bottom:1px solid #f0e3d8; font-weight:600;">${row.label}</td>
+          <td style="padding:10px 14px; color:#2b2b2b; border-bottom:1px solid #f0e3d8; font-size:14px;">${row.value}</td>
+        </tr>`,
+        )
+        .join("");
+
+
+    const customerRows = [
+        { label: "Full Name", value: escapeHtml(data.customer.fullName) },
+        { label: "Email", value: escapeHtml(data.customer.email) },
+        { label: "Phone", value: escapeHtml(data.customer.phone) },
+        { label: "Shipping Address", value: escapeHtml(data.customer.address) },
+        ...(data.customer.landmark
+            ? [{ label: "Landmark", value: escapeHtml(data.customer.landmark) }]
+            : []),
+    ]
+        .map(
+            (row, idx, arr) => `
+        <tr>
+          <td style="padding:10px 14px; width:160px; color:#888; font-size:12px; text-transform:uppercase; letter-spacing:0.3px; background-color:#fafafa;${idx < arr.length - 1 ? " border-bottom:1px solid #f0e3d8;" : ""} font-weight:600;">${row.label}</td>
+          <td style="padding:10px 14px; color:#2b2b2b; font-size:14px;${idx < arr.length - 1 ? " border-bottom:1px solid #f0e3d8;" : ""}">${row.value}</td>
+        </tr>`,
+        )
+        .join("");
+
+    const vendorSections = data.vendors
+        .map((vendor) => {
+            const productRows = vendor.items
+                .map(
+                    (item) => `
+              <tr>
+                <td style="padding:11px 10px; border-bottom:1px solid #f0e3d8; color:#2b2b2b; font-size:13.5px;">
+                  <strong>${escapeHtml(item.name)}</strong>
+                  ${item.sku ? `<br><span style="color:#999; font-size:11.5px;">SKU: ${escapeHtml(item.sku)}</span>` : ""}
+                </td>
+                <td style="padding:11px 10px; border-bottom:1px solid #f0e3d8; color:#555; font-size:13.5px;">
+                  ${item.variant ? escapeHtml(item.variant) : '<span style="color:#bbb;">—</span>'}
+                </td>
+                <td style="padding:11px 10px; border-bottom:1px solid #f0e3d8; text-align:center; color:#555; font-size:13.5px;">${item.quantity}</td>
+                <td style="padding:11px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#555; font-size:13.5px;">Rs ${Number(item.unitPrice).toFixed(2)}</td>
+                <td style="padding:11px 10px; border-bottom:1px solid #f0e3d8; text-align:right; color:#2e7d32; font-size:13.5px;">
+                  ${item.discount && item.discount > 0 ? `-Rs ${Number(item.discount).toFixed(2)}` : '<span style="color:#bbb;">—</span>'}
+                </td>
+                <td style="padding:11px 10px; border-bottom:1px solid #f0e3d8; text-align:right; font-weight:700; color:#2b2b2b; font-size:13.5px;">Rs ${Number(item.lineTotal).toFixed(2)}</td>
+              </tr>`,
+                )
+                .join("");
+
+            return `
+          <!-- Vendor Section: ${escapeHtml(vendor.name)} -->
+          <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:28px; border:1px solid #e8d8c4; border-radius:8px; overflow:hidden;">
+            <!-- Vendor info row (single line) -->
+            <tr>
+              <td colspan="6" style="padding:12px 16px; border-bottom:1px solid #f0e3d8; background:#fff4e9;">
+                <span style="font-size:13px; color:#2b2b2b;">
+                  <strong>${escapeHtml(vendor.name)}</strong>
+                  <span style="color:#888; margin:0 8px;">|</span> <strong>${escapeHtml(vendor.district)}</strong>
+                  <span style="color:#888; margin:0 8px;">|</span> <strong>${escapeHtml(vendor.email)}</strong>
+                  <span style="color:#888; margin:0 8px;">|</span> <strong>${escapeHtml(vendor.phone)}</strong>
+                </span>
+              </td>
+            </tr>
+           
+            <!-- Product table header -->
+            <tr style="background-color:#f5f5f5;">
+              <th style="padding:10px 10px; text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8; font-weight:700;">Product</th>
+              <th style="padding:10px 10px; text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8; font-weight:700;">Variant</th>
+              <th style="padding:10px 10px; text-align:center; font-size:11.5px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8; font-weight:700;">Qty</th>
+              <th style="padding:10px 10px; text-align:right; font-size:11.5px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8; font-weight:700;">Unit Price</th>
+              <th style="padding:10px 10px; text-align:right; font-size:11.5px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8; font-weight:700;">Discount</th>
+              <th style="padding:10px 10px; text-align:right; font-size:11.5px; text-transform:uppercase; letter-spacing:0.3px; color:#888; border-bottom:1px solid #f0e3d8; font-weight:700;">Total</th>
+            </tr>
+            <tbody>
+              ${productRows}
+            </tbody>
+            <tfoot>
+              <tr>
+                <td colspan="5" style="padding:12px 10px; text-align:right; font-weight:700; color:#2b2b2b; background-color:#fafafa; border-top:1px solid #f0e3d8;">Vendor Total:</td>
+                <td style="padding:12px 10px; text-align:right; font-weight:700; color:#c05a00; background-color:#fafafa; border-top:1px solid #f0e3d8;">Rs ${Number(vendor.subtotal).toFixed(2)}</td>
+              </tr>
+            </tfoot>
+          </table>`;
+        })
+        .join("");
+
+    const hasDiscount = data.discountTotal > 0;
+
+    // -- Vendor Subtotal section rows (one per vendor) --
+    const vendorSubtotalRows = data.vendors
+        .map(
+            (v) => `
+        <tr>
+          <td style="padding:7px 14px; color:#555; font-size:13.5px;">${escapeHtml(v.name)}</td>
+          <td style="padding:7px 14px; text-align:right; color:#2b2b2b; font-size:13.5px;">Rs ${Number(v.subtotal).toFixed(2)}</td>
+        </tr>`,
+        )
+        .join("");
+
+    const totalVendorSubtotal = hasDiscount && data.promoApplyOn !== "SHIPPING"
+        ? data.subtotal - data.discountTotal
+        : data.subtotal;
+
+    // -- Shipping Fees by Vendor section rows --
+    const shippingByVendorRows = data.vendors
+        .map(
+            (v) => `
+        <tr>
+          <td style="padding:7px 14px; color:#555; font-size:13.5px;">${escapeHtml(v.name)}, ${escapeHtml(v.district)}</td>
+          <td style="padding:7px 14px; text-align:right; color:#2b2b2b; font-size:13.5px;">Rs ${Number(v.shippingFee).toFixed(2)}</td>
+        </tr>`,
+        )
+        .join("");
+
+    const totalShipping = hasDiscount && data.promoApplyOn === "SHIPPING"
+        ? data.shippingTotal - data.discountTotal
+        : data.shippingTotal;
+
+    return `
+<body style="margin:0; padding:0; font-family: Arial, Helvetica, sans-serif; background-color:#f4f4f4;">
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
+    <tr>
+      <td align="center" style="padding:24px 12px;">
+        <table width="760" cellpadding="0" cellspacing="0" border="0" style="max-width:95%; background-color:#ffffff; border-radius:10px; overflow:hidden; box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+
+          <!-- ── Header ── -->
+          <tr>
+            <td style="background:${headerGradient}; padding:28px 30px; text-align:center;">
+              <div style="font-size:12px; font-weight:700; letter-spacing:0.08em; text-transform:uppercase; color:rgba(255,255,255,0.7); margin-bottom:6px;">DajuVai Admin Notification</div>
+              <h1 style="color:#ffffff; margin:0; font-size:24px; letter-spacing:0.4px;">${escapeHtml(emailTitle)}</h1>
+            </td>
+          </tr>
+
+          <!-- ── Body ── -->
+          <tr>
+            <td style="padding:30px;">
+
+              <!-- ── Order Information ── -->
+              <h3 style="margin:0 0 12px; font-size:15px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Order Information</h3>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:28px; border:1px solid #e8d8c4; border-radius:8px; overflow:hidden;">
+                <tbody>
+                  ${orderInfoRows}
+                </tbody>
+              </table>
+
+              <!-- ── Customer Information ── -->
+              <h3 style="margin:0 0 12px; font-size:15px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Customer Information</h3>
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:28px; border:1px solid #e8d8c4; border-radius:8px; overflow:hidden;">
+                <tbody>
+                  ${customerRows}
+                </tbody>
+              </table>
+
+              <!-- ── Vendor Sections ── -->
+              <h3 style="margin:0 0 16px; font-size:15px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Order Items by Vendor</h3>
+              ${vendorSections}
+
+              <!-- ── Price Summary ── -->
+              <h3 style="margin:0 0 12px; font-size:15px; color:#2b2b2b; border-left:4px solid #ff7a1a; padding-left:10px;">Price Summary</h3>
+
+              <!-- Section 1: Vendor Subtotal -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:16px; border:1px solid #e8d8c4; border-radius:8px; overflow:hidden;">
+                <tr>
+                  <td colspan="2" style="padding:10px 14px; background-color:#fff4e9; border-bottom:2px solid #ff7a1a;">
+                    <span style="font-size:12px; font-weight:700; color:#c05a00; text-transform:uppercase; letter-spacing:0.4px;">Vendor Wise Order Subtotal</span>
+                  </td>
+                </tr>
+                <tbody>
+                  ${vendorSubtotalRows}
+                  ${
+                      hasDiscount && data.promoApplyOn !== "SHIPPING"
+                          ? `<tr>
+                    <td style="padding:8px 14px; color:#2e7d32; font-size:13.5px;">Promo Code (${escapeHtml(data.appliedPromoCode || "")})</td>
+                    <td style="padding:8px 14px; text-align:right; color:#2e7d32; font-size:13.5px;">-Rs ${Number(data.discountTotal).toFixed(2)}</td>
+                  </tr>`
+                          : ""
+                  }
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td style="padding:10px 14px; font-weight:700; color:#2b2b2b; font-size:13.5px; background-color:#fafafa; border-top:1px solid #f0e3d8;">Order Subtotal</td>
+                    <td style="padding:10px 14px; text-align:right; font-weight:700; color:#c05a00; font-size:13.5px; background-color:#fafafa; border-top:1px solid #f0e3d8;">Rs ${Number(totalVendorSubtotal).toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <!-- Section 2: Shipping Fees by Vendor -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:16px; border:1px solid #e8d8c4; border-radius:8px; overflow:hidden;">
+                <tr>
+                  <td colspan="2" style="padding:10px 14px; background-color:#fff4e9; border-bottom:2px solid #ff7a1a;">
+                    <span style="font-size:12px; font-weight:700; color:#c05a00; text-transform:uppercase; letter-spacing:0.4px;">Shipping Fees by Vendor</span>
+                  </td>
+                </tr>
+                <tbody>
+                  ${shippingByVendorRows}
+                  ${
+                      hasDiscount && data.promoApplyOn === "SHIPPING"
+                          ? `<tr>
+                    <td style="padding:8px 14px; color:#2e7d32; font-size:13.5px;">Promo Code (${escapeHtml(data.appliedPromoCode || "")})</td>
+                    <td style="padding:8px 14px; text-align:right; color:#2e7d32; font-size:13.5px;">-Rs ${Number(data.discountTotal).toFixed(2)}</td>
+                  </tr>`
+                          : ""
+                  }
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td style="padding:10px 14px; font-weight:700; color:#2b2b2b; font-size:13.5px; background-color:#fafafa; border-top:1px solid #f0e3d8;">Total Shipping</td>
+                    <td style="padding:10px 14px; text-align:right; font-weight:700; color:#c05a00; font-size:13.5px; background-color:#fafafa; border-top:1px solid #f0e3d8;">Rs ${Number(totalShipping).toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+              <!-- Section 3: Grand Total -->
+              <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse; margin-bottom:6px; border:1px solid #e8d8c4; border-radius:8px; overflow:hidden;">
+                <tr>
+                  <td colspan="2" style="padding:10px 14px; background-color:#fff4e9; border-bottom:2px solid #ff7a1a;">
+                    <span style="font-size:12px; font-weight:700; color:#c05a00; text-transform:uppercase; letter-spacing:0.4px;">Grand Total</span>
+                  </td>
+                </tr>
+                <tbody>
+                  <tr>
+                    <td style="padding:8px 14px; color:#555; font-size:13.5px;">Order Subtotal</td>
+                    <td style="padding:8px 14px; text-align:right; color:#2b2b2b; font-size:13.5px;">Rs ${Number(totalVendorSubtotal).toFixed(2)}</td>
+                  </tr>
+                  <tr>
+                    <td style="padding:8px 14px; color:#555; font-size:13.5px;">Total Shipping</td>
+                    <td style="padding:8px 14px; text-align:right; color:#2b2b2b; font-size:13.5px;">Rs ${Number(totalShipping).toFixed(2)}</td>
+                  </tr>
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td style="padding:14px; border-top:2px solid #ff7a1a; font-weight:700; font-size:15px; color:#2b2b2b;">Grand Total</td>
+                    <td style="padding:14px; border-top:2px solid #ff7a1a; text-align:right; font-weight:700; font-size:15px; color:#ff7a1a;">Rs ${Number(data.grandTotal).toFixed(2)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+
+            </td>
+          </tr>
+
+          <!-- ── Footer ── -->
+          <tr>
+            <td style="padding:20px 30px; border-top:1px solid #eee; font-size:12px; color:#999; text-align:center;">
+              This is an automated internal notification sent to administrators only. Please do not reply to this email.
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>`;
+};
+
+
+export const sendAdminOrderCreatedEmail = async (
+    to: string,
+    data: AdminOrderEmailData,
+): Promise<void> => {
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject: `New Order Received - #${data.orderNumber}`,
+        html: buildAdminOrderEmailHtml(data, "created"),
+    });
+};
+
+export const sendAdminOrderDeliveredEmail = async (
+    to: string,
+    data: AdminOrderEmailData,
+): Promise<void> => {
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to: "samippoudelcsit080@chitwancollege.edu.np",
+        subject: `Order Delivered - #${data.orderNumber}`,
+        html: buildAdminOrderEmailHtml(data, "delivered"),
+    });
 };
 
 export const sendVendorOrderStatusEmail = async (

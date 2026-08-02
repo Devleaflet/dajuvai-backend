@@ -167,6 +167,12 @@ export class OrderController {
                     console.log("Failed to send customer order email:", error);
                 }
 
+                try {
+                    await this.orderService.sendAdminOrderPlacedEmail(order.id);
+                } catch (error) {
+                    console.error("Failed to send admin order placed email:", error);
+                }
+
                 const orderItems = order.orderItems;
 
                 for (const vendorId of uniqueVendorIds) {
