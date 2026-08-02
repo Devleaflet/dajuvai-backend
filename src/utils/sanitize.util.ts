@@ -11,6 +11,7 @@ import { OrderItem } from "../entities/orderItems.entity";
 import { Address } from "../entities/address.entity";
 import { PaymentOption } from "../entities/vendorPaymentOption";
 import { DiscountType } from "../entities/product.enum";
+import { PromoType } from "../entities/promo.entity";
 
 export interface SanitizedVendor {
     id: number;
@@ -335,6 +336,7 @@ export interface SanitizedOrderFull {
     paymentStatus: PaymentStatus;
     paymentMethod: PaymentMethod;
     appliedPromoCode: string | null;
+    promoApplyOn: PromoType | null;
     phoneNumber: string | null;
     isBuyNow: boolean;
     createdAt: Date;
@@ -348,6 +350,9 @@ export interface SanitizedOrderFull {
         productDiscountTotal: number;
         dealDiscountTotal: number;
         promoDiscountTotal: number;
+        promoApplyOn: PromoType | null;
+        promoLineTotalDiscount: number;
+        promoShippingDiscount: number;
         appliedPromoCode: string | null;
         lineItems: SanitizedOrderItem["priceBreakdown"][];
     };
@@ -389,6 +394,17 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
     const orderItems = (order.orderItems ?? []).map(sanitizeOrderItem);
     const lineBreakdowns = orderItems.map((item) => item.priceBreakdown);
 
+    // The order stores the promo discount as one flat amount; classify it
+    // by the persisted applyOn so LINE_TOTAL vs SHIPPING promos can be shown
+    // separately in admin/user views (shipping promos never touch vendor
+    // merchandise payments).
+    const promoApplyOn = order.promoApplyOn ?? null;
+    const promoDiscountTotal = Number(order.discountTotal) || 0;
+    const promoLineTotalDiscount =
+        promoApplyOn === PromoType.SHIPPING ? 0 : promoDiscountTotal;
+    const promoShippingDiscount =
+        promoApplyOn === PromoType.SHIPPING ? promoDiscountTotal : 0;
+
     return {
         id: order.id,
         orderNumber: order.orderNumber,
@@ -403,6 +419,7 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
         paymentStatus: order.paymentStatus,
         paymentMethod: order.paymentMethod,
         appliedPromoCode: order.appliedPromoCode ?? null,
+        promoApplyOn,
         phoneNumber: order.phoneNumber ?? null,
         isBuyNow: order.isBuyNow ?? false,
         createdAt: order.createdAt,
@@ -427,7 +444,10 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
                 (sum, line) => sum + line.dealDiscount.amount,
                 0,
             ),
-            promoDiscountTotal: Number(order.discountTotal) || 0,
+            promoDiscountTotal,
+            promoApplyOn,
+            promoLineTotalDiscount,
+            promoShippingDiscount,
             appliedPromoCode: order.appliedPromoCode ?? null,
             lineItems: lineBreakdowns,
         },
@@ -452,6 +472,7 @@ export interface SanitizedVendorOrderView {
     itemsSubtotal: number;
     discountAllocation: number;
     appliedPromoCode: string | null;
+    promoApplyOn: PromoType | null;
     vendorPayable: number;
     /** Only present so a vendor responsible for fulfillment can see the fee
      * for its own shipment — never the order's other-vendor fees or total. */
@@ -476,9 +497,15 @@ export const sanitizeOrderForVendor = (
     );
 
     const orderMerchandiseSubtotal = Number(order.merchandiseSubtotal) || 0;
+    // A SHIPPING promo discounts the customer's shipping fee, never the
+    // merchandise — so it must not be allocated against a vendor's items
+    // (vendors never see the order's shipping at all).
+    const promoApplyOn = order.promoApplyOn ?? null;
+    const allocatableDiscount =
+        promoApplyOn === PromoType.SHIPPING ? 0 : Number(order.discountTotal || 0);
     const discountAllocation =
         orderMerchandiseSubtotal > 0
-            ? Number(order.discountTotal || 0) * (itemsSubtotal / orderMerchandiseSubtotal)
+            ? allocatableDiscount * (itemsSubtotal / orderMerchandiseSubtotal)
             : 0;
 
     const ownShipping = (order.vendorShippings ?? []).find((vs) => vs.vendorId === vendorId);
@@ -497,6 +524,7 @@ export const sanitizeOrderForVendor = (
         itemsSubtotal,
         discountAllocation: Number(discountAllocation.toFixed(2)),
         appliedPromoCode: order.appliedPromoCode ?? null,
+        promoApplyOn,
         vendorPayable: Number((itemsSubtotal - discountAllocation).toFixed(2)),
         ownShippingFee: ownShipping ? Number(ownShipping.shippingFee) : null,
         ownShippingZone: ownShipping?.shippingZone ?? null,

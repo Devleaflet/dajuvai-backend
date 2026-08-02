@@ -1,6 +1,6 @@
 import { Brackets, EntityManager, In, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
-import { APIError } from "../utils/ApiError.utils";
+import { APIError } from "../errors/ApiError";
 import {
     IShippingAddressRequest,
     IUpdateOrderStatusRequest,
@@ -54,6 +54,11 @@ import { NotificationService } from "./notification.service";
 import crypto from "crypto";
 import axios from "axios";
 import { Promo, PromoType } from "../entities/promo.entity";
+import {
+    normalizePromoCode,
+    isPromoUsable,
+    calculatePromoDiscount,
+} from "./promoRules";
 import { DealStatus } from "../entities/deal.entity";
 import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
@@ -522,7 +527,7 @@ export class OrderService {
         }, 0);
 
         // apply promo code if provided
-        const { discountAmount, appliedPromoCode } =
+        const { discountAmount, appliedPromoCode, applyOn } =
             await this.calculateDiscount(
                 userId,
                 orderData.promoCode,
@@ -555,6 +560,7 @@ export class OrderService {
             paymentStatus: PaymentStatus.UNPAID,
             paymentMethod: orderData.paymentMethod,
             appliedPromoCode,
+            promoApplyOn: applyOn,
             status: OrderStatus.ORDER_PLACED,
             shippingAddress: address,
             shippingAddressSnapshot: {
@@ -580,46 +586,97 @@ export class OrderService {
         promoCode: string | undefined,
         merchandiseSubtotal: number,
         shippingTotal: number,
-    ): Promise<{ discountAmount: number; appliedPromoCode: string | null }> {
-        if (!promoCode) return { discountAmount: 0, appliedPromoCode: null };
+    ): Promise<{
+        discountAmount: number;
+        appliedPromoCode: string | null;
+        applyOn: PromoType | null;
+    }> {
+        const normalized = normalizePromoCode(promoCode);
+        if (!normalized)
+            return { discountAmount: 0, appliedPromoCode: null, applyOn: null };
 
-        const promo = await this.promoService.findPromoByCode(promoCode);
-        if (!promo || !promo.isValid) {
-            return { discountAmount: 0, appliedPromoCode: null };
-        }
+        const promo = await this.promoService.findPromoByCode(normalized);
 
-        // Check global usage limit
-        if (promo.maxUsageCount > 0 && promo.usageCount >= promo.maxUsageCount) {
-            return { discountAmount: 0, appliedPromoCode: null };
-        }
+        // One-time-per-user: the promo may only be redeemed once by a user on
+        // a completed order. Matching is case-insensitive because old rows can
+        // hold codes in mixed case.
+        const alreadyUsedByUser = promo
+            ? (await this.orderRepository
+                  .createQueryBuilder("order")
+                  .where(
+                      "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
+                      { code: normalized, userId },
+                  )
+                  .andWhere(
+                      "order.status IN (:...statuses)",
+                      { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] },
+                  )
+                  .getCount()) > 0
+            : false;
 
-        // Check if user already used this promo on a completed/delivered order
-        const pastOrderTransaction = await this.orderRepository.find({
-            where: {
-                appliedPromoCode: promoCode,
-                orderedById: userId,
-                status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
-            },
-        });
+        const { usable } = isPromoUsable(promo, { alreadyUsedByUser });
+        if (!usable)
+            return { discountAmount: 0, appliedPromoCode: null, applyOn: null };
 
-        if (pastOrderTransaction.length > 0) {
-            return { discountAmount: 0, appliedPromoCode: null };
-        }
+        const discountAmount = calculatePromoDiscount(
+            promo,
+            merchandiseSubtotal,
+            shippingTotal,
+        );
 
-        const discountAmount =
-            promo.applyOn === PromoType.LINE_TOTAL
-                ? (merchandiseSubtotal * promo.discountPercentage) / 100
-                : (shippingTotal * promo.discountPercentage) / 100;
-
-        return { discountAmount, appliedPromoCode: promo.promoCode };
+        return {
+            discountAmount,
+            appliedPromoCode: promo.promoCode,
+            applyOn: promo.applyOn,
+        };
     }
 
-    private async incrementPromoUsage(promoCode: string): Promise<void> {
-        const promo = await this.promoService.findPromoByCode(promoCode);
-        if (promo) {
-            promo.usageCount = (promo.usageCount || 0) + 1;
-            await AppDataSource.getRepository(Promo).save(promo);
-        }
+    /**
+     * Atomically claim one usage slot for a promo. Single conditional UPDATE
+     * (not a read-modify-write), so concurrent orders can never push usage
+     * past maxUsageCount. Returns whether a slot was actually claimed.
+     */
+    private async claimPromoUsage(
+        promoCode: string,
+        manager?: EntityManager,
+    ): Promise<boolean> {
+        const normalized = normalizePromoCode(promoCode);
+        if (!normalized) return false;
+
+        const promoRepo = manager
+            ? manager.getRepository(Promo)
+            : AppDataSource.getRepository(Promo);
+
+        const result = await promoRepo
+            .createQueryBuilder()
+            .update(Promo)
+            .set({ usageCount: () => '"usageCount" + 1' })
+            .where(
+                'LOWER("promoCode") = LOWER(:code) AND ("maxUsageCount" = 0 OR "usageCount" < "maxUsageCount")',
+                { code: normalized },
+            )
+            .execute();
+
+        return (result.affected ?? 0) > 0;
+    }
+
+    /**
+     * Release one claimed usage slot (used when an order that applied a promo
+     * is cancelled / payment fails). Guarded so it never drives usageCount
+     * below zero.
+     */
+    private async releasePromoUsage(promoCode: string | null | undefined): Promise<void> {
+        const normalized = normalizePromoCode(promoCode);
+        if (!normalized) return;
+
+        await AppDataSource.getRepository(Promo)
+            .createQueryBuilder()
+            .update(Promo)
+            .set({ usageCount: () => 'GREATEST("usageCount" - 1, 0)' })
+            .where('LOWER("promoCode") = LOWER(:code) AND "usageCount" > 0', {
+                code: normalized,
+            })
+            .execute();
     }
 
     /**
@@ -747,28 +804,27 @@ export class OrderService {
     }
 
     async checkAvailablePromocode(promoCode: string, userId: number) {
-        const promo = await this.promoService.findPromoByCode(promoCode);
-        if (!promo || !promo.isValid) {
-            return null;
-        }
+        const normalized = normalizePromoCode(promoCode);
+        if (!normalized) return null;
 
-        // Check global usage limit
-        if (promo.maxUsageCount > 0 && promo.usageCount >= promo.maxUsageCount) {
-            return null;
-        }
+        const promo = await this.promoService.findPromoByCode(normalized);
 
-        const pastOrderTransaction = await this.orderRepository.find({
-            where: {
-                appliedPromoCode: promoCode,
-                orderedById: userId,
-                status: In([OrderStatus.DELIVERED, OrderStatus.CONFIRMED]),
-            },
-        });
-        if (pastOrderTransaction.length > 0) {
-            return null;
-        }
+        const alreadyUsedByUser = promo
+            ? (await this.orderRepository
+                  .createQueryBuilder("order")
+                  .where(
+                      "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
+                      { code: normalized, userId },
+                  )
+                  .andWhere(
+                      "order.status IN (:...statuses)",
+                      { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] },
+                  )
+                  .getCount()) > 0
+            : false;
 
-        return promo;
+        const { usable } = isPromoUsable(promo, { alreadyUsedByUser });
+        return usable ? promo : null;
     }
 
     async trackOrder(email: string, orderNumber: string) {
@@ -1019,12 +1075,9 @@ export class OrderService {
                 ],
             });
 
-            // Increment promo usage count if a promo code was applied
-            if (order.appliedPromoCode && orderData.promoCode) {
-                await this.incrementPromoUsage(orderData.promoCode).catch((err) =>
-                    console.error("Failed to increment promo usage count:", err),
-                );
-            }
+            // Promo usage is claimed atomically inside reserveStockAndSaveOrder's
+            // transaction (see above), so it commits/rolls back with the order
+            // save and stock reservation — nothing to do here.
 
             try {
                 await this.sendAdminOrderPlacedEmail(order.id);
@@ -1350,6 +1403,12 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.UNPAID;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
             await this.orderRepository.save(order);
+            if (!alreadyTerminal) {
+                // The order never fulfilled, so give the promo slot back.
+                await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+                    console.error("Failed to release promo usage:", err),
+                );
+            }
             await this.recordStatusChange(
                 order.id,
                 previousStatus,
@@ -1539,7 +1598,11 @@ export class OrderService {
                 }
 
                 if (variant.stock < item.quantity) {
-                    throw new APIError(400, "Insufficient stock");
+                    throw new APIError(
+                        400,
+                        "Insufficient stock",
+                        "INSUFFICIENT_STOCK",
+                    );
                 }
 
                 continue;
@@ -1559,6 +1622,7 @@ export class OrderService {
                     400,
                     `Insufficient stock for product "${product.name}". ` +
                         `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
+                    "INSUFFICIENT_STOCK",
                 );
             }
         }
@@ -1714,6 +1778,23 @@ export class OrderService {
 
             let savedOrder = await orderRepo.save(order);
 
+            // Atomically claim the promo's usage slot in the same transaction
+            // that saves the order and reserves stock. If the slot is already
+            // exhausted (a concurrent order won the race), the whole
+            // transaction rolls back — no order, no stock deduction.
+            if (savedOrder.appliedPromoCode) {
+                const claimed = await this.claimPromoUsage(
+                    savedOrder.appliedPromoCode,
+                    manager,
+                );
+                if (!claimed) {
+                    throw new APIError(
+                        400,
+                        "Promo code usage limit has been reached. Remove the promo code and try again.",
+                    );
+                }
+            }
+
             if (vendorShippingRows.length) {
                 await vendorShippingRepo.save(
                     vendorShippingRows.map(
@@ -1848,6 +1929,7 @@ export class OrderService {
                         400,
                         `Insufficient stock for variant "${variant.sku || variant.id}" of product "${item.product?.name || "Unknown"}". ` +
                             `Available: ${variant.stock}, Requested: ${item.quantity}`,
+                        "INSUFFICIENT_STOCK",
                     );
                 }
 
@@ -1869,11 +1951,12 @@ export class OrderService {
                 }
 
                 if (!product.stock || product.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for product "${product.name || product.id}". ` +
-                            `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
-                    );
+                throw new APIError(
+                    400,
+                    `Insufficient stock for product "${product.name || product.id}". ` +
+                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
+                    "INSUFFICIENT_STOCK",
+                );
                 }
 
                 product.stock -= item.quantity;
@@ -1975,6 +2058,10 @@ export class OrderService {
             order.paymentStatus = PaymentStatus.UNPAID;
             order.status = OrderStatus.CANCELLED;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
+            // Order never fulfilled — return the claimed promo slot.
+            await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+                console.error("Failed to release promo usage:", err),
+            );
         }
 
         // Save updated order info
@@ -2032,6 +2119,10 @@ export class OrderService {
 
         if (shouldRestoreStock) {
             await this.restoreStock(order.orderItems);
+            // Order never fulfilled — return the claimed promo slot.
+            await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+                console.error("Failed to release promo usage:", err),
+            );
         }
 
         const previousStatus = order.status;
@@ -2704,6 +2795,10 @@ export class OrderService {
             terminalUnfulfilled.includes(targetStatus) &&
             !terminalUnfulfilled.includes(previousStatus)
         ) {
+            // Order never fulfilled — return any claimed promo slot.
+            await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+                console.error("Failed to release promo usage:", err),
+            );
             for (const item of order.orderItems) {
                 if (item.variantId) {
                     const variant = await this.variantRepository.findOne({

@@ -3,6 +3,7 @@ import { Promo } from '../entities/promo.entity';
 import AppDataSource from "../config/db.config";
 import { CreatePromoCodeInput, DeletePromoCodeInput, UpdatePromoCodeInput } from "../utils/zod_validations/promo.zod";
 import { APIError } from "../utils/ApiError.utils";
+import { normalizePromoCode } from "./promoRules";
 
 export class PromoService {
 
@@ -17,7 +18,10 @@ export class PromoService {
 
     async createPromo(data: CreatePromoCodeInput): Promise<Promo> {
         const newpromoCode = this.promoRepository.create({
-            ...data
+            ...data,
+            // Store codes normalized (trim + uppercase) so customer-facing
+            // matching is case-insensitive and unique-by-uppercase.
+            promoCode: normalizePromoCode(data.promoCode),
         })
 
         console.log(newpromoCode);
@@ -43,12 +47,16 @@ export class PromoService {
         return deletedPromo;
     }
 
+    /** Case-insensitive lookup — a customer may type the code in any case. */
     async findPromoByCode(code: string) {
-        return await this.promoRepository.findOne({
-            where: {
-                promoCode: code
-            }
-        })
+        const normalized = normalizePromoCode(code);
+        if (!normalized) return null;
+        return await this.promoRepository
+            .createQueryBuilder("promo")
+            .where("LOWER(promo.promoCode) = LOWER(:code)", {
+                code: normalized,
+            })
+            .getOne();
     }
 
     async findPromoCodeById(promoCodeId: number) {
@@ -60,9 +68,13 @@ export class PromoService {
     }
 
     async updatePromoCodeById(promoCode: number, data: UpdatePromoCodeInput) {
-        return await this.promoRepository.save({
+        const payload: Partial<UpdatePromoCodeInput> & { id: number } = {
             id: promoCode,
             ...data,
-        });
+        };
+        if (data.promoCode) {
+            payload.promoCode = normalizePromoCode(data.promoCode);
+        }
+        return await this.promoRepository.save(payload);
     }
 }

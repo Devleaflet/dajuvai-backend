@@ -64,10 +64,12 @@
     "ts-node": "^10.9.2",
     "typeorm": "^0.3.22",
     "typescript": "^5.8.3",
+    "vitest": "^4.1.10",
     "zod": "^3.24.3"
   },
   "scripts": {
     "test": "npm run check:routes",
+    "test:unit": "vitest run",
     "backfill:product-search": "ts-node src/scripts/backfill-product-search.ts",
     "backfill:legacy-pricing": "ts-node src/scripts/backfill-legacy-pricing.ts",
     "check:routes": "ts-node src/scripts/routeInventory.ts",
