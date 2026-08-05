@@ -1,9 +1,14 @@
 import { Router } from "express";
 import { authMiddleware } from "../middlewares/auth.middleware";
 import { MobileCheckoutController } from "../controllers/mobile.checkout.controller";
+import { OrderController } from "../controllers/order.controller";
+import { mobileCheckoutEstimateSchema, createOrderSchema } from "../utils/zod_validations/order.zod";
+import { validateZod } from "../middlewares/validation.middleware";
+import { asyncHandler } from "../utils/asyncHandler.utils";
 
 const checkoutRouter = Router();
 const controller = new MobileCheckoutController();
+const orderController = new OrderController();
 
 /**
  * @swagger
@@ -62,7 +67,7 @@ const controller = new MobileCheckoutController();
  *                           properties:
  *                             province:
  *                               type: string
- *                               enum: [Province 1, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                               enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
  *                               example: "Bagmati"
  *                             district:
  *                               type: string
@@ -172,7 +177,7 @@ const controller = new MobileCheckoutController();
  *                           example: "9841000000"
  *                         paymentMethod:
  *                           type: string
- *                           enum: [CASH_ON_DELIVERY, ESEWA, NPX]
+ *                           enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
  *                           example: CASH_ON_DELIVERY
  *                         shippingAddress:
  *                           type: object
@@ -182,7 +187,7 @@ const controller = new MobileCheckoutController();
  *                       type: array
  *                       items:
  *                         type: string
- *                         enum: [CASH_ON_DELIVERY, ESEWA, NPX]
+ *                         enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
  *                       example: [CASH_ON_DELIVERY, ESEWA, NPX]
  *                     checkoutEstimate:
  *                       type: object
@@ -276,6 +281,59 @@ checkoutRouter.get(
     "/mobile-checkout-details",
     authMiddleware,
     (req, res) => controller.getCheckoutDetails(req as any, res)
+);
+
+/**
+ * @swagger
+ * /api/checkout/mobile-estimate:
+ *   post:
+ *     summary: Estimate mobile checkout totals for submitted checkout data
+ *     tags: [Checkout]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { $ref: '#/components/schemas/MobileCheckoutEstimateRequest' }
+ *     responses:
+ *       200:
+ *         description: Backend-authoritative checkout estimate
+ *         content:
+ *           application/json:
+ *             schema: { $ref: '#/components/schemas/CheckoutEstimateResponse' }
+ *       400: { $ref: '#/components/responses/BadRequest' }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+checkoutRouter.post(
+    "/mobile-estimate",
+    authMiddleware,
+    validateZod(mobileCheckoutEstimateSchema),
+    asyncHandler(orderController.estimateCheckout.bind(orderController)),
+);
+
+/**
+ * @swagger
+ * /api/checkout/mobile-order:
+ *   post:
+ *     summary: Create an order from mobile checkout data
+ *     tags: [Checkout]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema: { $ref: '#/components/schemas/CreateOrderRequest' }
+ *     responses:
+ *       200:
+ *         description: Order creation result, including payment redirect fields when applicable
+ *       400: { $ref: '#/components/responses/BadRequest' }
+ *       401: { $ref: '#/components/responses/Unauthorized' }
+ */
+checkoutRouter.post(
+    "/mobile-order",
+    authMiddleware,
+    validateZod(createOrderSchema),
+    asyncHandler(orderController.createOrder.bind(orderController)),
 );
 
 export default checkoutRouter;

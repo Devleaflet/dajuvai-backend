@@ -23,6 +23,7 @@ import {
 import userRouter from "./routes/user.routes";
 import categoryRoutes from "./routes/category.routes";
 import searchRoutes from "./routes/search.routes";
+import catalogSearchRoutes from "./routes/catalog-search.routes";
 import cartRouter from "./routes/cart.routes";
 import vendorRoutes from "./routes/vendor.routes";
 import wishlistRoutes from "./routes/wishlist.routes";
@@ -65,6 +66,7 @@ import userProfileRouter from "./routes/product.recommend.routes";
 import productRecommendRouter from "./routes/product.recommend.routes";
 import deliveryRouter from "./routes/delivery.routes";
 import deliveryAdminRouter from "./routes/delivery.admin.routes";
+import searchAliasRouter from "./routes/search-alias.routes";
 import deliveryRiderRouter from "./routes/delivery.rider.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
@@ -144,6 +146,7 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
 app.use("/api/search", searchRoutes);
+app.use("/api/search", catalogSearchRoutes);
 app.use("/api/placements", merchandisingRoutes);
 app.use("/api/storefront", storefrontRoutes);
 app.use("/api/vendors", vendorRoutes);
@@ -162,6 +165,7 @@ app.use("/api/admin/vendors", adminVendorsRouter);
 app.use("/api/admin/orders", adminOrdersRouter);
 app.use("/api/admin/users", adminUsersRouter);
 app.use("/api/admin/placements", merchandisingAdminRouter);
+app.use("/api/admin/search-aliases", searchAliasRouter);
 
 // admin delivery
 app.use("/api/admin/delivery", deliveryAdminRouter);

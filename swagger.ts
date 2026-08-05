@@ -1,6 +1,7 @@
 import swaggerJSDoc from "swagger-jsdoc";
 import path from "path";
 import { mountedRouteInventory } from "./src/scripts/routeInventory";
+import { swaggerSchemas } from "./src/docs/swagger.schemas";
 
 const options: swaggerJSDoc.Options = {
   definition: {
@@ -24,6 +25,7 @@ const options: swaggerJSDoc.Options = {
     ],
     components: {
       schemas: {
+        ...swaggerSchemas,
         ValidationFieldError: {
           type: "object",
           required: ["field", "message"],
@@ -85,7 +87,7 @@ const options: swaggerJSDoc.Options = {
             paymentStatus: { type: "string", enum: ["PAID", "UNPAID"], example: "UNPAID" },
             paymentMethod: {
               type: "string",
-              enum: ["ONLINE_PAYMENT", "CASH_ON_DELIVERY", "KHALIT", "ESEWA", "NPX"],
+              enum: ["ONLINE_PAYMENT", "CASH_ON_DELIVERY", "KHALTI", "ESEWA", "NPX"],
               example: "CASH_ON_DELIVERY",
             },
             status: {
@@ -157,6 +159,15 @@ const options: swaggerJSDoc.Options = {
         },
       },
       responses: {
+        BadRequest: {
+          description: "The request is invalid or failed validation.",
+          content: {
+            "application/json": {
+              schema: { $ref: "#/components/schemas/ApiError" },
+              example: { success: false, message: "Invalid request" },
+            },
+          },
+        },
         ValidationError: {
           description: "Request validation failed.",
           content: {

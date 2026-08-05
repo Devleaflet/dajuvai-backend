@@ -38,7 +38,7 @@ export class ProductSearchIndexer {
     this.productRepository = dataSource.getRepository(Product);
   }
 
-  async refreshProduct(productId: number): Promise<void> {
+  async rebuildProduct(productId: number): Promise<void> {
     const product = await this.productRepository.findOne({
       where: { id: productId },
       relations: ["subcategory", "subcategory.category", "variants"],
@@ -47,6 +47,10 @@ export class ProductSearchIndexer {
     if (!product) return;
 
     await this.productRepository.update(product.id, toProductSearchFields(product));
+  }
+
+  async refreshProduct(productId: number): Promise<void> {
+    await this.rebuildProduct(productId);
   }
 
   async refreshProductsAfterId(afterId: number, limit: number): Promise<number[]> {
@@ -59,7 +63,7 @@ export class ProductSearchIndexer {
       .getRawMany<{ id: number }>();
 
     for (const product of products) {
-      await this.refreshProduct(Number(product.id));
+      await this.rebuildProduct(Number(product.id));
     }
 
     return products.map((product) => Number(product.id));

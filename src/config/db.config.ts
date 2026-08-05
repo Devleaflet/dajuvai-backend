@@ -33,6 +33,9 @@ import { DeviceToken } from "../entities/deviceToken.entity";
 import { NotificationDispatch } from "../entities/notificationDispatch.entity";
 import { Placement } from "../entities/placement.entity";
 import { PlacementItem } from "../entities/placementItem.entity";
+import { SearchAlias } from "../entities/search-alias.entity";
+import { SearchAliasCandidate } from "../entities/search-alias-candidate.entity";
+import { SearchQueryMetric } from "../entities/search-query-metric.entity";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -110,6 +113,9 @@ const AppDataSource = new DataSource({
         NotificationDispatch,
         Placement,
         PlacementItem,
+        SearchAlias,
+        SearchAliasCandidate,
+        SearchQueryMetric,
     ],
     migrations: ["src/migrations/*.ts"],
     // Each migration file commits in its own transaction instead of the

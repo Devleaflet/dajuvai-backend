@@ -6,6 +6,7 @@ import { APIError } from '../utils/ApiError.utils';
 import { PaymentMethod } from '../entities/order.entity';
 import { OrderService } from './order.service';
 import { IShippingAddressRequest } from '../interface/order.interface';
+import { serializeMobileCheckout } from '../utils/mobile-checkout.serializer';
 
 export class MobileCheckoutService {
     private cartRepository: Repository<Cart>;
@@ -178,7 +179,7 @@ export class MobileCheckoutService {
               }
             : { id: null, total: 0, items: [] };
 
-        return {
+        return serializeMobileCheckout({
             user: userProfile,
             cart: cartData,
             checkoutReady,
@@ -203,6 +204,6 @@ export class MobileCheckoutService {
                       grandTotal: checkoutEstimate.grandTotal,
                   }
                 : null,
-        };
+        });
     }
 }

@@ -1,6 +1,7 @@
 
 import { z } from 'zod';
 import { OrderStatus } from '../../entities/order.entity';
+import { PaymentMethod } from '../../entities/order.entity';
 
 /**
  * Enum schema for Nepal provinces used in shipping addresses.
@@ -29,7 +30,7 @@ const OrderStatusEnum = z.nativeEnum(OrderStatus);
 /**
  * Enum schema for supported payment methods.
  */
-const PaymentMethodEnum = z.enum(['ONLINE_PAYMENT', 'CASH_ON_DELIVERY', "KHALTI", "ESEWA", "NPX"]);
+const PaymentMethodEnum = z.nativeEnum(PaymentMethod);
 
 /**
  * Shipping address validation schema.
@@ -72,6 +73,15 @@ export const createOrderSchema = z.object({
     variantId: z.number().optional(),
     quantity: z.number().int().positive().optional().default(1), 
     ageRestrictedAcknowledged: z.boolean().optional().default(false),
+});
+
+export const mobileCheckoutEstimateSchema = z.object({
+    shippingAddress: shippingAddressSchema,
+    promoCode: z.string().trim().max(80).optional(),
+    isBuyNow: z.boolean().optional(),
+    productId: z.number().int().positive().optional(),
+    variantId: z.number().int().positive().optional(),
+    quantity: z.number().int().positive().optional(),
 });
 
 

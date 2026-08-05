@@ -679,7 +679,7 @@ export class ProductService {
       return savedProduct;
     });
 
-    await this.productSearchIndexer.refreshProduct(savedProduct.id);
+    await this.productSearchIndexer.rebuildProduct(savedProduct.id);
     return savedProduct;
   }
 
@@ -1065,7 +1065,7 @@ export class ProductService {
     if (variantsForResponse !== undefined) {
       savedProduct.variants = variantsForResponse;
     }
-    await this.productSearchIndexer.refreshProduct(savedProduct.id);
+    await this.productSearchIndexer.rebuildProduct(savedProduct.id);
     return savedProduct;
   }
 
@@ -2202,7 +2202,7 @@ export class ProductService {
       where: { id },
       relations: ["variants", "vendor", "subcategory", "deal"],
     });
-    await this.productSearchIndexer.refreshProduct(id);
+    await this.productSearchIndexer.rebuildProduct(id);
     return restored!;
   }
 
@@ -2264,7 +2264,7 @@ export class ProductService {
     product.stock = inventory.stock;
     product.status = inventory.status;
     await this.productRepository.save(product);
-    await this.productSearchIndexer.refreshProduct(productId);
+    await this.productSearchIndexer.rebuildProduct(productId);
 
     return variant;
   }
