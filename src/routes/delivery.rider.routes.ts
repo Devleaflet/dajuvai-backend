@@ -43,7 +43,7 @@ deliveryRiderRouter.use(authMiddleware, isRider);
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
+ *                     $ref: '#/components/schemas/DeliveryAssignment'
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -78,13 +78,6 @@ deliveryRiderRouter.get(
  *         schema:
  *           type: integer
  *         example: 101
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             description: No request body required
  *     responses:
  *       200:
  *         description: Pickup confirmed successfully
@@ -144,13 +137,6 @@ deliveryRiderRouter.patch(
  *         schema:
  *           type: integer
  *         example: 101
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             description: No request body required
  *     responses:
  *       200:
  *         description: Order marked delivered successfully

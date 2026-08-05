@@ -65,14 +65,18 @@ function getAuthHeader(): string {
  *           application/json:
  *             schema:
  *               type: object
+ *               required: [code, data]
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
+ *                 code:
+ *                   type: string
+ *                   example: "0"
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
+ *                     $ref: '#/components/schemas/PaymentInstrument'
+ *                 message:
+ *                   type: string
+ *                   nullable: true
  *       500:
  *         description: Failed to get payment instruments
  *         content:

@@ -77,6 +77,7 @@ import {
     calculateGrandTotal,
 } from "./shipping.service";
 import { emitOrderStatusUpdate, emitProductStockUpdate } from "../socket/socket";
+import { dispatchStatusSideEffects } from "../utils/status-side-effects.utils";
 
 /**
  * Service class responsible for managing orders.
@@ -2988,16 +2989,20 @@ export class OrderService {
             changedByRole,
         });
 
+        const statusSideEffects: Array<() => Promise<void>> = [];
+
         if (order.orderedBy?.email) {
-            try {
-                await sendOrderStatusEmail(
-                    order.orderedBy.email,
-                    order.orderNumber,
-                    order.status,
-                );
-            } catch (error) {
-                console.error("Failed to send customer status email:", error);
-            }
+            statusSideEffects.push(async () => {
+                try {
+                    await sendOrderStatusEmail(
+                        order.orderedBy!.email,
+                        order.orderNumber,
+                        order.status,
+                    );
+                } catch (error) {
+                    console.error("Failed to send customer status email:", error);
+                }
+            });
         }
 
         // ORDER_PLACED is covered by the order-placed email already sent at
@@ -3011,39 +3016,47 @@ export class OrderService {
                 ),
             ];
 
-            await Promise.all(
-                vendorEmails.map((email) =>
-                    sendVendorOrderStatusEmail(
-                        email,
-                        order.orderNumber,
-                        order.status,
-                    ).catch((error) => {
-                        console.error(
-                            "Failed to send vendor status email:",
-                            error,
-                        );
-                    }),
-                ),
-            );
+            statusSideEffects.push(async () => {
+                await Promise.all(
+                    vendorEmails.map((email) =>
+                        sendVendorOrderStatusEmail(
+                            email,
+                            order.orderNumber,
+                            order.status,
+                        ).catch((error) => {
+                            console.error(
+                                "Failed to send vendor status email:",
+                                error,
+                            );
+                        }),
+                    ),
+                );
+            });
         }
 
         if (targetStatus === OrderStatus.DELIVERED && config.USER_EMAIL) {
-            try {
-                const deliveredEmailData = await this.buildAdminOrderEmailData(order);
-                await sendAdminOrderDeliveredEmail(
-                    config.USER_EMAIL,
-                    deliveredEmailData,
-                );
-            } catch (error) {
-                console.error("Failed to send admin delivered email:", error);
-            }
+            statusSideEffects.push(async () => {
+                try {
+                    const deliveredEmailData = await this.buildAdminOrderEmailData(order);
+                    await sendAdminOrderDeliveredEmail(
+                        config.USER_EMAIL!,
+                        deliveredEmailData,
+                    );
+                } catch (error) {
+                    console.error("Failed to send admin delivered email:", error);
+                }
+            });
         }
 
-        try {
-            await this.notificationService.notifyOrderStatusUpdated(order);
-        } catch (error) {
-            console.error("Failed to send order status notification:", error);
-        }
+        statusSideEffects.push(async () => {
+            try {
+                await this.notificationService.notifyOrderStatusUpdated(order);
+            } catch (error) {
+                console.error("Failed to send order status notification:", error);
+            }
+        });
+
+        dispatchStatusSideEffects(statusSideEffects);
 
         emitOrderStatusUpdate(order);
 

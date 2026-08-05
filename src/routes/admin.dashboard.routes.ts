@@ -52,6 +52,16 @@ const adminDashboardRouter = Router();
  *                       type: integer
  *                       description: Total number of products listed
  *                       example: 220
+ *                     totalDeliveredRevenue:
+ *                       type: number
+ *                       format: float
+ *                       description: Paid revenue from delivered orders, including shipping.
+ *                       example: 11200.50
+ *                     totalShippingRevenue:
+ *                       type: number
+ *                       format: float
+ *                       description: Shipping fees from paid orders.
+ *                       example: 875.00
  *       401:
  *         description: Unauthorized - No token or invalid token
  *         content:
@@ -104,7 +114,7 @@ adminDashboardRouter.get("/stats", adminDashboardController.getDashboardStats.bi
  *   get:
  *     summary: Get daily revenue chart data for admin dashboard
  *     description: |
- *       Returns daily revenue (**totalPrice + shippingFee**) for the last N days.  
+ *       Returns paid daily revenue (**totalPrice + shippingFee**) for the last N days.  
  *       If no orders exist on a particular day, that day will still be included in the response with `0` revenue.
  *     tags: [Admin Dashboard]
  *     security:
@@ -176,7 +186,7 @@ adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bi
  *       Fetch total sales amount grouped by vendors.  
  *       - Supports optional date range filters (`startDate`, `endDate`).  
  *       - Supports pagination via `page`.  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -312,7 +322,7 @@ adminDashboardRouter.get("/vendors-sales-amount", adminDashboardController.getVe
  *       Fetch products ranked by total sales amount (quantity × price).  
  *       - Supports optional date range filters (`startDate`, `endDate`).  
  *       - Supports pagination via `page`.  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -445,8 +455,8 @@ adminDashboardRouter.get("/top-products", adminDashboardController.getTopProduct
  *     summary: Get today's total sales
  *     description: |
  *       Fetch the total sales amount for the current day.  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
- *       - The sales amount is the sum of `totalPrice` from orders placed today.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - The sales amount is the sum of `totalPrice + shippingFee` from paid orders placed today.  
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -469,6 +479,22 @@ adminDashboardRouter.get("/top-products", adminDashboardController.getTopProduct
  *                       type: number
  *                       format: float
  *                       example: 4520.50
+ *                     hourlySales:
+ *                       type: array
+ *                       description: 24 hourly paid-sales buckets for the current day, including zero-value hours.
+ *                       minItems: 24
+ *                       maxItems: 24
+ *                       items:
+ *                         type: object
+ *                         required: [label, value]
+ *                         properties:
+ *                           label:
+ *                             type: string
+ *                             example: "14:00"
+ *                           value:
+ *                             type: number
+ *                             format: float
+ *                             example: 1250.00
  *       401:
  *         description: Unauthorized (missing or invalid token)
  *       403:
@@ -498,7 +524,7 @@ adminDashboardRouter.get("/todays-sales", adminDashboardController.getTodaysSale
  *  /api/admin/dashboard/analytics/revenue-by-category:
  *   get:
  *     summary: Get revenue by category
- *     description: Returns total revenue grouped by category and subcategory. Only orders with paymentStatus "PAID" are included. Optional date filtering is supported.
+ *     description: Returns realized revenue grouped by category. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional date filtering is supported.
  *     tags:
  *       - Revenue
  *     parameters:
@@ -535,12 +561,10 @@ adminDashboardRouter.get("/todays-sales", adminDashboardController.getTodaysSale
  *                       category:
  *                         type: string
  *                         example: "Women's Fashion"
- *                       subcategory:
- *                         type: string
- *                         example: "Women's Sunglasses"
  *                       revenue:
- *                         type: string
- *                         example: "900.00"
+ *                         type: number
+ *                         format: float
+ *                         example: 900.00
  *       400:
  *         description: Invalid request parameters
  *         content:
@@ -575,8 +599,8 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  * @swagger
  *  /api/admin/dashboard/analytics/revenue-by-sub-category:
  *   get:
- *     summary: Get revenue by category
- *     description: Returns total revenue grouped by subcategory . Only orders with paymentStatus "PAID" are included. Optional date filtering is supported.
+ *     summary: Get revenue by subcategory
+ *     description: Returns realized revenue grouped by subcategory. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional date filtering is supported.
  *     tags:
  *       - Revenue
  *     parameters:
@@ -596,7 +620,7 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  *         description: End date for filtering orders (ISO 8601 format, e.g., 2025-09-30T23:59:59Z)
  *     responses:
  *       200:
- *         description: Revenue by category fetched successfully
+ *         description: Revenue by subcategory fetched successfully
  *         content:
  *           application/json:
  *             schema:
@@ -610,15 +634,13 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  *                   items:
  *                     type: object
  *                     properties:
- *                       category:
- *                         type: string
- *                         example: "Women's Fashion"
  *                       subcategory:
  *                         type: string
  *                         example: "Women's Sunglasses"
  *                       revenue:
- *                         type: string
- *                         example: "900.00"
+ *                         type: number
+ *                         format: float
+ *                         example: 900.00
  *       400:
  *         description: Invalid request parameters
  *         content:
@@ -655,7 +677,7 @@ adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardCon
  * /api/admin/dashboard/analytics/vendor/revenue:
  *   get:
  *     summary: Get revenue breakdown by vendor
- *     description: Returns total revenue grouped by vendor. Only includes orders with paymentStatus PAID. Supports optional date range filtering.
+ *     description: Returns realized revenue grouped by vendor. Only PAID orders with status CONFIRMED or DELIVERED are included. Supports optional date range filtering.
  *     tags:
  *       - Admin Dashboard
  *     security:

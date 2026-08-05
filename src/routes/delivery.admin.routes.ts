@@ -190,8 +190,7 @@ deliveryAdminRouter.post(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     description: Rider entity (see POST /riders response for shape)
+ *                     $ref: '#/components/schemas/DeliveryRider'
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -358,8 +357,7 @@ deliveryAdminRouter.put(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     description: Processing order entity
+ *                     $ref: '#/components/schemas/DeliveryOrder'
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -451,13 +449,6 @@ deliveryAdminRouter.get(
  *         schema:
  *           type: integer
  *         example: 101
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             description: No request body required (status transition only)
  *     responses:
  *       200:
  *         description: Order status updated successfully
@@ -518,13 +509,6 @@ deliveryAdminRouter.patch(
  *         schema:
  *           type: integer
  *         example: 555
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             description: No request body required
  *     responses:
  *       201:
  *         description: Order item collected successfully
@@ -611,8 +595,7 @@ deliveryAdminRouter.put(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     description: Warehouse queue order entity
+ *                     $ref: '#/components/schemas/DeliveryOrder'
  *                 pagination:
  *                   type: object
  *                   properties:
@@ -770,8 +753,7 @@ deliveryAdminRouter.post(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     description: Delivery assignment entity
+ *                     $ref: '#/components/schemas/DeliveryAssignment'
  *                 pagination:
  *                   type: object
  *                   properties:
@@ -880,13 +862,6 @@ deliveryAdminRouter.get(
  *         schema:
  *           type: integer
  *         example: 101
- *     requestBody:
- *       required: false
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             description: No request body required (status transition only)
  *     responses:
  *       200:
  *         description: Order reset successfully

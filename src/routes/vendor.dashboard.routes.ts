@@ -10,7 +10,7 @@ const vendorDashBoardRouter = Router();
  * /api/vendor/dashboard/stats:
  *   get:
  *     summary: Get vendor dashboard statistics
- *     description: Returns key statistics for the authenticated vendor including total products, total orders, total sales, and pending orders.
+ *     description: Returns key statistics for the authenticated vendor. Orders are distinct orders; sales are paid line-item price multiplied by quantity.
  *     tags:
  *       - Vendor Dashboard
  *     security:
@@ -36,6 +36,12 @@ const vendorDashBoardRouter = Router();
  *                 totalPendingOrders:
  *                   type: integer
  *                   example: 8
+ *                 lowStockCount:
+ *                   type: integer
+ *                   example: 3
+ *                 outOfStockCount:
+ *                   type: integer
+ *                   example: 1
  *       401:
  *         description: Unauthorized - Invalid or missing token
  *         content:
@@ -147,7 +153,8 @@ vendorDashBoardRouter.get("/orders", vendorAuthMiddleware, isVendor, vendorDashb
  *     description: |
  *       Fetch the total sales amount for the authenticated vendor.  
  *       - Supports optional date range filters (`startDate`, `endDate`).  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - Sales are calculated as `price * quantity` for each vendor line item.
  *     tags:
  *       - Vendor Dashboard
  *     security:
@@ -212,6 +219,53 @@ vendorDashBoardRouter.get("/orders", vendorAuthMiddleware, isVendor, vendorDashb
  *                   example: "Internal server error"
  */
 vendorDashBoardRouter.get("/total-sales", vendorAuthMiddleware, isVendor, vendorDashboardController.vendorSalesReport.bind(vendorDashboardController));
+
+/**
+ * @swagger
+ * /api/vendor/dashboard/sales-trend:
+ *   get:
+ *     summary: Get vendor daily sales trend
+ *     description: Returns paid sales, zero-filled for each calendar day in the requested range.
+ *     tags: [Vendor Dashboard]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: days
+ *         required: false
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           maximum: 180
+ *           default: 10
+ *         description: Number of trailing calendar days.
+ *     responses:
+ *       200:
+ *         description: Daily sales trend.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [vendorId, days, data]
+ *               properties:
+ *                 vendorId: { type: integer, example: 7 }
+ *                 days: { type: integer, example: 10 }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     required: [date, totalSales]
+ *                     properties:
+ *                       date: { type: string, format: date, example: '2026-08-05' }
+ *                       totalSales: { type: number, format: float, example: 12500.75 }
+ *       401:
+ *         description: Unauthorized.
+ *       403:
+ *         description: Forbidden; caller is not a vendor.
+ *       500:
+ *         description: Internal server error.
+ */
+vendorDashBoardRouter.get("/sales-trend", vendorAuthMiddleware, isVendor, vendorDashboardController.vendorSalesTrend.bind(vendorDashboardController));
 
 
 /**
@@ -317,7 +371,7 @@ vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDa
  * /api/vendor/dashboard/analytics/top-selling-products:
  *   get:
  *     summary: Get vendor's top selling products
- *     description: Returns a list of top selling products for the authenticated vendor based on total quantity sold.
+ *     description: Returns realized top-selling products for the authenticated vendor, ranked by quantity sold. Only PAID orders with status CONFIRMED or DELIVERED are included.
  *     tags:
  *       - Vendor Dashboard
  *     security:
@@ -328,22 +382,24 @@ vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDa
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       productId:
- *                         type: integer
- *                       productName:
- *                         type: string
- *                       totalSold:
- *                         type: integer
+ *               type: array
+ *               items:
+ *                 type: object
+ *                 required: [productId, productName, totalquantity, totalSales]
+ *                 properties:
+ *                   productId:
+ *                     type: integer
+ *                     example: 42
+ *                   productName:
+ *                     type: string
+ *                     example: "Wireless Mouse"
+ *                   totalquantity:
+ *                     type: integer
+ *                     example: 31
+ *                   totalSales:
+ *                     type: number
+ *                     format: float
+ *                     example: 46500
  *       401:
  *         description: Unauthorized
  *       500:
@@ -356,7 +412,7 @@ vendorDashBoardRouter.get("/analytics/top-selling-products", vendorAuthMiddlewar
  * /api/vendor/dashboard/analytics/revenue-by-category:
  *   get:
  *     summary: Get vendor's revenue grouped by category
- *     description: Returns revenue data grouped by product category for the authenticated vendor.
+ *     description: Returns realized revenue grouped by product category. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional date filtering is supported.
  *     tags:
  *       - Vendor Dashboard
  *     security:
@@ -408,7 +464,7 @@ vendorDashBoardRouter.get("/analytics/revenue-by-category", vendorAuthMiddleware
  * /api/vendor/dashboard/analytics/revenue-by-sub-category:
  *   get:
  *     summary: Get vendor's revenue grouped by subcategory
- *     description: Returns revenue data grouped by product subcategory for the authenticated vendor.
+ *     description: Returns realized revenue grouped by product subcategory. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional date filtering is supported.
  *     tags:
  *       - Vendor Dashboard
  *     security:

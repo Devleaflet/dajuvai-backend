@@ -5,6 +5,9 @@ import { Order, OrderStatus } from "../entities/order.entity";
 import config from "../config/env.config";
 import { InventoryStatus } from "../entities/product.enum";
 import { getVendorInventoryAlertCounts } from "./vendor-inventory-alerts.service";
+import { IsNull } from "typeorm";
+
+const REALIZED_ORDER_STATUSES = [OrderStatus.CONFIRMED, OrderStatus.DELIVERED];
 
 export class VendorDashBoardService {
     // Repositories for DB operations on Products and OrderItems
@@ -26,13 +29,17 @@ export class VendorDashBoardService {
     async getStats(vendorId: number) {
         // Count products linked to vendorId
         const totalProducts = await this.productRepository.count({
-            where: { vendorId }
+            where: { vendorId, deletedAt: IsNull() }
         });
 
-        // Count order items for this vendor
-        const totalOrders = await this.orderItemRepository.count({
-            where: { vendorId }
-        });
+        // Count distinct orders; one order can contain multiple vendor items.
+        const totalOrdersRaw = await this.orderItemRepository
+            .createQueryBuilder("orderItem")
+            .innerJoin("orderItem.order", "order")
+            .select("COUNT(DISTINCT order.id)", "totalOrders")
+            .where("orderItem.vendorId = :vendorId", { vendorId })
+            .getRawOne();
+        const totalOrders = Number(totalOrdersRaw?.totalOrders) || 0;
 
         // Calculate total sales by summing price * quantity
         // Raw result is an object, convert to number; fallback 0
@@ -42,17 +49,20 @@ export class VendorDashBoardService {
             .select('SUM(orderItem.price * orderItem.quantity)', 'totalSales')
             .where('orderItem.vendorId = :vendorId', { vendorId })
             .andWhere('order.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
+            .andWhere('order.status IN (:...realizedStatuses)', { realizedStatuses: REALIZED_ORDER_STATUSES })
             .getRawOne();
 
-        const totalSales = Number(totalSalesRaw.totalSales) || 0;
+        const totalSales = Number(totalSalesRaw?.totalSales) || 0;
 
         // Count pending orders by joining order entity and filtering status
-        const totalPendingOrders = await this.orderItemRepository
+        const totalPendingOrdersRaw = await this.orderItemRepository
             .createQueryBuilder('orderItem')
             .leftJoin('orderItem.order', 'order')
             .where('orderItem.vendorId = :vendorId', { vendorId })
             .andWhere('order.status = :status', { status: OrderStatus.ORDER_PLACED })
-            .getCount();
+            .select("COUNT(DISTINCT order.id)", "totalPendingOrders")
+            .getRawOne();
+        const totalPendingOrders = Number(totalPendingOrdersRaw?.totalPendingOrders) || 0;
 
         // Low-stock and out-of-stock counts, split, across ALL of the vendor's
         // products (not just the current page). Classification mirrors
@@ -62,7 +72,7 @@ export class VendorDashBoardService {
         // - has variants: ALL variants out-of-stock -> out-of-stock; ANY
         //   variant low/out (but not all out) -> low-stock; else available.
         const productsForStock = await this.productRepository.find({
-            where: { vendorId },
+            where: { vendorId, deletedAt: IsNull() },
             relations: ["variants"],
         });
 
@@ -126,11 +136,12 @@ export class VendorDashBoardService {
         const query = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder("oi")
             .innerJoin(Order, "o", "o.id = oi.orderId")
-            .select("COALESCE(SUM(oi.price), 0)", "totalSales")
+            .select("COALESCE(SUM(oi.price * oi.quantity), 0)", "totalSales")
             .where("oi.vendorId = :vendorId", { vendorId })
             .andWhere("o.status IN (:...statuses)", {
                 statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
-            });
+            })
+            .andWhere("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" });
 
         if (startDate && endDate) {
             query.andWhere("o.createdAt BETWEEN :start AND :end", {
@@ -147,9 +158,39 @@ export class VendorDashBoardService {
 
         return {
             vendorId,
-            totalSales: parseFloat(result.totalSales),
+            totalSales: Number(result?.totalSales) || 0,
         };
 
+    }
+
+    /** Return a zero-filled paid-sales point for every calendar day in range. */
+    async getSalesTrend(vendorId: number, startDate: Date, endDate: Date) {
+        const rows = await this.orderItemRepository
+            .createQueryBuilder("oi")
+            .innerJoin(Order, "o", "o.id = oi.orderId")
+            .select("TO_CHAR(DATE(o.createdAt), 'YYYY-MM-DD')", "date")
+            .addSelect("COALESCE(SUM(oi.price * oi.quantity), 0)", "totalSales")
+            .where("oi.vendorId = :vendorId", { vendorId })
+            .andWhere("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .andWhere("o.status IN (:...realizedStatuses)", { realizedStatuses: REALIZED_ORDER_STATUSES })
+            .andWhere("o.createdAt >= :startDate AND o.createdAt <= :endDate", { startDate, endDate })
+            .groupBy("DATE(o.createdAt)")
+            .orderBy("DATE(o.createdAt)", "ASC")
+            .getRawMany();
+        const totals = new Map(rows.map((row) => [row.date, Number(row.totalSales) || 0]));
+        const points: Array<{ date: string; totalSales: number }> = [];
+        const cursor = new Date(startDate);
+        cursor.setHours(0, 0, 0, 0);
+        const last = new Date(endDate);
+        last.setHours(0, 0, 0, 0);
+        while (cursor <= last) {
+            // Use the server/database calendar date, not UTC serialization;
+            // UTC conversion shifts midnight for Nepal and similar timezones.
+            const date = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`;
+            points.push({ date, totalSales: totals.get(date) ?? 0 });
+            cursor.setDate(cursor.getDate() + 1);
+        }
+        return points;
     }
 
     async getLowStockProducts(vendorId: number, page: number) {
@@ -208,10 +249,16 @@ export class VendorDashBoardService {
             .innerJoin("oi.product", "p")
             .innerJoin("oi.order", "o")
             .where("oi.vendorId = :vendorId", { vendorId })
-            .andWhere("o.paymentStatus = :status", { status: "PAID" });
+            .andWhere("o.paymentStatus = :status", { status: "PAID" })
+            .andWhere("o.status IN (:...realizedStatuses)", { realizedStatuses: REALIZED_ORDER_STATUSES })
+            .andWhere("p.deletedAt IS NULL");
 
         if (startDate && endDate) {
             qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        } else if (startDate) {
+            qb.andWhere("o.createdAt >= :startDate", { startDate });
+        } else if (endDate) {
+            qb.andWhere("o.createdAt <= :endDate", { endDate });
         }
 
         qb.groupBy("p.id")
@@ -221,10 +268,10 @@ export class VendorDashBoardService {
 
         const rawResult = await qb.getRawMany();
         const result = rawResult.map(r => ({
-            productId: r.productId,
-            productName: r.productName,
-            totalquantity: Number(r.totalquantity),
-            totalSales: Number(r.totalSales),
+            productId: Number(r.productId) || 0,
+            productName: r.productName || "Unnamed product",
+            totalquantity: Number(r.totalquantity) || 0,
+            totalSales: Number(r.totalSales) || 0,
         }));
 
         return result;
@@ -244,11 +291,16 @@ export class VendorDashBoardService {
             .leftJoin("p.subcategory", "sc")
             .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
             .andWhere("oi.vendorId = :vendorId", { vendorId }) //  filter for vendor
+            .andWhere("o.status IN (:...realizedStatuses)", { realizedStatuses: REALIZED_ORDER_STATUSES })
             .groupBy("sc.name")
             .orderBy("revenue", "DESC");
 
         if (startDate && endDate) {
             qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        } else if (startDate) {
+            qb.andWhere("o.createdAt >= :startDate", { startDate });
+        } else if (endDate) {
+            qb.andWhere("o.createdAt <= :endDate", { endDate });
         }
 
         const result = await qb.getRawMany();
@@ -273,12 +325,17 @@ export class VendorDashBoardService {
             .leftJoin("sc.category", "c")
             .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
             .andWhere("oi.vendorId = :vendorId", { vendorId })
+            .andWhere("o.status IN (:...realizedStatuses)", { realizedStatuses: REALIZED_ORDER_STATUSES })
             .groupBy("c.name")
             .orderBy("revenue", "DESC");
 
 
         if (startDate && endDate) {
             qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        } else if (startDate) {
+            qb.andWhere("o.createdAt >= :startDate", { startDate });
+        } else if (endDate) {
+            qb.andWhere("o.createdAt <= :endDate", { endDate });
         }
 
         const result = await qb.getRawMany();

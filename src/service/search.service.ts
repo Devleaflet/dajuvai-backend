@@ -3,6 +3,7 @@ import { Category } from "../entities/category.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { Product } from "../entities/product.entity";
 import { Review } from "../entities/reviews.entity";
+import { OrderItem } from "../entities/orderItems.entity";
 import { Banner } from "../entities/banner.entity";
 import { SearchAliasService } from "./search-alias.service";
 import { SearchLearningService } from "./search-learning.service";
@@ -207,6 +208,12 @@ export class SearchService {
       .addSelect("AVG(review.rating)", "average_rating")
       .addSelect("COUNT(*)", "total_reviews")
       .groupBy("review.productId");
+    const salesQuery = manager
+      .getRepository(OrderItem)
+      .createQueryBuilder("order_item")
+      .select("order_item.productId", "product_id")
+      .addSelect("SUM(order_item.quantity)", "sold_quantity")
+      .groupBy("order_item.productId");
     const taxonomyTextWhere = searchCondition
       ? this.buildTaxonomyTextWhere(searchCondition)
       : "FALSE";
@@ -219,6 +226,7 @@ export class SearchService {
       .leftJoin("subcategory.category", "category")
       .leftJoin("product.deal", "deal")
       .leftJoin(`(${ratingQuery.getQuery()})`, "rating", "rating.product_id = product.id")
+      .leftJoin(`(${salesQuery.getQuery()})`, "sales", "sales.product_id = product.id")
       .where("product.deletedAt IS NULL")
       .andWhere(
         this.buildProductSearchWhere(searchCondition, resolvedFilters, taxonomyTextWhere),
@@ -232,6 +240,7 @@ export class SearchService {
       .addSelect('GREATEST(COALESCE("product"."discountPercent", 0), COALESCE(MAX("variants"."discountPercent"), 0))', "discount_percentage")
       .addSelect('COALESCE("rating"."average_rating", 0)', "average_rating")
       .addSelect('COALESCE("rating"."total_reviews", 0)', "total_reviews")
+      .addSelect('COALESCE("sales"."sold_quantity", 0)', "sold_quantity")
       .addSelect("MAX(CASE WHEN COALESCE(\"variants\".stock, \"product\".stock, 0) > 0 AND COALESCE(\"variants\".status::text, \"product\".status::text, '') != 'OUT_OF_STOCK' THEN 1 ELSE 0 END)", "in_stock")
       .addSelect(
         this.buildProductNameRelevanceScore(searchCondition),
@@ -246,6 +255,8 @@ export class SearchService {
       .addGroupBy("rating.product_id")
       .addGroupBy("rating.average_rating")
       .addGroupBy("rating.total_reviews")
+      .addGroupBy("sales.product_id")
+      .addGroupBy("sales.sold_quantity")
       .offset(offset)
       .limit(limit);
 
@@ -259,6 +270,10 @@ export class SearchService {
       query.orderBy("effective_price", "ASC");
     } else if (sort === "price_high_low") {
       query.orderBy("effective_price", "DESC");
+    } else if (sort === "discount_high_low") {
+      query.orderBy("discount_percentage", "DESC");
+    } else if (sort === "best_selling") {
+      query.orderBy("sold_quantity", "DESC");
     } else {
       query.orderBy("name_score", "DESC");
       query.addOrderBy("search_score", "DESC");

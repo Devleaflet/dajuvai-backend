@@ -33,7 +33,7 @@ export const searchCatalogSchema = z.object({
   hasDeal: queryBoolean.optional(),
   dealIds: positiveIdList,
   bannerId: z.coerce.number().int().positive().optional(),
-  sort: z.enum(["relevance", "newest", "rating", "price_low_high", "price_high_low"]).default("relevance"),
+  sort: z.enum(["relevance", "newest", "rating", "price_low_high", "price_high_low", "discount_high_low", "best_selling"]).default("relevance"),
 }).superRefine((input, context) => {
   if (input.minPrice !== undefined && input.maxPrice !== undefined && input.minPrice > input.maxPrice) {
     context.addIssue({ code: z.ZodIssueCode.custom, message: "minPrice cannot exceed maxPrice", path: ["minPrice"] });

@@ -35,8 +35,7 @@ const controller = new MerchandisingController();
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     description: Placement item entity
+ *                     $ref: '#/components/schemas/PlacementItem'
  *   post:
  *     summary: Add one or more items to a placement (appended last)
  *     description: Unknown or already-present items are silently skipped.
@@ -286,8 +285,7 @@ merchandisingAdminRouter.put(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
- *                     description: Available catalog entity (category/subcategory)
+ *                     $ref: '#/components/schemas/CatalogEntity'
  */
 merchandisingAdminRouter.get(
     "/:slug/available-items",

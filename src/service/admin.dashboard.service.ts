@@ -92,9 +92,11 @@ export class AdminDashBoardService {
     private async getTotalSales(): Promise<number> {
         const result = await this.orderRepository
             .createQueryBuilder('order')
-            .select('SUM(order.totalPrice + order.shippingFee)', 'total')
+            .select('SUM(order.totalPrice + COALESCE(order.shippingFee, 0))', 'total')
             .where('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
-            .andWhere('order.status = :orderStatus', { orderStatus: OrderStatus.CONFIRMED })
+            .andWhere('order.status IN (:...orderStatuses)', {
+                orderStatuses: [OrderStatus.CONFIRMED, OrderStatus.DELIVERED],
+            })
             .getRawOne();
 
         // Convert result to number or return 0 if null
@@ -157,8 +159,9 @@ export class AdminDashBoardService {
     private async getTotalDeliveredRevenue(): Promise<number> {
         const result = await this.orderRepository
             .createQueryBuilder('order')
-            .select('SUM(order.totalPrice + order.shippingFee)', 'total')
+            .select('SUM(order.totalPrice + COALESCE(order.shippingFee, 0))', 'total')
             .where('order.status = :orderStatus', { orderStatus: OrderStatus.DELIVERED })
+            .andWhere('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
             .getRawOne();
 
         // Convert result to number or return 0 if null
@@ -178,7 +181,7 @@ export class AdminDashBoardService {
                 `
       SELECT 
           TO_CHAR(d::date, 'DD Mon') AS date,
-          COALESCE(SUM(o."totalPrice" + o."shippingFee"), 0) AS revenue
+          COALESCE(SUM(o."totalPrice" + COALESCE(o."shippingFee", 0)), 0) AS revenue
       FROM generate_series(
           CURRENT_DATE - INTERVAL '${days - 1} days',
           CURRENT_DATE,
@@ -266,11 +269,12 @@ export class AdminDashBoardService {
         };
 
         // count distinct vendors matching the filter (1 query)
-        const countQb = AppDataSource.getRepository(OrderItem)
+            const countQb = AppDataSource.getRepository(OrderItem)
             .createQueryBuilder("orderItem")
             .innerJoin(Order, "order", "order.id = orderItem.orderId")
             .select("COUNT(DISTINCT orderItem.vendorId)", "total")
-            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] });
+            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] })
+            .andWhere("order.paymentStatus = :paymentStatus", { paymentStatus: PaymentStatus.PAID });
         applyDateFilters(countQb);
         const countResult = await countQb.getRawOne();
         const totalData = parseInt(countResult?.total || '0', 10);
@@ -284,6 +288,7 @@ export class AdminDashBoardService {
             .addSelect("vendor.businessName", "businessName")
             .addSelect("SUM(orderItem.quantity * orderItem.price)", "totalSales")
             .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] })
+            .andWhere("order.paymentStatus = :paymentStatus", { paymentStatus: PaymentStatus.PAID })
             .groupBy("vendor.id")
             .addGroupBy("vendor.businessName")
             .offset(skip)
@@ -323,7 +328,8 @@ export class AdminDashBoardService {
             .createQueryBuilder("orderItem")
             .innerJoin("orderItem.order", "order")
             .select("COUNT(DISTINCT orderItem.productId)", "total")
-            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] });
+            .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] })
+            .andWhere("order.paymentStatus = :paymentStatus", { paymentStatus: PaymentStatus.PAID });
         applyDateFilters(countQb);
         const countResult = await countQb.getRawOne();
         const totalData = parseInt(countResult?.total || '0', 10);
@@ -338,6 +344,7 @@ export class AdminDashBoardService {
             .addSelect("SUM(orderItem.quantity)", "totalQuantity")
             .addSelect("SUM(orderItem.quantity * orderItem.price)", "totalSales")
             .where("order.status IN (:...statuses)", { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] })
+            .andWhere("order.paymentStatus = :paymentStatus", { paymentStatus: PaymentStatus.PAID })
             .groupBy("product.id")
             .addGroupBy("product.name")
             .orderBy("SUM(orderItem.quantity * orderItem.price)", "DESC")
@@ -408,17 +415,29 @@ export class AdminDashBoardService {
     // }
 
     async getTodayTotalSales() {
-        const result = await AppDataSource.getRepository(Order)
-            .createQueryBuilder("o")
-            .select("COALESCE(SUM(o.totalPrice), 0)", "totalSales")
-            .where("o.status IN (:...statuses)", {
+        const base = this.orderRepository
+            .createQueryBuilder("order")
+            .where("order.status IN (:...statuses)", {
                 statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
             })
-            .andWhere("DATE(o.createdAt) = CURRENT_DATE")
-            .getRawOne();
-
+            .andWhere("order.paymentStatus = :paymentStatus", { paymentStatus: PaymentStatus.PAID })
+            .andWhere("DATE(order.createdAt) = CURRENT_DATE");
+        const [total, hourly] = await Promise.all([
+            base.clone().select("COALESCE(SUM(order.totalPrice + COALESCE(order.shippingFee, 0)), 0)", "totalSales").getRawOne(),
+            base.clone()
+                .select('EXTRACT(HOUR FROM "order"."createdAt")', "hour")
+                .addSelect("COALESCE(SUM(order.totalPrice + COALESCE(order.shippingFee, 0)), 0)", "sales")
+                .groupBy('EXTRACT(HOUR FROM "order"."createdAt")')
+                .orderBy("hour", "ASC")
+                .getRawMany(),
+        ]);
+        const hourlyByHour = new Map(hourly.map((row) => [Number(row.hour), Number(row.sales) || 0]));
         return {
-            totalSales: parseFloat(result.totalSales),
+            totalSales: Number(total?.totalSales) || 0,
+            hourlySales: Array.from({ length: 24 }, (_, hour) => ({
+                label: `${String(hour).padStart(2, "0")}:00`,
+                value: hourlyByHour.get(hour) ?? 0,
+            })),
         };
     }
 
@@ -474,14 +493,23 @@ export class AdminDashBoardService {
             .leftJoin('p.subcategory', 'sc')
             .leftJoin('sc.category', 'c')
             .where('o.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
+            .andWhere('o.status IN (:...realizedStatuses)', { realizedStatuses: [OrderStatus.CONFIRMED, OrderStatus.DELIVERED] })
             .groupBy('c.name')
             .orderBy('revenue', 'DESC');
 
         if (startDate && endDate) {
             qb.andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate });
+        } else if (startDate) {
+            qb.andWhere('o.createdAt >= :startDate', { startDate });
+        } else if (endDate) {
+            qb.andWhere('o.createdAt <= :endDate', { endDate });
         }
 
-        return qb.getRawMany();
+        const rows = await qb.getRawMany();
+        return rows.map((row) => ({
+            category: row.category || 'Uncategorized',
+            revenue: Number(row.revenue) || 0,
+        }));
     }
 
     async getRevenueBySubcategory(startDate?: string, endDate?: string) {
@@ -493,14 +521,23 @@ export class AdminDashBoardService {
             .innerJoin("oi.product", "p")
             .leftJoin("p.subcategory", "sc")
             .where("o.paymentStatus = :paymentStatus", { paymentStatus: "PAID" })
+            .andWhere("o.status IN (:...realizedStatuses)", { realizedStatuses: [OrderStatus.CONFIRMED, OrderStatus.DELIVERED] })
             .groupBy("sc.name")
             .orderBy("revenue", "DESC");
 
         if (startDate && endDate) {
             qb.andWhere("o.createdAt BETWEEN :startDate AND :endDate", { startDate, endDate });
+        } else if (startDate) {
+            qb.andWhere("o.createdAt >= :startDate", { startDate });
+        } else if (endDate) {
+            qb.andWhere("o.createdAt <= :endDate", { endDate });
         }
 
-        return await qb.getRawMany();
+        const rows = await qb.getRawMany();
+        return rows.map((row) => ({
+            subcategory: row.subcategory || 'Uncategorized',
+            revenue: Number(row.revenue) || 0,
+        }));
 
     }
 
@@ -516,15 +553,25 @@ export class AdminDashBoardService {
             .innerJoin('oi.product', 'p')
             .innerJoin('p.vendor', 'v')
             .where('o.paymentStatus = :paymentStatus', { paymentStatus: 'PAID' })
+            .andWhere('o.status IN (:...realizedStatuses)', { realizedStatuses: [OrderStatus.CONFIRMED, OrderStatus.DELIVERED] })
             .groupBy('v.id')
             .addGroupBy('v.businessName')
             .orderBy('revenue', 'DESC');
 
         if (startDate && endDate) {
             qb.andWhere('o.createdAt BETWEEN :startDate AND :endDate', { startDate, endDate });
+        } else if (startDate) {
+            qb.andWhere('o.createdAt >= :startDate', { startDate });
+        } else if (endDate) {
+            qb.andWhere('o.createdAt <= :endDate', { endDate });
         }
 
-        return await qb.getRawMany();
+        const rows = await qb.getRawMany();
+        return rows.map((row) => ({
+            vendorId: Number(row.vendorId) || 0,
+            vendorName: row.vendorName || 'Unknown vendor',
+            revenue: Number(row.revenue) || 0,
+        }));
     }
 
 
@@ -541,7 +588,6 @@ export class AdminDashBoardService {
 
         const result = await qb.getRawOne();
 
-        console.log(result)
         return parseFloat(result.totalShippingRevenue || 0);
     }
 
@@ -564,13 +610,13 @@ export class AdminDashBoardService {
         const [currentResult, lastResult] = await Promise.all([
             this.orderRepository
                 .createQueryBuilder('order')
-                .select('SUM(order.totalPrice + order.shippingFee)', 'total')
+                .select('SUM(order.totalPrice + COALESCE(order.shippingFee, 0))', 'total')
                 .where('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
                 .andWhere('order.createdAt >= :start', { start: firstDayThisMonth })
                 .getRawOne(),
             this.orderRepository
                 .createQueryBuilder('order')
-                .select('SUM(order.totalPrice + order.shippingFee)', 'total')
+                .select('SUM(order.totalPrice + COALESCE(order.shippingFee, 0))', 'total')
                 .where('order.paymentStatus = :paymentStatus', { paymentStatus: PaymentStatus.PAID })
                 .andWhere('order.createdAt BETWEEN :start AND :end', {
                     start: firstDayLastMonth,

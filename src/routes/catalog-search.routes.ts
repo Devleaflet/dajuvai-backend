@@ -79,7 +79,7 @@ const catalogSearchRateLimiter = rateLimit({
  *         name: sort
  *         schema:
  *           type: string
- *           enum: [relevance, newest, rating, price_low_high, price_high_low]
+ *           enum: [relevance, newest, rating, price_low_high, price_high_low, discount_high_low, best_selling]
  *           default: relevance
  *     responses:
  *       200:
