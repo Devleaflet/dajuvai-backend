@@ -340,7 +340,7 @@ export class OrderController {
 
         const order = await this.orderService.getCustomerOrderDetails(orderId);
 
-        if (user.role === UserRole.ADMIN || order.orderedById === user.id) {
+        if (user.role === UserRole.ADMIN || user.role === UserRole.STAFF || order.orderedById === user.id) {
             res.status(200).json({
                 success: true,
                 data: sanitizeOrderFull(order),

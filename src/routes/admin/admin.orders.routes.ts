@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware, isAdminOrStaff } from '../../middlewares/auth.middleware';
+import { checkPermission } from '../../middlewares/permission.middleware';
+import { ModuleName, PermissionLevel } from '../../entities/permission.enum';
 import { AdminOrdersController } from '../../controllers/admin.orders.controller';
 
 const adminOrdersController = new AdminOrdersController();
@@ -81,6 +83,7 @@ adminOrdersRouter.get(
     '/stats',
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
     adminOrdersController.getOrderPageStats.bind(adminOrdersController)
 );
 

@@ -486,7 +486,11 @@ export const isAdminOrVendor = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  if (req.user?.role === UserRole.ADMIN || req.vendor) {
+  if (
+    req.user?.role === UserRole.ADMIN ||
+    req.user?.role === UserRole.STAFF ||
+    req.vendor
+  ) {
     return next();
   }
   return next(new ForbiddenError("Admin or Vendor access required"));

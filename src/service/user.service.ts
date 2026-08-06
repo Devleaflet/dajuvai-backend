@@ -9,11 +9,17 @@ import { IUpdateUserRequest } from "../interface/user.interface";
 import { Address } from "../entities/address.entity";
 import { add } from "winston";
 import { SanitizedUser, sanitizeUser } from "../utils/sanitize.util";
+import { StaffSignUpInput } from "../utils/zod_validations/user.zod";
+import { StaffPermission } from "../entities/staffPermission.entity";
+import { PermissionAction, PermissionLevel } from "../entities/permission.enum";
+import { getPermissionString } from "../utils/permission.utils";
 
 /**
  * User repository instance for database operations.
  */
 const userDB = AppDataSource.getRepository(User);
+
+const staffPerDB = AppDataSource.getRepository(StaffPermission);
 
 /**
  * Vendor repository instance for database operations.
@@ -51,6 +57,51 @@ export const createUser = async (userData: Partial<User>): Promise<User> => {
     const user = userDB.create(userData);
     return await userDB.save(user);
 };
+
+export const setStaffPermissions = async(userId:number, data: StaffSignUpInput["permissions"]) => {
+    const permissionArray = [];
+    
+    for(const [module, permission] of Object.entries(data)){
+        const action = getPermissionString(permission)
+
+        permissionArray.push({
+            staffId: userId,
+            module,
+            permissionLevel: permission,
+            permissionAction: action
+        })
+    }
+
+    if(permissionArray.length > 0){
+        await staffPerDB.insert(permissionArray)
+    }
+}
+
+export const getStaffPermissionsById = async (staffId: number) => {
+    return await staffPerDB.find({
+        where: { staffId },
+    });
+};
+
+export const getFormattedStaffPermissions = async (staffId: number): Promise<Record<string, string>> => {
+    const staffPerms = await getStaffPermissionsById(staffId);
+    const permissions: Record<string, string> = {};
+    staffPerms.forEach((p) => {
+        const actionStr = p.permissionAction || getPermissionString(p.permissionLevel);
+        permissions[p.module] = actionStr;
+    });
+    return permissions;
+};
+
+export const updateStaffPermissions = async (staffId: number, data: StaffSignUpInput["permissions"]) => {
+    // Remove all existing permissions for this staff member
+    await staffPerDB.delete({ staffId });
+    // Re-insert the new set (if any)
+    if (data && Object.keys(data).length > 0) {
+        await setStaffPermissions(staffId, data);
+    }
+};
+
 
 /**
  * Finds a user by their email.
@@ -109,25 +160,31 @@ export const findUserByResetToken = async (
  */
 export const getUserByIdService = async (
     id: number,
-): Promise<SanitizedUser | null> => {
+): Promise<(SanitizedUser & { permissions?: Record<string, string> }) | null> => {
     const user = await userDB.findOne({
         where: { id: id },
         relations: ["address"],
     });
 
-    return user ? sanitizeUser(user) : null;
+    if (!user) return null;
+    const sanitized = sanitizeUser(user);
+
+    if (user.role === UserRole.STAFF) {
+        const permissions = await getFormattedStaffPermissions(user.id);
+        return { ...sanitized, permissions };
+    }
+
+    return sanitized;
 };
 
 export const getAllStaff = async () => {
-    return await userDB.find({
+    const users = await userDB.find({
         where: {
             role: UserRole.STAFF,
         },
-        // Exclude password hash and other sensitive/internal fields from the list response
         select: [
             "id",
             "fullName",
-            "username",
             "email",
             "phoneNumber",
             "role",
@@ -136,7 +193,22 @@ export const getAllStaff = async () => {
             "updatedAt",
         ],
     });
+
+    // Attach permissions for each staff member
+    const staffWithPermissions = await Promise.all(
+        users.map(async (user) => {
+            const permissions = await staffPerDB.find({ where: { staffId: user.id } });
+            const permissionsMap: Record<string, number> = {};
+            permissions.forEach((p) => {
+                permissionsMap[p.module] = p.permissionLevel;
+            });
+            return { ...user, permissions: permissionsMap };
+        })
+    );
+
+    return staffWithPermissions;
 };
+
 
 export const deleteStaffById = async (id: number) => {
     return await userDB.delete(id);
@@ -163,7 +235,6 @@ export const updateStaffById = async (id: number, data: any) => {
         select: [
             "id",
             "fullName",
-            "username",
             "email",
             "phoneNumber",
             "role",

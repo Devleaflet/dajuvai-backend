@@ -10,6 +10,8 @@ import {
     isVendor,
     vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { validateZod } from "../middlewares/validation.middleware";
 import {
     createOrderSchema,
@@ -438,6 +440,7 @@ router.get(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
     asyncHandler(orderController.getAllOrders.bind(orderController)),
 );
 
@@ -1485,6 +1488,7 @@ router.get(
     "/admin/:orderId",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
     asyncHandler(orderController.getOrderDetails.bind(orderController)),
 ); // order by id
 
@@ -1650,6 +1654,7 @@ router.put(
     "/admin/:orderId/status",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.CREATE_EDIT),
     validateZod(updateOrderStatusSchema),
     asyncHandler(orderController.updateOrderStatus.bind(orderController)),
 );
@@ -1724,6 +1729,7 @@ router.get(
     "/admin/:orderId/status-history",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
     asyncHandler(orderController.getOrderStatusHistory.bind(orderController)),
 );
 
@@ -1857,6 +1863,7 @@ router.get(
     "/admin/order/search",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
     asyncHandler(orderController.searchOrdersById.bind(orderController)),
 );
 
@@ -2531,6 +2538,7 @@ router.delete(
     "/order/delete/all",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.DELETE),
     asyncHandler(orderController.deleteOrder.bind(orderController)),
 );
 

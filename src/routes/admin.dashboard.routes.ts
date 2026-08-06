@@ -2,10 +2,13 @@
 
 import { Router } from "express";
 import { authMiddleware, isAdmin, isAdminOrStaff } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { AdminDashboardController } from "../controllers/admin.dashboard.controller";
 const adminDashboardController = new AdminDashboardController();
 
 const adminDashboardRouter = Router();
+adminDashboardRouter.use(authMiddleware, isAdminOrStaff);
 
 /**
  * @swagger
@@ -1016,7 +1019,7 @@ adminDashboardRouter.get("/orders-today-count", adminDashboardController.getOrde
  *                   type: string
  *                   example: "Error fetching needs-action data"
  */
-adminDashboardRouter.get("/needs-action", adminDashboardController.getNeedsAction.bind(adminDashboardController));
+adminDashboardRouter.get("/needs-action", checkPermission(ModuleName.ORDER, PermissionLevel.VIEW), adminDashboardController.getNeedsAction.bind(adminDashboardController));
 
 export default adminDashboardRouter;
 

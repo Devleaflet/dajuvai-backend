@@ -5,6 +5,8 @@ import {
 	isAdminOrStaff,
 	validateZod,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import {
 	createBannerSchema,
 	updateBannerSchema,
@@ -138,6 +140,7 @@ router.post(
 	"/",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.CREATE_EDIT),
 	validateZod(createBannerSchema),
 	bannerController.createBanner.bind(bannerController)
 );
@@ -261,6 +264,7 @@ router.patch(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.CREATE_EDIT),
 	validateZod(updateBannerSchema),
 	bannerController.updateBanner.bind(bannerController)
 );
@@ -439,6 +443,7 @@ router.delete(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.DELETE),
 	bannerController.deleteBanner.bind(bannerController)
 );
 
@@ -501,6 +506,7 @@ router.get(
 	"/search/:bannerName",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.VIEW),
 	bannerController.searchBannerByBannerName.bind(bannerController)
 );
 

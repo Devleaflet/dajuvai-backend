@@ -1,6 +1,8 @@
 
 import { Router } from "express";
 import { authMiddleware, isAdminOrStaff, validateZod } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { PromoController } from "../controllers/promo.controller";
 import { createPromoSchema, deletePromoSchema, editPromoSchema } from "../utils/zod_validations/promo.zod";
 
@@ -195,7 +197,7 @@ promoRouter.get("/", promoController.getPromoCode.bind(promoController));
  *                   type: string
  *                   example: Internal Server Error
  */
-promoRouter.post("/", authMiddleware, isAdminOrStaff, validateZod(createPromoSchema, "body"), promoController.createPromo.bind(promoController));
+promoRouter.post("/", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.CREATE_EDIT), validateZod(createPromoSchema, "body"), promoController.createPromo.bind(promoController));
 
 /**
  * @swagger
@@ -298,7 +300,7 @@ promoRouter.post("/", authMiddleware, isAdminOrStaff, validateZod(createPromoSch
  *                   type: string
  *                   example: Internal Server Error
  */
-promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePromoSchema, "params"), promoController.deletePromo.bind(promoController));
+promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.DELETE), validateZod(deletePromoSchema, "params"), promoController.deletePromo.bind(promoController));
 
 
 /**
@@ -383,6 +385,6 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePro
  *       404:
  *         description: Promo code not found
  */
-promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
+promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.CREATE_EDIT), validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
 
 export default promoRouter;

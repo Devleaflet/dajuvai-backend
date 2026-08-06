@@ -9,6 +9,8 @@ import {
     restrictToVendorOrAdmin,
     vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import {
     vendorSignupSchema,
     vendorLoginSchema,
@@ -154,6 +156,7 @@ router.get(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.VIEW),
     vendorController.getVendors.bind(vendorController),
 );
 
@@ -348,6 +351,7 @@ router.get(
     "/unapprove/list",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.VIEW),
     vendorController.getUnapprovedVendorList.bind(vendorController),
 );
 
@@ -845,7 +849,8 @@ router.get(
 router.post(
     "/signup",
     authMiddleware,
-    isAdmin,
+    isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.CREATE_EDIT),
     validateZod(vendorSignupSchema),
     vendorController.vendorSignup.bind(vendorController),
 );
@@ -1902,6 +1907,7 @@ router.put(
     "/approve/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.CREATE_EDIT),
     vendorController.approveVendor.bind(vendorController),
 );
 
@@ -1967,6 +1973,7 @@ router.put(
     "/reject/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.CREATE_EDIT),
     vendorController.rejectVendor.bind(vendorController),
 );
 
@@ -2031,7 +2038,8 @@ router.put(
 router.delete(
     "/:id",
     authMiddleware,
-    isAdmin,
+    isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.DELETE),
     vendorController.deleteVendor.bind(vendorController),
 );
 

@@ -1,5 +1,7 @@
 import { Router } from "express";
 import { authMiddleware, isAdmin, isAdminOrStaff } from "../../middlewares/auth.middleware";
+import { checkPermission } from "../../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../../entities/permission.enum";
 import { MerchandisingController } from "../../controllers/merchandising.controller";
 
 const merchandisingAdminRouter = Router();
@@ -86,12 +88,14 @@ merchandisingAdminRouter.get(
     "/:slug/items",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.VIEW),
     controller.getItems.bind(controller),
 );
 merchandisingAdminRouter.post(
     "/:slug/items",
     authMiddleware,
-    isAdmin,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     controller.addItems.bind(controller),
 );
 
@@ -179,12 +183,14 @@ merchandisingAdminRouter.patch(
     "/:slug/items/:itemId",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     controller.updateVisibility.bind(controller),
 );
 merchandisingAdminRouter.delete(
     "/:slug/items/:itemId",
     authMiddleware,
-    isAdmin,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.DELETE),
     controller.removeItem.bind(controller),
 );
 
@@ -242,6 +248,7 @@ merchandisingAdminRouter.put(
     "/:slug/reorder",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     controller.reorder.bind(controller),
 );
 
@@ -291,6 +298,7 @@ merchandisingAdminRouter.get(
     "/:slug/available-items",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.VIEW),
     controller.availableItems.bind(controller),
 );
 

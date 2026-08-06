@@ -20,6 +20,10 @@ import {
     findUserById,
     updateStaffById,
     findvendorByvendorId,
+    setStaffPermissions,
+    getStaffPermissionsById,
+    getFormattedStaffPermissions,
+    updateStaffPermissions,
 } from "../service/user.service";
 import {
     ISignupRequest,
@@ -42,6 +46,7 @@ import {
     updateUserSchema,
     AdminResetPasswordInput,
     UpdateStaffInput,
+    StaffSignUpInput,
 } from "../utils/zod_validations/user.zod";
 import { APIError } from "../utils/ApiError.utils";
 import { AuthProvider, User, UserRole } from "../entities/user.entity";
@@ -220,11 +225,11 @@ export class UserController {
             return;
         }
 
-        // Check user role is ADMIN, else forbid access
-        if (user.role != UserRole.ADMIN) {
+        // Check user role is ADMIN or STAFF, else forbid access
+        if (user.role !== UserRole.ADMIN && user.role !== UserRole.STAFF) {
             res.status(403).json({
                 success: false,
-                message: "Access denied: not an admin",
+                message: "Access denied: not an admin or staff member",
             });
             return;
         }
@@ -241,6 +246,12 @@ export class UserController {
                 message: "Invalid credentials",
             });
             return;
+        }
+
+        // Fetch staff permissions if staff member
+        let permissions: Record<string, string> | undefined = undefined;
+        if (user.role === UserRole.STAFF) {
+            permissions = await getFormattedStaffPermissions(user.id);
         }
 
         // Sign JWT token for 7 days
@@ -276,7 +287,7 @@ export class UserController {
         // Send success response with user data and token
         res.status(200).json({
             success: true,
-            message: "Admin logged in successfully",
+            message: user.role === UserRole.STAFF ? "Staff logged in successfully" : "Admin logged in successfully",
             token,
             refreshToken,
             data: {
@@ -284,6 +295,7 @@ export class UserController {
                 username: user.username,
                 email: user.email,
                 role: user.role,
+                ...(permissions ? { permissions } : {}),
             },
         });
     }
@@ -325,14 +337,20 @@ export class UserController {
             throw new APIError(404, "Staff does not exist");
         }
 
-        const updatedStaff = await updateStaffById(Number(id), req.body);
+        const { permissions, ...profileData } = req.body;
+
+        const updatedStaff = await updateStaffById(Number(id), profileData);
+
+        // Update permissions if provided
+        if (permissions !== undefined) {
+            await updateStaffPermissions(Number(id), permissions);
+        }
 
         res.status(200).json({
             success: true,
             msg: "Staff updated successfully",
             data: {
                 id: updatedStaff.id,
-                username: updatedStaff.username,
                 email: updatedStaff.email,
                 fullName: updatedStaff.fullName,
                 phoneNumber: updatedStaff.phoneNumber,
@@ -340,12 +358,36 @@ export class UserController {
         });
     }
 
+    async getStaffPermissions(
+        req: Request<{ id: string }, {}, {}, {}>,
+        res: Response,
+    ) {
+        const id = req.params.id;
+
+        const staffExists = await findUserById(Number(id));
+        if (!staffExists || staffExists.role !== UserRole.STAFF) {
+            throw new APIError(404, "Staff does not exist");
+        }
+
+        const permissions = await getStaffPermissionsById(Number(id));
+        const permissionsMap: Record<string, number> = {};
+        permissions.forEach((p) => {
+            permissionsMap[p.module] = p.permissionLevel;
+        });
+
+        res.status(200).json({
+            success: true,
+            data: permissionsMap,
+        });
+    }
+
+
     async staffSignup(
-        req: AuthRequest<{}, {}, ISignupRequest>,
+        req: AuthRequest<{}, {}, StaffSignUpInput>,
         res: Response,
     ): Promise<void> {
         //  Body already validated by validateZod(signupSchema) middleware
-        const { username, email, password } = req.body;
+        const { email, password, permissions, fullName } = req.body;
 
         //  Prepare hashed password and verification token
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -354,52 +396,33 @@ export class UserController {
 
         // Check if user already exists by email
         const existingUser = await findUserByEmail(loweredCaseEmail);
+        const errMsg = existingUser?.role === UserRole.STAFF ? 
+            "Staff account with this email already exists" :
+            "Customer account with this email exists"
         if (existingUser) {
-            throw new APIError(409, "User with this email already exists");
+            throw new APIError(409, errMsg);
         }
 
-        // Create user with verified status and ADMIN role
+        // Create user with verified status and STAFF role
         const user = await createUser({
-            username,
             email: loweredCaseEmail,
             password: hashedPassword,
+            fullName: fullName || null,
             verificationCode: null,
             isVerified: true,
             verificationCodeExpire: null,
             role: UserRole.STAFF,
         });
 
-        //  Generate JWT and set cookie
-        const token = jwt.sign(
-            {
-                id: user.id,
-                email: user.email,
-                username: user.username,
-                role: user.role,
-            },
-            this.jwtSecret,
-            { expiresIn: "24h" },
-        );
+        await setStaffPermissions(user.id, permissions)
 
-        // Set httpOnly cookie with token
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 24 * 60 * 60 * 1000,
-        });
-
-        // Send successful response with user data and token
+        // Send successful response with user data
         res.status(201).json({
             success: true,
-            user: {
-                id: user.id,
-                username: user.username,
-                email: user.email,
-            },
-            token,
+            message: "new staff created successfully"
         });
     }
+
 
     /**
      * @method getUsers
@@ -649,11 +672,22 @@ export class UserController {
                 maxAge: 1 * 24 * 60 * 60 * 1000,
             });
 
+            // Fetch staff permissions if staff member
+            let permissions: Record<string, string> | undefined = undefined;
+            if (user.role === UserRole.STAFF) {
+                permissions = await getFormattedStaffPermissions(user.id);
+            }
+
             res.status(200).json({
                 success: true,
                 token,
                 refreshToken,
-                data: { userId: user.id, email: user.email, role: user.role },
+                data: {
+                    userId: user.id,
+                    email: user.email,
+                    role: user.role,
+                    ...(permissions ? { permissions } : {}),
+                },
             });
         } catch (error) {
             if (error instanceof APIError) {

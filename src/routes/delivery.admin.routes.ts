@@ -5,6 +5,8 @@ import {
     isAdminOrStaff,
     validateZod,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 
 import { asyncHandler } from "../utils/asyncHandler.utils";
 import { assignRiderSchema, createRiderSchema, resetRiderPasswordSchema } from "../utils/zod_validations/delivery.zod";
@@ -159,6 +161,7 @@ deliveryAdminRouter.use(authMiddleware, isAdminOrStaff);
 deliveryAdminRouter.post(
     "/riders",
     isAdmin,
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(createRiderSchema),
     asyncHandler(deliveryAdminController.createRider.bind(deliveryAdminController)),
 );
@@ -200,6 +203,7 @@ deliveryAdminRouter.post(
  */
 deliveryAdminRouter.get(
     "/riders",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(deliveryAdminController.getAllRiders.bind(deliveryAdminController)),
 );
 
@@ -258,6 +262,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.get(
     "/riders/:riderId",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(deliveryAdminController.getRiderById.bind(deliveryAdminController)),
 );
 
@@ -324,6 +329,7 @@ deliveryAdminRouter.get(
 deliveryAdminRouter.put(
     "/riders/:riderId/reset-password",
     isAdmin,
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(resetRiderPasswordSchema),
     asyncHandler(
         deliveryAdminController.resetRiderPassword.bind(deliveryAdminController),
@@ -367,6 +373,7 @@ deliveryAdminRouter.put(
  */
 deliveryAdminRouter.get(
     "/orders/processing",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(
         deliveryAdminController.getProcessingOrders.bind(deliveryAdminController),
     ),
@@ -424,6 +431,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.get(
     "/orders/:orderId/processing",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(
         deliveryAdminController.getProcessingOrderById.bind(deliveryAdminController),
     ),
@@ -485,6 +493,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.patch(
     "/orders/:orderId/returned-warehouse",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     asyncHandler(deliveryAdminController.markAtWarehouse.bind(deliveryAdminController)),
 );
 
@@ -548,6 +557,7 @@ deliveryAdminRouter.patch(
  */
 deliveryAdminRouter.put(
     "/orders/orderItems/:orderItemId/collect-items",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     asyncHandler(deliveryAdminController.collectOrderItems.bind(deliveryAdminController)),
 );
 
@@ -617,6 +627,7 @@ deliveryAdminRouter.put(
  */
 deliveryAdminRouter.get(
     "/warehouse-order-queue",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(
         deliveryAdminController.getWarehouseOrderQueue.bind(deliveryAdminController),
     ),
@@ -705,6 +716,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.post(
     "/orders/:orderId/assign-rider",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(assignRiderSchema),
     asyncHandler(deliveryAdminController.assignRider.bind(deliveryAdminController)),
 );
@@ -776,6 +788,7 @@ deliveryAdminRouter.post(
 deliveryAdminRouter.get(
     "/assignments",
     isAdmin,
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(deliveryAdminController.getAllAssignments.bind(deliveryAdminController)),
 );
 
@@ -836,6 +849,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.get(
     "/orders/:orderId/assignment",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(
         deliveryAdminController.findOrderAssignment.bind(deliveryAdminController),
     ),
@@ -898,6 +912,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.patch(
     "/orders/:orderId/reset-to-warehouse",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     asyncHandler(
         deliveryAdminController.resetToWarehouse.bind(deliveryAdminController),
     ),

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { UserRole } from '../../entities/user.entity';
 import { Province } from '../../entities/address.entity';
+import { ModuleName, PermissionLevel } from '../../entities/permission.enum';
 
 /**
  * Schema for user signup input validation.
@@ -27,6 +28,24 @@ export const signupSchema = z.object({
     path: ["confirmPassword"],
 });
 
+export const staffSignupSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(8, 'Password must be at least 8 characters long'),
+    phoneNumber: z.string().length(10, "Phone number must have 10 digits"),
+    fullName: z.string().optional(),
+    permissions: z.object({
+        order: z.nativeEnum(PermissionLevel).optional(),
+        delivery: z.nativeEnum(PermissionLevel).optional(),
+        catalog: z.nativeEnum(PermissionLevel).optional(),
+        promo: z.nativeEnum(PermissionLevel).optional(),
+        deal: z.nativeEnum(PermissionLevel).optional(),
+        vendor: z.nativeEnum(PermissionLevel).optional(),
+        banner: z.nativeEnum(PermissionLevel).optional(),
+        arrangement: z.nativeEnum(PermissionLevel).optional(),
+        customer: z.nativeEnum(PermissionLevel).optional(),
+        product: z.nativeEnum(PermissionLevel).optional(),
+    })
+})
 
 /**
  * Schema for user login input validation.
@@ -60,8 +79,21 @@ export const verifyTokenSchema = z.object({
  * If password is provided, confirmPassword must match and meet the same
  * complexity rules enforced at signup.
  */
+const permissionsSchema = z.object({
+    order: z.nativeEnum(PermissionLevel).optional(),
+    delivery: z.nativeEnum(PermissionLevel).optional(),
+    catalog: z.nativeEnum(PermissionLevel).optional(),
+    promo: z.nativeEnum(PermissionLevel).optional(),
+    deal: z.nativeEnum(PermissionLevel).optional(),
+    vendor: z.nativeEnum(PermissionLevel).optional(),
+    banner: z.nativeEnum(PermissionLevel).optional(),
+    arrangement: z.nativeEnum(PermissionLevel).optional(),
+    customer: z.nativeEnum(PermissionLevel).optional(),
+    category: z.nativeEnum(PermissionLevel).optional(),
+    product: z.nativeEnum(PermissionLevel).optional(),
+}).optional();
+
 export const updateStaffSchema = z.object({
-    username: z.string().min(3, "Username must be at least 3 characters").optional(),
     email: z.string().email("Invalid email format").optional(),
     fullName: z.string().min(1, "Full name is required").optional(),
     phoneNumber: z
@@ -76,6 +108,7 @@ export const updateStaffSchema = z.object({
         .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character")
         .optional(),
     confirmPassword: z.string().optional(),
+    permissions: permissionsSchema,
 }).refine(data => Object.keys(data).length > 0, {
     message: "At least one field is required",
 }).refine(data => !data.password || data.password === data.confirmPassword, {
@@ -167,3 +200,4 @@ export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;
 export type AdminResetPasswordInput = z.infer<typeof adminResetPasswordSchema>;
+export type StaffSignUpInput = z.infer<typeof staffSignupSchema>
