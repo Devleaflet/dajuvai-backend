@@ -36,6 +36,7 @@ import { PlacementItem } from "../entities/placementItem.entity";
 import { SearchAlias } from "../entities/search-alias.entity";
 import { SearchAliasCandidate } from "../entities/search-alias-candidate.entity";
 import { SearchQueryMetric } from "../entities/search-query-metric.entity";
+import { StaffPermission } from "../entities/staffPermission.entity";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -116,6 +117,7 @@ const AppDataSource = new DataSource({
         SearchAlias,
         SearchAliasCandidate,
         SearchQueryMetric,
+        StaffPermission,
     ],
     migrations: ["src/migrations/*.ts"],
     // Each migration file commits in its own transaction instead of the

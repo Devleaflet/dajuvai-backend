@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { DealController } from '../controllers/deal.controller';
 import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from '../middlewares/auth.middleware';
+import { checkPermission } from '../middlewares/permission.middleware';
+import { ModuleName, PermissionLevel } from '../entities/permission.enum';
 import { createDealSchema, updateDealSchema } from '../utils/zod_validations/deal.zod';
 
 const router = Router();
@@ -115,7 +117,7 @@ const dealController = new DealController();
  *                   type: string
  *                   example: "Error message describing what went wrong"
  */
-router.post('/', authMiddleware, isAdminOrStaff, validateZod(createDealSchema), dealController.createDeal.bind(dealController));
+router.post('/', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.DEAL, PermissionLevel.CREATE_EDIT), validateZod(createDealSchema), dealController.createDeal.bind(dealController));
 
 /**
  * @swagger
@@ -249,7 +251,7 @@ router.post('/', authMiddleware, isAdminOrStaff, validateZod(createDealSchema), 
  *                   type: string
  *                   example: "Internal server error"
  */
-router.patch('/:id', authMiddleware, isAdminOrStaff, validateZod(updateDealSchema), dealController.updateDeal.bind(dealController));
+router.patch('/:id', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.DEAL, PermissionLevel.CREATE_EDIT), validateZod(updateDealSchema), dealController.updateDeal.bind(dealController));
 
 /**
  * @swagger
@@ -538,6 +540,6 @@ router.get('/', dealController.getAllDeals.bind(dealController));
  *                   type: string
  *                   example: Internal server error
  */
-router.delete('/:id', authMiddleware, isAdminOrStaff, dealController.deleteDeal.bind(dealController));
+router.delete('/:id', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.DEAL, PermissionLevel.DELETE), dealController.deleteDeal.bind(dealController));
 
 export default router;

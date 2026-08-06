@@ -5,6 +5,8 @@ import {
     updateHomePageSectionSchema,
 } from "../utils/zod_validations/homepage.zod";
 import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
 
 const router = Router();
@@ -179,6 +181,7 @@ router.post(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     validateZod(createHomePageSectionSchema),
     homePageSectionController.createHomePageSection.bind(homePageSectionController)
 );
@@ -361,6 +364,7 @@ router.put(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     validateZod(updateHomePageSectionSchema),
     homePageSectionController.updateHomePageSection.bind(homePageSectionController)
 );
@@ -668,6 +672,7 @@ router.delete(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.DELETE),
     homePageSectionController.deleteHomePageSection.bind(homePageSectionController)
 );
 
@@ -795,6 +800,7 @@ router.patch(
     "/:id/toggle-status",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     homePageSectionController.toggleSectionStatus.bind(homePageSectionController)
 );
 

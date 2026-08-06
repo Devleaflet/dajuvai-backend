@@ -13,6 +13,8 @@ import {
     validateZod,
     vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { multerOptions, uploadMiddleware } from "../config/multer.config";
 import multer from "multer";
 import {
@@ -116,6 +118,7 @@ router.post(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
     upload.single("image"),
     validateZod(createCategorySchema),
     categoryController.createCategory.bind(categoryController),
@@ -363,6 +366,7 @@ router.put(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
     upload.single("image"),
     validateZod(updateCategorySchema),
     categoryController.updateCategory.bind(categoryController),
@@ -513,6 +517,7 @@ router.get(
     "/search/name",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.VIEW),
     categoryController.searchCategories.bind(categoryController),
 );
 
@@ -549,6 +554,7 @@ router.delete(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.DELETE),
     categoryController.deleteCategory.bind(categoryController),
 );
 
@@ -650,6 +656,7 @@ router.post(
     "/:categoryId/subcategories",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
     upload.single("image"),
     validateZod(createSubCategorySchema),
     subcategoryController.createSubcategory.bind(subcategoryController),
@@ -899,6 +906,7 @@ router.put(
     "/:categoryId/subcategories/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
     upload.single("image"),
     validateZod(updateSubcategorySchema),
     subcategoryController.updateSubcategory.bind(subcategoryController),
@@ -954,6 +962,7 @@ router.delete(
     "/:categoryId/subcategories/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.DELETE),
     subcategoryController.deleteSubcategory.bind(subcategoryController),
 );
 

@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware, isAdminOrStaff } from '../../middlewares/auth.middleware';
+import { checkPermission } from '../../middlewares/permission.middleware';
+import { ModuleName, PermissionLevel } from '../../entities/permission.enum';
 import { AdminVendorsController } from '../../controllers/admin.vendors.controller';
 
 const adminVendorsController = new AdminVendorsController();
@@ -78,6 +80,7 @@ adminVendorsRouter.get(
     '/stats',
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.VIEW),
     adminVendorsController.getVendorPageStats.bind(adminVendorsController)
 );
 
@@ -143,6 +146,7 @@ adminVendorsRouter.get(
     '/top-earning',
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.VIEW),
     adminVendorsController.getTopEarningVendor.bind(adminVendorsController)
 );
 

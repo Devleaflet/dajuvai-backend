@@ -15,12 +15,13 @@ import {
     loginSchema,
     resetPasswordSchema,
     signupSchema,
+    staffSignupSchema,
     updateStaffSchema,
     verificationTokenSchema,
     verifyEmailChangeSchema,
     verifyTokenSchema,
 } from "../utils/zod_validations/user.zod";
-import { deleteUserDataByFacebookId } from "../service/user.service";
+import { deleteUserDataByFacebookId, getFormattedStaffPermissions } from "../service/user.service";
 import { APIError } from "../utils/ApiError.utils";
 import { UserRole } from "../entities/user.entity";
 import config from "../config/env.config";
@@ -255,7 +256,7 @@ userRouter.post(
     "/signup/staff",
     authMiddleware,
     isAdmin,
-    validateZod(signupSchema),
+    validateZod(staffSignupSchema),
     userController.staffSignup.bind(userController),
 );
 
@@ -427,6 +428,13 @@ userRouter.delete(
     authMiddleware,
     isAdmin,
     userController.deleteStaff.bind(userController),
+);
+
+userRouter.get(
+    "/staff/:id/permissions",
+    authMiddleware,
+    isAdmin,
+    userController.getStaffPermissions.bind(userController),
 );
 
 /**
@@ -1306,12 +1314,19 @@ userRouter.get(
         try {
             const user = req.user;
 
+            let permissions: Record<string, string> | undefined = undefined;
+            if (user && user.role === UserRole.STAFF) {
+                permissions = await getFormattedStaffPermissions(user.id);
+            }
+
             res.status(200).json({
                 success: true,
                 data: {
                     userId: user.id,
                     email: user.email,
                     role: user.role || UserRole.USER,
+                    username: user.username,
+                    ...(permissions ? { permissions } : {}),
                 },
             });
         } catch (error) {

@@ -5,9 +5,19 @@ import { uploadMiddleware } from "../config/multer.config";
 import {
     authMiddleware,
     combinedAuthMiddleware,
+    isAccountOwner,
+    isAccountOwnerOrAdmin,
+    isAdmin,
     isAdminOrStaff,
     isAdminOrVendor,
+    isVendor,
+    isVendorAccountOwnerOrAdminOrStaff,
+    requireAdminStaffOrVendor,
+    restrictToVendorOrAdmin,
+    vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
 
 const productRouter = Router();
@@ -507,6 +517,7 @@ productRouter.get(
     "/admin/products",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.PRODUCT, PermissionLevel.VIEW),
     productController.getAdminProducts.bind(productController),
 );
 

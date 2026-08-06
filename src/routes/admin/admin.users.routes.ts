@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { authMiddleware, isAdminOrStaff } from '../../middlewares/auth.middleware';
+import { checkPermission } from '../../middlewares/permission.middleware';
+import { ModuleName, PermissionLevel } from '../../entities/permission.enum';
 import { AdminUsersController } from '../../controllers/admin.users.controller';
 
 const adminUsersController = new AdminUsersController();
@@ -74,6 +76,7 @@ adminUsersRouter.get(
     '/stats',
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CUSTOMER, PermissionLevel.VIEW),
     adminUsersController.getUserPageStats.bind(adminUsersController)
 );
 
@@ -162,6 +165,7 @@ adminUsersRouter.get(
     '/heat',
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CUSTOMER, PermissionLevel.VIEW),
     adminUsersController.getCustomerHeat.bind(adminUsersController)
 );
 
