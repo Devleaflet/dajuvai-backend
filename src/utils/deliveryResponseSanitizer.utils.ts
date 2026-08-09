@@ -112,8 +112,19 @@ export function sanitizeOrderItemForDelivery(item?: OrderItem | null) {
 
 export function sanitizeOrderForDelivery(order?: Order | null) {
     if (!order) return null;
+    const assignments = (order as any).deliveryAssignments;
+    const latestAssignment = Array.isArray(assignments) && assignments.length > 0
+        ? assignments.reduce((latest: any, current: any) => {
+              if (!latest) return current;
+              const latestId = latest.id ?? 0;
+              const currentId = current.id ?? 0;
+              return currentId >= latestId ? current : latest;
+          }, null)
+        : (order as any).latestAssignment ?? null;
+
     return {
         id: order.id,
+        orderNumber: order.orderNumber,
         orderedById: order.orderedById,
         totalPrice: order.totalPrice,
         shippingFee: order.shippingFee,
@@ -122,7 +133,6 @@ export function sanitizeOrderForDelivery(order?: Order | null) {
         paymentStatus: order.paymentStatus,
         paymentMethod: order.paymentMethod,
         status: order.status,
-        deliveryStatus: order.deliveryStatus,
         appliedPromoCode: (order as any).appliedPromoCode ?? null,
         phoneNumber: (order as any).phoneNumber ?? null,
         instrumentName: (order as any).instrumentName ?? null,
@@ -135,6 +145,8 @@ export function sanitizeOrderForDelivery(order?: Order | null) {
                   sanitizeOrderItemForDelivery(i),
               )
             : [],
+        assignedRider: latestAssignment?.rider ? sanitizeRiderForDelivery(latestAssignment.rider) : null,
+        assignmentStatus: latestAssignment?.assignmentStatus ?? null,
     };
 }
 

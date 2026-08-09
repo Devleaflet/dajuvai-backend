@@ -63,9 +63,6 @@ export class DeliveryRiderService {
         }
 
         return await AppDataSource.transaction(async (manager) => {
-            this.adminService.validateAndTransition(order, DeliveryStatus.OUT_FOR_DELIVERY);
-            await manager.save(order);
-
             assignment.assignmentStatus = AssignmentStatus.PICKED_UP;
             assignment.pickedUpAt = new Date();
             await manager.save(assignment);
@@ -105,9 +102,6 @@ export class DeliveryRiderService {
 
         const updatedAssignment = await AppDataSource.transaction(
             async (manager) => {
-                this.adminService.validateAndTransition(order, DeliveryStatus.DELIVERED);
-                await manager.save(order);
-
                 assignment.assignmentStatus = AssignmentStatus.DELIVERED;
                 assignment.deliveredAt = new Date();
                 await manager.save(assignment);
@@ -162,9 +156,6 @@ export class DeliveryRiderService {
         let riderUserId: number | undefined;
 
         const updatedAssignment = await AppDataSource.transaction(async (manager) => {
-            this.adminService.validateAndTransition(order, DeliveryStatus.DELIVERY_FAILED);
-            await manager.save(order);
-
             assignment.assignmentStatus = AssignmentStatus.FAILED;
             assignment.failureReason = data.failedReason;
             await manager.save(assignment);

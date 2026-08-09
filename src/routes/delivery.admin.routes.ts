@@ -9,7 +9,7 @@ import { checkPermission } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 
 import { asyncHandler } from "../utils/asyncHandler.utils";
-import { assignRiderSchema, createRiderSchema, resetRiderPasswordSchema } from "../utils/zod_validations/delivery.zod";
+import { assignRiderSchema, bulkAssignRiderSchema, createRiderSchema, resetRiderPasswordSchema } from "../utils/zod_validations/delivery.zod";
 import { DeliveryAdminController } from "../controllers/delivery.admin.controller";
 
 const deliveryAdminRouter = Router();
@@ -336,240 +336,16 @@ deliveryAdminRouter.put(
     ),
 );
 
-//  ORDER PROCESSING
+//  ALL ORDERS (AT_WAREHOUSE)
 
 /**
  * @swagger
- * /api/admin/delivery/orders/processing:
+ * /api/admin/delivery/orders/at-warehouse:
  *   get:
- *     summary: Get processing orders (deliveryStatus = ORDER_PROCESSING)
+ *     summary: Get all orders at warehouse (status = ARRIVED_AT_WAREHOUSE)
  *     description: |
- *       Legacy alias: `/api/delivery/admin/orders/processing`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Processing orders fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/DeliveryOrder'
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.get(
-    "/orders/processing",
-    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
-    asyncHandler(
-        deliveryAdminController.getProcessingOrders.bind(deliveryAdminController),
-    ),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/orders/{orderId}/processing:
- *   get:
- *     summary: Get a processing order by ID
- *     description: |
- *       Legacy alias: `/api/delivery/admin/orders/{orderId}/processing`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: integer
- *         example: 101
- *     responses:
- *       200:
- *         description: Order fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 101
- *                     deliveryStatus:
- *                       type: string
- *                       example: "ORDER_PROCESSING"
- *                     customerName:
- *                       type: string
- *                       example: "John Doe"
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       404:
- *         description: Order not found
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.get(
-    "/orders/:orderId/processing",
-    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
-    asyncHandler(
-        deliveryAdminController.getProcessingOrderById.bind(deliveryAdminController),
-    ),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/orders/{orderId}/returned-warehouse:
- *   patch:
- *     summary: Mark order at warehouse (deliveryStatus -> AT_WAREHOUSE)
- *     description: |
- *       Transitions an order from `ORDER_PROCESSING` to `AT_WAREHOUSE` (if allowed).
- *
- *       Legacy alias: `/api/delivery/admin/orders/{orderId}/returned-warehouse`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: integer
- *         example: 101
- *     responses:
- *       200:
- *         description: Order status updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 101
- *                     deliveryStatus:
- *                       type: string
- *                       example: "AT_WAREHOUSE"
- *                     message:
- *                       type: string
- *                       example: "Order marked at warehouse"
- *       400:
- *         description: Invalid delivery status transition
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       404:
- *         description: Order not found
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.patch(
-    "/orders/:orderId/returned-warehouse",
-    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
-    asyncHandler(deliveryAdminController.markAtWarehouse.bind(deliveryAdminController)),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/orders/orderItems/{orderItemId}/collect-items:
- *   put:
- *     summary: Mark an order item as collected at warehouse
- *     description: |
- *       Sets `collectedAtWarehouse = true` for the order item. If all items of the
- *       order are collected, the order deliveryStatus transitions to `READY_FOR_DELIVERY`.
- *
- *       Legacy alias: `/api/delivery/admin/orders/orderItems/{orderItemId}/collect-items`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderItemId
- *         required: true
- *         schema:
- *           type: integer
- *         example: 555
- *     responses:
- *       201:
- *         description: Order item collected successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 555
- *                     orderId:
- *                       type: integer
- *                       example: 101
- *                     collectedAtWarehouse:
- *                       type: boolean
- *                       example: true
- *                 message:
- *                   type: string
- *                   example: "Order Item Collected"
- *       400:
- *         description: Invalid request
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       404:
- *         description: Order item not found
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.put(
-    "/orders/orderItems/:orderItemId/collect-items",
-    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
-    asyncHandler(deliveryAdminController.collectOrderItems.bind(deliveryAdminController)),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/warehouse-order-queue:
- *   get:
- *     summary: Get warehouse order queue (deliveryStatus = READY_FOR_DELIVERY)
- *     description: |
- *       Returns orders ready to be assigned to a rider, in FIFO order (oldest updated first).
- *
- *       Legacy alias: `/api/delivery/admin/warehouse-order-queue`
+ *       Returns paginated orders whose status is ARRIVED_AT_WAREHOUSE for delivery management.
+ *       Supports search by order number, customer name, vendor name, and sorting by newest/oldest.
  *     tags:
  *       - Delivery Admin
  *     security:
@@ -577,60 +353,70 @@ deliveryAdminRouter.put(
  *     parameters:
  *       - in: query
  *         name: page
- *         required: false
  *         schema:
  *           type: integer
- *           minimum: 1
  *           default: 1
- *         example: 1
  *       - in: query
  *         name: limit
- *         required: false
  *         schema:
  *           type: integer
- *           minimum: 1
  *           default: 20
- *         example: 20
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest]
+ *           default: newest
  *     responses:
  *       200:
- *         description: Warehouse queue fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     $ref: '#/components/schemas/DeliveryOrder'
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     total:
- *                       type: integer
- *                       example: 120
- *                     currentPage:
- *                       type: integer
- *                       example: 1
- *                     totalPages:
- *                       type: integer
- *                       example: 6
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       500:
- *         description: Internal server error
+ *         description: Orders fetched successfully
  */
 deliveryAdminRouter.get(
-    "/warehouse-order-queue",
+    "/orders/at-warehouse",
     checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(
-        deliveryAdminController.getWarehouseOrderQueue.bind(deliveryAdminController),
+        deliveryAdminController.getAtWarehouseOrders.bind(deliveryAdminController),
     ),
+);
+
+/**
+ * @swagger
+ * /api/admin/delivery/orders/bulk-assign:
+ *   post:
+ *     summary: Bulk assign a rider to multiple orders
+ *     tags:
+ *       - Delivery Admin
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderIds
+ *               - riderId
+ *             properties:
+ *               orderIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *               riderId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Bulk assignment completed
+ */
+deliveryAdminRouter.post(
+    "/orders/bulk-assign",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
+    validateZod(bulkAssignRiderSchema),
+    asyncHandler(deliveryAdminController.bulkAssignRider.bind(deliveryAdminController)),
 );
 
 //  ASSIGNMENTS
@@ -915,6 +701,14 @@ deliveryAdminRouter.patch(
     checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     asyncHandler(
         deliveryAdminController.resetToWarehouse.bind(deliveryAdminController),
+    ),
+);
+
+deliveryAdminRouter.get(
+    "/orders/failed-deliveries",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    asyncHandler(
+        deliveryAdminController.getFailedDeliveries.bind(deliveryAdminController),
     ),
 );
 

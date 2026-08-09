@@ -76,7 +76,10 @@ import {
     ShippingCalculationService,
     calculateGrandTotal,
 } from "./shipping.service";
-import { emitOrderStatusUpdate, emitProductStockUpdate } from "../socket/socket";
+import {
+    emitOrderStatusUpdate,
+    emitProductStockUpdate,
+} from "../socket/socket";
 import { dispatchStatusSideEffects } from "../utils/status-side-effects.utils";
 
 /**
@@ -255,8 +258,14 @@ export class OrderService {
         });
 
         return {
-            actualPrice: lineItems.reduce((sum, item) => sum + item.lineBaseTotal, 0),
-            merchandiseSubtotal: lineItems.reduce((sum, item) => sum + item.lineTotal, 0),
+            actualPrice: lineItems.reduce(
+                (sum, item) => sum + item.lineBaseTotal,
+                0,
+            ),
+            merchandiseSubtotal: lineItems.reduce(
+                (sum, item) => sum + item.lineTotal,
+                0,
+            ),
             productDiscountTotal: lineItems.reduce(
                 (sum, item) => sum + item.productDiscount.amount,
                 0,
@@ -611,10 +620,9 @@ export class OrderService {
                       "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
                       { code: normalized, userId },
                   )
-                  .andWhere(
-                      "order.status IN (:...statuses)",
-                      { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] },
-                  )
+                  .andWhere("order.status IN (:...statuses)", {
+                      statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
+                  })
                   .getCount()) > 0
             : false;
 
@@ -669,7 +677,9 @@ export class OrderService {
      * is cancelled / payment fails). Guarded so it never drives usageCount
      * below zero.
      */
-    private async releasePromoUsage(promoCode: string | null | undefined): Promise<void> {
+    private async releasePromoUsage(
+        promoCode: string | null | undefined,
+    ): Promise<void> {
         const normalized = normalizePromoCode(promoCode);
         if (!normalized) return;
 
@@ -820,10 +830,9 @@ export class OrderService {
                       "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
                       { code: normalized, userId },
                   )
-                  .andWhere(
-                      "order.status IN (:...statuses)",
-                      { statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED] },
-                  )
+                  .andWhere("order.status IN (:...statuses)", {
+                      statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
+                  })
                   .getCount()) > 0
             : false;
 
@@ -931,7 +940,14 @@ export class OrderService {
                 // 🔹 Buy Now: create a temporary item list from product/variant
                 const product = await this.productRepository.findOne({
                     where: { id: productId },
-                    relations: ["variants", "subcategory", "subcategory.category", "vendor", "vendor.district", "deal"],
+                    relations: [
+                        "variants",
+                        "subcategory",
+                        "subcategory.category",
+                        "vendor",
+                        "vendor.district",
+                        "deal",
+                    ],
                 });
 
                 if (!product) throw new APIError(404, "Product not found");
@@ -956,9 +972,17 @@ export class OrderService {
                 items = cart.items;
             }
 
-            const ageSummary = getAgeRestrictionSummary(items.map((item) => item.product));
-            if (ageSummary.containsRestrictedItems && !orderData.ageRestrictedAcknowledged) {
-                throw new APIError(400, "Age confirmation is required for restricted products");
+            const ageSummary = getAgeRestrictionSummary(
+                items.map((item) => item.product),
+            );
+            if (
+                ageSummary.containsRestrictedItems &&
+                !orderData.ageRestrictedAcknowledged
+            ) {
+                throw new APIError(
+                    400,
+                    "Age confirmation is required for restricted products",
+                );
             }
 
             // Check stock before creating the order
@@ -1223,13 +1247,13 @@ export class OrderService {
         await sendAdminOrderCreatedEmail(config.USER_EMAIL, adminEmailData);
     }
 
-    private async buildAdminOrderEmailData(order: any): Promise<AdminOrderEmailData> {
+    private async buildAdminOrderEmailData(
+        order: any,
+    ): Promise<AdminOrderEmailData> {
         const addr = order.shippingAddress || {};
-        const addrParts = [
-            addr.localAddress,
-            addr.city,
-            addr.district,
-        ].filter(Boolean);
+        const addrParts = [addr.localAddress, addr.city, addr.district].filter(
+            Boolean,
+        );
         const formattedAddress = addrParts.join(", ") || "N/A";
 
         const orderDate = order.createdAt
@@ -1259,11 +1283,15 @@ export class OrderService {
         // Build district shipping breakdown de-duplicated by vendor district
         const districtShippingMap = new Map<string, number>();
         for (const vs of order.vendorShippings || []) {
-            const district = vs.vendorDistrictSnapshot ||
+            const district =
+                vs.vendorDistrictSnapshot ||
                 vs.vendor?.district?.name ||
                 "Unknown";
             const existing = districtShippingMap.get(district) || 0;
-            districtShippingMap.set(district, existing + (Number(vs.shippingFee) || 0));
+            districtShippingMap.set(
+                district,
+                existing + (Number(vs.shippingFee) || 0),
+            );
         }
         const districtShipping = Array.from(districtShippingMap.entries()).map(
             ([district, fee]) => ({ district, fee }),
@@ -1276,8 +1304,10 @@ export class OrderService {
                 const vendor = sampleItem?.vendor;
 
                 const vendorItems = items.map((item: any) => {
-                    const unitPrice = Number(item.unitPriceSnapshot ?? item.price) || 0;
-                    const basePrice = Number(item.basePriceSnapshot ?? unitPrice) || 0;
+                    const unitPrice =
+                        Number(item.unitPriceSnapshot ?? item.price) || 0;
+                    const basePrice =
+                        Number(item.basePriceSnapshot ?? unitPrice) || 0;
                     const productDiscount =
                         Number(item.productDiscountSnapshot) || 0;
                     const dealDiscount = Number(item.dealDiscountSnapshot) || 0;
@@ -1298,10 +1328,7 @@ export class OrderService {
                             item.productNameSnapshot ||
                             "Product",
                         variant: variantStr,
-                        sku:
-                            item.variant?.sku ||
-                            item.skuSnapshot ||
-                            null,
+                        sku: item.variant?.sku || item.skuSnapshot || null,
                         quantity: item.quantity,
                         unitPrice,
                         discount: totalDiscount > 0 ? totalDiscount : null,
@@ -1335,7 +1362,9 @@ export class OrderService {
         let promoApplyOn: string | null = null;
         if (order.appliedPromoCode) {
             try {
-                const promo = await this.promoService.findPromoByCode(order.appliedPromoCode);
+                const promo = await this.promoService.findPromoByCode(
+                    order.appliedPromoCode,
+                );
                 promoApplyOn = promo?.applyOn || null;
             } catch {
                 // Non-fatal: fall back to null — email will still show the discount amount
@@ -1355,9 +1384,7 @@ export class OrderService {
                     "N/A",
                 email: order.orderedBy?.email || "N/A",
                 phone:
-                    order.phoneNumber ||
-                    order.orderedBy?.phoneNumber ||
-                    "N/A",
+                    order.phoneNumber || order.orderedBy?.phoneNumber || "N/A",
                 address: formattedAddress,
                 landmark: addr.landmark || null,
             },
@@ -1417,7 +1444,9 @@ export class OrderService {
         let promoApplyOn: string | null = null;
         if (order.appliedPromoCode) {
             try {
-                const promo = await this.promoService.findPromoByCode(order.appliedPromoCode);
+                const promo = await this.promoService.findPromoByCode(
+                    order.appliedPromoCode,
+                );
                 promoApplyOn = promo?.applyOn || null;
             } catch {
                 // Non-fatal
@@ -1434,7 +1463,8 @@ export class OrderService {
                 variantAttributes: item.variant?.attributes || null,
                 vendorDistrict: vendor?.district?.name || null,
                 basePriceSnapshot: Number(item.basePriceSnapshot) || 0,
-                productDiscountSnapshot: Number(item.productDiscountSnapshot) || 0,
+                productDiscountSnapshot:
+                    Number(item.productDiscountSnapshot) || 0,
                 dealDiscountSnapshot: Number(item.dealDiscountSnapshot) || 0,
                 discountLabelSnapshot: item.discountLabelSnapshot || null,
                 dealNameSnapshot: item.dealNameSnapshot || null,
@@ -1482,8 +1512,10 @@ export class OrderService {
                     price: item.price,
                     variantAttributes: item.variant?.attributes || null,
                     basePriceSnapshot: Number(item.basePriceSnapshot) || 0,
-                    productDiscountSnapshot: Number(item.productDiscountSnapshot) || 0,
-                    dealDiscountSnapshot: Number(item.dealDiscountSnapshot) || 0,
+                    productDiscountSnapshot:
+                        Number(item.productDiscountSnapshot) || 0,
+                    dealDiscountSnapshot:
+                        Number(item.dealDiscountSnapshot) || 0,
                     discountLabelSnapshot: item.discountLabelSnapshot || null,
                     dealNameSnapshot: item.dealNameSnapshot || null,
                 }));
@@ -1549,8 +1581,9 @@ export class OrderService {
             await this.orderRepository.save(order);
             if (!alreadyTerminal) {
                 // The order never fulfilled, so give the promo slot back.
-                await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
-                    console.error("Failed to release promo usage:", err),
+                await this.releasePromoUsage(order.appliedPromoCode).catch(
+                    (err) =>
+                        console.error("Failed to release promo usage:", err),
                 );
             }
             await this.recordStatusChange(
@@ -2095,12 +2128,12 @@ export class OrderService {
                 }
 
                 if (!product.stock || product.stock < item.quantity) {
-                throw new APIError(
-                    400,
-                    `Insufficient stock for product "${product.name || product.id}". ` +
-                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
-                    "INSUFFICIENT_STOCK",
-                );
+                    throw new APIError(
+                        400,
+                        `Insufficient stock for product "${product.name || product.id}". ` +
+                            `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
+                        "INSUFFICIENT_STOCK",
+                    );
                 }
 
                 product.stock -= item.quantity;
@@ -2920,6 +2953,15 @@ export class OrderService {
             );
         }
 
+        if (
+            targetStatus === OrderStatus.ASSIGNED_TO_RIDER &&
+            previousStatus !== OrderStatus.ARRIVED_AT_WAREHOUSE
+        ) {
+            throw new InvalidOrderStatusTransitionError(
+                `Only orders with status ARRIVED_AT_WAREHOUSE can be assigned to a rider. Current status: ${previousStatus}.`,
+            );
+        }
+
         // COD orders are marked PAID the moment they're confirmed delivered.
         if (
             targetStatus === OrderStatus.DELIVERED &&
@@ -3000,7 +3042,10 @@ export class OrderService {
                         order.status,
                     );
                 } catch (error) {
-                    console.error("Failed to send customer status email:", error);
+                    console.error(
+                        "Failed to send customer status email:",
+                        error,
+                    );
                 }
             });
         }
@@ -3037,13 +3082,17 @@ export class OrderService {
         if (targetStatus === OrderStatus.DELIVERED && config.USER_EMAIL) {
             statusSideEffects.push(async () => {
                 try {
-                    const deliveredEmailData = await this.buildAdminOrderEmailData(order);
+                    const deliveredEmailData =
+                        await this.buildAdminOrderEmailData(order);
                     await sendAdminOrderDeliveredEmail(
                         config.USER_EMAIL!,
                         deliveredEmailData,
                     );
                 } catch (error) {
-                    console.error("Failed to send admin delivered email:", error);
+                    console.error(
+                        "Failed to send admin delivered email:",
+                        error,
+                    );
                 }
             });
         }
@@ -3052,7 +3101,10 @@ export class OrderService {
             try {
                 await this.notificationService.notifyOrderStatusUpdated(order);
             } catch (error) {
-                console.error("Failed to send order status notification:", error);
+                console.error(
+                    "Failed to send order status notification:",
+                    error,
+                );
             }
         });
 
@@ -3174,7 +3226,12 @@ export class OrderService {
     ) {
         const idQuery = this.orderRepository
             .createQueryBuilder("order")
-            .innerJoin("order.orderItems", "orderItems", "orderItems.vendorId = :vendorId", { vendorId })
+            .innerJoin(
+                "order.orderItems",
+                "orderItems",
+                "orderItems.vendorId = :vendorId",
+                { vendorId },
+            )
             .leftJoin("orderItems.product", "product")
             .leftJoin("order.orderedBy", "orderedBy")
             .select("order.id", "id");
@@ -3189,7 +3246,9 @@ export class OrderService {
                 canceled: "CANCELLED",
                 cancelled: "CANCELLED",
             };
-            const dbStatus = statusMap[filters.status.toLowerCase()] ?? filters.status.toUpperCase();
+            const dbStatus =
+                statusMap[filters.status.toLowerCase()] ??
+                filters.status.toUpperCase();
             idQuery.andWhere("order.status = :status", { status: dbStatus });
         }
 
@@ -3211,16 +3270,23 @@ export class OrderService {
         return idQuery;
     }
 
-    private vendorOrderSortColumn(
-        sort: IVendorOrderQueryParams["sort"],
-    ): { column: string; direction: "ASC" | "DESC" } {
+    private vendorOrderSortColumn(sort: IVendorOrderQueryParams["sort"]): {
+        column: string;
+        direction: "ASC" | "DESC";
+    } {
         switch (sort) {
             case "oldest":
                 return { column: "order.createdAt", direction: "ASC" };
             case "highestPrice":
-                return { column: "order.merchandiseSubtotal", direction: "DESC" };
+                return {
+                    column: "order.merchandiseSubtotal",
+                    direction: "DESC",
+                };
             case "lowestPrice":
-                return { column: "order.merchandiseSubtotal", direction: "ASC" };
+                return {
+                    column: "order.merchandiseSubtotal",
+                    direction: "ASC",
+                };
             case "newest":
             default:
                 return { column: "order.createdAt", direction: "DESC" };
@@ -3309,7 +3375,10 @@ export class OrderService {
      */
     async getAllVendorOrdersForExport(
         vendorId: number,
-        params: Pick<IVendorOrderQueryParams, "status" | "search" | "sort"> = {},
+        params: Pick<
+            IVendorOrderQueryParams,
+            "status" | "search" | "sort"
+        > = {},
     ): Promise<SanitizedVendorOrderView[]> {
         const idQuery = this.buildVendorOrderIdQuery(vendorId, params);
         const { column: sortColumn, direction: sortDirection } =

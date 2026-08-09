@@ -20,7 +20,13 @@ export const resetRiderPasswordSchema = z.object({
     newPassword: z.string().min(8, "password must be at least 8 characters long"),
 });
 
+export const bulkAssignRiderSchema = z.object({
+    orderIds: z.array(z.number()).min(1, "at least one order ID is required"),
+    riderId: z.number({ required_error: "rider Id is required" }),
+});
+
 export type CreateRiderType = z.infer<typeof createRiderSchema>;
 export type AssignRiderType = z.infer<typeof assignRiderSchema>;
+export type BulkAssignRiderType = z.infer<typeof bulkAssignRiderSchema>;
 export type DeliveryFailedType = z.infer<typeof deliveryFailedSchema>;
 export type ResetRiderPasswordType = z.infer<typeof resetRiderPasswordSchema>;

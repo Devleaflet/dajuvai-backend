@@ -272,13 +272,10 @@ export class DeliveryService {
         });
         if (!rider) throw new APIError(404, "rider not found");
 
-        if (
-            order.deliveryStatus !== DeliveryStatus.READY_FOR_DELIVERY &&
-            order.deliveryStatus !== DeliveryStatus.AT_WAREHOUSE
-        ) {
+        if (order.status !== OrderStatus.ARRIVED_AT_WAREHOUSE) {
             throw new APIError(
                 400,
-                "Order is not ready for delivery assignment",
+                `Only orders at warehouse (status: ARRIVED_AT_WAREHOUSE) can be assigned a rider. Current status: ${order.status}`,
             );
         }
 
@@ -435,29 +432,35 @@ export class DeliveryService {
             );
         }
 
-        const updatedAssignment = await AppDataSource.transaction(async (manager) => {
-            this.validateAndTransition(order, DeliveryStatus.DELIVERED);
-            await manager.save(order);
+        const updatedAssignment = await AppDataSource.transaction(
+            async (manager) => {
+                this.validateAndTransition(order, DeliveryStatus.DELIVERED);
+                await manager.save(order);
 
-            assignment.assignmentStatus = AssignmentStatus.DELIVERED;
-            assignment.deliveredAt = new Date();
-            await manager.save(assignment);
+                assignment.assignmentStatus = AssignmentStatus.DELIVERED;
+                assignment.deliveredAt = new Date();
+                await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, {
-                where: { id: riderId },
-            });
-            if (rider) {
-                rider.onDelivery = false;
-                await manager.save(rider);
-            }
+                const rider = await manager.findOne(Rider, {
+                    where: { id: riderId },
+                });
+                if (rider) {
+                    rider.onDelivery = false;
+                    await manager.save(rider);
+                }
 
-            return assignment;
-        });
+                return assignment;
+            },
+        );
 
-        await this.orderService.changeOrderStatus(orderId, OrderStatus.DELIVERED, {
-            actorRole: "RIDER",
-            reason: "Delivered by rider",
-        });
+        await this.orderService.changeOrderStatus(
+            orderId,
+            OrderStatus.DELIVERED,
+            {
+                actorRole: "RIDER",
+                reason: "Delivered by rider",
+            },
+        );
 
         return updatedAssignment;
     }

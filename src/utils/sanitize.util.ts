@@ -366,16 +366,25 @@ export interface SanitizedOrderFull {
  * the `vendorShippings` relation to be loaded on `order`.
  */
 function buildVendorShippingBreakdown(order: Order): SanitizedVendorShipping[] {
-    const itemsByVendor = new Map<number, { subtotal: number; itemCount: number }>();
+    const itemsByVendor = new Map<
+        number,
+        { subtotal: number; itemCount: number }
+    >();
     for (const item of order.orderItems ?? []) {
-        const existing = itemsByVendor.get(item.vendorId) ?? { subtotal: 0, itemCount: 0 };
+        const existing = itemsByVendor.get(item.vendorId) ?? {
+            subtotal: 0,
+            itemCount: 0,
+        };
         existing.subtotal += Number(item.price) * item.quantity;
         existing.itemCount += item.quantity;
         itemsByVendor.set(item.vendorId, existing);
     }
 
     return (order.vendorShippings ?? []).map((vs) => {
-        const items = itemsByVendor.get(vs.vendorId) ?? { subtotal: 0, itemCount: 0 };
+        const items = itemsByVendor.get(vs.vendorId) ?? {
+            subtotal: 0,
+            itemCount: 0,
+        };
         return {
             vendorId: vs.vendorId,
             vendorName: vs.vendorNameSnapshot || `Vendor #${vs.vendorId}`,
@@ -490,7 +499,9 @@ export const sanitizeOrderForVendor = (
     order: Order,
     vendorId: number,
 ): SanitizedVendorOrderView => {
-    const vendorItems = (order.orderItems ?? []).filter((i) => i.vendorId === vendorId);
+    const vendorItems = (order.orderItems ?? []).filter(
+        (i) => i.vendorId === vendorId,
+    );
     const itemsSubtotal = vendorItems.reduce(
         (sum, item) => sum + Number(item.price) * item.quantity,
         0,
@@ -502,13 +513,17 @@ export const sanitizeOrderForVendor = (
     // (vendors never see the order's shipping at all).
     const promoApplyOn = order.promoApplyOn ?? null;
     const allocatableDiscount =
-        promoApplyOn === PromoType.SHIPPING ? 0 : Number(order.discountTotal || 0);
+        promoApplyOn === PromoType.SHIPPING
+            ? 0
+            : Number(order.discountTotal || 0);
     const discountAllocation =
         orderMerchandiseSubtotal > 0
             ? allocatableDiscount * (itemsSubtotal / orderMerchandiseSubtotal)
             : 0;
 
-    const ownShipping = (order.vendorShippings ?? []).find((vs) => vs.vendorId === vendorId);
+    const ownShipping = (order.vendorShippings ?? []).find(
+        (vs) => vs.vendorId === vendorId,
+    );
 
     return {
         id: order.id,

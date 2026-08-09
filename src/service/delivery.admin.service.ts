@@ -1,5 +1,5 @@
-import { Repository } from "typeorm";
-import { DeliveryStatus, Order, OrderStatus } from "../entities/order.entity";
+import { Brackets, ILike, Repository } from "typeorm";
+import { Order, OrderStatus } from "../entities/order.entity";
 import { Rider } from "../entities/rider.entity";
 import {
     AssignmentStatus,
@@ -11,7 +11,6 @@ import {
     AssignRiderType,
     CreateRiderType,
 } from "../utils/zod_validations/delivery.zod";
-import { OrderItem } from "../entities/orderItems.entity";
 import bcrypt from "bcryptjs";
 import { User, UserRole } from "../entities/user.entity";
 import {
@@ -25,52 +24,16 @@ export class DeliveryAdminService {
     private orderRepository: Repository<Order>;
     private riderRepository: Repository<Rider>;
     private assignmentRepository: Repository<DeliveryAssignment>;
-    private orderItemRepository: Repository<OrderItem>;
     private userRepository: Repository<User>;
     private orderService: OrderService;
-
-    // to verify status change
-    readonly ALLOWED_STATUS_TRANSITIONS: Record<
-        DeliveryStatus,
-        DeliveryStatus[]
-    > = {
-        [DeliveryStatus.ORDER_PROCESSING]: [
-            DeliveryStatus.AT_WAREHOUSE,
-            DeliveryStatus.READY_FOR_DELIVERY,
-        ],
-        [DeliveryStatus.READY_FOR_DELIVERY]: [DeliveryStatus.RIDER_ASSIGNED],
-        [DeliveryStatus.AT_WAREHOUSE]: [DeliveryStatus.RIDER_ASSIGNED],
-        [DeliveryStatus.RIDER_ASSIGNED]: [DeliveryStatus.OUT_FOR_DELIVERY],
-        [DeliveryStatus.OUT_FOR_DELIVERY]: [
-            DeliveryStatus.DELIVERED,
-            DeliveryStatus.DELIVERY_FAILED,
-        ],
-        [DeliveryStatus.DELIVERY_FAILED]: [DeliveryStatus.AT_WAREHOUSE],
-        [DeliveryStatus.DELIVERED]: [],
-        [DeliveryStatus.RETURNED_WAREHOUSE]: [DeliveryStatus.AT_WAREHOUSE],
-    };
 
     constructor() {
         this.orderRepository = AppDataSource.getRepository(Order);
         this.riderRepository = AppDataSource.getRepository(Rider);
         this.assignmentRepository =
             AppDataSource.getRepository(DeliveryAssignment);
-        this.orderItemRepository = AppDataSource.getRepository(OrderItem);
         this.userRepository = AppDataSource.getRepository(User);
         this.orderService = new OrderService();
-    }
-
-    validateAndTransition(order: Order, target: DeliveryStatus): void {
-        // console.log("\n", order.deliveryStatus, target);
-        const allowed = this.ALLOWED_STATUS_TRANSITIONS[order.deliveryStatus];
-        // console.log("\n", allowed);
-        if (!allowed?.includes(target)) {
-            throw new APIError(
-                400,
-                `Invalid status transition: '${order.deliveryStatus}' to '${target}'`,
-            );
-        }
-        order.deliveryStatus = target;
     }
 
     async findOrderById(orderId: number): Promise<Order> {
@@ -116,7 +79,7 @@ export class DeliveryAdminService {
                 userId: savedUser.id,
                 phoneNumber: data.phoneNumber,
                 email: data.email,
-                documentUrl: data.documentUrl
+                documentUrl: data.documentUrl,
             });
             const saved = await manager.save(rider);
             return sanitizeRiderForDelivery(saved);
@@ -136,7 +99,6 @@ export class DeliveryAdminService {
             relations: ["assignments"],
         });
         if (!rider) throw new APIError(404, "rider not found");
-        // Keep assignments but do not expose documentUrl.
         return {
             ...sanitizeRiderForDelivery(rider),
             assignments: (rider as any).assignments ?? [],
@@ -169,129 +131,59 @@ export class DeliveryAdminService {
         return { message: "Password reset successfull" };
     }
 
-    //  ORDER PROCESSING
+    //  ALL ORDERS (AT_WAREHOUSE)
 
-    async getProcessingOrders() {
-        const orders = await this.orderRepository.find({
-            where: { deliveryStatus: DeliveryStatus.ORDER_PROCESSING },
-            relations: [
-                "orderedBy",
-                "shippingAddress",
-                "orderItems",
-                "orderItems.product",
-                "orderItems.variant",
-                "orderItems.vendor",
-            ],
-            order: { createdAt: "DESC" },
-            withDeleted: true,
-        });
+    /**
+     * Returns paginated orders filtered by one or more statuses.
+     * When no statuses are provided, defaults to ARRIVED_AT_WAREHOUSE.
+     * Supports search by order number, customer name, or vendor name.
+     * Supports sort by createdAt asc/desc.
+     */
+    async getAtWarehouseOrders(
+        page: number = 1,
+        limit: number = 20,
+        search?: string,
+        sort: "newest" | "oldest" = "newest",
+        statuses?: OrderStatus[],
+    ) {
+        const filterStatuses =
+            statuses && statuses.length > 0
+                ? statuses
+                : [OrderStatus.ARRIVED_AT_WAREHOUSE];
 
-        return orders.map((o) => sanitizeOrderForDelivery(o));
-    }
+        const qb = this.orderRepository
+            .createQueryBuilder("order")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+            .leftJoinAndSelect("order.orderItems", "orderItems")
+            .leftJoinAndSelect("orderItems.product", "product")
+            .leftJoinAndSelect("orderItems.vendor", "vendor")
+            .leftJoinAndSelect("orderItems.variant", "variant")
+            // latest delivery assignment (for assigned rider info)
+            .leftJoinAndSelect("order.deliveryAssignments", "latestAssignment")
+            .leftJoinAndSelect("latestAssignment.rider", "rider")
+            .where("order.status IN (:...filterStatuses)", { filterStatuses })
+            .withDeleted();
 
-    async getProcessingOrderById(orderId: number) {
-        const order = await this.orderRepository.findOne({
-            where: { id: orderId },
-            relations: [
-                "orderedBy",
-                "shippingAddress",
-                "orderItems",
-                "orderItems.product",
-                "orderItems.variant",
-                "orderItems.vendor",
-            ],
-            withDeleted: true,
-        });
-
-        if (!order) {
-            throw new APIError(404, "Order not found");
-        }
-
-        // if (order.deliveryStatus !== DeliveryStatus.ORDER_PROCESSING) {
-        //     throw new APIError(
-        //         400,
-        //         `Order is processed and is ${order.deliveryStatus}`,
-        //     );
-        // }
-
-        return sanitizeOrderForDelivery(order);
-    }
-
-    async markAtWarehouse(orderId: number) {
-        const order = await this.findOrderById(orderId);
-
-        this.validateAndTransition(order, DeliveryStatus.AT_WAREHOUSE);
-        await this.orderRepository.save(order);
-
-        await this.orderService.changeOrderStatus(
-            orderId,
-            OrderStatus.ARRIVED_AT_WAREHOUSE,
-            {
-                actorRole: "SYSTEM",
-                reason: "Order arrived at warehouse",
-            },
-        );
-        // changeOrderStatus persists its own separately-fetched Order row —
-        // mirror the new value onto this local copy so the response we
-        // return here isn't stale.
-        order.status = OrderStatus.ARRIVED_AT_WAREHOUSE;
-
-        return sanitizeOrderForDelivery(order);
-    }
-
-    async collectOrderItems(orderItemId: number) {
-        const orderItem = await this.orderItemRepository.findOne({
-            where: { id: orderItemId },
-        });
-
-        if (!orderItem) {
-            throw new APIError(404, "Order Item not found");
-        }
-
-        orderItem.collectedAtWarehouse = true;
-        await this.orderItemRepository.save(orderItem);
-
-        const allOrderItems = await this.orderItemRepository.find({
-            where: { orderId: orderItem.orderId },
-            select: ["collectedAtWarehouse"],
-        });
-
-        const ready = allOrderItems.every((item) => item.collectedAtWarehouse);
-
-        if (ready) {
-            const order = await this.orderRepository.findOne({
-                where: { id: orderItem.orderId },
-            });
-
-            if (!order) {
-                throw new APIError(404, "Order not found for this order item");
-            }
-
-            this.validateAndTransition(
-                order,
-                DeliveryStatus.READY_FOR_DELIVERY,
+        if (search && search.trim()) {
+            const term = `%${search.trim()}%`;
+            qb.andWhere(
+                new Brackets((qb2) => {
+                    qb2.where("order.orderNumber ILIKE :term", { term })
+                        .orWhere("orderedBy.username ILIKE :term", { term })
+                        .orWhere("orderedBy.fullName ILIKE :term", { term })
+                        .orWhere("vendor.businessName ILIKE :term", { term });
+                }),
             );
-            await this.orderRepository.save(order);
         }
 
-        return orderItem;
-    }
+        qb.orderBy("order.createdAt", sort === "oldest" ? "ASC" : "DESC")
+          .addOrderBy("order.id", sort === "oldest" ? "ASC" : "DESC");
 
-    async getWarehouseOrderQueue(page: number = 1, limit: number = 20) {
-        const [orders, total] = await this.orderRepository.findAndCount({
-            where: { deliveryStatus: DeliveryStatus.AT_WAREHOUSE},
-            relations: [
-                "orderedBy",
-                "shippingAddress",
-                "orderItems",
-                "orderItems.product",
-                "orderItems.vendor",
-            ],
-            order: { updatedAt: "ASC" },
-            skip: (page - 1) * limit,
-            take: limit,
-            withDeleted: true,
-        });
+        const [orders, total] = await qb
+            .skip((page - 1) * limit)
+            .take(limit)
+            .getManyAndCount();
 
         const totalPages = Math.ceil(total / limit);
 
@@ -310,49 +202,59 @@ export class DeliveryAdminService {
     async assignRider(orderId: number, data: AssignRiderType) {
         const order = await this.findOrderById(orderId);
 
-        const rider = await this.riderRepository.findOne({
+        const newRider = await this.riderRepository.findOne({
             where: { id: data.riderId },
         });
-        if (!rider) throw new APIError(404, "rider not found");
+        if (!newRider) throw new APIError(404, "rider not found");
 
-        if (
-            order.deliveryStatus !== DeliveryStatus.READY_FOR_DELIVERY &&
-            order.deliveryStatus !== DeliveryStatus.AT_WAREHOUSE
-        ) {
+        // Order must be ARRIVED_AT_WAREHOUSE to be assigned
+        if (order.status !== OrderStatus.ARRIVED_AT_WAREHOUSE) {
             throw new APIError(
                 400,
-                "Order is not ready for delivery assignment",
+                `Order status must be ARRIVED_AT_WAREHOUSE to assign a rider. Current status: ${order.status}`,
             );
         }
 
         const existingAssignment = await this.assignmentRepository.findOne({
             where: { orderId },
             order: { createdAt: "DESC" },
+            relations: ["rider"],
         });
-
-        if (
-            existingAssignment &&
-            ![AssignmentStatus.DELIVERED, AssignmentStatus.FAILED].includes(
-                existingAssignment.assignmentStatus,
-            )
-        ) {
-            throw new APIError(
-                400,
-                "Order already has an active rider assigned",
-            );
-        }
 
         const savedAssignment = await AppDataSource.transaction(
             async (manager) => {
+                // If there's an existing assignment that is still active (not DELIVERED),
+                // close it out and free the previous rider.
+                if (
+                    existingAssignment &&
+                    ![
+                        AssignmentStatus.DELIVERED,
+                        AssignmentStatus.REASSIGNED
+                    ].includes(existingAssignment.assignmentStatus)
+                ) {
+                    existingAssignment.assignmentStatus =
+                        AssignmentStatus.REASSIGNED;
+                    // existingAssignment.failureReason = `Reassigned to rider ${newRider.fullName || `#${newRider.id}`}`;
+                    await manager.save(existingAssignment);
+
+                    if (existingAssignment.rider) {
+                        existingAssignment.rider.onDelivery = false;
+                        await manager.save(existingAssignment.rider);
+                    }
+                }
+
+                // Create new assignment for the new rider
                 const assignment = manager.create(DeliveryAssignment, {
                     orderId,
                     riderId: data.riderId,
+                    assignmentStatus: AssignmentStatus.ASSIGNED,
                 });
 
                 const saved = await manager.save(assignment);
 
-                this.validateAndTransition(order, DeliveryStatus.RIDER_ASSIGNED);
-                await manager.save(order);
+                // Update new rider status
+                newRider.onDelivery = true;
+                await manager.save(newRider);
 
                 return saved;
             },
@@ -363,11 +265,43 @@ export class DeliveryAdminService {
             OrderStatus.ASSIGNED_TO_RIDER,
             {
                 actorRole: "SYSTEM",
-                reason: `Assigned to rider ${rider.fullName}`,
+                reason: `Assigned to rider ${newRider.fullName || `#${newRider.id}`}`,
             },
         );
 
         return savedAssignment;
+    }
+
+    /**
+     * Bulk assign a single rider to multiple orders.
+     * Returns per-order results so the UI can show which orders failed.
+     */
+    async bulkAssignRider(
+        orderIds: number[],
+        riderId: number,
+    ): Promise<{ orderId: number; success: boolean; error?: string }[]> {
+        const rider = await this.riderRepository.findOne({
+            where: { id: riderId },
+        });
+        if (!rider) throw new APIError(404, "rider not found");
+
+        const results: { orderId: number; success: boolean; error?: string }[] =
+            [];
+
+        for (const orderId of orderIds) {
+            try {
+                await this.assignRider(orderId, { riderId });
+                results.push({ orderId, success: true });
+            } catch (err: any) {
+                results.push({
+                    orderId,
+                    success: false,
+                    error: err?.message ?? "Unknown error",
+                });
+            }
+        }
+
+        return results;
     }
 
     async getAllAssignments(page: number = 1, limit: number = 20) {
@@ -414,18 +348,58 @@ export class DeliveryAdminService {
         return sanitizeAssignmentForDelivery(assignment);
     }
 
+    // reset status to ARRIVED_AT_WAREHOUSE from failed
     async backToWarehouse(orderId: number) {
         const order = await this.findOrderById(orderId);
 
-        this.validateAndTransition(order, DeliveryStatus.AT_WAREHOUSE);
-        await this.orderRepository.save(order);
-
-        await this.orderService.changeOrderStatus(orderId, OrderStatus.RETURNED, {
-            actorRole: "SYSTEM",
-            reason: "Order returned to warehouse",
+        // Find existing active assignment (if any) and clear it so a new rider can be assigned
+        const existingAssignment = await this.assignmentRepository.findOne({
+            where: { orderId },
+            order: { createdAt: "DESC" },
+            relations: ["rider"],
         });
-        order.status = OrderStatus.RETURNED;
 
-        return sanitizeOrderForDelivery(order);
+        if (
+            existingAssignment &&
+            existingAssignment.assignmentStatus !== AssignmentStatus.DELIVERED &&
+            existingAssignment.assignmentStatus !== AssignmentStatus.NONE
+        ) {
+            await AppDataSource.transaction(async (manager) => {
+                existingAssignment.assignmentStatus = AssignmentStatus.NONE;
+                await manager.save(existingAssignment);
+
+                if (existingAssignment.rider) {
+                    existingAssignment.rider.onDelivery = false;
+                    await manager.save(existingAssignment.rider);
+                }
+            });
+        }
+
+        if (order.status !== OrderStatus.ARRIVED_AT_WAREHOUSE) {
+            await this.orderService.changeOrderStatus(
+                orderId,
+                OrderStatus.ARRIVED_AT_WAREHOUSE,
+                {
+                    actorRole: "SYSTEM",
+                    reason: "Order reset to warehouse for reassignment",
+                },
+            );
+        }
+
+        // Reload order to return fresh data
+        const updated = await this.findOrderById(orderId);
+        return sanitizeOrderForDelivery(updated);
+    }
+
+    async getFailedDeliveries(): Promise<DeliveryAssignment[]> {
+        return this.assignmentRepository
+            .createQueryBuilder("assignment")
+            .leftJoinAndSelect("assignment.order", "order")
+            .leftJoinAndSelect("assignment.rider", "rider")
+            .where("assignment.assignmentStatus = :status", {
+                status: AssignmentStatus.FAILED,
+            })
+            .orderBy("assignment.updatedAt", "DESC")
+            .getMany();
     }
 }
