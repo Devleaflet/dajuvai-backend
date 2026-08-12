@@ -190,8 +190,7 @@ router.post('/', authMiddleware, requireUserRole, validateZod(addToWishlistSchem
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   type: object
- *                   description: The updated wishlist object
+ *                   $ref: '#/components/schemas/Wishlist'
  *       404:
  *         description: Wishlist or wishlist item not found
  *       401:
@@ -209,7 +208,7 @@ router.delete('/', authMiddleware, requireUserRole, validateZod(removeFromWishli
  * /api/wishlist:
  *   get:
  *     summary: Get the authenticated user's wishlist with product details
- *     description: Retrieves the wishlist of the authenticated user including the products in it.
+ *     description: "Retrieves authenticated user's wishlist with hydrated product and optional variant details. Empty wishlist returns success true with data.items as an empty array."
  *     tags: [Wishlist]
  *     security:
  *       - bearerAuth: []
@@ -237,6 +236,9 @@ router.delete('/', authMiddleware, requireUserRole, validateZod(removeFromWishli
  *                             description: Wishlist item ID
  *                           productId:
  *                             type: integer
+ *                           variantId:
+ *                             type: integer
+ *                             nullable: true
  *                           product:
  *                             type: object
  *                             description: Product details
@@ -249,6 +251,12 @@ router.delete('/', authMiddleware, requireUserRole, validateZod(removeFromWishli
  *                                 type: string
  *                               basePrice:
  *                                 type: number
+ *                               finalPrice:
+ *                                 type: number
+ *                               productImages:
+ *                                 type: array
+ *                                 items:
+ *                                   type: string
  *       401:
  *         description: Unauthorized - user not authenticated
  *       500:
@@ -307,8 +315,7 @@ router.get('/', authMiddleware, requireUserRole, wishlistController.getWishlist.
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   type: object
- *                   description: Updated wishlist object
+ *                   $ref: '#/components/schemas/Wishlist'
  *       400:
  *         description: Bad request (invalid input)
  *       401:
@@ -362,8 +369,7 @@ router.post('/move-to-cart/batch', authMiddleware, requireUserRole, validateZod(
  *                   type: boolean
  *                   example: true
  *                 data:
- *                   type: object
- *                   description: Updated wishlist object
+ *                   $ref: '#/components/schemas/Wishlist'
  *       400:
  *         description: Bad request (invalid input)
  *       401:

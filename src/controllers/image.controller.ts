@@ -9,11 +9,12 @@ export class ImageController {
         this.imageService = new ImageService();
     }
 
-    async uplaodSingle(req: Request<{}, {}, {}, { folder: string }>, res: Response, next: NextFunction) {
-        const files = req.files as Express.Multer.File[];
-        if (!files || files.length === 0) return next(new BadRequestError("No file uploaded"));
+    async uploadSingle(req: Request<{}, {}, {}, { folder?: string }>, res: Response, next: NextFunction) {
+        const files = req.files as Express.Multer.File[] | undefined;
+        const file = req.file ?? files?.[0];
+        if (!file) return next(new BadRequestError("No file uploaded"));
 
-        const upload = await this.imageService.uploadSingleImage(files[0], req.query.folder);
+        const upload = await this.imageService.uploadSingleImage(file, req.query.folder);
         res.json({
             success: true,
             data: upload.url,

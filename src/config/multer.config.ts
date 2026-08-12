@@ -1,37 +1,52 @@
-import multer, { memoryStorage } from 'multer';
+import multer, { memoryStorage } from "multer";
+import { BadRequestError } from "../errors";
+import { MAX_UPLOAD_SIZE } from "../service/upload.validation";
+
+const STRICT_UPLOAD_MIME_TYPES = new Set([
+    "image/jpeg",
+    "image/png",
+    "image/jpg",
+    "image/pjpeg",
+    "image/webp",
+    "image/avif",
+    "image/heic",
+    "image/heif",
+    "image/x-canon-cr2",
+    "application/pdf",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "text/csv",
+]);
 
 export const multerOptions = {
     storage: memoryStorage(),
     fileFilter: (_req: any, file: Express.Multer.File, cb: any) => {
-        const allowedTypes = [
-            'image/jpeg',
-            'image/png',
-            'image/jpg',
-            'image/webp',
-            'image/avif',
-            'application/pdf',
-            'image/heic',
-            'image/heif',
-            'image/x-canon-cr2',
-            'application/vnd.ms-excel',
-            'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-            'application/msword',
-            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            'text/csv',
-        ];
-
-        if (!allowedTypes.includes(file.mimetype)) {
-            return cb(new Error('Only JPEG, PNG, WebP images, PDF, Word, Excel and CSV files are allowed'), false);
+        if (!STRICT_UPLOAD_MIME_TYPES.has((file.mimetype ?? "").toLowerCase())) {
+            return cb(new BadRequestError("Unsupported upload file type"), false);
         }
         cb(null, true);
     },
     limits: {
-        fileSize: 5 * 1024 * 1024, // 5MB
+        fileSize: MAX_UPLOAD_SIZE,
     },
 };
 
-// Accept any files
+export const singleUploadOptions = {
+    ...multerOptions,
+    // Mobile clients often send application/octet-stream for valid files.
+    // Content validation runs after memoryStorage has produced a buffer.
+    fileFilter: (_req: any, _file: Express.Multer.File, cb: any) => cb(null, true),
+    limits: {
+        ...multerOptions.limits,
+        files: 1,
+    },
+};
+
+// Accept any files; each consuming service validates its own buffered content.
 export const uploadMiddleware = multer(multerOptions).any();
+export const singleUploadMiddleware = multer(singleUploadOptions).any();
 
 export interface MulterFile {
     fieldname: string;

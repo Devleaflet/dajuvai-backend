@@ -11,6 +11,7 @@ import {
     DispatchQueryInput,
 } from "../utils/zod_validations/push.zod";
 import { GetNotificationsQuery } from "../utils/zod_validations/notification.zod";
+import { serializeNotification } from "../utils/notificationResponse";
 
 export class NotificationController {
     private notificationService: NotificationService;
@@ -35,7 +36,11 @@ export class NotificationController {
             this.getAuthEntity(req),
             page && limit ? { page, limit } : undefined,
         );
-        res.status(200).json({ success: true, ...result });
+        res.status(200).json({
+            success: true,
+            ...result,
+            data: result.data.map(serializeNotification),
+        });
     }
 
     async markReadController(req: CombinedAuthRequest<{ id: string }>, res: Response, _next: NextFunction) {
@@ -109,7 +114,10 @@ export class NotificationController {
             throw new NotFoundError("Notification");
         }
 
-        res.status(200).json({ success: true, data: notification });
+        res.status(200).json({
+            success: true,
+            data: serializeNotification(notification),
+        });
     }
 
     // ── Admin push ───────────────────────────────────────────────────────────

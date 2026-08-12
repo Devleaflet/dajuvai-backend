@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { uploadMiddleware } from "../config/multer.config";
+import { singleUploadMiddleware } from "../config/multer.config";
 import { ImageController } from "../controllers/image.controller";
 import { authMiddleware } from "../middlewares/auth.middleware";
 
@@ -78,8 +78,8 @@ const imageController = new ImageController();
 imageRouter.post(
   "/",
   //   authMiddleware,
-  uploadMiddleware,
-  imageController.uplaodSingle.bind(imageController),
+  singleUploadMiddleware,
+  imageController.uploadSingle.bind(imageController),
 );
 
 export default imageRouter;

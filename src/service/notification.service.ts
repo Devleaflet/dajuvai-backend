@@ -80,6 +80,7 @@ export class NotificationService {
         const total = await this.notificationRepo.count({ where });
         const data = await this.notificationRepo.find({
             where,
+            relations: ["order"],
             order: { createdAt: "DESC" },
             ...(pagination && {
                 skip: (pagination.page - 1) * pagination.limit,
@@ -357,8 +358,9 @@ export class NotificationService {
 
     async getNotificationById(id: string) {
         return await this.notificationRepo.findOne({
-            where: { id }
-        })
+            where: { id },
+            relations: ["order"],
+        });
     }
 
     /**

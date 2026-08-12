@@ -38,6 +38,90 @@ const responseEnvelope = (schema: Record<string, unknown>) => ({
 });
 
 export const swaggerSchemas = {
+  Notification: {
+    type: "object",
+    required: ["id", "title", "message", "body", "type", "target", "isRead", "createdAt", "updatedAt"],
+    properties: {
+      id: { type: "string", format: "uuid", example: "a02a85ed-b995-4e09-ac14-567f575c119c" },
+      title: { type: "string", example: "Order Status Updated" },
+      message: { type: "string", example: "Order #DV-20260810-00042 status updated to SHIPPED" },
+      body: { type: "string", description: "Compatibility alias of message for push-notification clients.", example: "Order #DV-20260810-00042 status updated to SHIPPED" },
+      type: { type: "string", enum: ["ORDER_PLACED", "ORDER_STATUS_UPDATED", "GENERAL"], example: "ORDER_STATUS_UPDATED" },
+      target: { type: "string", enum: ["ADMIN", "VENDOR", "USER"], example: "USER" },
+      isRead: { type: "boolean", example: false },
+      orderId: { type: "integer", nullable: true, example: 42 },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  NotificationListResponse: {
+    type: "object",
+    required: ["success", "data", "total"],
+    properties: {
+      success: { type: "boolean", example: true },
+      data: { type: "array", items: { $ref: "#/components/schemas/Notification" } },
+      total: { type: "integer", example: 12 },
+      page: { type: "integer", nullable: true, example: 1 },
+      limit: { type: "integer", nullable: true, example: 20 },
+      totalPages: { type: "integer", nullable: true, example: 1 },
+    },
+  },
+  WishlistItem: {
+    type: "object",
+    required: ["id", "productId", "variantId", "product", "variant"],
+    properties: {
+      id: { type: "integer", example: 10 },
+      productId: { type: "integer", example: 25 },
+      variantId: { type: "integer", nullable: true, example: null },
+      product: {
+        type: "object",
+        required: ["id", "name", "productImages"],
+        properties: {
+          id: { type: "integer", example: 25 },
+          name: { type: "string", example: "Wireless Headphones" },
+          description: { type: "string", nullable: true },
+          basePrice: { type: "number", example: 2500 },
+          finalPrice: { type: "number", example: 2250 },
+          discount: { type: "number", nullable: true, example: 10 },
+          discountAmount: { type: "number", nullable: true, example: 250 },
+          discountPercent: { type: "number", nullable: true, example: 10 },
+          discountType: { type: "string", nullable: true, enum: ["PERCENTAGE", "FLAT"] },
+          productImages: { type: "array", items: { type: "string" }, example: ["https://cdn.example.com/headphones.jpg"] },
+          ageRestriction: { type: "object", nullable: true },
+        },
+      },
+      variant: {
+        type: "object",
+        nullable: true,
+        properties: {
+          id: { type: "integer", example: 60 },
+          sku: { type: "string", nullable: true },
+          basePrice: { type: "number", nullable: true },
+          finalPrice: { type: "number", nullable: true },
+          variantImages: { type: "array", items: { type: "string" } },
+          attributes: { type: "object", nullable: true },
+          stock: { type: "integer", nullable: true },
+        },
+      },
+    },
+  },
+  Wishlist: {
+    type: "object",
+    required: ["items"],
+    properties: {
+      id: { type: "integer", nullable: true, example: 1 },
+      userId: { type: "integer", nullable: true, example: 42 },
+      items: { type: "array", items: { $ref: "#/components/schemas/WishlistItem" } },
+    },
+  },
+  PasswordMessageResponse: {
+    type: "object",
+    required: ["success", "message"],
+    properties: {
+      success: { type: "boolean", example: true },
+      message: { type: "string", example: "Password reset request sent" },
+    },
+  },
   DeliveryRider: {
     type: "object",
     required: ["id", "fullName", "phoneNumber", "email", "onDelivery", "userId", "createdAt", "updatedAt"],

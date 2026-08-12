@@ -1368,7 +1368,7 @@ router.post("/logout", vendorController.logout.bind(vendorController));
  * /api/vendors/forgot-password:
  *   post:
  *     summary: Request vendor password reset
- *     description: Sends a password reset token to the vendor's registered email address. Rate limited to 5 requests per 15 minutes.
+ *     description: Generates a six-digit reset token, stores it for 15 minutes, and emails it to the vendor. Rate limited to 5 requests per 15 minutes per IP. No authentication required.
  *     tags: [Vendors]
  *     requestBody:
  *       required: true
@@ -1397,7 +1397,7 @@ router.post("/logout", vendorController.logout.bind(vendorController));
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: "Password reset email sent successfully"
+ *                   example: "Password reset request sent"
  *       400:
  *         description: Invalid email format
  *         content:
@@ -1412,7 +1412,7 @@ router.post("/logout", vendorController.logout.bind(vendorController));
  *                   type: string
  *                   example: "Invalid email format"
  *       404:
- *         description: Vendor not found with this email
+ *         description: No vendor exists for submitted email. Response uses standard ApiError envelope.
  *         content:
  *           application/json:
  *             schema:
@@ -1463,7 +1463,7 @@ router.post(
  * /api/vendors/reset-password:
  *   post:
  *     summary: Reset vendor password with token
- *     description: Resets the vendor's password using a valid reset token received via email. Rate limited to 5 requests per 15 minutes.
+ *     description: Resets vendor password using six-digit token emailed by forgot-password. Token expires after 15 minutes, is single-use, and endpoint is rate limited to 5 requests per 15 minutes per IP. No authentication required.
  *     tags: [Vendors]
  *     requestBody:
  *       required: true
@@ -1486,13 +1486,15 @@ router.post(
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 description: New password (minimum 8 characters)
+ *                 maxLength: 100
+ *                 description: New password (8-100 characters)
  *                 example: "NewSecurePass123!"
  *               confirmPass:
  *                 type: string
  *                 format: password
  *                 minLength: 8
- *                 description: Confirm new password (must match newPass)
+ *                 maxLength: 100
+ *                 description: Confirm password; must match newPass
  *                 example: "NewSecurePass123!"
  *               token:
  *                 type: string
@@ -1512,7 +1514,7 @@ router.post(
  *                   example: true
  *                 message:
  *                   type: string
- *                   example: "Password reset successful"
+ *                   example: "Password reset successfully"
  *       400:
  *         description: Invalid token, password mismatch, or validation error
  *         content:
@@ -1540,7 +1542,7 @@ router.post(
  *                   type: string
  *                   example: "Vendor not found"
  *       410:
- *         description: Reset token expired
+ *         description: Reset token missing or expired. Response uses standard ApiError envelope.
  *       429:
  *         description: Too many requests - rate limit exceeded
  *       500:
@@ -2155,10 +2157,13 @@ router.delete(
  *         description: Vendor registration request submitted successfully
  *         content:
  *           application/json:
- *             example:
- *               success: true
- *               message: "Your account has been successfully registered. Our admin team will review your application within 5 business days"
- *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+ *             schema:
+ *               type: object
+ *               required: [success, message, token]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Your account has been successfully registered. Our admin team will review your application within 5 business days" }
+ *                 token: { type: string, description: Short-lived vendor access JWT, example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
  *       400:
  *         description: Validation error
  *       409:

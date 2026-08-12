@@ -1,4 +1,10 @@
 import { v2 as cloudinary } from "cloudinary";
+import config from "../config/env.config";
+import { APIError } from "../errors/ApiError";
+import {
+    validateUploadFile,
+    validateUploadFolder,
+} from "./upload.validation";
 
 export interface UploadedFile {
     url: string;
@@ -7,45 +13,86 @@ export interface UploadedFile {
 }
 
 export class ImageService {
+    constructor() {
+        cloudinary.config({
+            cloud_name: config.CLOUDINARY_CLOUD_NAME,
+            api_key: config.CLOUDINARY_API_KEY,
+            api_secret: config.CLOUDINARY_API_SECRET,
+        });
+    }
+
+    private ensureCloudinaryConfigured(): void {
+        const missing = [
+            ["CLOUDINARY_CLOUD_NAME", config.CLOUDINARY_CLOUD_NAME],
+            ["CLOUDINARY_API_KEY", config.CLOUDINARY_API_KEY],
+            ["CLOUDINARY_API_SECRET", config.CLOUDINARY_API_SECRET],
+        ]
+            .filter(([, value]) => !value)
+            .map(([name]) => name);
+
+        if (missing.length > 0) {
+            throw new APIError(
+                503,
+                "File upload service is not configured",
+                "UPLOAD_SERVICE_UNAVAILABLE",
+            );
+        }
+    }
+
+    private storageError(): APIError {
+        return new APIError(
+            502,
+            "File storage upload failed",
+            "UPLOAD_STORAGE_ERROR",
+        );
+    }
+
+    private getRawPublicId(file: Express.Multer.File, extension: string): string {
+        const baseName = (file.originalname ?? "upload")
+            .replace(/\.[^/.]+$/, "")
+            .replace(/[^a-zA-Z0-9_-]/g, "_")
+            .slice(0, 80) || "upload";
+        return `${baseName}_${Date.now()}.${extension}`;
+    }
+
     async uploadSingleImage(
         file: Express.Multer.File,
-        folderName: string,
+        folderName: string | undefined,
     ): Promise<UploadedFile> {
-        if (!file) throw new Error("No file provided");
-
-        const isImage = file.mimetype.startsWith("image/");
-        const isPdf = file.mimetype === "application/pdf";
+        const folder = validateUploadFolder(folderName);
+        const validated = validateUploadFile(file);
+        this.ensureCloudinaryConfigured();
 
         const uploadOptions: Record<string, unknown> = {
-            folder: folderName,
-            resource_type: isImage || isPdf ? "auto" : "raw",
+            folder,
+            resource_type: validated.resourceType,
         };
 
-        if (!isImage && !isPdf) {
-            const originalExt = file.originalname.split(".").pop() || "bin";
-            const baseName = file.originalname
-                .replace(/\.[^/.]+$/, "")
-                .replace(/[^a-zA-Z0-9_-]/g, "_")
-                .slice(0, 80);
-            uploadOptions.public_id = `${baseName}_${Date.now()}.${originalExt}`;
+        if (validated.resourceType === "raw") {
+            uploadOptions.public_id = this.getRawPublicId(file, validated.extension);
         }
 
         const result = await new Promise<any>((resolve, reject) => {
-            cloudinary.uploader
-                .upload_stream(uploadOptions, (error, result) => {
-                    if (error || !result)
-                        return reject(error || new Error("Upload failed"));
-                    resolve(result);
-                })
-                .end(file.buffer);
+            try {
+                cloudinary.uploader
+                    .upload_stream(uploadOptions, (error, uploadResult) => {
+                        if (error || !uploadResult) return reject(this.storageError());
+                        resolve(uploadResult);
+                    })
+                    .end(file.buffer);
+            } catch {
+                reject(this.storageError());
+            }
         });
 
-        console.log(result);
+        if (!result.secure_url || !result.public_id) {
+            throw this.storageError();
+        }
 
         return {
             url: result.secure_url,
             publicId: result.public_id,
-            resourceType: result.resource_type,
+            resourceType: result.resource_type ?? validated.resourceType,
         };
     }
 

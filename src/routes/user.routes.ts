@@ -430,6 +430,42 @@ userRouter.delete(
     userController.deleteStaff.bind(userController),
 );
 
+/**
+ * @swagger
+ * /api/auth/staff/{id}/permissions:
+ *   get:
+ *     summary: Get staff permission map
+ *     description: Returns configured module permission levels for one staff account. Admin authentication required.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: Staff user ID
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           example: 24
+ *     responses:
+ *       200:
+ *         description: Permission map keyed by module name
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   additionalProperties:
+ *                     type: integer
+ *                   example: { PRODUCT: 2, ORDER: 1, VENDOR: 0 }
+ *       404:
+ *         description: Staff account does not exist
+ */
 userRouter.get(
     "/staff/:id/permissions",
     authMiddleware,
@@ -1513,7 +1549,7 @@ userRouter.get(
  * /api/auth/forgot-password:
  *   post:
  *     summary: Request password reset
- *     description: Sends a password reset token to the user's email
+ *     description: Generates a reset token, stores it for 15 minutes, and emails it to the user. Google-authenticated users cannot use this flow. Rate limited to 5 requests per 15 minutes per IP. No authentication required.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -1538,11 +1574,15 @@ userRouter.get(
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 message:
  *                   type: string
- *                   example: Password reset email sent successfully
+ *                   example: Password reset request sent
  *             example:
- *               message: "Password reset email sent successfully"
+ *               success: true
+ *               message: "Password reset request sent"
  *       400:
  *         description: Invalid email
  *       404:
@@ -1564,7 +1604,7 @@ userRouter.post(
  * /api/auth/reset-password:
  *   post:
  *     summary: Reset password with token
- *     description: Resets the user's password using a valid reset token
+ *     description: Resets user password using token emailed by forgot-password. Token expires after 15 minutes, is single-use, and Google-authenticated users cannot use this flow. Rate limited to 5 requests per 15 minutes per IP. No authentication required.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -1585,15 +1625,18 @@ userRouter.post(
  *               newPass:
  *                 type: string
  *                 format: password
- *                 description: New password (min 8 characters)
+ *                 minLength: 8
+ *                 description: New password (minimum 8 characters)
  *               confirmPass:
  *                 type: string
  *                 format: password
- *                 description: Confirm new password
+ *                 minLength: 1
+ *                 description: Confirm password; must match newPass
  *               token:
  *                 type: string
  *                 description: Password reset token
  *           example:
+ *             email: "user@example.com"
  *             newPass: "newPassword123!@#"
  *             confirmPass: "newPassword123!@#"
  *             token: "123456"
@@ -1607,15 +1650,15 @@ userRouter.post(
  *               properties:
  *                 message:
  *                   type: string
- *                   example: Password reset successful
+ *                   example: Password reset successfully
  *             example:
- *               message: "Password reset successful"
+ *               message: "Password reset successfully"
  *       400:
  *         description: Invalid token, password, or passwords do not match
  *       404:
- *         description: Token not found
+ *         description: User does not exist for submitted email
  *       410:
- *         description: Token expired
+ *         description: Reset token missing or expired. Response uses standard ApiError envelope.
  *       429:
  *         description: Too many requests, please try again later
  */

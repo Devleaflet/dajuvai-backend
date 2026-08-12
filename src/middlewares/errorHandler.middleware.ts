@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from "express";
+import multer from "multer";
 import { QueryFailedError, EntityNotFoundError } from "typeorm";
 import { ZodError } from "zod";
 import {
@@ -8,6 +9,7 @@ import {
 import { APIError } from "../errors/ApiError";
 import {
     AuthError,
+    BadRequestError,
     DatabaseError,
     ForeignKeyConstraintError,
     NotFoundError,
@@ -25,6 +27,20 @@ const isProduction = config.NODE_ENV === "production";
 function normalizeError(err: unknown): APIError {
     // Already one of our errors — pass through unchanged
     if (err instanceof APIError) return err;
+
+    // Multer errors are client input errors, not server failures.
+    if (err instanceof multer.MulterError) {
+        const messages: Record<string, string> = {
+            LIMIT_FILE_SIZE: "Uploaded file must be 5 MB or smaller",
+            LIMIT_FILE_COUNT: "Only one file can be uploaded at a time",
+            LIMIT_UNEXPECTED_FILE: "Unexpected upload field",
+            LIMIT_FIELD_COUNT: "Too many form fields",
+            LIMIT_FIELD_KEY: "Upload field name is too long",
+            LIMIT_FIELD_VALUE: "Upload field value is too long",
+            LIMIT_PART_COUNT: "Too many multipart form parts",
+        };
+        return new BadRequestError(messages[err.code] ?? "Invalid multipart upload");
+    }
 
     // Legacy APIError shape used across older services/controllers (src/utils/ApiError.utils.ts)
     // This prevents intentional 4xx errors from being downgraded to a generic 500.
