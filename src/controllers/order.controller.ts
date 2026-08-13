@@ -17,6 +17,7 @@ import {
     NotFoundError,
 } from "../errors";
 import { UserRole } from "../entities/user.entity";
+import { AuditActorType } from "../entities/auditLog.entity";
 import { findUserByEmail, findUserById } from "../service/user.service";
 import {
     sendCustomerOrderEmail,
@@ -480,6 +481,10 @@ export class OrderController {
             {
                 actorRole: "ADMIN",
                 changedByUserId: req.user.id,
+                auditActorType:
+                    req.user.role === UserRole.STAFF
+                        ? AuditActorType.STAFF
+                        : AuditActorType.ADMIN,
                 reason,
                 note,
                 expectedCurrentStatus,
