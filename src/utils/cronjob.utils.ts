@@ -16,6 +16,7 @@ import { Vendor } from "../entities/vendor.entity";
 import { deviceTokenService } from "../service/deviceToken.service";
 import { Product } from "../entities/product.entity";
 import { Variant } from "../entities/variant.entity";
+import { VendorService } from "../service/vendor.service";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
@@ -246,6 +247,16 @@ export const removeUnverifiedVendors = () => {
             });
         } catch (error) {
             // silent fail for cron
+        }
+    });
+};
+
+export const finalizeVendorAccountDeletions = () => {
+    cron.schedule("0 * * * *", async () => {
+        try {
+            await new VendorService().finalizeExpiredVendorDeletions();
+        } catch (error) {
+            // silent fail for cron; next hourly run retries safely
         }
     });
 };

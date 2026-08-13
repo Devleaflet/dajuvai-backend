@@ -65,6 +65,14 @@ export const vendorLoginSchema = z.object({
     .max(25, "Password must not exceed 25 characters"),
 });
 
+export const vendorDeleteAccountSchema = z.object({
+  email: z.string().email("Invalid email format"),
+  password: z.string().min(1, "Password is required"),
+  confirmation: z.literal("DELETE", {
+    errorMap: () => ({ message: "Type DELETE to confirm account deletion" }),
+  }),
+});
+
 /**
  * Schema to request verification token for vendor email.
  */

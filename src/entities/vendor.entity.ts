@@ -86,6 +86,18 @@ export class Vendor {
     @Column({ default: false })
     isApproved: boolean;
 
+    @Column({ type: "timestamp", nullable: true })
+    deletionRequestedAt: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionScheduledFor: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionFinalizedAt: Date | null;
+
+    @Column({ type: "boolean", nullable: true })
+    deletionPreviousApproval: boolean | null;
+
     @Column({ nullable: true })
     resetToken: string | null;
 

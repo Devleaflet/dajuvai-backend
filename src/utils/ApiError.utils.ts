@@ -13,9 +13,17 @@
  *   throw new APIError(404, 'Resource not found');
  */
 export class APIError extends Error {
-    constructor(public status: number, message: string) {
+    public readonly errorCode: string;
+
+    constructor(
+        public status: number,
+        message: string,
+        errorCode: string = "GENERIC_ERROR",
+    ) {
         super(message);
         this.status = status;
+        this.errorCode = errorCode;
+        Object.setPrototypeOf(this, new.target.prototype);
 
     }
 }

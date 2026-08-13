@@ -1,4 +1,6 @@
-import { Repository, MoreThan } from "typeorm";
+import { In, IsNull, LessThanOrEqual, MoreThan, Repository } from "typeorm";
+import bcrypt from "bcryptjs";
+import { randomUUID } from "crypto";
 import { Vendor } from "../entities/vendor.entity";
 import AppDataSource from "../config/db.config";
 import {
@@ -19,6 +21,9 @@ import {
 } from "../entities/vendorPaymentOption";
 import { toVendorAdminDTO } from "../utils/vendorAdminDto";
 import { sanitizeVendor } from "../utils/sanitize.util";
+import { getVendorDeletionDeadline, isVendorDeletionGracePeriodActive } from "./vendor-account-deletion.policy";
+import { Product } from "../entities/product.entity";
+import { Variant } from "../entities/variant.entity";
 
 /**
  * Service for managing vendor-related operations such as
@@ -139,6 +144,19 @@ export class VendorService {
         return await this.vendorRepository.findOne({ where: { email } });
     }
 
+    async findVendorForSignup(email: string): Promise<Vendor | null> {
+        const vendor = await this.findVendorByEmail(email);
+        if (
+            vendor?.deletionScheduledFor &&
+            vendor.deletionScheduledFor <= new Date() &&
+            !vendor.deletionFinalizedAt
+        ) {
+            await this.finalizeVendorDeletion(vendor.id);
+            return null;
+        }
+        return vendor;
+    }
+
     /**
      * Finds a vendor by reset token (e.g., for password reset).
      * @param token - Reset token string.
@@ -246,8 +264,189 @@ export class VendorService {
         );
     }
 
-    async deleteVendor(id: number) {
-        return await this.vendorRepository.delete(id);
+    async requestAccountDeletion(
+        id: number,
+        email: string,
+        password: string,
+    ): Promise<Date> {
+        const vendor = await this.vendorRepository.findOne({ where: { id } });
+        if (!vendor) throw new APIError(404, "Vendor not found");
+        if (vendor.email.toLowerCase() !== email.trim().toLowerCase()) {
+            throw new APIError(401, "Invalid credentials");
+        }
+        if (!(await bcrypt.compare(password, vendor.password))) {
+            throw new APIError(401, "Invalid credentials");
+        }
+        if (vendor.deletionScheduledFor && !vendor.deletionFinalizedAt) {
+            return vendor.deletionScheduledFor;
+        }
+
+        const requestedAt = new Date();
+        const scheduledFor = getVendorDeletionDeadline(requestedAt);
+
+        await this.vendorRepository.manager.transaction(async (manager) => {
+            const currentVendor = await manager.findOne(Vendor, { where: { id } });
+            if (!currentVendor) throw new APIError(404, "Vendor not found");
+
+            currentVendor.deletionRequestedAt = requestedAt;
+            currentVendor.deletionScheduledFor = scheduledFor;
+            currentVendor.deletionFinalizedAt = null;
+            currentVendor.deletionPreviousApproval = currentVendor.isApproved;
+            currentVendor.isApproved = false;
+            await manager.save(currentVendor);
+
+            const products = await manager.find(Product, { where: { vendorId: id } });
+            for (const product of products) {
+                product.deletedAt = requestedAt;
+                product.vendorDeletionArchivedAt = requestedAt;
+                await manager.save(product);
+
+                const variants = await manager.find(Variant, { where: { productId: product.id } });
+                for (const variant of variants) {
+                    variant.deletedAt = requestedAt;
+                    variant.vendorDeletionArchivedAt = requestedAt;
+                    await manager.save(variant);
+                }
+            }
+        });
+
+        return scheduledFor;
+    }
+
+    async reactivateVendor(email: string, password: string): Promise<Vendor> {
+        const vendor = await this.findVendorByEmail(email.trim().toLowerCase());
+        if (!vendor || !vendor.deletionRequestedAt || vendor.deletionFinalizedAt) {
+            throw new APIError(401, "Invalid credentials");
+        }
+        if (!(await bcrypt.compare(password, vendor.password))) {
+            throw new APIError(401, "Invalid credentials");
+        }
+        if (!isVendorDeletionGracePeriodActive(vendor.deletionRequestedAt)) {
+            await this.finalizeVendorDeletion(vendor.id);
+            throw new APIError(410, "Account deletion grace period has expired");
+        }
+
+        await this.vendorRepository.manager.transaction(async (manager) => {
+            const currentVendor = await manager.findOne(Vendor, { where: { id: vendor.id } });
+            if (!currentVendor) throw new APIError(401, "Invalid credentials");
+
+            currentVendor.isApproved = currentVendor.deletionPreviousApproval ?? true;
+            currentVendor.deletionRequestedAt = null;
+            currentVendor.deletionScheduledFor = null;
+            currentVendor.deletionPreviousApproval = null;
+            await manager.save(currentVendor);
+
+            const products = await manager
+                .createQueryBuilder(Product, "product")
+                .withDeleted()
+                .where("product.vendorId = :vendorId", { vendorId: vendor.id })
+                .andWhere("product.vendorDeletionArchivedAt = :archivedAt", {
+                    archivedAt: vendor.deletionRequestedAt,
+                })
+                .getMany();
+
+            for (const product of products) {
+                product.deletedAt = null;
+                product.vendorDeletionArchivedAt = null;
+                await manager.save(product);
+            }
+
+            const variants = await manager
+                .createQueryBuilder(Variant, "variant")
+                .withDeleted()
+                .where("variant.vendorDeletionArchivedAt = :archivedAt", {
+                    archivedAt: vendor.deletionRequestedAt,
+                })
+                .andWhere("variant.productId IN (:...productIds)", {
+                    productIds: products.length ? products.map((p) => p.id) : [0],
+                })
+                .getMany();
+
+            for (const variant of variants) {
+                variant.deletedAt = null;
+                variant.vendorDeletionArchivedAt = null;
+                await manager.save(variant);
+            }
+        });
+
+        return (await this.findVendorByEmail(email.trim().toLowerCase()))!;
+    }
+
+    async finalizeVendorDeletion(id: number): Promise<void> {
+        await this.vendorRepository.manager.transaction(async (manager) => {
+            const vendor = await manager.findOne(Vendor, { where: { id } });
+            if (!vendor || vendor.deletionFinalizedAt) return;
+
+            const finalizationAt = new Date();
+            const products = await manager
+                .createQueryBuilder(Product, "product")
+                .withDeleted()
+                .where("product.vendorId = :vendorId", { vendorId: id })
+                .getMany();
+            for (const product of products) {
+                if (!product.deletedAt) product.deletedAt = finalizationAt;
+                product.vendorDeletionArchivedAt = null;
+                await manager.save(product);
+            }
+
+            const variants = await manager
+                .createQueryBuilder(Variant, "variant")
+                .withDeleted()
+                .where("variant.productId IN (:...productIds)", {
+                    productIds: products.length ? products.map((p) => p.id) : [0],
+                })
+                .getMany();
+            for (const variant of variants) {
+                if (!variant.deletedAt) variant.deletedAt = finalizationAt;
+                variant.vendorDeletionArchivedAt = null;
+                await manager.save(variant);
+            }
+
+            await manager.delete(VendorPaymentOption, { vendorId: id });
+            vendor.email = `deleted-vendor-${vendor.id}-${Date.now()}@deleted.invalid`;
+            vendor.password = await bcrypt.hash(randomUUID(), 10);
+            vendor.businessName = `Deleted Vendor ${vendor.id}`;
+            vendor.phoneNumber = "";
+            vendor.telePhone = null;
+            vendor.businessRegNumber = null;
+            vendor.taxNumber = null;
+            vendor.taxDocuments = null;
+            vendor.citizenshipDocuments = null;
+            vendor.chequePhoto = null;
+            vendor.accountName = null;
+            vendor.bankName = null;
+            vendor.accountNumber = null;
+            vendor.bankBranch = null;
+            vendor.profilePicture = null;
+            vendor.fcmToken = null;
+            vendor.isApproved = false;
+            vendor.isVerified = false;
+            vendor.resetToken = null;
+            vendor.resetTokenExpire = null;
+            vendor.verificationCode = null;
+            vendor.verificationCodeExpire = null;
+            vendor.resendCount = 0;
+            vendor.resendBlockUntil = null;
+            vendor.deletionFinalizedAt = new Date();
+            vendor.deletionPreviousApproval = null;
+            await manager.save(vendor);
+        });
+    }
+
+    async finalizeExpiredVendorDeletions(now = new Date()): Promise<number> {
+        const vendors = await this.vendorRepository.find({
+            where: {
+                deletionScheduledFor: LessThanOrEqual(now),
+                deletionFinalizedAt: IsNull(),
+            },
+        });
+        for (const vendor of vendors) await this.finalizeVendorDeletion(vendor.id);
+        return vendors.length;
+    }
+
+    async deleteVendor(id: number): Promise<{ affected: number }> {
+        await this.finalizeVendorDeletion(id);
+        return { affected: 1 };
     }
 
     /**

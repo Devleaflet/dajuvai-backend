@@ -406,6 +406,12 @@ export class SearchService {
     const nameBoundary = searchCondition.query.split(" ").length === 1
       ? `(' ' || COALESCE(${name}, '') || ' ') LIKE :searchBoundary`
       : `${name} LIKE :searchLike`;
+    const namePrefix = searchCondition.query.split(" ").length === 1
+      ? `(' ' || COALESCE(${name}, '') || ' ') LIKE :searchTokenPrefix0`
+      : searchCondition.query
+          .split(" ")
+          .map((_, index) => `(' ' || COALESCE(${name}, '') || ' ') LIKE :searchTokenPrefix${index}`)
+          .join(" AND ");
     const synonymKeys = Object.keys(searchCondition.parameters).filter((key) =>
       key.startsWith("searchSynonym"),
     );
@@ -416,7 +422,8 @@ export class SearchService {
       : "FALSE";
     return `CASE
       WHEN ${name} = :searchExact THEN 1000
-      WHEN ${name} LIKE :searchPrefix AND ${nameBoundary} THEN 900
+      WHEN ${name} LIKE :searchPrefix THEN 900
+      WHEN ${namePrefix} THEN 800
       WHEN (${aliasMatch}) THEN 800
       WHEN ${nameBoundary} THEN 700
       ELSE 0

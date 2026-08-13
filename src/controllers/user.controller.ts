@@ -51,6 +51,9 @@ import {
 import { APIError } from "../utils/ApiError.utils";
 import { AuthProvider, User, UserRole } from "../entities/user.entity";
 import {
+    createAuthAccountConflict,
+} from "../service/auth-account-conflict.policy";
+import {
     AuthRequest,
     CombinedAuthRequest,
     isVendor,
@@ -474,10 +477,17 @@ export class UserController {
             let existingUser = await findUserByEmail(loweredEmail);
 
             const existingAccount =
-                await this.vendorService.findVendorByEmail(loweredEmail);
+                await this.vendorService.findVendorForSignup(loweredEmail);
 
             if (existingAccount) {
-                throw new APIError(400, "User already exists");
+                const conflict = createAuthAccountConflict(
+                    "customerAccountExists",
+                );
+                throw new APIError(
+                    conflict.status,
+                    conflict.message,
+                    conflict.errorCode,
+                );
             }
 
             //  Prepare hashed password and verification token
@@ -489,9 +499,13 @@ export class UserController {
             if (existingUser) {
                 if (existingUser.isVerified) {
                     // User already verified — reject signup
+                    const conflict = createAuthAccountConflict(
+                        "customerAccountExists",
+                    );
                     throw new APIError(
-                        409,
-                        "User already exists and is verified",
+                        conflict.status,
+                        conflict.message,
+                        conflict.errorCode,
                     );
                 }
 
@@ -572,6 +586,7 @@ export class UserController {
             if (error instanceof APIError) {
                 res.status(error.status).json({
                     success: false,
+                    errorCode: error.errorCode,
                     message: error.message,
                 });
             } else {
@@ -619,7 +634,20 @@ export class UserController {
             const user = await findUserByEmailLogin(loweredEmail);
 
             if (!user) {
-                throw new APIError(404, "User does not exist");
+                const vendor = await this.vendorService.findVendorForSignup(
+                    loweredEmail,
+                );
+                if (vendor) {
+                    const conflict = createAuthAccountConflict(
+                        "customerAccountExists",
+                    );
+                    throw new APIError(
+                        conflict.status,
+                        conflict.message,
+                        conflict.errorCode,
+                    );
+                }
+                throw new APIError(404, "Customer account does not exist");
             }
 
             if (user.provider !== AuthProvider.LOCAL) {
@@ -693,6 +721,7 @@ export class UserController {
             if (error instanceof APIError) {
                 res.status(error.status).json({
                     success: false,
+                    errorCode: error.errorCode,
                     message: error.message,
                 });
             } else {

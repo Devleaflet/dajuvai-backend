@@ -973,7 +973,7 @@ router.delete(
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
  *   post:
  *     summary: Create a new product
- *     description: Creates a new product. Product images must be uploaded separately first to get URLs (e.g., from Cloudinary). Requires vendor or admin authorization via JWT.
+ *     description: Creates a new product. Product images must be uploaded separately first to get URLs (e.g., from Cloudinary). Requires vendor authorization via JWT. Server refreshes normalized search fields and PostgreSQL full-text index automatically; clients must not send search_vector.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []

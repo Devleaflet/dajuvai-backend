@@ -24,6 +24,7 @@ import {
     resetPasswordSchema,
     IVendorSignupRequestV2,
     vendorSignupSchemav2,
+    vendorDeleteAccountSchema,
     IUpdateVendorRequestV2,
     IUpdateVendorPaymentOptionRequest,
 } from "../utils/zod_validations/vendor.zod";
@@ -33,7 +34,6 @@ import {
     AuthError,
     ForbiddenError,
     NotFoundError,
-    ConflictError,
     RateLimitError,
     GoneError,
     APIError,
@@ -41,6 +41,7 @@ import {
 import { DistrictService } from "../service/district.service";
 import { findUserByEmail } from "../service/user.service";
 import config from "../config/env.config";
+import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
 
 /**
  * Utility class for token management
@@ -65,6 +66,32 @@ export class VendorController {
         this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
         this.districtService = new DistrictService();
+    }
+
+    private issueVendorSession(res: Response, vendor: any) {
+        const token = jwt.sign(
+            { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+            this.jwtSecret,
+            { expiresIn: "15m" },
+        );
+        const refreshToken = jwt.sign(
+            { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+            config.JWT_REFRESH_SECRET,
+            { expiresIn: "7d" },
+        );
+        res.cookie("vendorToken", token, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 15 * 60 * 1000,
+        });
+        res.cookie("vendorRefreshToken", refreshToken, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: 7 * 24 * 60 * 60 * 1000,
+        });
+        return { token, refreshToken };
     }
 
     async getVendors(
@@ -120,12 +147,34 @@ export class VendorController {
         const { email, password, district } = parsed.data;
 
         const existingVendor =
-            await this.vendorService.findVendorByEmail(email);
+            await this.vendorService.findVendorForSignup(email);
         const existingUser = await findUserByEmail(email);
 
-        if (existingUser) throw new ConflictError("User already exists");
-        if (existingVendor && existingVendor.isVerified)
-            throw new ConflictError("Vendor already exists");
+        if (existingUser) {
+            const conflict = createAuthAccountConflict(
+                "emailRegisteredAsCustomer",
+            );
+            throw new APIError(
+                conflict.status,
+                conflict.message,
+                conflict.errorCode,
+            );
+        }
+        if (existingVendor?.deletionRequestedAt && !existingVendor.deletionFinalizedAt) {
+            const conflict = createAuthAccountConflict(
+                "vendorDeletionPending",
+                existingVendor.deletionScheduledFor,
+            );
+            throw new APIError(conflict.status, conflict.message, conflict.errorCode);
+        }
+        if (existingVendor) {
+            const conflict = createAuthAccountConflict("vendorAccountExists");
+            throw new APIError(
+                conflict.status,
+                conflict.message,
+                conflict.errorCode,
+            );
+        }
 
         const districtEntity =
             await this.districtService.findDistrictByName(district);
@@ -192,7 +241,35 @@ export class VendorController {
 
         const { email, password } = parsed.data;
         const vendor = await this.vendorService.findVendorByEmailLogin(email);
-        if (!vendor) throw new AuthError("Vendor does not exist");
+        if (!vendor) {
+            const customer = await findUserByEmail(email);
+            if (customer) {
+                const conflict = createAuthAccountConflict(
+                    "emailRegisteredAsCustomer",
+                );
+                throw new APIError(
+                    conflict.status,
+                    conflict.message,
+                    conflict.errorCode,
+                );
+            }
+            throw new AuthError("Vendor account does not exist");
+        }
+
+        const isMatch = await bcrypt.compare(password, vendor.password);
+        if (!isMatch) throw new AuthError("Invalid credentials");
+
+        if (vendor.deletionRequestedAt && !vendor.deletionFinalizedAt) {
+            if (vendor.deletionScheduledFor && vendor.deletionScheduledFor <= new Date()) {
+                await this.vendorService.finalizeVendorDeletion(vendor.id);
+                throw new AuthError("Vendor does not exist");
+            }
+            throw new APIError(
+                409,
+                `Account scheduled for deletion until ${vendor.deletionScheduledFor?.toISOString()}. Reactivate it to continue.`,
+                "VENDOR_DELETION_PENDING",
+            );
+        }
 
         if (!vendor.isApproved) {
             throw new ForbiddenError(
@@ -200,42 +277,7 @@ export class VendorController {
             );
         }
 
-        const isMatch = await bcrypt.compare(password, vendor.password);
-        if (!isMatch) throw new AuthError("Invalid credentials");
-
-        const token = jwt.sign(
-            {
-                id: vendor.id,
-                email: vendor.email,
-                businessName: vendor.businessName,
-            },
-            this.jwtSecret,
-            { expiresIn: "15m" },
-        );
-
-        const refreshToken = jwt.sign(
-            {
-                id: vendor.id,
-                email: vendor.email,
-                businessName: vendor.businessName,
-            },
-            config.JWT_REFRESH_SECRET,
-            { expiresIn: "7d" },
-        );
-
-        res.cookie("vendorToken", token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 15 * 60 * 1000,
-        });
-
-        res.cookie("vendorRefreshToken", refreshToken, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 7 * 24 * 60 * 60 * 1000,
-        });
+        const { token, refreshToken } = this.issueVendorSession(res, vendor);
 
         res.status(200).json({
             success: true,
@@ -292,12 +334,71 @@ export class VendorController {
         res.status(200).json({ success: true, token: newAccessToken });
     }
 
+    async reactivate(
+        req: Request<{}, {}, IVendorLoginRequest>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const parsed = vendorLoginSchema.safeParse(req.body);
+        if (!parsed.success) {
+            throw new ValidationError(
+                "Validation failed",
+                parsed.error.errors.map((e) => ({ field: e.path.join("."), message: e.message })),
+            );
+        }
+        const vendor = await this.vendorService.reactivateVendor(
+            parsed.data.email,
+            parsed.data.password,
+        );
+        if (!vendor.isApproved) throw new ForbiddenError("Your account is not yet approved");
+        const { token, refreshToken } = this.issueVendorSession(res, vendor);
+        res.status(200).json({
+            success: true,
+            message: "Vendor account reactivated successfully",
+            vendor: {
+                id: vendor.id,
+                email: vendor.email,
+                businessName: vendor.businessName,
+                profilePicture: vendor.profilePicture,
+            },
+            token,
+            refreshToken,
+        });
+    }
+
     async logout(_req: Request, res: Response): Promise<void> {
         res.clearCookie("vendorToken");
         res.clearCookie("vendorRefreshToken");
         res.status(200).json({
             success: true,
             message: "Logged out successfully",
+        });
+    }
+
+    async requestAccountDeletion(
+        req: VendorAuthRequest<{}, {}, { email: string; password: string; confirmation: "DELETE" }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const parsed = vendorDeleteAccountSchema.safeParse(req.body);
+        if (!parsed.success) {
+            throw new ValidationError(
+                "Validation failed",
+                parsed.error.errors.map((e) => ({ field: e.path.join("."), message: e.message })),
+            );
+        }
+        if (!req.vendor) throw new AuthError("Authentication required");
+        const scheduledFor = await this.vendorService.requestAccountDeletion(
+            req.vendor.id,
+            parsed.data.email,
+            parsed.data.password,
+        );
+        res.clearCookie("vendorToken");
+        res.clearCookie("vendorRefreshToken");
+        res.status(202).json({
+            success: true,
+            message: "Account scheduled for deletion. You can reactivate it before the deadline.",
+            deletionScheduledFor: scheduledFor,
         });
     }
 
@@ -634,14 +735,36 @@ export class VendorController {
 
         const data = parsed.data;
 
-        const existingVendor = await this.vendorService.findVendorByEmail(
+        const existingVendor = await this.vendorService.findVendorForSignup(
             data.email,
         );
         const existingUser = await findUserByEmail(data.email);
 
-        if (existingUser) throw new ConflictError("User already exists");
-        if (existingVendor && existingVendor.isVerified)
-            throw new ConflictError("Vendor already exists");
+        if (existingUser) {
+            const conflict = createAuthAccountConflict(
+                "emailRegisteredAsCustomer",
+            );
+            throw new APIError(
+                conflict.status,
+                conflict.message,
+                conflict.errorCode,
+            );
+        }
+        if (existingVendor?.deletionRequestedAt && !existingVendor.deletionFinalizedAt) {
+            const conflict = createAuthAccountConflict(
+                "vendorDeletionPending",
+                existingVendor.deletionScheduledFor,
+            );
+            throw new APIError(conflict.status, conflict.message, conflict.errorCode);
+        }
+        if (existingVendor) {
+            const conflict = createAuthAccountConflict("vendorAccountExists");
+            throw new APIError(
+                conflict.status,
+                conflict.message,
+                conflict.errorCode,
+            );
+        }
 
         const districtEntity = await this.districtService.findDistrictByName(
             data.district,

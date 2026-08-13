@@ -57,6 +57,9 @@ export class Variant {
     @DeleteDateColumn({ name: 'deleted_at' })
     deletedAt?: Date;
 
+    @Column({ type: 'timestamp', nullable: true })
+    vendorDeletionArchivedAt?: Date | null;
+
     // orphanedRowAction must be set here too: TypeORM reads it off this
     // (inverse/ManyToOne) side when deciding what to do with a variant
     // dropped from Product.variants, defaulting to "nullify" otherwise —

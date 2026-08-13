@@ -32,6 +32,9 @@ export function buildCatalogSearchCondition(
 
   tokens.forEach((token, index) => {
     parameters[`searchToken${index}`] = `% ${token} %`;
+    // Match token prefixes at word boundaries: `tes` matches `test`, but not
+    // the middle of `contest`.
+    parameters[`searchTokenPrefix${index}`] = `% ${token}%`;
   });
   expandedTokens.forEach((token, index) => {
     parameters[`searchSynonym${index}`] = `% ${token} %`;
@@ -50,6 +53,14 @@ export function buildCatalogSearchCondition(
     { length: tokens.length },
     (_, index) => boundaryMatch(searchText, `searchToken${index}`),
   ).join(" AND ");
+  const nameTokenPrefixMatch = Array.from(
+    { length: tokens.length },
+    (_, index) => boundaryMatch(normalizedName, `searchTokenPrefix${index}`),
+  ).join(" AND ");
+  const textTokenPrefixMatch = Array.from(
+    { length: tokens.length },
+    (_, index) => boundaryMatch(searchText, `searchTokenPrefix${index}`),
+  ).join(" AND ");
   const synonymMatch = expandedTokens.length
     ? expandedTokens
         .map((_, index) => boundaryMatch(searchText, `searchSynonym${index}`))
@@ -65,10 +76,20 @@ export function buildCatalogSearchCondition(
   const searchTextMatch = tokens.length === 1
     ? boundaryMatch(searchText, "searchBoundary")
     : `${searchText} LIKE :searchLike`;
+  const normalizedNamePrefixMatch = tokens.length === 1
+    ? boundaryMatch(normalizedName, "searchTokenPrefix0")
+    : nameTokenPrefixMatch;
+  const searchTextPrefixMatch = tokens.length === 1
+    ? boundaryMatch(searchText, "searchTokenPrefix0")
+    : textTokenPrefixMatch;
 
   const lexicalWhere = `(
     ${normalizedNameMatch}
     OR ${searchTextMatch}
+    OR ${normalizedNamePrefixMatch}
+    OR ${searchTextPrefixMatch}
+    OR (${nameTokenPrefixMatch})
+    OR (${textTokenPrefixMatch})
     OR (${textTokenMatch})
     OR (${synonymMatch})
     OR ${fullTextMatch}
@@ -85,10 +106,12 @@ export function buildCatalogSearchCondition(
     where: `(${lexicalWhere} OR ${fuzzyWhere})`,
     score: `CASE
       WHEN ${normalizedName} = :searchExact THEN 1000
-      WHEN ${normalizedName} LIKE :searchPrefix AND ${normalizedNameMatch} THEN 800
+      WHEN ${normalizedName} LIKE :searchPrefix THEN 900
+      WHEN (${nameTokenPrefixMatch}) THEN 800
       WHEN (${nameTokenMatch}) THEN 650
       WHEN ${fullTextMatch} THEN 600 + (${fullTextScore} * 100)
       WHEN ${normalizedNameMatch} THEN 550
+      WHEN ${searchTextPrefixMatch} THEN 500
       WHEN ${searchTextMatch} THEN 400
       WHEN (${textTokenMatch}) THEN 300
       WHEN ${similarityMatch} THEN 200

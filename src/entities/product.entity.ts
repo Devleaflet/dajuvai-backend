@@ -42,6 +42,16 @@ export class Product {
   @Column({ name: "search_text", type: "text", default: "" })
   searchText: string;
 
+  // Maintained by PostgreSQL trigger for full-text catalog search.
+  // Hidden from normal entity reads; search queries select it explicitly.
+  @Column({
+    name: "search_vector",
+    type: "tsvector",
+    default: "''::tsvector",
+    select: false,
+  })
+  searchVector: string;
+
   // Only used if hasVariants = false
   @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
   basePrice?: number;
@@ -142,4 +152,7 @@ export class Product {
   // archives the product instead of removing the row.
   @DeleteDateColumn({ name: "deleted_at" })
   deletedAt?: Date;
+
+  @Column({ type: "timestamp", nullable: true })
+  vendorDeletionArchivedAt?: Date | null;
 }

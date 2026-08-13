@@ -24,14 +24,20 @@ const catalogSearchRateLimiter = rateLimit({
  * /api/search/catalog:
  *   get:
  *     summary: Search products and resolve catalog taxonomy
+ *     description: >
+ *       Searches active catalog records. Multi-word queries require every token. Each token matches
+ *       from a word start, so `elec` matches `electronics`; exact product-name matches rank ahead
+ *       of prefix and full-text matches. Image URLs can be null when no image is configured.
  *     tags: [Search]
  *     parameters:
  *       - in: query
  *         name: q
  *         schema: { type: string, maxLength: 80 }
+ *         description: Search text. Use at least two characters for useful suggestion results.
  *       - in: query
  *         name: mode
  *         schema: { type: string, enum: [suggest, catalog], default: catalog }
+ *         description: suggest returns compact ranked autocomplete data; catalog returns paginated product results and filters.
  *       - in: query
  *         name: page
  *         schema: { type: integer, minimum: 1, default: 1 }

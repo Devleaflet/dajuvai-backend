@@ -19,6 +19,7 @@ import {
     vendorSignupSchemav2,
     updateVendorSchema2,
     updateVendorPaymentOptionSchema,
+    vendorDeleteAccountSchema,
 } from "../utils/zod_validations/vendor.zod";
 
 import { validateZod } from "../middlewares/auth.middleware";
@@ -1244,6 +1245,16 @@ router.post(
  *             example:
  *               success: false
  *               message: "Invalid credentials"
+ *       409:
+ *         description: Account is within deletion grace period. Send same email and password to POST /api/vendors/reactivate.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: false }
+ *                 errorCode: { type: string, example: VENDOR_DELETION_PENDING }
+ *                 message: { type: string, example: "Account scheduled for deletion until 2026-09-12T00:00:00.000Z. Reactivate it to continue." }
  *       503:
  *         description: Service temporarily unavailable
  *         content:
@@ -1267,6 +1278,39 @@ router.post(
     "/login",
     validateZod(vendorLoginSchema),
     vendorController.login.bind(vendorController),
+);
+
+/**
+ * @swagger
+ * /api/vendors/reactivate:
+ *   post:
+ *     summary: Reactivate vendor account during deletion grace period
+ *     description: Requires original vendor email and password. Restores account approval state and products/variants archived only by this deletion request, then creates a normal vendor session. Use standard vendor forgot-password endpoint first if password is unavailable.
+ *     tags: [Vendors]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *     responses:
+ *       200:
+ *         description: Vendor account, products, and deletion-archived variants reactivated. Vendor session cookies are set.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ *       401: { description: Invalid credentials }
+ *       410: { description: Grace period expired }
+ *       409: { description: Account is not scheduled for deletion or cannot be reactivated }
+ */
+router.post(
+    "/reactivate",
+    validateZod(vendorLoginSchema),
+    vendorController.reactivate.bind(vendorController),
 );
 
 /**
@@ -1974,7 +2018,7 @@ router.put(
 router.put(
     "/reject/:id",
     authMiddleware,
-    isAdminOrStaff,
+    isAdmin,
     checkPermission(ModuleName.VENDOR, PermissionLevel.CREATE_EDIT),
     vendorController.rejectVendor.bind(vendorController),
 );
@@ -2037,10 +2081,83 @@ router.put(
  *                   type: string
  *                   example: "Vendor update service temporarily unavailable"
  */
+/**
+ * @swagger
+ * /api/vendors/me:
+ *   delete:
+ *     summary: Schedule authenticated vendor account for deletion
+ *     tags: [Vendors]
+ *     security:
+ *       - cookieAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [email, password, confirmation]
+ *             properties:
+ *               email: { type: string, format: email }
+ *               password: { type: string, format: password }
+ *               confirmation: { type: string, enum: [DELETE] }
+ *     responses:
+ *       202:
+ *         description: Account scheduled for deletion with 30-day recovery. Products and variants are hidden immediately and restored only by POST /api/vendors/reactivate before deletionScheduledFor.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, message, deletionScheduledFor]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 message: { type: string, example: "Account scheduled for deletion. You can reactivate it before the deadline." }
+ *                 deletionScheduledFor: { type: string, format: date-time }
+ *       401: { description: Invalid credentials }
+ *       400: { description: Invalid confirmation payload }
+ */
+router.delete(
+    "/me",
+    vendorAuthMiddleware,
+    validateZod(vendorDeleteAccountSchema),
+    vendorController.requestAccountDeletion.bind(vendorController),
+);
+
+/**
+ * @swagger
+ * /api/vendors/{id}:
+ *   delete:
+ *     summary: Permanently finalize a vendor account (admin only)
+ *     description: >
+ *       Requires vendor DELETE permission. Active products block this operation. For an account already
+ *       in its vendor-initiated deletion grace period, finalizes deletion immediately and irreversibly;
+ *       the original email and password can no longer reactivate it.
+ *     tags: [Vendors]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema: { type: integer, minimum: 1 }
+ *     responses:
+ *       200:
+ *         description: Vendor account finalized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 msg: { type: string, example: "Vendor deleted" }
+ *       400: { description: Vendor has active products or invalid ID }
+ *       401: { description: Authentication required }
+ *       403: { description: Vendor delete permission required }
+ *       404: { description: Vendor not found }
+ */
 router.delete(
     "/:id",
     authMiddleware,
-    isAdminOrStaff,
+    isAdmin,
     checkPermission(ModuleName.VENDOR, PermissionLevel.DELETE),
     vendorController.deleteVendor.bind(vendorController),
 );
