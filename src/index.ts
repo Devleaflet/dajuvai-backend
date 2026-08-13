@@ -69,6 +69,7 @@ import deliveryRouter from "./routes/delivery.routes";
 import deliveryAdminRouter from "./routes/delivery.admin.routes";
 import searchAliasRouter from "./routes/search-alias.routes";
 import deliveryRiderRouter from "./routes/delivery.rider.routes";
+import adminAuditRouter from "./routes/admin/admin.audit.routes";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, "uploads");
@@ -167,6 +168,7 @@ app.use("/api/admin/orders", adminOrdersRouter);
 app.use("/api/admin/users", adminUsersRouter);
 app.use("/api/admin/placements", merchandisingAdminRouter);
 app.use("/api/admin/search-aliases", searchAliasRouter);
+app.use("/api/admin/audit-logs", adminAuditRouter);
 
 // admin delivery
 app.use("/api/admin/delivery", deliveryAdminRouter);

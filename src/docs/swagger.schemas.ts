@@ -61,9 +61,10 @@ export const swaggerSchemas = {
       success: { type: "boolean", example: true },
       data: { type: "array", items: { $ref: "#/components/schemas/Notification" } },
       total: { type: "integer", example: 12 },
-      page: { type: "integer", nullable: true, example: 1 },
-      limit: { type: "integer", nullable: true, example: 20 },
-      totalPages: { type: "integer", nullable: true, example: 1 },
+      unreadTotal: { type: "integer", example: 3 },
+      page: { type: "integer", example: 1 },
+      limit: { type: "integer", example: 25 },
+      totalPages: { type: "integer", example: 1 },
     },
   },
   WishlistItem: {

@@ -9,6 +9,7 @@ import {
 } from "../utils/nodemailer.utils";
 import { sanitizeVendor, sanitizeVendorForAdmin } from "../utils/sanitize.util";
 import { VendorService } from "../service/vendor.service";
+import { NotificationService } from "../service/notification.service";
 import {
     IVendorSignupRequest,
     IVendorLoginRequest,
@@ -60,11 +61,13 @@ class TokenUtils {
 export class VendorController {
     private readonly jwtSecret: string;
     private readonly vendorService: VendorService;
+    private readonly notificationService: NotificationService;
     private districtService: DistrictService;
 
     constructor() {
         this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
+        this.notificationService = new NotificationService();
         this.districtService = new DistrictService();
     }
 
@@ -352,6 +355,12 @@ export class VendorController {
         );
         if (!vendor.isApproved) throw new ForbiddenError("Your account is not yet approved");
         const { token, refreshToken } = this.issueVendorSession(res, vendor);
+        void this.notificationService.notifyVendorAccountEvent(
+            vendor,
+            "Vendor Account Reactivated",
+            "Your vendor account and archived products have been restored.",
+            "VENDOR_REACTIVATED",
+        ).catch((error) => console.error("Failed to send vendor reactivation notification:", error));
         res.status(200).json({
             success: true,
             message: "Vendor account reactivated successfully",
@@ -393,6 +402,12 @@ export class VendorController {
             parsed.data.email,
             parsed.data.password,
         );
+        void this.notificationService.notifyVendorAccountEvent(
+            { id: req.vendor.id, email: parsed.data.email },
+            "Vendor Account Deletion Scheduled",
+            `Your account is scheduled for deletion on ${scheduledFor.toLocaleDateString("en-CA")}. Sign in and reactivate before that date to keep your account and products.`,
+            "VENDOR_DELETION_REQUESTED",
+        ).catch((error) => console.error("Failed to send vendor deletion notification:", error));
         res.clearCookie("vendorToken");
         res.clearCookie("vendorRefreshToken");
         res.status(202).json({

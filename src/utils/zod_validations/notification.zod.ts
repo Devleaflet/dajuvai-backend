@@ -34,13 +34,15 @@ export const updateNotificationSchema = baseNotificationSchema.partial();
 export type CreateNotificationInput = z.infer<typeof createNotificationSchema>;
 export type UpdateNotificationInput = z.infer<typeof updateNotificationSchema>;
 
-// GET /api/notification list query. Both optional and left undefined when the
-// caller sends neither: the admin web app already calls this endpoint with no
-// query params and expects the full unpaginated array back, and that must keep
-// working. Mobile (or any new caller) opts into paging by sending both.
+// GET /api/notification list query. Every caller receives bounded pagination;
+// unreadOnly keeps filtering server-side so clients never download full feeds.
 export const getNotificationsQuerySchema = z.object({
-    page: z.coerce.number().int().min(1).optional(),
-    limit: z.coerce.number().int().min(1).max(100).optional(),
+    page: z.coerce.number().int().min(1).default(1),
+    limit: z.coerce.number().int().min(1).max(100).default(25),
+    unreadOnly: z.preprocess(
+        (value) => value === undefined ? false : value === true || value === "true" ? true : value === false || value === "false" ? false : value,
+        z.boolean(),
+    ).default(false),
 });
 
 export type GetNotificationsQuery = z.infer<typeof getNotificationsQuerySchema>;

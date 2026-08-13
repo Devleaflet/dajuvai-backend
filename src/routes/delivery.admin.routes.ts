@@ -1,7 +1,6 @@
 import { Router } from "express";
 import {
     authMiddleware,
-    isAdmin,
     isAdminOrStaff,
     validateZod,
 } from "../middlewares/auth.middleware";
@@ -160,7 +159,6 @@ deliveryAdminRouter.use(authMiddleware, isAdminOrStaff);
  */
 deliveryAdminRouter.post(
     "/riders",
-    isAdmin,
     checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(createRiderSchema),
     asyncHandler(deliveryAdminController.createRider.bind(deliveryAdminController)),
@@ -328,7 +326,6 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.put(
     "/riders/:riderId/reset-password",
-    isAdmin,
     checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(resetRiderPasswordSchema),
     asyncHandler(
@@ -374,6 +371,14 @@ deliveryAdminRouter.put(
  *     responses:
  *       200:
  *         description: Orders fetched successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { type: array, items: { type: object } }
+ *                 pagination: { type: object }
  */
 deliveryAdminRouter.get(
     "/orders/at-warehouse",
@@ -411,6 +416,20 @@ deliveryAdminRouter.get(
  *     responses:
  *       200:
  *         description: Bulk assignment completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       orderId: { type: integer }
+ *                       success: { type: boolean }
+ *                       error: { type: string, nullable: true }
  */
 deliveryAdminRouter.post(
     "/orders/bulk-assign",
@@ -571,9 +590,27 @@ deliveryAdminRouter.post(
  *       500:
  *         description: Internal server error
  */
+/**
+ * @swagger
+ * /api/admin/delivery/orders/failed-deliveries:
+ *   get:
+ *     summary: List failed delivery assignments
+ *     description: Requires Delivery view permission.
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Failed deliveries fetched successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { type: array, items: { $ref: '#/components/schemas/DeliveryAssignment' } }
+ */
 deliveryAdminRouter.get(
     "/assignments",
-    isAdmin,
     checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(deliveryAdminController.getAllAssignments.bind(deliveryAdminController)),
 );
@@ -711,5 +748,55 @@ deliveryAdminRouter.get(
         deliveryAdminController.getFailedDeliveries.bind(deliveryAdminController),
     ),
 );
+
+/**
+ * @swagger
+ * /api/delivery/admin/orders/at-warehouse:
+ *   get:
+ *     summary: Legacy alias for warehouse delivery orders
+ *     deprecated: true
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Orders fetched successfully.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ * /api/delivery/admin/orders/bulk-assign:
+ *   post:
+ *     summary: Legacy alias for bulk rider assignment
+ *     deprecated: true
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [orderIds, riderId]
+ *             properties:
+ *               orderIds: { type: array, items: { type: integer } }
+ *               riderId: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Bulk assignment completed.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ * /api/delivery/admin/orders/failed-deliveries:
+ *   get:
+ *     summary: Legacy alias for failed delivery assignments
+ *     deprecated: true
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     responses:
+ *       200:
+ *         description: Failed deliveries fetched successfully.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ */
 
 export default deliveryAdminRouter;

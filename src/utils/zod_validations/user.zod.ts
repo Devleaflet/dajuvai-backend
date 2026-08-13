@@ -44,6 +44,7 @@ export const staffSignupSchema = z.object({
         arrangement: z.nativeEnum(PermissionLevel).optional(),
         customer: z.nativeEnum(PermissionLevel).optional(),
         product: z.nativeEnum(PermissionLevel).optional(),
+        audit: z.nativeEnum(PermissionLevel).optional(),
     })
 })
 
@@ -91,6 +92,7 @@ const permissionsSchema = z.object({
     customer: z.nativeEnum(PermissionLevel).optional(),
     category: z.nativeEnum(PermissionLevel).optional(),
     product: z.nativeEnum(PermissionLevel).optional(),
+    audit: z.nativeEnum(PermissionLevel).optional(),
 }).optional();
 
 export const updateStaffSchema = z.object({

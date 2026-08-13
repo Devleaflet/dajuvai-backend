@@ -41,6 +41,8 @@ import { ProductSearchIndexer } from "./product-search-indexer.service";
 import { buildCatalogSearchCondition } from "../search/catalog-search";
 import { withAgeRestriction } from "./age-restriction.service";
 import { getManualBannerProductIds } from "../utils/bannerProductSelection";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { auditService } from "./audit.service";
 
 interface GetProductsOptions {
   search?: string;
@@ -676,6 +678,24 @@ export class ProductService {
       }
 
       savedProduct.variants = savedVariants;
+      await auditService.record(
+        {
+          module: "PRODUCT",
+          action: "CREATED",
+          entityType: "Product",
+          entityId: savedProduct.id,
+          actor: { type: AuditActorType.VENDOR, id: vendorId },
+          summary: `Product created: ${savedProduct.name}`,
+          after: {
+            name: savedProduct.name,
+            stock: savedProduct.stock,
+            status: savedProduct.status,
+            hasVariants: savedProduct.hasVariants,
+            variantCount: savedVariants.length,
+          },
+        },
+        manager,
+      );
       return savedProduct;
     });
 

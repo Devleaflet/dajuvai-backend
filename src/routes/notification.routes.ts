@@ -35,7 +35,7 @@ const controller = new NotificationController();
  * @swagger
  * /api/notification:
  *   get:
- *     summary: Get all notifications for the authenticated user or vendor
+ *     summary: Get paginated notifications for the authenticated user, vendor, admin, or staff account
  *     tags: [Notifications]
  *     security:
  *       - bearerAuth: []
@@ -43,11 +43,15 @@ const controller = new NotificationController();
  *       - in: query
  *         name: page
  *         schema: { type: integer, minimum: 1 }
- *         description: Optional. Omit both page and limit to get the full unpaginated list (existing behavior).
+ *         description: Page number. Defaults to 1.
  *       - in: query
  *         name: limit
  *         schema: { type: integer, minimum: 1, maximum: 100 }
- *         description: Optional. Must be sent together with page to enable pagination.
+ *         description: Page size. Defaults to 25.
+ *       - in: query
+ *         name: unreadOnly
+ *         schema: { type: boolean, default: false }
+ *         description: Return only unread notifications while keeping unreadTotal for the account.
  *     responses:
  *       200:
  *         description: Successfully fetched all notifications for the authenticated entity
@@ -91,9 +95,38 @@ notificationRoutes.get(
 
 /**
  * @swagger
+ * /api/notification/read-all:
+ *   patch:
+ *     summary: Mark all accessible notifications as read
+ *     tags: [Notifications]
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Number of notifications marked as read.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     updated: { type: integer, example: 12 }
+ */
+notificationRoutes.patch(
+  "/read-all",
+  combinedAuthMiddleware,
+  controller.markAllReadController.bind(controller),
+);
+
+/**
+ * @swagger
  * /api/notification/fcm-token:
  *   post:
- *     summary: Save FCM device token for push notifications (called by Flutter app)
+ *     summary: Register or refresh an FCM device token for transactional push
+ *     description: Call after every authenticated app launch, login, and FCM token refresh. Legacy token-only clients remain supported; modern clients should provide fcmToken, deviceId, and platform so multi-device delivery works.
  *     tags: [Notifications]
  *     security:
  *       - bearerAuth: []
@@ -108,7 +141,23 @@ notificationRoutes.get(
  *             properties:
  *               token:
  *                 type: string
+ *                 description: Legacy alias for fcmToken.
  *                 example: "fxyz123..."
+ *               fcmToken:
+ *                 type: string
+ *                 example: "fxyz123..."
+ *               deviceId:
+ *                 type: string
+ *                 example: "android-install-8f28"
+ *               platform:
+ *                 type: string
+ *                 enum: [android, ios, web]
+ *               appVersion:
+ *                 type: string
+ *               deviceModel:
+ *                 type: string
+ *               osVersion:
+ *                 type: string
  *     responses:
  *       200:
  *         description: FCM token saved successfully

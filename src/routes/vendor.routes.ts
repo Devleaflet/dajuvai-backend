@@ -2112,8 +2112,12 @@ router.put(
  *                 success: { type: boolean, example: true }
  *                 message: { type: string, example: "Account scheduled for deletion. You can reactivate it before the deadline." }
  *                 deletionScheduledFor: { type: string, format: date-time }
- *       401: { description: Invalid credentials }
- *       400: { description: Invalid confirmation payload }
+ *       400:
+ *         description: Invalid confirmation payload or current password. A password mismatch returns errorCode INVALID_CURRENT_PASSWORD and never invalidates the existing vendor session.
+ *         content:
+ *           application/json:
+ *             example: { success: false, errorCode: "INVALID_CURRENT_PASSWORD", message: "Current password is incorrect" }
+ *       401: { description: Authentication required or expired vendor session }
  */
 router.delete(
     "/me",

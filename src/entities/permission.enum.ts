@@ -1,5 +1,6 @@
 export enum ModuleName {
     ARRANGEMENT = "arrangement",
+    AUDIT = "audit",
     BANNER = "banner",
     CATALOG = "catalog",
     CATEGORY = "category",

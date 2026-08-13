@@ -12,6 +12,31 @@ const transporter = nodemailer.createTransport({
     },
 });
 
+export const isEmailConfigured = (): boolean =>
+    Boolean(config.USER_EMAIL && config.PASS_EMAIL);
+
+/**
+ * Minimal transactional fallback used by durable delivery worker. Existing
+ * rich order/security templates remain available to legacy callers.
+ */
+export const sendTransactionalEmail = async (
+    to: string,
+    subject: string,
+    message: string,
+): Promise<string> => {
+    if (!isEmailConfigured()) {
+        throw new Error("SMTP is not configured");
+    }
+    const result = await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        text: message,
+        html: `<p>${escapeHtml(message)}</p>`,
+    });
+    return result.messageId;
+};
+
 const escapeHtml = (value: unknown): string =>
     String(value ?? "")
         .replace(/&/g, "&amp;")

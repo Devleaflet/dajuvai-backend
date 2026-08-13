@@ -19,6 +19,7 @@ import {
     sanitizeRiderForDelivery,
 } from "../utils/deliveryResponseSanitizer.utils";
 import { OrderService } from "./order.service";
+import { AuditActorType } from "../entities/auditLog.entity";
 
 export class DeliveryAdminService {
     private orderRepository: Repository<Order>;
@@ -199,7 +200,7 @@ export class DeliveryAdminService {
 
     //  ASSIGNMENTS
 
-    async assignRider(orderId: number, data: AssignRiderType) {
+    async assignRider(orderId: number, data: AssignRiderType, changedByUserId: number, auditActorType: AuditActorType) {
         const order = await this.findOrderById(orderId);
 
         const newRider = await this.riderRepository.findOne({
@@ -264,7 +265,9 @@ export class DeliveryAdminService {
             orderId,
             OrderStatus.ASSIGNED_TO_RIDER,
             {
-                actorRole: "SYSTEM",
+                actorRole: "ADMIN",
+                changedByUserId,
+                auditActorType,
                 reason: `Assigned to rider ${newRider.fullName || `#${newRider.id}`}`,
             },
         );
@@ -279,6 +282,8 @@ export class DeliveryAdminService {
     async bulkAssignRider(
         orderIds: number[],
         riderId: number,
+        changedByUserId: number,
+        auditActorType: AuditActorType,
     ): Promise<{ orderId: number; success: boolean; error?: string }[]> {
         const rider = await this.riderRepository.findOne({
             where: { id: riderId },
@@ -290,7 +295,7 @@ export class DeliveryAdminService {
 
         for (const orderId of orderIds) {
             try {
-                await this.assignRider(orderId, { riderId });
+                await this.assignRider(orderId, { riderId }, changedByUserId, auditActorType);
                 results.push({ orderId, success: true });
             } catch (err: any) {
                 results.push({
@@ -349,7 +354,7 @@ export class DeliveryAdminService {
     }
 
     // reset status to ARRIVED_AT_WAREHOUSE from failed
-    async backToWarehouse(orderId: number) {
+    async backToWarehouse(orderId: number, changedByUserId: number, auditActorType: AuditActorType) {
         const order = await this.findOrderById(orderId);
 
         // Find existing active assignment (if any) and clear it so a new rider can be assigned
@@ -380,7 +385,9 @@ export class DeliveryAdminService {
                 orderId,
                 OrderStatus.ARRIVED_AT_WAREHOUSE,
                 {
-                    actorRole: "SYSTEM",
+                actorRole: "ADMIN",
+                changedByUserId,
+                auditActorType,
                     reason: "Order reset to warehouse for reassignment",
                 },
             );

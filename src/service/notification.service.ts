@@ -1,4 +1,4 @@
-import { In } from "typeorm";
+import { FindOptionsWhere, In } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { Notification, NotificationTarget, NotificationType } from "../entities/notification.entity";
 import { Vendor } from "../entities/vendor.entity";
@@ -9,6 +9,10 @@ import { sendToTokens, PushPayload } from "../utils/fcm.utils";
 import { deviceTokenService, OwnerType } from "./deviceToken.service";
 import { DevicePlatform } from "../entities/deviceToken.entity";
 import { RegisterDeviceInput } from "../utils/zod_validations/push.zod";
+import { orderPlacedRecipients } from "./notification-audience.policy";
+import { deliverWithRetry } from "../utils/delivery-retry.utils";
+import { sendTransactionalEmail } from "../utils/nodemailer.utils";
+import logger from "../utils/logger";
 
 export class NotificationService {
     private notificationRepo = AppDataSource.getRepository(Notification);
@@ -31,8 +35,22 @@ export class NotificationService {
      */
     private async push(tokens: string[], payload: PushPayload): Promise<void> {
         if (!tokens.length) return;
-        const result = await sendToTokens(tokens, payload);
-        await deviceTokenService.deactivateTokens(result.invalidTokens);
+        const delivery = await deliverWithRetry(async () => {
+            const result = await sendToTokens(tokens, payload);
+            await deviceTokenService.deactivateTokens(result.invalidTokens);
+            if (result.successCount > 0) return;
+            if (result.invalidTokens.length === tokens.length) {
+                throw new Error("All device tokens are invalid");
+            }
+            throw new Error("Firebase did not accept delivery");
+        });
+        if (delivery.status === "failed") {
+            logger.error("[Notification] push delivery failed", {
+                type: payload.data?.type,
+                attempts: delivery.attempts,
+                error: delivery.error,
+            });
+        }
     }
 
     /** Active device tokens for every admin and staff account. */
@@ -55,13 +73,13 @@ export class NotificationService {
      */
     async getNotifications(
         authEntity: User | Vendor | undefined,
-        pagination?: { page: number; limit: number },
-    ): Promise<{ data: Notification[]; total: number; page?: number; limit?: number; totalPages?: number }> {
+        pagination: { page: number; limit: number; unreadOnly?: boolean } = { page: 1, limit: 25 },
+    ): Promise<{ data: Notification[]; total: number; unreadTotal: number; page: number; limit: number; totalPages: number }> {
         if (!authEntity) {
             throw new APIError(401, "Not authenticated");
         }
 
-        let where: Record<string, unknown>;
+        let where: FindOptionsWhere<Notification>;
 
         // ADMIN & STAFF (from User)
         if (this.isUserEntity(authEntity) &&
@@ -77,35 +95,39 @@ export class NotificationService {
             throw new APIError(403, "Invalid or unauthorized role");
         }
 
-        const total = await this.notificationRepo.count({ where });
-        const data = await this.notificationRepo.find({
-            where,
-            relations: ["order"],
-            order: { createdAt: "DESC" },
-            ...(pagination && {
+        const unreadWhere: FindOptionsWhere<Notification> = { ...where, isRead: false };
+        const pageWhere: FindOptionsWhere<Notification> = pagination.unreadOnly ? unreadWhere : where;
+        const [data, total, unreadTotal] = await Promise.all([
+            this.notificationRepo.find({
+                where: pageWhere,
+                relations: ["order"],
+                order: { createdAt: "DESC" },
                 skip: (pagination.page - 1) * pagination.limit,
                 take: pagination.limit,
             }),
-        });
+            this.notificationRepo.count({ where: pageWhere }),
+            this.notificationRepo.count({ where: unreadWhere }),
+        ]);
 
         return {
             data,
             total,
-            ...(pagination && {
-                page: pagination.page,
-                limit: pagination.limit,
-                totalPages: Math.ceil(total / pagination.limit),
-            }),
+            unreadTotal,
+            page: pagination.page,
+            limit: pagination.limit,
+            totalPages: Math.ceil(total / pagination.limit),
         };
     }
 
 
     async notifyOrderPlaced(order: Order): Promise<void> {
-        console.log("____________Order---------------")
-        console.log(order)
         const notifications: Notification[] = [];
         const fullName = order.orderedBy?.fullName || "Customer";
         const orderDisplayNumber = order.orderNumber || order.id;
+        const audience = orderPlacedRecipients(
+            order.orderedById,
+            order.orderItems.map((item) => item.vendorId),
+        );
 
         // Notify Admin
         const adminNotification = this.notificationRepo.create({
@@ -118,8 +140,19 @@ export class NotificationService {
         });
         notifications.push(adminNotification);
 
+        notifications.push(
+            this.notificationRepo.create({
+                title: "Order Placed",
+                message: `Your order #${orderDisplayNumber} has been placed successfully.`,
+                type: NotificationType.ORDER_PLACED,
+                target: NotificationTarget.USER,
+                orderId: order.id,
+                createdById: audience.customerId,
+            }),
+        );
+
         // Notify Vendors involved
-        const vendorIds = [...new Set(order.orderItems.map(item => item.vendorId))];
+        const vendorIds = audience.vendorIds;
 
         const vendors = await this.vendorRepo.find({
             where: { id: In(vendorIds) },
@@ -142,18 +175,24 @@ export class NotificationService {
         await this.notificationRepo.save(notifications);
 
         // --- Push Notifications ---
-        await this.push(await this.adminTokens(), {
-            title: "New Order Placed",
-            body: `Order #${order.id} placed by ${fullName}`,
-            data: { type: "ORDER_PLACED", orderId: String(order.id) },
-        });
-
-        // One batched send for all vendors on the order, not one per vendor.
-        await this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
-            title: "New Order Received",
-            body: `You have received a new order #${order.id}`,
-            data: { type: "ORDER_PLACED", orderId: String(order.id) },
-        });
+        const data = { type: "ORDER_PLACED", orderId: String(order.id) };
+        await Promise.all([
+            this.push(await this.adminTokens(), {
+                title: "New Order Placed",
+                body: `Order #${orderDisplayNumber} placed by ${fullName}`,
+                data,
+            }),
+            this.push(await deviceTokenService.getTokensForUser(audience.customerId), {
+                title: "Order Placed",
+                body: `Your order #${orderDisplayNumber} has been placed successfully.`,
+                data,
+            }),
+            this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
+                title: "New Order Received",
+                body: `You have received a new order #${orderDisplayNumber}`,
+                data,
+            }),
+        ]);
     }
 
     async notifyOrderStatusUpdated(order: any): Promise<void> {
@@ -198,8 +237,10 @@ export class NotificationService {
             );
         }
 
-        // User notification
-        if (order.orderedBy) {
+        const userId = order.orderedBy?.id ?? order.orderedById;
+        // User notification. `orderedById` keeps cron and lean-query callers
+        // functional even when the User relation was not loaded.
+        if (userId) {
             notifications.push(
                 this.notificationRepo.create({
                     title: "Order Status Updated",
@@ -207,7 +248,7 @@ export class NotificationService {
                     type: NotificationType.ORDER_STATUS_UPDATED,
                     target: NotificationTarget.USER,
                     orderId: order.id,
-                    createdById: order.orderedBy.id,
+                    createdById: userId,
                 })
             );
         }
@@ -217,26 +258,23 @@ export class NotificationService {
         // --- Push Notifications ---
         const data = { type: "ORDER_STATUS_UPDATED", orderId: String(order.id) };
 
-        await this.push(await this.adminTokens(), {
-            title: "Order Status Updated",
-            body: statusMessage,
-            data,
-        });
-
-        await this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
-            title: "Order Status Changed",
-            body: statusMessage,
-            data,
-        });
-
-        // Send to the user who placed the order
-        if (order.orderedBy) {
-            await this.push(await deviceTokenService.getTokensForUser(order.orderedBy.id), {
+        await Promise.all([
+            this.push(await this.adminTokens(), {
+                title: "Order Status Updated",
+                body: statusMessage,
+                data,
+            }),
+            this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
+                title: "Order Status Changed",
+                body: statusMessage,
+                data,
+            }),
+            ...(userId ? [this.push(await deviceTokenService.getTokensForUser(userId), {
                 title: "Your Order Status Updated",
                 body: statusMessage,
                 data,
-            });
-        }
+            })] : []),
+        ]);
     }
 
 
@@ -272,6 +310,46 @@ export class NotificationService {
             body: pushBody,
             data: { type: dataType, orderId: String(orderId) },
         });
+    }
+
+    async notifyVendorAccountEvent(
+        vendor: Pick<Vendor, "id" | "email">,
+        title: string,
+        body: string,
+        eventType: string,
+    ): Promise<void> {
+        await this.notificationRepo.save(this.notificationRepo.create({
+            title,
+            message: body,
+            type: NotificationType.GENERAL,
+            target: NotificationTarget.VENDOR,
+            vendorId: vendor.id,
+        }));
+        const payload = { title, body, data: { type: eventType } };
+        void (async () => this.push(
+            await deviceTokenService.getTokensForVendor(vendor.id),
+            payload,
+        ))().catch((error) => logger.warn("Vendor account push delivery failed", {
+            vendorId: vendor.id,
+            eventType,
+            error: error instanceof Error ? error.message : String(error),
+        }));
+        void this.email(vendor.email, title, body, eventType).catch((error) => logger.warn("Vendor account email delivery failed", {
+            vendorId: vendor.id,
+            eventType,
+            error: error instanceof Error ? error.message : String(error),
+        }));
+    }
+
+    private async email(to: string, title: string, body: string, eventType: string): Promise<void> {
+        const delivery = await deliverWithRetry(() => sendTransactionalEmail(to, title, body));
+        if (delivery.status === "failed") {
+            logger.error("[Notification] email delivery failed", {
+                eventType,
+                attempts: delivery.attempts,
+                error: delivery.error,
+            });
+        }
     }
 
     async notifyPaymentSuccess(orderId: number, userId: number): Promise<void> {
@@ -354,6 +432,22 @@ export class NotificationService {
 
     async markAsRead(notificationId: string): Promise<void> {
         await this.notificationRepo.update(notificationId, { isRead: true });
+    }
+
+    async markAllAsRead(authEntity: User | Vendor | undefined): Promise<number> {
+        if (!authEntity) throw new APIError(401, "Not authenticated");
+        let where: FindOptionsWhere<Notification>;
+        if (this.isVendorEntity(authEntity)) {
+            where = { target: NotificationTarget.VENDOR, vendorId: authEntity.id, isRead: false };
+        } else if (this.isUserEntity(authEntity) && (authEntity.role === UserRole.ADMIN || authEntity.role === UserRole.STAFF)) {
+            where = { target: NotificationTarget.ADMIN, isRead: false };
+        } else if (this.isUserEntity(authEntity) && authEntity.role === UserRole.USER) {
+            where = { target: NotificationTarget.USER, createdById: authEntity.id, isRead: false };
+        } else {
+            throw new APIError(403, "Invalid or unauthorized role");
+        }
+        const result = await this.notificationRepo.update(where, { isRead: true });
+        return result.affected ?? 0;
     }
 
     async getNotificationById(id: string) {

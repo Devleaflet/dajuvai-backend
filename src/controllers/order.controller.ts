@@ -103,11 +103,15 @@ export class OrderController {
 
         const orderSummary = this.buildOrderSummary(order);
 
-        void this.notificationService
-            .notifyOrderPlaced(order)
-            .catch((error) => {
-                console.log("Failed to send order placed notification:", error);
-            });
+        // Online-payment orders are not sent to vendors until payment succeeds.
+        // `OrderService.orderSuccess` owns their equivalent notification.
+        if (order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+            void this.notificationService
+                .notifyOrderPlaced(order)
+                .catch((error) => {
+                    console.log("Failed to send order placed notification:", error);
+                });
+        }
 
         if (order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
             void (async () => {

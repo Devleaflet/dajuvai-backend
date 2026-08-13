@@ -23,6 +23,8 @@ import {
     OrderStatusHistory,
     OrderStatusChangedByRole,
 } from "../entities/orderStatusHistory.entity";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { auditService } from "./audit.service";
 import {
     canTransition,
     StatusActorRole,
@@ -1617,6 +1619,10 @@ export class OrderService {
                 throw new APIError(404, "Order not found");
             }
 
+            // Payment gateway callbacks can be retried. Do not repeat customer
+            // push/email side effects after a callback already marked this paid.
+            if (order.paymentStatus === PaymentStatus.PAID) return order;
+
             // Update payment state only. Fulfillment confirmation remains an
             // admin action, even after successful online payment.
             order.paymentStatus = PaymentStatus.PAID;
@@ -1626,6 +1632,15 @@ export class OrderService {
                 order.id,
                 order.orderedById,
             );
+
+            const orderForNotification = await this.orderRepository.findOne({
+                where: { id: order.id },
+                relations: ["orderedBy", "orderItems"],
+            });
+            if (orderForNotification) {
+                void this.notificationService.notifyOrderPlaced(orderForNotification)
+                    .catch((error) => console.error("Failed to send paid order notification:", error));
+            }
 
             return order;
         } catch (err) {
@@ -2901,6 +2916,7 @@ export class OrderService {
         options: {
             actorRole: StatusActorRole;
             changedByUserId?: number;
+            auditActorType?: AuditActorType;
             reason: string;
             note?: string;
             expectedCurrentStatus?: OrderStatus;
@@ -3029,6 +3045,29 @@ export class OrderService {
             note: options.note,
             changedByUserId: options.changedByUserId,
             changedByRole,
+        });
+
+        await auditService.record({
+            module: "ORDER",
+            action: "STATUS_CHANGED",
+            entityType: "Order",
+            entityId: order.id,
+            actor: {
+                type: options.auditActorType
+                    ?? (options.actorRole === "SYSTEM"
+                        ? AuditActorType.SYSTEM
+                        : options.actorRole === "RIDER"
+                          ? AuditActorType.RIDER
+                          : AuditActorType.ADMIN),
+                id: options.changedByUserId ?? null,
+            },
+            summary: `Order status changed from ${previousStatus} to ${targetStatus}`,
+            before: { status: previousStatus },
+            after: {
+                status: targetStatus,
+                reason: options.reason,
+                note: options.note,
+            },
         });
 
         const statusSideEffects: Array<() => Promise<void>> = [];

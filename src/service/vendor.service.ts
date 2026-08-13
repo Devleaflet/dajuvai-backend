@@ -24,6 +24,8 @@ import { sanitizeVendor } from "../utils/sanitize.util";
 import { getVendorDeletionDeadline, isVendorDeletionGracePeriodActive } from "./vendor-account-deletion.policy";
 import { Product } from "../entities/product.entity";
 import { Variant } from "../entities/variant.entity";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { auditService } from "./audit.service";
 
 /**
  * Service for managing vendor-related operations such as
@@ -272,10 +274,10 @@ export class VendorService {
         const vendor = await this.vendorRepository.findOne({ where: { id } });
         if (!vendor) throw new APIError(404, "Vendor not found");
         if (vendor.email.toLowerCase() !== email.trim().toLowerCase()) {
-            throw new APIError(401, "Invalid credentials");
+            throw new APIError(400, "Current password is incorrect", "INVALID_CURRENT_PASSWORD");
         }
         if (!(await bcrypt.compare(password, vendor.password))) {
-            throw new APIError(401, "Invalid credentials");
+            throw new APIError(400, "Current password is incorrect", "INVALID_CURRENT_PASSWORD");
         }
         if (vendor.deletionScheduledFor && !vendor.deletionFinalizedAt) {
             return vendor.deletionScheduledFor;
@@ -308,6 +310,19 @@ export class VendorService {
                     await manager.save(variant);
                 }
             }
+
+            await auditService.record({
+                module: "ACCOUNT",
+                action: "DELETION_REQUESTED",
+                entityType: "Vendor",
+                entityId: id,
+                actor: {
+                    type: AuditActorType.VENDOR,
+                    id,
+                },
+                summary: "Vendor requested account deletion",
+                after: { deletionScheduledFor: scheduledFor.toISOString() },
+            }, manager);
         });
 
         return scheduledFor;
@@ -367,6 +382,18 @@ export class VendorService {
                 variant.vendorDeletionArchivedAt = null;
                 await manager.save(variant);
             }
+
+            await auditService.record({
+                module: "ACCOUNT",
+                action: "REACTIVATED",
+                entityType: "Vendor",
+                entityId: vendor.id,
+                actor: {
+                    type: AuditActorType.VENDOR,
+                    id: vendor.id,
+                },
+                summary: "Vendor reactivated account",
+            }, manager);
         });
 
         return (await this.findVendorByEmail(email.trim().toLowerCase()))!;
