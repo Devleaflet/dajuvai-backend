@@ -10,8 +10,8 @@ const imageController = new ImageController();
  * @swagger
  * /api/image:
  *   post:
- *     summary: Upload a single image to Cloudinary
- *     description: Uploads a single image file to Cloudinary and returns its secure URL and publicId. The target folder can be specified in query params.
+ *     summary: Upload a single file to Cloudinary
+ *     description: Uploads one image or supported document to Cloudinary and returns its secure URL, publicId, and resource type. The folder is required and validated before upload.
  *     tags:
  *       - Image
  *     parameters:
@@ -19,7 +19,7 @@ const imageController = new ImageController();
  *         name: folder
  *         schema:
  *           type: string
- *           example: products
+ *           example: banners
  *         required: true
  *         description: The folder in Cloudinary where the image will be stored.
  *     requestBody:
@@ -28,11 +28,13 @@ const imageController = new ImageController();
  *         multipart/form-data:
  *           schema:
  *             type: object
+ *             required:
+ *               - image
  *             properties:
- *               file:
+ *               image:
  *                 type: string
  *                 format: binary
- *                 description: The image file to upload
+ *                 description: The image or supported document to upload
  *     responses:
  *       200:
  *         description: Image uploaded successfully
@@ -58,11 +60,11 @@ const imageController = new ImageController();
  *                 success:
  *                   type: boolean
  *                   example: false
- *                 msg:
+ *                 message:
  *                   type: string
- *                   example: No file found
- *       500:
- *         description: Image upload failed on server or Cloudinary side
+ *                   example: No file uploaded
+ *       502:
+ *         description: Cloudinary upload failed
  *         content:
  *           application/json:
  *             schema:
@@ -71,9 +73,28 @@ const imageController = new ImageController();
  *                 success:
  *                   type: boolean
  *                   example: false
- *                 msg:
+ *                 errorCode:
  *                   type: string
- *                   example: Error uploading image
+ *                   example: UPLOAD_STORAGE_ERROR
+ *                 message:
+ *                   type: string
+ *                   example: File storage upload failed
+ *       503:
+ *         description: Cloudinary is not configured
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 errorCode:
+ *                   type: string
+ *                   example: UPLOAD_SERVICE_UNAVAILABLE
+ *                 message:
+ *                   type: string
+ *                   example: File upload service is not configured
  */
 imageRouter.post(
   "/",
