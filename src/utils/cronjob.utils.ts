@@ -17,6 +17,8 @@ import { deviceTokenService } from "../service/deviceToken.service";
 import { Product } from "../entities/product.entity";
 import { Variant } from "../entities/variant.entity";
 import { VendorService } from "../service/vendor.service";
+import { UserDeletionService } from "../service/user-deletion.service";
+import { OrderService } from "../service/order.service";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
@@ -257,6 +259,31 @@ export const finalizeVendorAccountDeletions = () => {
             await new VendorService().finalizeExpiredVendorDeletions();
         } catch (error) {
             // silent fail for cron; next hourly run retries safely
+        }
+    });
+};
+
+// Finalizes customer accounts whose 30-day deletion grace period elapsed.
+// Mirrors finalizeVendorAccountDeletions; safe to retry every hour.
+export const finalizeUserAccountDeletions = () => {
+    cron.schedule("0 * * * *", async () => {
+        try {
+            await new UserDeletionService().finalizeExpiredUserDeletions();
+        } catch (error) {
+            // silent fail for cron; next hourly run retries safely
+        }
+    });
+};
+
+// Expires online-payment checkout drafts whose TTL elapsed without a gateway
+// verdict. Drafts never reserve stock or claim promos, so expiring them is a
+// pure status flip — safe to retry every 10 minutes.
+export const expireStaleCheckoutDraftsJob = () => {
+    cron.schedule("*/10 * * * *", async () => {
+        try {
+            await new OrderService().expireStaleCheckoutDrafts();
+        } catch (error) {
+            // silent fail for cron; next run retries safely
         }
     });
 };

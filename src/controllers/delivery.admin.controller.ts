@@ -4,15 +4,15 @@ import { AuditActorType } from "../entities/auditLog.entity";
 import { UserRole } from "../entities/user.entity";
 import { DeliveryAdminService } from "../service/delivery.admin.service";
 import { CreateRiderType } from "../utils/zod_validations/delivery.zod";
-import { ImageDeletionService } from "../service/image.delete.service";
+import { CloudinaryService } from "../service/image.service";
 
 export class DeliveryAdminController {
     private deliveryAdminService: DeliveryAdminService;
-    private imageDeletionService: ImageDeletionService;
+    private cloudinaryService: CloudinaryService;
 
     constructor() {
         this.deliveryAdminService = new DeliveryAdminService();
-        this.imageDeletionService = new ImageDeletionService();
+        this.cloudinaryService = new CloudinaryService();
     }
 
     //  RIDER MANAGEMENT
@@ -28,7 +28,7 @@ export class DeliveryAdminController {
         } catch (error) {
             if (req.body.documentUrl) {
                 try {
-                    await this.imageDeletionService.deleteSingleImage(
+                    await this.cloudinaryService.deleteByUrl(
                         req.body.documentUrl,
                     );
                 } catch (cleanupErr) {

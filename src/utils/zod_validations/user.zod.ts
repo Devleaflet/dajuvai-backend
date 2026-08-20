@@ -58,6 +58,26 @@ export const loginSchema = z.object({
 });
 
 /**
+ * Schema for user self-deletion requests.
+ * Email is always required; password only for email/password accounts
+ * (Google OAuth accounts have no password and rely on the active session).
+ */
+export const userDeleteAccountSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required').optional(),
+    confirmation: z.literal('DELETE'),
+});
+
+/**
+ * Schema for reactivating an account scheduled for deletion
+ * (email/password accounts only; OAuth accounts reactivate via sign-in).
+ */
+export const userReactivateSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required'),
+});
+
+/**
  * Schema for requesting email verification token.
  * Validates email format.
  */

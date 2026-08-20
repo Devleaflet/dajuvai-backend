@@ -99,8 +99,34 @@ export class OrderController {
 
         const data = req.body;
 
-        const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
-            await this.orderService.createOrder(req.user.id, data);
+        const {
+            order,
+            draft,
+            vendorids,
+            useremail,
+            esewaRedirectUrl,
+        } = await this.orderService.createOrder(req.user.id, data);
+
+        // Online-payment checkouts create a draft, not an order — the order
+        // materializes only after the gateway confirms success. 200 (not 201)
+        // matches the "payment pending" convention used for eSewa redirects.
+        if (draft) {
+            res.status(200).json({
+                success: true,
+                draft: true,
+                data: {
+                    id: draft.id,
+                    draftId: draft.id,
+                    orderNumber: draft.orderNumber,
+                    totalPrice: draft.totals?.totalPrice,
+                    paymentMethod: draft.paymentMethod,
+                },
+                esewaRedirectUrl,
+            });
+            return;
+        }
+
+        if (!order) throw new BadRequestError("Order creation failed");
 
         const orderSummary = this.buildOrderSummary(order);
 
@@ -674,7 +700,10 @@ export class OrderController {
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const { mTransactionId } = req.body as { mTransactionId: string };
+        const { mTransactionId, returnedFromGateway } = req.body as {
+            mTransactionId: string;
+            returnedFromGateway?: boolean;
+        };
 
         if (!mTransactionId || typeof mTransactionId !== "string") {
             throw new BadRequestError("Invalid or missing MerchantTxnId");
@@ -683,6 +712,7 @@ export class OrderController {
         const orders =
             await this.orderService.getOrderDetailByMerchantTransactionId(
                 mTransactionId,
+                { returnedFromGateway: returnedFromGateway === true },
             );
         if (!orders) throw new NotFoundError("Order");
 
@@ -711,16 +741,46 @@ export class OrderController {
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const { token, orderId } = req.body as {
+        const { token, orderId, draftId } = req.body as {
             token: string;
-            orderId: number;
+            orderId?: number;
+            draftId?: number;
         };
-        if (typeof token !== "string" || !token || !Number.isInteger(Number(orderId))) {
-            throw new BadRequestError("token and integer orderId are required");
+        if (typeof token !== "string" || !token) {
+            throw new BadRequestError("token is required");
         }
-        const order = await this.orderService.esewaSuccess(token, orderId);
-        if (order.success) {
-            res.status(200).json({ success: true, msg: "Payment successful" });
+        if (
+            orderId !== undefined &&
+            orderId !== null &&
+            !Number.isInteger(Number(orderId))
+        ) {
+            throw new BadRequestError("orderId must be an integer");
+        }
+        if (
+            draftId !== undefined &&
+            draftId !== null &&
+            !Number.isInteger(Number(draftId))
+        ) {
+            throw new BadRequestError("draftId must be an integer");
+        }
+        const result = await this.orderService.esewaSuccess(
+            token,
+            orderId !== undefined && orderId !== null
+                ? Number(orderId)
+                : undefined,
+            draftId !== undefined && draftId !== null
+                ? Number(draftId)
+                : undefined,
+        );
+        if (result.success) {
+            res.status(200).json({
+                success: true,
+                msg: "Payment successful",
+                data: {
+                    orderId: result.orderId,
+                    orderNumber: result.orderNumber,
+                },
+            });
             return;
         }
         throw new BadRequestError("Payment failed");
@@ -731,12 +791,39 @@ export class OrderController {
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const { orderId } = req.body as { orderId: number };
-        if (!Number.isInteger(Number(orderId))) {
-            throw new BadRequestError("integer orderId is required");
+        const { orderId, draftId } = req.body as {
+            orderId?: number;
+            draftId?: number;
+        };
+        if (
+            orderId !== undefined &&
+            orderId !== null &&
+            !Number.isInteger(Number(orderId))
+        ) {
+            throw new BadRequestError("orderId must be an integer");
         }
-        const order = await this.orderService.esewaFailed(orderId);
-        if (order.success) {
+        if (
+            draftId !== undefined &&
+            draftId !== null &&
+            !Number.isInteger(Number(draftId))
+        ) {
+            throw new BadRequestError("draftId must be an integer");
+        }
+        if (
+            (orderId === undefined || orderId === null) &&
+            (draftId === undefined || draftId === null)
+        ) {
+            throw new BadRequestError("orderId or draftId is required");
+        }
+        const result = await this.orderService.esewaFailed(
+            orderId !== undefined && orderId !== null
+                ? Number(orderId)
+                : undefined,
+            draftId !== undefined && draftId !== null
+                ? Number(draftId)
+                : undefined,
+        );
+        if (result.success) {
             res.status(200).json({ success: true, msg: "Payment failed" });
             return;
         }

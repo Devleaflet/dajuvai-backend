@@ -2,7 +2,6 @@ import { Brackets, DataSource, Repository, In } from "typeorm";
 import { Product } from "../entities/product.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { User, UserRole } from "../entities/user.entity";
-import { v2 as cloudinary } from "cloudinary";
 import { APIError } from "../utils/ApiError.utils";
 import { Vendor } from "../entities/vendor.entity";
 import { VendorService } from "./vendor.service";
@@ -11,8 +10,7 @@ import {
   IAdminProductQueryParams,
 } from "../interface/product.interface";
 import { Deal, DealStatus } from "../entities/deal.entity";
-import { ImageUploadService } from "./image.upload.service";
-import { ImageDeletionService } from "./image.delete.service";
+import { CloudinaryService } from "./image.service";
 import { Category } from "../entities/category.entity";
 import { Brand } from "../entities/brand.entity";
 import { Banner } from "../entities/banner.entity";
@@ -26,7 +24,6 @@ import { DealService } from "./deal.service";
 import { SubcategoryService } from "./subcategory.service";
 import { MulterFile } from "../config/multer.config";
 import { Variant } from "../entities/variant.entity";
-import config from "../config/env.config";
 import { DiscountType, ProductSortOption } from "../entities/product.enum"; // adjust path as needed
 import { OrderStatus } from "../entities/order.entity";
 import { sanitizeVendor } from "../utils/sanitize.util";
@@ -83,8 +80,7 @@ export class ProductService {
   private dealRepository: Repository<Deal>;
   private brandRepository: Repository<Brand>;
   private vendorService: VendorService;
-  private imageUploadService: ImageUploadService;
-  private imageDeletionService: ImageDeletionService;
+  private cloudinaryService: CloudinaryService;
   private bannerRepository: Repository<Banner>;
   private categoryService: CategoryService;
   private subcategoryService: SubcategoryService;
@@ -105,8 +101,7 @@ export class ProductService {
     this.brandRepository = this.dataSource.getRepository(Brand);
     this.bannerRepository = this.dataSource.getRepository(Banner);
     this.vendorService = new VendorService();
-    this.imageUploadService = new ImageUploadService();
-    this.imageDeletionService = new ImageDeletionService();
+    this.cloudinaryService = new CloudinaryService();
     this.categoryService = new CategoryService();
     this.subcategoryService = new SubcategoryService();
     this.bannerService = new BannerService();
@@ -115,11 +110,6 @@ export class ProductService {
     this.cartItemRepository = this.dataSource.getRepository(CartItem);
     this.wishlistItemRepository = this.dataSource.getRepository(WishlistItem);
     this.productSearchIndexer = new ProductSearchIndexer(this.dataSource);
-    cloudinary.config({
-      cloud_name: config.CLOUDINARY_CLOUD_NAME,
-      api_key: config.CLOUDINARY_API_KEY,
-      api_secret: config.CLOUDINARY_API_SECRET,
-    });
   }
 
   async getAlllProducts(page: number = 1, limit: number = 50) {
@@ -1965,7 +1955,7 @@ export class ProductService {
 
     // Delete image from Cloudinary
     const deletionResult =
-      await this.imageDeletionService.deleteSingleImage(imageUrl);
+      await this.cloudinaryService.deleteByUrl(imageUrl);
     if (!deletionResult.success) {
       throw new APIError(
         500,

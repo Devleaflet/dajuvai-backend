@@ -15,10 +15,9 @@ import {
     IProductQueryParams,
 } from "../interface/product.interface";
 import { normalizeCatalogQuery } from "../utils/catalog-query";
-import { v2 as cloudinary } from "cloudinary";
 import { DataSource } from "typeorm";
 import { ReviewService } from "../service/review.service";
-import config from "../config/env.config";
+import { CloudinaryService } from "../service/image.service";
 import { UserRole } from "../entities/user.entity";
 
 /**
@@ -28,16 +27,12 @@ import { UserRole } from "../entities/user.entity";
 export class ProductController {
     private productService: ProductService;
     private reviewService: ReviewService;
+    private cloudinaryService: CloudinaryService;
 
     constructor(dataSource: DataSource) {
         this.productService = new ProductService(dataSource);
         this.reviewService = new ReviewService();
-
-        cloudinary.config({
-            cloud_name: config.CLOUDINARY_CLOUD_NAME,
-            api_key: config.CLOUDINARY_API_KEY,
-            api_secret: config.CLOUDINARY_API_SECRET,
-        });
+        this.cloudinaryService = new CloudinaryService();
     }
 
     /**
@@ -425,30 +420,18 @@ export class ProductController {
 
         const files = req.files as Express.Multer.File[];
 
-        const uploadedUrls = await Promise.all(
-            files.map(
-                (file) =>
-                    new Promise<string>((resolve, reject) => {
-                        cloudinary.uploader
-                            .upload_stream(
-                                {
-                                    resource_type: "image",
-                                    folder: "products",
-                                    public_id: `prod_${Date.now()}`,
-                                },
-                                (error, result) => {
-                                    if (error || !result)
-                                        return reject(
-                                            error || new Error("Upload failed"),
-                                        );
-                                    resolve(result.secure_url);
-                                },
-                            )
-                            .end(file.buffer);
-                    }),
-            ),
+        // Routed through CloudinaryService: per-file validation, the
+        // products optimization preset, and content-hash public IDs —
+        // the old prod_${Date.now()} scheme collided across files in the
+        // same request and silently overwrote all but the last upload.
+        const uploads = await this.cloudinaryService.uploadMultipleImages(
+            files,
+            "products",
         );
 
-        res.status(200).json({ success: true, urls: uploadedUrls });
+        res.status(200).json({
+            success: true,
+            urls: uploads.map((upload) => upload.url),
+        });
     }
 }

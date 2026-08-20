@@ -6,7 +6,6 @@ import {
     ProductSource,
 } from "../entities/banner.entity";
 import AppDataSource from "../config/db.config";
-import { v2 as cloudinary } from "cloudinary";
 import {
     CreateBannerInput,
     UpdateBannerInput,
@@ -17,7 +16,7 @@ import { ProductService } from "./product.service";
 import { CategoryService } from "./category.service";
 import { DealService } from "./deal.service";
 import { SubcategoryService } from "./subcategory.service";
-import config from "../config/env.config";
+import { CloudinaryService } from "./image.service";
 import { Product } from "../entities/product.entity";
 import { normalizeManualBannerProductIds } from "../utils/bannerProductSelection";
 
@@ -32,18 +31,14 @@ export class BannerService {
     private categoryService: CategoryService;
     private subcategoryService: SubcategoryService;
     private dealService: DealService;
+    private cloudinaryService: CloudinaryService;
 
     constructor() {
         this.bannerRepository = AppDataSource.getRepository(Banner);
         this.categoryService = new CategoryService();
         this.subcategoryService = new SubcategoryService();
         this.dealService = new DealService();
-
-        cloudinary.config({
-            cloud_name: config.CLOUDINARY_CLOUD_NAME,
-            api_key: config.CLOUDINARY_API_KEY,
-            api_secret: config.CLOUDINARY_API_SECRET,
-        });
+        this.cloudinaryService = new CloudinaryService();
 
         if (!cronScheduled) {
             cron.schedule("0 */5 * * *", async () => {
@@ -363,41 +358,36 @@ export class BannerService {
         }
     }
 
-    private extractPublicIdFromUrl(url: string): string | null {
-        try {
-            const parts = url.split("/");
-            const file = parts[parts.length - 1].split(".")[0];
-            const folderIdx = parts.findIndex((p) => p === "upload");
-            if (folderIdx !== -1 && folderIdx < parts.length - 2) {
-                const folderPath = parts.slice(folderIdx + 2, -1).join("/");
-                return folderPath ? `${folderPath}/${file}` : file;
-            }
-            return file;
-        } catch {
-            return null;
-        }
-    }
+    /**
+     * Deletes all banner images in one batched Cloudinary call (spec OPT-9),
+     * with CDN invalidation and logged — not swallowed — failures.
+     */
+    private async deleteBannerImages(
+        urls: (string | null | undefined)[],
+    ): Promise<void> {
+        const targets = urls.filter(
+            (url): url is string =>
+                Boolean(url && url.includes("cloudinary.com")),
+        );
+        if (targets.length === 0) return;
 
-    private async deleteCloudinaryImage(url: string): Promise<void> {
-        if (!url || !url.includes("cloudinary.com")) return;
-        const publicId = this.extractPublicIdFromUrl(url);
-        if (!publicId) return;
-        try {
-            await cloudinary.uploader.destroy(publicId);
-        } catch {
-            // Silent fail for orphan cleanup
+        const results = await this.cloudinaryService.deleteManyByUrls(targets);
+        for (const result of results) {
+            if (!result.success) {
+                console.warn(
+                    `[BannerService] Image cleanup failed for ${result.publicId || "unknown"}: ${result.error}`,
+                );
+            }
         }
     }
 
     async deleteBanner(id: number) {
         const banner = await this.bannerRepository.findOne({ where: { id } });
         if (banner) {
-            if (banner.desktopImage) {
-                await this.deleteCloudinaryImage(banner.desktopImage);
-            }
-            if (banner.mobileImage) {
-                await this.deleteCloudinaryImage(banner.mobileImage);
-            }
+            await this.deleteBannerImages([
+                banner.desktopImage,
+                banner.mobileImage,
+            ]);
         }
         return await this.bannerRepository.delete(id);
     }

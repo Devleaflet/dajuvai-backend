@@ -2425,6 +2425,10 @@ router.get(
  *                 type: string
  *                 description: Merchant transaction ID to search for
  *                 example: "TXN123456"
+ *               returnedFromGateway:
+ *                 type: boolean
+ *                 description: Set true when the customer's browser was redirected back from the payment gateway (payment round-trip finished). A still-pending checkout draft is then settled as cancelled instead of polling.
+ *                 example: true
  *     responses:
  *       200:
  *         description: Successfully retrieved order details

@@ -6,6 +6,7 @@ import { AuthProvider, User } from "../entities/user.entity";
 import AppDataSource from "./db.config";
 import jwt from "jsonwebtoken";
 import config from "./env.config";
+import { UserDeletionService } from "../service/user-deletion.service";
 
 // Initialize User repository to interact with the database
 // This sets up TypeORM to perform CRUD operations on the User entity
@@ -124,6 +125,28 @@ passport.use(
               provider: AuthProvider.GOOGLE,
             });
             await userDB.save(user);
+          }
+        }
+
+        // Account-deletion grace handling:
+        // - Signing in with Google during the grace period reactivates the
+        //   account (the OAuth sign-in is strong proof of identity).
+        // - Once the grace period has elapsed the account is finalized
+        //   (PII anonymized) and Google sign-in starts a fresh account.
+        if (user.deletionScheduledFor && !user.deletionFinalizedAt) {
+          const userDeletionService = new UserDeletionService();
+          if (user.deletionScheduledFor <= new Date()) {
+            await userDeletionService.finalizeUserDeletion(user.id);
+            user = userDB.create({
+              googleId: profile.id,
+              email: profile.emails[0].value,
+              username: profile.displayName,
+              isVerified: true,
+              provider: AuthProvider.GOOGLE,
+            });
+            await userDB.save(user);
+          } else {
+            await userDeletionService.reactivateOAuthUser(user.id);
           }
         }
 

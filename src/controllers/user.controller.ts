@@ -47,6 +47,8 @@ import {
     AdminResetPasswordInput,
     UpdateStaffInput,
     StaffSignUpInput,
+    userDeleteAccountSchema,
+    userReactivateSchema,
 } from "../utils/zod_validations/user.zod";
 import { APIError } from "../utils/ApiError.utils";
 import { AuthProvider, User, UserRole } from "../entities/user.entity";
@@ -64,6 +66,8 @@ import {
 } from "../utils/nodemailer.utils";
 import AppDataSource from "../config/db.config";
 import { VendorService } from "../service/vendor.service";
+import { UserDeletionService } from "../service/user-deletion.service";
+import { isUserDeletionGracePeriodActive } from "../service/user-account-deletion.policy";
 import { sanitizeUser } from "../utils/sanitize.util";
 import { Vendor } from "../entities/vendor.entity";
 
@@ -103,6 +107,7 @@ class TokenUtils {
 export class UserController {
     private readonly jwtSecret: string;
     private vendorService: VendorService;
+    private userDeletionService: UserDeletionService;
 
     /**
      * @constructor
@@ -111,6 +116,7 @@ export class UserController {
     constructor() {
         this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
+        this.userDeletionService = new UserDeletionService();
     }
 
     /**
@@ -473,8 +479,23 @@ export class UserController {
 
             const loweredEmail = this.toLowerEmail(email);
 
-            // Check if a user with this email already exists
-            let existingUser = await findUserByEmail(loweredEmail);
+            // Check if a user with this email already exists.
+            // findUserForSignup lazily finalizes accounts whose deletion
+            // grace period has elapsed, freeing the email for re-signup.
+            let existingUser =
+                await this.userDeletionService.findUserForSignup(loweredEmail);
+
+            if (
+                existingUser?.deletionRequestedAt &&
+                !existingUser.deletionFinalizedAt &&
+                isUserDeletionGracePeriodActive(existingUser.deletionRequestedAt)
+            ) {
+                throw new APIError(
+                    409,
+                    `This account is scheduled for deletion on ${existingUser.deletionScheduledFor?.toISOString()}. Log in to reactivate it instead.`,
+                    "USER_DELETION_PENDING",
+                );
+            }
 
             const existingAccount =
                 await this.vendorService.findVendorForSignup(loweredEmail);
@@ -670,6 +691,24 @@ export class UserController {
                 throw new APIError(401, "Invalid credentials");
             }
 
+            // Accounts scheduled for deletion cannot log in normally — the
+            // caller must use the reactivation endpoint (or Google sign-in
+            // for OAuth accounts). Expired grace periods finalize on the spot.
+            if (user.deletionRequestedAt && !user.deletionFinalizedAt) {
+                if (
+                    user.deletionScheduledFor &&
+                    user.deletionScheduledFor <= new Date()
+                ) {
+                    await this.userDeletionService.finalizeUserDeletion(user.id);
+                    throw new APIError(404, "Customer account does not exist");
+                }
+                throw new APIError(
+                    409,
+                    `Account scheduled for deletion until ${user.deletionScheduledFor?.toISOString()}. Reactivate it to continue.`,
+                    "USER_DELETION_PENDING",
+                );
+            }
+
             // Generate access token (short-lived)
             const token = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
@@ -735,6 +774,142 @@ export class UserController {
     }
 
     /**
+     * @method requestAccountDeletion
+     * @route DELETE /auth/me
+     * @description Schedules the authenticated customer account for deletion
+     * after a 30-day grace period (mirrors the vendor deletion flow).
+     * Email/password accounts must re-enter their password; Google OAuth
+     * accounts are confirmed by the active session alone.
+     * @access Authenticated User
+     */
+    async requestAccountDeletion(
+        req: AuthRequest<{}, {}, { email: string; password?: string; confirmation: "DELETE" }>,
+        res: Response,
+    ): Promise<void> {
+        try {
+            const parsed = userDeleteAccountSchema.safeParse(req.body);
+            if (!parsed.success) {
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
+                return;
+            }
+            if (!req.user) throw new APIError(401, "Authentication required");
+
+            const scheduledFor =
+                await this.userDeletionService.requestAccountDeletion(
+                    req.user.id,
+                    parsed.data.email,
+                    parsed.data.password,
+                );
+
+            // The session is invalidated immediately; the account can be
+            // restored by logging in again before the deadline.
+            res.clearCookie("token");
+            res.clearCookie("refreshToken");
+            res.status(202).json({
+                success: true,
+                message:
+                    "Account scheduled for deletion. You can reactivate it before the deadline by logging in.",
+                deletionScheduledFor: scheduledFor,
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({
+                    success: false,
+                    errorCode: error.errorCode,
+                    message: error.message,
+                });
+            } else {
+                console.error("Request account deletion error:", error);
+                res.status(500).json({
+                    success: false,
+                    message: "Failed to schedule account deletion",
+                });
+            }
+        }
+    }
+
+    /**
+     * @method reactivateAccount
+     * @route POST /auth/reactivate
+     * @description Restores an email/password account that is scheduled for
+     * deletion but still inside the grace period, and issues a fresh session.
+     * @access Public
+     */
+    async reactivateAccount(
+        req: Request<{}, {}, { email: string; password: string }>,
+        res: Response,
+    ): Promise<void> {
+        try {
+            const parsed = userReactivateSchema.safeParse(req.body);
+            if (!parsed.success) {
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
+                return;
+            }
+
+            const user = await this.userDeletionService.reactivateUser(
+                parsed.data.email,
+                parsed.data.password,
+            );
+
+            const token = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                this.jwtSecret,
+                { expiresIn: "15m" },
+            );
+            const refreshToken = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                config.JWT_REFRESH_SECRET,
+                { expiresIn: "1d" },
+            );
+
+            res.cookie("token", token, {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 15 * 60 * 1000,
+            });
+            res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 1 * 24 * 60 * 60 * 1000,
+            });
+
+            res.status(200).json({
+                success: true,
+                message: "Account reactivated successfully",
+                token,
+                refreshToken,
+                data: {
+                    userId: user.id,
+                    email: user.email,
+                    role: user.role,
+                },
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({
+                    success: false,
+                    errorCode: error.errorCode,
+                    message: error.message,
+                });
+            } else {
+                console.error("Reactivate account error:", error);
+                res.status(500).json({
+                    success: false,
+                    message: "Failed to reactivate account",
+                });
+            }
+        }
+    }
+
+    /**
      * @method refreshToken
      * @route POST /auth/refresh-token
      * @description Issues a new access token using a valid refresh token from the cookie.
@@ -767,6 +942,20 @@ export class UserController {
                 res.status(401).json({
                     success: false,
                     message: "User not found",
+                });
+                return;
+            }
+
+            // Deletion-pending or finalized accounts cannot refresh sessions.
+            if (user.deletionFinalizedAt || user.deletionScheduledFor) {
+                res.clearCookie("token");
+                res.clearCookie("refreshToken");
+                res.status(401).json({
+                    success: false,
+                    errorCode: user.deletionFinalizedAt
+                        ? "USER_DELETED"
+                        : "USER_DELETION_PENDING",
+                    message: "This account is scheduled for deletion",
                 });
                 return;
             }
@@ -886,6 +1075,26 @@ export class UserController {
                         provider: AuthProvider.GOOGLE,
                     });
                     await userRepo.save(user);
+                }
+            }
+
+            // Account-deletion grace handling (same policy as the web Google
+            // callback): sign-in during the grace period reactivates the
+            // account; after expiry the old account is finalized and Google
+            // sign-in starts a fresh one.
+            if (user.deletionScheduledFor && !user.deletionFinalizedAt) {
+                if (user.deletionScheduledFor <= new Date()) {
+                    await this.userDeletionService.finalizeUserDeletion(user.id);
+                    user = userRepo.create({
+                        googleId,
+                        email,
+                        username: name || email.split("@")[0],
+                        isVerified: true,
+                        provider: AuthProvider.GOOGLE,
+                    });
+                    await userRepo.save(user);
+                } else {
+                    await this.userDeletionService.reactivateOAuthUser(user.id);
                 }
             }
 

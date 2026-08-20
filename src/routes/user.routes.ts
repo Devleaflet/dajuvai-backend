@@ -17,6 +17,8 @@ import {
     signupSchema,
     staffSignupSchema,
     updateStaffSchema,
+    userDeleteAccountSchema,
+    userReactivateSchema,
     verificationTokenSchema,
     verifyEmailChangeSchema,
     verifyTokenSchema,
@@ -722,34 +724,53 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: number
- *                     description: User ID
- *                   username:
- *                     type: string
- *                     description: Username
- *                   email:
- *                     type: string
- *                     description: User email
- *                   role:
- *                     type: string
- *                     enum: [admin, user, customer]
- *                     description: User role
- *                   isVerified:
- *                     type: boolean
- *                     description: Email verification status
- *                   createdAt:
- *                     type: string
- *                     format: date-time
- *                     description: Account creation date
- *                   updatedAt:
- *                     type: string
- *                     format: date-time
- *                     description: Account last update date
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: number
+ *                         description: User ID
+ *                       username:
+ *                         type: string
+ *                         description: Username
+ *                       email:
+ *                         type: string
+ *                         description: User email
+ *                       role:
+ *                         type: string
+ *                         enum: [admin, user, customer]
+ *                         description: User role
+ *                       isVerified:
+ *                         type: boolean
+ *                         description: Email verification status
+ *                       provider:
+ *                         type: string
+ *                         enum: [local, google, facebook]
+ *                         description: Login provider
+ *                       deletionStatus:
+ *                         type: string
+ *                         enum: [ACTIVE, PENDING_DELETION, DELETED]
+ *                         description: Current account deletion status
+ *                       deletionScheduledFor:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         description: Deletion deadline when status is PENDING_DELETION
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Account creation date
+ *                       updatedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Account last update date
  *       401:
  *         description: Unauthorized - Invalid or missing token
  *       403:
@@ -2063,8 +2084,157 @@ userRouter.post(
  *       500:
  *         description: Internal server error
  */
-userRouter.delete("/:id", userController.deleteUserHandler);
-// isAdminOrStaff,
+/**
+ * @swagger
+ * /api/auth/me:
+ *   delete:
+ *     summary: Request self-deletion of the authenticated customer account
+ *     description: >
+ *       Schedules the account for deletion after a 30-day grace period.
+ *       Email/password accounts must re-enter their password; Google OAuth
+ *       accounts are confirmed by the active session (no password field).
+ *       During the grace period the account can be reactivated by logging in.
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - confirmation
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 description: Required for email/password accounts; omit for Google accounts.
+ *               confirmation:
+ *                 type: string
+ *                 enum: [DELETE]
+ *                 example: DELETE
+ *     responses:
+ *       202:
+ *         description: Deletion scheduled
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Account scheduled for deletion. You can reactivate it before the deadline by logging in."
+ *                 deletionScheduledFor:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Validation failed or wrong password
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 errorCode:
+ *                   type: string
+ *                   example: INVALID_CURRENT_PASSWORD
+ *                 message:
+ *                   type: string
+ *                   example: "Current password is incorrect"
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.delete(
+    "/me",
+    authMiddleware,
+    validateZod(userDeleteAccountSchema),
+    userController.requestAccountDeletion.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/reactivate:
+ *   post:
+ *     summary: Reactivate an email/password account scheduled for deletion
+ *     description: >
+ *       Restores an account that requested deletion but is still inside the
+ *       30-day grace period, and issues a fresh session. Google accounts
+ *       reactivate automatically by signing in with Google.
+ *     tags: [User]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 format: password
+ *     responses:
+ *       200:
+ *         description: Account reactivated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Account reactivated successfully"
+ *                 token:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Validation failed (missing/invalid email or password)
+ *       401:
+ *         description: Invalid credentials
+ *       403:
+ *         description: OAuth account must reactivate via Google sign-in
+ *       410:
+ *         description: Grace period expired
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.post(
+    "/reactivate",
+    authRateLimiter,
+    validateZod(userReactivateSchema),
+    userController.reactivateAccount.bind(userController),
+);
+
+userRouter.delete(
+    "/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    userController.deleteUserHandler,
+);
 
 /**
  * @swagger

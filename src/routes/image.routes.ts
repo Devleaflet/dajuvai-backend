@@ -1,10 +1,25 @@
 import { Router } from "express";
+import type { RequestHandler } from "express";
 import { singleUploadMiddleware } from "../config/multer.config";
 import { ImageController } from "../controllers/image.controller";
-import { authMiddleware } from "../middlewares/auth.middleware";
+import { combinedAuthMiddleware } from "../middlewares/auth.middleware";
 
 const imageRouter = Router();
 const imageController = new ImageController();
+
+/**
+ * Uploads require an authenticated user or vendor (spec OPT-7 / BUG-5).
+ * Sole exception: `folder=vendor` — vendor signup uploads registration
+ * documents before any account/token exists, so that folder stays public
+ * while every other folder rejects unauthenticated callers.
+ */
+const uploadAuthMiddleware: RequestHandler = (req, res, next) => {
+    void combinedAuthMiddleware(req as any, res, (err?: unknown) => {
+        if (!err) return next();
+        if (String(req.query.folder ?? "") === "vendor") return next();
+        next(err);
+    });
+};
 
 /**
  * @swagger
@@ -98,7 +113,7 @@ const imageController = new ImageController();
  */
 imageRouter.post(
   "/",
-  //   authMiddleware,
+  uploadAuthMiddleware,
   singleUploadMiddleware,
   imageController.uploadSingle.bind(imageController),
 );

@@ -17,6 +17,11 @@ import {
     DeliveryStatus,
 } from "../entities/order.entity";
 import { Address } from "../entities/address.entity";
+import {
+    CheckoutDraft,
+    CheckoutDraftStatus,
+    CHECKOUT_DRAFT_TTL_MS,
+} from "../entities/checkoutDraft.entity";
 import { OrderItem } from "../entities/orderItems.entity";
 import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
 import {
@@ -83,6 +88,7 @@ import {
     emitProductStockUpdate,
 } from "../socket/socket";
 import { dispatchStatusSideEffects } from "../utils/status-side-effects.utils";
+import { NpsPaymentService } from "./nps-payment.service";
 
 /**
  * Service class responsible for managing orders.
@@ -108,6 +114,8 @@ export class OrderService {
     private variantRepository: Repository<Variant>;
     private vendorService: VendorService;
     private notificationService: NotificationService;
+    private checkoutDraftRepository: Repository<CheckoutDraft>;
+    private npsPaymentService: NpsPaymentService;
 
     /**
      * Initialize repositories and dependent services.
@@ -159,6 +167,9 @@ export class OrderService {
 
         this.vendorService = new VendorService();
         this.notificationService = new NotificationService();
+        this.checkoutDraftRepository =
+            AppDataSource.getRepository(CheckoutDraft);
+        this.npsPaymentService = new NpsPaymentService();
     }
 
     private calculateLineItemPrice(item: any): number {
@@ -593,6 +604,451 @@ export class OrderService {
         });
     }
 
+    /**
+     * Persist a priced checkout as a CheckoutDraft (online payments only).
+     * Nothing is reserved or claimed here — the draft is just a validated
+     * snapshot that materializeDraftOrder() turns into a real Order once
+     * the payment gateway confirms success.
+     */
+    private async createCheckoutDraft(args: {
+        userId: number;
+        orderData: IOrderCreateRequest;
+        order: Order;
+        vendorShippingRows: Array<Record<string, any>>;
+        address: Address;
+        isBuyNow: boolean;
+        items: any[];
+    }): Promise<CheckoutDraft> {
+        const { userId, orderData, order, vendorShippingRows, address, isBuyNow, items } =
+            args;
+
+        const draft = this.checkoutDraftRepository.create({
+            userId,
+            status: CheckoutDraftStatus.PENDING,
+            paymentMethod: order.paymentMethod,
+            orderNumber: order.orderNumber,
+            payload: {
+                fullName: orderData.fullName,
+                phoneNumber: orderData.phoneNumber,
+                shippingAddress: orderData.shippingAddress,
+                isBuyNow: Boolean(isBuyNow),
+                productId: orderData.productId ?? null,
+                variantId: orderData.variantId ?? null,
+                quantity: orderData.quantity ?? null,
+                promoCode: orderData.promoCode ?? null,
+                ageRestrictedAcknowledged: Boolean(
+                    orderData.ageRestrictedAcknowledged,
+                ),
+                idempotencyKey: orderData.idempotencyKey ?? null,
+                instrumentName: orderData.instrumentName ?? null,
+            },
+            items: items.map((item) => ({
+                productId: item.product.id,
+                variantId: item.variant ? item.variant.id : null,
+                quantity: item.quantity,
+                price: this.calculateLineItemPrice(item),
+            })),
+            totals: {
+                totalPrice: order.totalPrice,
+                shippingFee: order.shippingFee,
+                merchandiseSubtotal: order.merchandiseSubtotal,
+                discountTotal: order.discountTotal,
+                taxTotal: order.taxTotal,
+                serviceCharge: order.serviceCharge,
+                appliedPromoCode: order.appliedPromoCode ?? null,
+                promoApplyOn: order.promoApplyOn ?? null,
+                vendorShippingRows,
+            },
+            addressId: address.id,
+            expiresAt: new Date(Date.now() + CHECKOUT_DRAFT_TTL_MS),
+        });
+
+        return await this.checkoutDraftRepository.save(draft);
+    }
+
+    /**
+     * Materialize a PENDING CheckoutDraft into a real Order.
+     *
+     * Called ONLY after a payment gateway confirms success (eSewa callback,
+     * NPS status check, or NPS webhook). Idempotent: a COMPLETED draft
+     * returns its existing order. Stock is revalidated and decremented, and
+     * the promo usage slot is claimed, inside one row-locked transaction —
+     * the same guarantees as the COD path.
+     *
+     * @param draft - The checkout draft to materialize.
+     * @param transactionId - Gateway transaction reference stored on the
+     *   order (eSewa transaction_uuid or NPS MerchantTxnId).
+     */
+    async materializeDraftOrder(
+        draft: CheckoutDraft,
+        transactionId?: string | null,
+    ): Promise<Order> {
+        // Idempotency: duplicate gateway callbacks must return the same order.
+        if (draft.status === CheckoutDraftStatus.COMPLETED && draft.orderId) {
+            const existing = await this.orderRepository.findOne({
+                where: { id: draft.orderId },
+                relations: [
+                    "orderItems",
+                    "orderItems.product",
+                    "orderItems.variant",
+                    "vendorShippings",
+                ],
+                withDeleted: true,
+            });
+            if (existing) return existing;
+        }
+
+        if (draft.status !== CheckoutDraftStatus.PENDING) {
+            throw new APIError(400, "This checkout session has ended");
+        }
+
+        if (draft.expiresAt && draft.expiresAt <= new Date()) {
+            await this.checkoutDraftRepository
+                .update(
+                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
+                    { status: CheckoutDraftStatus.EXPIRED },
+                )
+                .catch(() => undefined);
+            throw new APIError(400, "This checkout session has expired");
+        }
+
+        let orderId: number;
+        try {
+            const result = await AppDataSource.transaction(async (manager) => {
+                const draftRepo = manager.getRepository(CheckoutDraft);
+
+                // Serialize concurrent callbacks (redirect + webhook + poll).
+                const lockedDraft = await draftRepo.findOne({
+                    where: { id: draft.id },
+                    lock: { mode: "pessimistic_write" },
+                });
+                if (!lockedDraft) {
+                    throw new APIError(404, "Checkout session not found");
+                }
+                if (
+                    lockedDraft.status === CheckoutDraftStatus.COMPLETED &&
+                    lockedDraft.orderId
+                ) {
+                    return { alreadyCompleted: true, orderId: lockedDraft.orderId };
+                }
+                if (lockedDraft.status !== CheckoutDraftStatus.PENDING) {
+                    throw new APIError(400, "This checkout session has ended");
+                }
+
+                const payload = lockedDraft.payload || {};
+                const totals = lockedDraft.totals || {};
+
+                const user = await manager
+                    .getRepository(User)
+                    .findOne({ where: { id: lockedDraft.userId } });
+                if (!user) {
+                    throw new APIError(404, "Customer account not found");
+                }
+
+                // Reload products/variants fresh — pricing relations (deal,
+                // subcategory, vendor) must be present for the OrderItem
+                // snapshots, and availability is re-checked here.
+                const items: any[] = [];
+                for (const snap of lockedDraft.items || []) {
+                    const product = await manager
+                        .getRepository(Product)
+                        .findOne({
+                            where: { id: snap.productId },
+                            relations: [
+                                "variants",
+                                "subcategory",
+                                "subcategory.category",
+                                "vendor",
+                                "vendor.district",
+                                "deal",
+                            ],
+                        });
+                    if (!product) {
+                        throw new APIError(
+                            400,
+                            "An item in your checkout is no longer available",
+                        );
+                    }
+                    let variant = null;
+                    if (snap.variantId) {
+                        variant = await manager
+                            .getRepository(Variant)
+                            .findOne({ where: { id: snap.variantId } });
+                        if (!variant) {
+                            throw new APIError(
+                                400,
+                                "An item in your checkout is no longer available",
+                            );
+                        }
+                    }
+                    items.push({ product, variant, quantity: snap.quantity });
+                }
+
+                // Reuse the stored address when it still exists; otherwise
+                // rebuild it from the payload snapshot so a paid checkout
+                // can never fail just because the address row changed.
+                let address = lockedDraft.addressId
+                    ? await manager.getRepository(Address).findOne({
+                          where: { id: lockedDraft.addressId },
+                      })
+                    : null;
+                if (!address) {
+                    const ship = payload.shippingAddress || {};
+                    const resolvedDistrict =
+                        await this.shippingService.resolveDistrictByName(
+                            ship.district,
+                        );
+                    const rebuilt = manager.getRepository(Address).create({
+                        province: ship.province,
+                        district: ship.district,
+                        districtId: resolvedDistrict?.id ?? null,
+                        city: ship.city,
+                        localAddress: ship.streetAddress,
+                        landmark: ship.landmark,
+                        userId: lockedDraft.userId,
+                    });
+                    address = await manager.getRepository(Address).save(rebuilt);
+                }
+
+                const orderItems = this.createOrderItems(items);
+
+                const orderEntity = manager.getRepository(Order).create({
+                    orderedById: lockedDraft.userId,
+                    orderedBy: user,
+                    orderNumber: lockedDraft.orderNumber,
+                    idempotencyKey: payload.idempotencyKey || null,
+                    totalPrice: totals.totalPrice,
+                    shippingFee: totals.shippingFee,
+                    merchandiseSubtotal: totals.merchandiseSubtotal,
+                    discountTotal: totals.discountTotal,
+                    taxTotal: totals.taxTotal || 0,
+                    serviceCharge: totals.serviceCharge || 0,
+                    instrumentName: payload.instrumentName || null,
+                    paymentMethod: lockedDraft.paymentMethod,
+                    appliedPromoCode: totals.appliedPromoCode || null,
+                    promoApplyOn: totals.promoApplyOn || null,
+                    paymentStatus: PaymentStatus.UNPAID,
+                    status: OrderStatus.ORDER_PLACED,
+                    shippingAddress: address,
+                    shippingAddressSnapshot: {
+                        province: address.province,
+                        district: address.district,
+                        districtId: address.districtId,
+                        city: address.city,
+                        localAddress: address.localAddress,
+                        landmark: address.landmark,
+                    },
+                    orderItems,
+                    deliveryStatus: DeliveryStatus.ORDER_PROCESSING,
+                    isBuyNow: Boolean(payload.isBuyNow),
+                    phoneNumber: payload.phoneNumber,
+                });
+
+                let savedOrder = await manager
+                    .getRepository(Order)
+                    .save(orderEntity);
+
+                // Claim the promo usage slot atomically with the order save,
+                // exactly like the COD path in reserveStockAndSaveOrder.
+                if (savedOrder.appliedPromoCode) {
+                    const claimed = await this.claimPromoUsage(
+                        savedOrder.appliedPromoCode,
+                        manager,
+                    );
+                    if (!claimed) {
+                        throw new APIError(
+                            400,
+                            "Promo code usage limit has been reached. Remove the promo code and try again.",
+                        );
+                    }
+                }
+
+                const vendorShippingRows: Array<Record<string, any>> =
+                    totals.vendorShippingRows || [];
+                if (vendorShippingRows.length) {
+                    await manager.getRepository(OrderVendorShipping).save(
+                        vendorShippingRows.map(
+                            (row): Partial<OrderVendorShipping> => ({
+                                ...row,
+                                shippingZone: row.shippingZone as any,
+                                orderId: savedOrder.id,
+                            }),
+                        ),
+                    );
+                }
+
+                savedOrder = await manager.getRepository(Order).findOne({
+                    where: { id: savedOrder.id },
+                    relations: [
+                        "orderItems",
+                        "orderItems.product",
+                        "orderItems.variant",
+                        "vendorShippings",
+                    ],
+                    withDeleted: true,
+                });
+                if (!savedOrder) {
+                    throw new APIError(500, "Failed to create order");
+                }
+
+                await this.updateStock(savedOrder.orderItems, manager);
+
+                lockedDraft.status = CheckoutDraftStatus.COMPLETED;
+                lockedDraft.orderId = savedOrder.id;
+                await draftRepo.save(lockedDraft);
+
+                return { alreadyCompleted: false, orderId: savedOrder.id };
+            });
+
+            orderId = result.orderId;
+        } catch (error) {
+            // The gateway already collected money — this is a reconciliation
+            // case. Mark the draft cancelled, log loudly with the transaction
+            // reference, and surface an explicit support-facing message.
+            await this.checkoutDraftRepository
+                .update(
+                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
+                    { status: CheckoutDraftStatus.CANCELLED },
+                )
+                .catch(() => undefined);
+            console.error(
+                `[CHECKOUT-DRAFT] Payment succeeded but order materialization failed. draftId=${draft.id} orderNumber=${draft.orderNumber} transactionId=${transactionId ?? "n/a"}`,
+                error,
+            );
+            throw new APIError(
+                500,
+                "Your payment was received but the order could not be completed. Please contact support with your transaction reference.",
+            );
+        }
+
+        // Mark paid + fire payment/order notifications through the same
+        // idempotent path used by gateway callbacks (orderSuccess no-ops
+        // if the order is already PAID).
+        await this.orderSuccess(
+            orderId,
+            transactionId || draft.esewaTransactionUuid || "",
+        );
+
+        const finalOrder = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "orderItems",
+                "orderItems.product",
+                "orderItems.variant",
+                "vendorShippings",
+            ],
+            withDeleted: true,
+        });
+        if (!finalOrder) {
+            throw new APIError(500, "Failed to load materialized order");
+        }
+
+        // Cart clear (sendOrderEmails also clears for non-buy-now), emails,
+        // audit trail and stock broadcast — same side effects as a COD order.
+        try {
+            await this.sendOrderEmails(orderId);
+        } catch (error) {
+            console.error("[CHECKOUT-DRAFT] Failed to send order emails:", error);
+        }
+
+        await this.recordStatusChange(orderId, null, OrderStatus.ORDER_PLACED, {
+            reason: "Order placed (online payment confirmed)",
+            changedByUserId: draft.userId,
+            changedByRole: OrderStatusChangedByRole.CUSTOMER,
+        });
+
+        emitProductStockUpdate({
+            productIds: [
+                ...new Set(
+                    finalOrder.orderItems
+                        .map((item) => Number(item.productId))
+                        .filter((id) => Number.isInteger(id) && id > 0),
+                ),
+            ],
+            variantIds: [
+                ...new Set(
+                    finalOrder.orderItems
+                        .map((item) => Number(item.variantId))
+                        .filter((id) => Number.isInteger(id) && id > 0),
+                ),
+            ],
+        });
+
+        return finalOrder;
+    }
+
+    /**
+     * Cancel a still-PENDING draft (payment failed/cancelled at gateway).
+     * No stock or promo was ever reserved, so there is nothing to restore.
+     * Idempotent — already-terminal drafts are left untouched.
+     */
+    async cancelCheckoutDraft(
+        draft: CheckoutDraft,
+        reason: string,
+    ): Promise<void> {
+        if (draft.status !== CheckoutDraftStatus.PENDING) return;
+        await this.checkoutDraftRepository
+            .update(
+                { id: draft.id, status: CheckoutDraftStatus.PENDING },
+                { status: CheckoutDraftStatus.CANCELLED },
+            )
+            .catch((error) =>
+                console.error(
+                    `[CHECKOUT-DRAFT] Failed to cancel draft ${draft.id} (${reason}):`,
+                    error,
+                ),
+            );
+    }
+
+    /**
+     * Cron hook: expire PENDING drafts whose TTL elapsed without a gateway
+     * verdict. Returns the number of drafts expired.
+     */
+    async expireStaleCheckoutDrafts(now: Date = new Date()): Promise<number> {
+        const result = await this.checkoutDraftRepository
+            .createQueryBuilder()
+            .update(CheckoutDraft)
+            .set({ status: CheckoutDraftStatus.EXPIRED })
+            .where("status = :status", { status: CheckoutDraftStatus.PENDING })
+            .andWhere('"expiresAt" <= :now', { now })
+            .execute();
+        return result.affected ?? 0;
+    }
+
+    /**
+     * Synthetic order-shaped view of a draft, used by the merchant-
+     * transaction lookup while the gateway hasn't settled yet. Keeps the
+     * existing Transaction.tsx polling contract (pending → keep polling,
+     * cancelled → show cancelled) without any frontend change.
+     */
+    private buildDraftOrderView(
+        draft: CheckoutDraft,
+        paymentStatus: PaymentStatus,
+        status: OrderStatus,
+    ): Order {
+        const totals = draft.totals || {};
+        return {
+            id: 0,
+            orderNumber: draft.orderNumber,
+            orderedById: draft.userId,
+            paymentStatus,
+            paymentMethod: draft.paymentMethod,
+            status,
+            deliveryStatus: DeliveryStatus.ORDER_PROCESSING,
+            totalPrice: totals.totalPrice ?? 0,
+            shippingFee: totals.shippingFee ?? 0,
+            merchandiseSubtotal: totals.merchandiseSubtotal ?? 0,
+            discountTotal: totals.discountTotal ?? 0,
+            taxTotal: totals.taxTotal ?? 0,
+            serviceCharge: totals.serviceCharge ?? 0,
+            mTransactionId: draft.mTransactionId ?? null,
+            instrumentName: draft.payload?.instrumentName ?? null,
+            createdAt: draft.createdAt,
+            updatedAt: draft.updatedAt,
+            orderItems: [],
+        } as unknown as Order;
+    }
+
     /** Single place that applies a promo code — used by both checkout
      * (`createOrderEntity`) and the pre-checkout estimate, so the discount a
      * customer previews always matches what actually gets charged. */
@@ -887,11 +1343,12 @@ export class OrderService {
         userId: number,
         orderData: IOrderCreateRequest,
     ): Promise<{
-        order: Order;
+        order?: Order;
+        draft?: CheckoutDraft;
         redirectUrl?: string;
         vendorids: any[];
         useremail: string;
-        esewaRedirectUrl: string | undefined;
+        esewaRedirectUrl: { url: string } | undefined;
     }> {
         try {
             const {
@@ -1070,17 +1527,33 @@ export class OrderService {
                 paymentMethod === PaymentMethod.ESEWA ||
                 paymentMethod === PaymentMethod.NPX
             ) {
-                // Reserve stock + save order atomically, THEN contact the
-                // payment gateway — never hold the DB transaction open across
-                // an external network call.
-                order = await this.reserveStockAndSaveOrder(
+                // Deferred order creation: an online-payment checkout only
+                // becomes a real Order after the gateway confirms success.
+                // Here we persist a priced CheckoutDraft instead — no order
+                // row, no stock reservation, no promo claim — so cancelling
+                // or abandoning the payment never leaves a phantom order
+                // behind. materializeDraftOrder() creates the order later.
+                const draft = await this.createCheckoutDraft({
+                    userId,
+                    orderData,
                     order,
                     vendorShippingRows,
-                );
+                    address,
+                    isBuyNow,
+                    items,
+                });
 
                 if (paymentMethod === PaymentMethod.ESEWA) {
-                    esewaRedirectUrl = await this.initateEsewaPayment(order);
+                    esewaRedirectUrl =
+                        await this.initateEsewaPaymentForDraft(draft);
                 }
+
+                return {
+                    draft,
+                    esewaRedirectUrl,
+                    vendorids,
+                    useremail,
+                };
             } else {
                 throw new APIError(400, "Invalid payment method");
             }
@@ -1132,26 +1605,71 @@ export class OrderService {
         }
     }
 
-    async esewaSuccess(token: string, orderId: number) {
+    async esewaSuccess(token: string, orderId?: number, draftId?: number) {
         try {
             let object = JSON.parse(
                 Buffer.from(token, "base64").toString("ascii"),
             );
 
             if (object.status !== "COMPLETE") {
-                // Release the stock reserved at order creation — otherwise a
-                // non-complete eSewa callback leaves it locked up forever.
-                await this.esewaFailed(orderId);
+                // Cancel the pending draft (nothing was reserved), or release
+                // the stock reserved at order creation for legacy orders —
+                // otherwise a non-complete eSewa callback leaves it locked
+                // up forever.
+                const pendingDraft = draftId
+                    ? await this.checkoutDraftRepository.findOne({
+                          where: {
+                              id: draftId,
+                              status: CheckoutDraftStatus.PENDING,
+                          },
+                      })
+                    : null;
+                if (pendingDraft) {
+                    await this.cancelCheckoutDraft(
+                        pendingDraft,
+                        "eSewa returned non-complete status",
+                    );
+                } else if (orderId) {
+                    await this.esewaFailed(orderId);
+                }
                 throw new APIError(400, "Payment not completed");
             }
 
-            // order success
+            // Draft-based checkout: resolve by the eSewa transaction uuid —
+            // unambiguous even though draft ids and order ids share a number
+            // space. Falls back to legacy order handling for orders created
+            // before the draft flow shipped.
+            const draft = object.transaction_uuid
+                ? await this.checkoutDraftRepository.findOne({
+                      where: {
+                          esewaTransactionUuid: object.transaction_uuid,
+                      },
+                  })
+                : null;
+
+            if (draft) {
+                const order = await this.materializeDraftOrder(
+                    draft,
+                    object.transaction_uuid,
+                );
+                return {
+                    success: true,
+                    orderId: order.id,
+                    orderNumber: order.orderNumber,
+                };
+            }
+
+            if (!orderId) {
+                throw new APIError(404, "Checkout session not found");
+            }
+
+            // order success (legacy path)
             await this.orderSuccess(orderId, object.transaction_uuid);
 
             // Send emails to customer and vendors
             await this.sendOrderEmails(orderId);
 
-            return { success: true };
+            return { success: true, orderId };
         } catch (err) {
             // Same fix as createOrder above: this used to unconditionally wrap
             // *any* error — including the intentional 400 "Payment not completed"
@@ -1550,8 +2068,33 @@ export class OrderService {
         }
     }
 
-    async esewaFailed(orderId: number) {
+    async esewaFailed(orderId?: number, draftId?: number) {
+        // Draft-based checkout resolution first — the draft flow never
+        // reserved stock or claimed promos, so failure handling is a single
+        // idempotent status flip.
+        if (draftId) {
+            const draft = await this.checkoutDraftRepository.findOne({
+                where: { id: draftId },
+            });
+            if (draft && draft.status === CheckoutDraftStatus.PENDING) {
+                await this.cancelCheckoutDraft(draft, "eSewa payment failed");
+                return { success: true };
+            }
+            if (draft && !orderId && draft.orderId) {
+                // Completed draft — route the failure callback to its order.
+                orderId = draft.orderId;
+            }
+            if (!orderId) {
+                // Already cancelled/expired with no order — nothing to do.
+                return { success: true };
+            }
+        }
+
         try {
+            if (!orderId) {
+                throw new APIError(404, "Checkout session not found");
+            }
+
             const order = await this.orderRepository.findOne({
                 where: { id: orderId },
                 relations: [
@@ -1649,10 +2192,17 @@ export class OrderService {
         }
     }
 
-    private async initateEsewaPayment(order: Order) {
+    private async initateEsewaPaymentForDraft(draft: CheckoutDraft) {
         const transaction_uuid = crypto.randomUUID();
 
-        const data = `total_amount=${order.totalPrice},transaction_uuid=${transaction_uuid},product_code=${config.ESEWA_MERCHANT}`;
+        // Persist the uuid BEFORE contacting eSewa so the success callback
+        // can always resolve back to this draft, even on retries.
+        draft.esewaTransactionUuid = transaction_uuid;
+        await this.checkoutDraftRepository.save(draft);
+
+        const totalPrice = draft.totals?.totalPrice;
+
+        const data = `total_amount=${totalPrice},transaction_uuid=${transaction_uuid},product_code=${config.ESEWA_MERCHANT}`;
 
         const esewaSignature = this.generateHmacSha256Hash(
             data,
@@ -1660,21 +2210,18 @@ export class OrderService {
         );
 
         let paymentData = {
-            amount: order.totalPrice,
-            failure_url: `${config.FRONTEND_URL}/order/esewa-payment-failure?oid=${order?.id}`,
-            // failure_url: `${config.FRONTEND_URL}/order/esewa-payment-failure&oid=${order?.id}`,
+            amount: totalPrice,
+            failure_url: `${config.FRONTEND_URL}/order/esewa-payment-failure?did=${draft.id}`,
             product_delivery_charge: "0",
             product_service_charge: "0",
             product_code: config.ESEWA_MERCHANT,
             signed_field_names: "total_amount,transaction_uuid,product_code",
-            success_url: `${config.FRONTEND_URL}/order/esewa-payment-success?oid=${order?.id}`,
-            // success_url: `${config.FRONTEND_URL}/order/esewa-payment-success&oid=${order?.id}`,
-            // success_url: `${config.FRONTEND_URL}/order/esewa-payment-success`,
+            success_url: `${config.FRONTEND_URL}/order/esewa-payment-success?did=${draft.id}`,
             tax_amount: "0",
-            total_amount: order?.totalPrice,
+            total_amount: totalPrice,
             transaction_uuid: transaction_uuid,
             metadata: {
-                paymentId: order?.id,
+                draftId: draft.id,
             },
             signature: esewaSignature,
         };
@@ -3507,14 +4054,113 @@ export class OrderService {
         return orders.map(sanitizeOrderFull);
     }
 
-    async getOrderDetailByMerchantTransactionId(mTransactionId: string) {
+    async getOrderDetailByMerchantTransactionId(
+        mTransactionId: string,
+        opts?: { returnedFromGateway?: boolean },
+    ): Promise<Order | null> {
         const order = await this.orderRepository.findOne({
             where: {
                 mTransactionId: mTransactionId,
             },
         });
+        if (order) return order;
 
-        return order;
+        // Deferred-order flow: the transaction belongs to a checkout draft.
+        // The gateway is the source of truth — query it and settle the draft
+        // so the existing Transaction.tsx polling contract keeps working
+        // (pending → keep polling, cancelled → show cancelled).
+        const draft = await this.checkoutDraftRepository.findOne({
+            where: { mTransactionId },
+        });
+        if (!draft) return null;
+
+        if (draft.status === CheckoutDraftStatus.COMPLETED && draft.orderId) {
+            return (
+                (await this.orderRepository.findOne({
+                    where: { id: draft.orderId },
+                })) ?? null
+            );
+        }
+
+        if (draft.status === CheckoutDraftStatus.PENDING) {
+            // TTL elapsed without a gateway verdict — the session is over.
+            if (draft.expiresAt && draft.expiresAt <= new Date()) {
+                await this.checkoutDraftRepository.update(
+                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
+                    { status: CheckoutDraftStatus.EXPIRED },
+                );
+                draft.status = CheckoutDraftStatus.EXPIRED;
+                return this.buildDraftOrderView(
+                    draft,
+                    PaymentStatus.UNPAID,
+                    OrderStatus.CANCELLED,
+                );
+            }
+
+            const { status } =
+                await this.npsPaymentService.checkTransactionStatus(
+                    mTransactionId,
+                );
+
+            if (status === "Success") {
+                try {
+                    return await this.materializeDraftOrder(
+                        draft,
+                        mTransactionId,
+                    );
+                } catch (error) {
+                    // Money-without-order reconciliation case — already
+                    // logged loudly inside materializeDraftOrder. Keep the
+                    // UI on a pending view instead of a hard failure.
+                    console.error(
+                        "[CHECKOUT-DRAFT] materialization failed during status lookup:",
+                        error instanceof Error ? error.message : error,
+                    );
+                }
+            } else if (status === "Failed") {
+                await this.cancelCheckoutDraft(
+                    draft,
+                    "Gateway reported failure",
+                );
+                return this.buildDraftOrderView(
+                    draft,
+                    PaymentStatus.UNPAID,
+                    OrderStatus.CANCELLED,
+                );
+            } else if (opts?.returnedFromGateway) {
+                // The customer's browser already completed the gateway
+                // round-trip (the redirect back to the app) without a
+                // success verdict — i.e. they cancelled, closed the gateway
+                // or the gateway timed out. NPS still reports the txn as
+                // pending/initiated in that case, so without this branch
+                // the page would poll a misleading "Payment Pending" view
+                // until the 2h TTL. Settle it as cancelled now.
+                await this.cancelCheckoutDraft(
+                    draft,
+                    "User returned from gateway without a successful payment",
+                );
+                return this.buildDraftOrderView(
+                    draft,
+                    PaymentStatus.UNPAID,
+                    OrderStatus.CANCELLED,
+                );
+            }
+
+            // Pending / Unknown while the customer is still at the gateway
+            // → keep the client polling.
+            return this.buildDraftOrderView(
+                draft,
+                PaymentStatus.UNPAID,
+                OrderStatus.ORDER_PLACED,
+            );
+        }
+
+        // CANCELLED / EXPIRED draft — no order exists or will exist.
+        return this.buildDraftOrderView(
+            draft,
+            PaymentStatus.UNPAID,
+            OrderStatus.CANCELLED,
+        );
     }
 
     async deleteOrder() {

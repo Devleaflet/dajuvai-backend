@@ -3,10 +3,9 @@ import { Category } from '../entities/category.entity';
 import { User, UserRole } from '../entities/user.entity';
 import { CreateCategoryInput, UpdateCategoryInput } from '../utils/zod_validations/category.zod';
 import AppDataSource from '../config/db.config';
-import { v2 as cloudinary } from 'cloudinary';
 import { APIError } from '../utils/ApiError.utils';
 import { Subcategory } from '../entities/subcategory.entity';
-import config from '../config/env.config';
+import { CloudinaryService } from './image.service';
 /**
  * Service for managing category-related operations.
  * 
@@ -16,20 +15,44 @@ export class CategoryService {
     private categoryRepository: Repository<Category>;
     private userRepository: Repository<User>;
     private subcategoryRepository: Repository<Subcategory>;
+    private cloudinaryService: CloudinaryService;
 
     /**
-     * Initializes repositories and configures Cloudinary.
+     * Initializes repositories and the shared Cloudinary service.
      */
     constructor() {
         this.categoryRepository = AppDataSource.getRepository(Category);
         this.userRepository = AppDataSource.getRepository(User);
         this.subcategoryRepository = AppDataSource.getRepository(Subcategory);
+        this.cloudinaryService = new CloudinaryService();
+    }
 
-        cloudinary.config({
-            cloud_name: config.CLOUDINARY_CLOUD_NAME,
-            api_key: config.CLOUDINARY_API_KEY,
-            api_secret: config.CLOUDINARY_API_SECRET,
-        });
+    /**
+     * Uploads a category image into the `categories` folder with the
+     * category optimization preset applied.
+     */
+    private async uploadCategoryImageFile(file: Express.Multer.File): Promise<string> {
+        const uploaded = await this.cloudinaryService.uploadSingleImage(file, 'categories');
+        return uploaded.url;
+    }
+
+    /**
+     * Deletes a previously stored category image. Log-and-continue: a CDN
+     * outage must never block category CRUD (orphans are visible in the
+     * console warning instead of being silently swallowed).
+     * `skipIfEquals` guards the dedup case: identical content maps to the
+     * same public ID, so deleting the old URL would destroy the freshly
+     * uploaded replacement.
+     */
+    private async deleteStoredImage(
+        url: string | null | undefined,
+        skipIfEquals?: string,
+    ): Promise<void> {
+        if (!url || (skipIfEquals && url === skipIfEquals)) return;
+        const result = await this.cloudinaryService.deleteByUrl(url);
+        if (!result.success) {
+            console.warn(`[CategoryService] Image cleanup failed for ${url}: ${result.error}`);
+        }
     }
 
     /**
@@ -52,18 +75,10 @@ export class CategoryService {
         }
 
         // Upload image to Cloudinary
-        const uploadResult = await new Promise<string>((resolve, reject) => {
-            cloudinary.uploader.upload_stream({ resource_type: 'image' }, (error, result) => {
-                if (error || !result) reject(new APIError(500, 'Image upload failed'));
-                else resolve(result.secure_url);
-            }).end(file.buffer);
-        });
+        const uploadResult = await this.uploadCategoryImageFile(file);
 
         // Delete existing image if it exists
-        if (category.image) {
-            const publicId = category.image.split('/').pop()?.split('.')[0] || '';
-            await cloudinary.uploader.destroy(publicId);
-        }
+        await this.deleteStoredImage(category.image, uploadResult);
 
         // Update category image URL
         category.image = uploadResult;
@@ -94,12 +109,7 @@ export class CategoryService {
 
         // Upload image if provided
         if (file) {
-            imageUrl = await new Promise<string>((resolve, reject) => {
-                cloudinary.uploader.upload_stream({ resource_type: 'image' }, (error, result) => {
-                    if (error || !result) reject(new APIError(500, 'Image upload failed'));
-                    else resolve(result.secure_url);
-                }).end(file.buffer);
-            });
+            imageUrl = await this.uploadCategoryImageFile(file);
         }
 
         // Create category entity
@@ -206,21 +216,10 @@ export class CategoryService {
         let imageUrl: string | undefined = category.image;
 
         if (file) {
-            // Delete existing image from Cloudinary
-            if (category.image) {
-                const publicId = category.image.split('/').pop()?.split('.')[0] || '';
-                await cloudinary.uploader.destroy(publicId).catch(() => {
-                    throw new APIError(500, 'Failed to delete existing image');
-                });
-            }
-
-            // Upload new image
-            imageUrl = await new Promise<string>((resolve, reject) => {
-                cloudinary.uploader.upload_stream({ resource_type: 'image' }, (error, result) => {
-                    if (error || !result) reject(new APIError(500, 'Image upload failed'));
-                    else resolve(result.secure_url);
-                }).end(file.buffer);
-            });
+            // Upload new image first so a failed upload never leaves the
+            // category without any image, then clean up the old asset.
+            imageUrl = await this.uploadCategoryImageFile(file);
+            await this.deleteStoredImage(category.image, imageUrl);
         }
 
         // Update fields
@@ -270,12 +269,7 @@ export class CategoryService {
             throw new APIError(409, 'Cannot delete category that contains subcategories. Please delete all subcategories first.');
         }
 
-        if (category.image) {
-            const publicId = category.image.split('/').pop()?.split('.')[0] || '';
-            await cloudinary.uploader.destroy(publicId).catch(() => {
-                throw new APIError(500, 'Failed to delete category image');
-            });
-        }
+        await this.deleteStoredImage(category.image);
 
         await this.categoryRepository.delete(id);
     }

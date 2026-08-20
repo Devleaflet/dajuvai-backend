@@ -471,6 +471,7 @@ productRouter.patch(
  */
 productRouter.post(
     "/image/upload",
+    combinedAuthMiddleware,
     uploadMiddleware,
     productController.uplaodImage.bind(productController),
 );

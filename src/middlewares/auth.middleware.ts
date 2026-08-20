@@ -260,6 +260,20 @@ export const authMiddleware = async (
       return next(new AuthError("User not found. Please log in again."));
     }
 
+    // Accounts scheduled for deletion (grace period) or already finalized
+    // cannot use their old sessions. Reactivation happens via the login
+    // flows (email/password reactivation endpoint or Google sign-in).
+    if (user.deletionFinalizedAt) {
+      return next(new AuthError("This account no longer exists."));
+    }
+    if (user.deletionScheduledFor) {
+      return next(
+        new AuthError(
+          "This account is scheduled for deletion. Log in again to reactivate it.",
+        ),
+      );
+    }
+
     if (!user.isVerified) {
       return next(new AuthError("Account is not verified."));
     }

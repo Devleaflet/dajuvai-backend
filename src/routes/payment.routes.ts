@@ -5,24 +5,28 @@ import { Router } from "express";
 import { DeliveryStatus, Order, OrderStatus, PaymentStatus } from "../entities/order.entity";
 import { Variant } from "../entities/variant.entity";
 import { Product } from "../entities/product.entity";
+import { CheckoutDraft, CheckoutDraftStatus } from "../entities/checkoutDraft.entity";
 import AppDataSource from "../config/db.config";
 import config from "../config/env.config";
 import { APIError } from "../utils/ApiError.utils";
 import { CartService } from "../service/cart.service";
 import { NotificationService } from "../service/notification.service";
+import { OrderService } from "../service/order.service";
+import {
+    NPS_CONFIG,
+    generateNpsSignature,
+    getNpsAuthHeader,
+} from "../service/nps-payment.service";
 
 const paymentRouter = Router();
 const orderDb = AppDataSource.getRepository(Order);
+const draftDb = AppDataSource.getRepository(CheckoutDraft);
 
-const CONFIG = {
-    MERCHANT_ID: config.NPX_MERCHANT_ID,
-    MERCHANT_NAME: config.NPX_MERCHANT_NAME,
-    API_USERNAME: config.NPX_API_USERNAME,
-    API_PASSWORD: config.NPX_API_PASSWORD,
-    SECRET_KEY: config.NPX_SECRET_KEY,
-    BASE_URL: config.NPX_BASE_URL,
-    GATEWAY_URL: config.NPS_GATEWAY_URL,
-};
+// Shared NPS gateway helpers live in nps-payment.service; aliased here to
+// keep the existing call sites readable.
+const CONFIG = NPS_CONFIG;
+const generateSignature = generateNpsSignature;
+const getAuthHeader = getNpsAuthHeader;
 
 const requirePaymentFields = (body: Record<string, unknown>, fields: string[]) => {
     const missing = fields.filter((field) => body[field] === undefined || body[field] === null || body[field] === "");
@@ -31,26 +35,6 @@ const requirePaymentFields = (body: Record<string, unknown>, fields: string[]) =
     }
     return null;
 };
-
-// Generate HMAC SHA512 Signature
-function generateSignature(
-    data: Record<string, string>,
-    secretKey: string,
-): string {
-    const sortedKeys = Object.keys(data).sort();
-    const concatenatedValues = sortedKeys.map((key) => data[key]).join("");
-    const hmac = crypto.createHmac("sha512", secretKey);
-    hmac.update(concatenatedValues, "utf8");
-    return hmac.digest("hex");
-}
-
-// Generate Basic Auth Header
-function getAuthHeader(): string {
-    const credentials = Buffer.from(
-        `${CONFIG.API_USERNAME}:${CONFIG.API_PASSWORD}`,
-    ).toString("base64");
-    return `Basic ${credentials}`;
-}
 
 /**
  * @swagger
@@ -323,7 +307,6 @@ paymentRouter.post("/process-id", async (req: Request, res: Response) => {
  *             type: object
  *             required:
  *               - amount
- *               - orderId
  *             properties:
  *               amount:
  *                 type: number
@@ -337,6 +320,11 @@ paymentRouter.post("/process-id", async (req: Request, res: Response) => {
  *               orderId:
  *                 type: integer
  *                 example: 42
+ *                 description: Existing order id (legacy/COD retry flow). Use draftId for online-payment checkouts.
+ *               draftId:
+ *                 type: integer
+ *                 example: 7
+ *                 description: Checkout draft id returned by POST /api/order for online payments.
  *     responses:
  *       200:
  *         description: Payment initiation data returned successfully
@@ -376,15 +364,25 @@ paymentRouter.post("/process-id", async (req: Request, res: Response) => {
 // 4. Initiate Payment (Complete Flow)
 paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
     try {
-        const { amount, instrumentCode, transactionRemarks, orderId } =
+        const { amount, instrumentCode, transactionRemarks, orderId, draftId } =
             req.body;
-        const validationError = requirePaymentFields(req.body, ["amount", "orderId"]);
+        const validationError = requirePaymentFields(req.body, ["amount"]);
         if (validationError) {
             res.status(400).json(validationError);
             return;
         }
-        if (!Number.isFinite(Number(amount)) || Number(amount) <= 0 || !Number.isInteger(Number(orderId))) {
-            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "amount must be positive and orderId must be an integer" });
+        const hasOrderId = orderId !== undefined && orderId !== null && orderId !== "";
+        const hasDraftId = draftId !== undefined && draftId !== null && draftId !== "";
+        if (!hasOrderId && !hasDraftId) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "Either orderId or draftId is required" });
+            return;
+        }
+        if (
+            !Number.isFinite(Number(amount)) || Number(amount) <= 0 ||
+            (hasOrderId && !Number.isInteger(Number(orderId))) ||
+            (hasDraftId && !Number.isInteger(Number(draftId)))
+        ) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "amount must be positive and orderId/draftId must be integers" });
             return;
         }
 
@@ -439,16 +437,38 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             CONFIG.SECRET_KEY,
         );
 
-        const order = await orderDb.findOne({ where: { id: orderId } });
-        if (!order) {
-            throw new APIError(404, "Order not found");
+        if (hasDraftId) {
+            // Draft-based checkout: no order exists yet — it materializes
+            // only after the gateway confirms success.
+            const draft = await draftDb.findOne({ where: { id: Number(draftId) } });
+            if (!draft || draft.status !== CheckoutDraftStatus.PENDING) {
+                throw new APIError(404, "Checkout session not found or no longer active");
+            }
+            if (draft.expiresAt && draft.expiresAt <= new Date()) {
+                throw new APIError(410, "This checkout session has expired. Please check out again.");
+            }
+            // Never trust the client-provided amount over the priced draft.
+            const draftTotal = Number(draft.totals?.totalPrice);
+            if (!Number.isFinite(draftTotal) || Math.abs(draftTotal - Number(amount)) > 0.01) {
+                throw new APIError(400, "Payment amount does not match the checkout total");
+            }
+            draft.mTransactionId = merchantTxnId;
+            if (draft.payload) {
+                draft.payload = { ...draft.payload, instrumentName: instrumentCode || null };
+            }
+            await draftDb.save(draft);
+        } else {
+            const order = await orderDb.findOne({ where: { id: Number(orderId) } });
+            if (!order) {
+                throw new APIError(404, "Order not found");
+            }
+
+            // Update order with merchant transaction info
+            order.mTransactionId = merchantTxnId;
+            order.instrumentName = instrumentCode;
+
+            await orderDb.save(order);
         }
-
-        // Update order with merchant transaction info
-        order.mTransactionId = merchantTxnId;
-        order.instrumentName = instrumentCode;
-
-        await orderDb.save(order);
 
         res.json({
             success: true,
@@ -544,6 +564,28 @@ paymentRouter.post("/check-status", async (req: Request, res: Response) => {
         );
 
         res.json(response.data);
+
+        // Settle a pending checkout draft based on the gateway verdict.
+        // Response is already sent — failures here only log.
+        try {
+            const draft = await draftDb.findOne({
+                where: {
+                    mTransactionId: merchantTxnId,
+                    status: CheckoutDraftStatus.PENDING,
+                },
+            });
+            if (draft) {
+                const rawStatus = String(response.data?.data?.Status ?? "");
+                const orderService = new OrderService();
+                if (/success/i.test(rawStatus)) {
+                    await orderService.materializeDraftOrder(draft, merchantTxnId);
+                } else if (/fail|cancel|declin/i.test(rawStatus)) {
+                    await orderService.cancelCheckoutDraft(draft, "Gateway reported failure");
+                }
+            }
+        } catch (error) {
+            console.error("[CHECKOUT-DRAFT] Settlement after check-status failed:", error);
+        }
     } catch (error: any) {
         res.status(500).json({ error: "Failed to check transaction status" });
     }
@@ -649,6 +691,23 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
         });
 
         if (!order) {
+            // Draft-based checkout: materialize or cancel the draft instead.
+            const draft = await draftDb.findOne({
+                where: { mTransactionId: MerchantTxnId },
+            });
+            if (draft) {
+                if (draft.status === CheckoutDraftStatus.PENDING) {
+                    const orderService = new OrderService();
+                    const statusUpper = String(Status || "").toUpperCase();
+                    if (statusUpper === "SUCCESS") {
+                        await orderService.materializeDraftOrder(draft, MerchantTxnId);
+                    } else if (statusUpper === "FAILED" || statusUpper === "CANCELLED") {
+                        await orderService.cancelCheckoutDraft(draft, "Gateway notification");
+                    }
+                }
+                res.send("received");
+                return;
+            }
             throw new APIError(404, "Order not found");
         }
 
