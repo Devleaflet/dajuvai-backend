@@ -111,6 +111,16 @@ export class User {
     @Column({ nullable: true })
     profilePicture?: string;
 
+    // --- Account self-deletion (mirrors vendor deletion grace-period flow) ---
+    @Column({ type: "timestamp", nullable: true })
+    deletionRequestedAt?: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionScheduledFor?: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionFinalizedAt?: Date | null;
+
     @CreateDateColumn()
     createdAt: Date;
 

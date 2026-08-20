@@ -17,6 +17,7 @@ import { deviceTokenService } from "../service/deviceToken.service";
 import { Product } from "../entities/product.entity";
 import { Variant } from "../entities/variant.entity";
 import { VendorService } from "../service/vendor.service";
+import { UserDeletionService } from "../service/user-deletion.service";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
@@ -255,6 +256,18 @@ export const finalizeVendorAccountDeletions = () => {
     cron.schedule("0 * * * *", async () => {
         try {
             await new VendorService().finalizeExpiredVendorDeletions();
+        } catch (error) {
+            // silent fail for cron; next hourly run retries safely
+        }
+    });
+};
+
+// Finalizes customer accounts whose 30-day deletion grace period elapsed.
+// Mirrors finalizeVendorAccountDeletions; safe to retry every hour.
+export const finalizeUserAccountDeletions = () => {
+    cron.schedule("0 * * * *", async () => {
+        try {
+            await new UserDeletionService().finalizeExpiredUserDeletions();
         } catch (error) {
             // silent fail for cron; next hourly run retries safely
         }

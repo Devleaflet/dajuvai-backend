@@ -13,6 +13,10 @@ import { StaffSignUpInput } from "../utils/zod_validations/user.zod";
 import { StaffPermission } from "../entities/staffPermission.entity";
 import { PermissionAction, PermissionLevel } from "../entities/permission.enum";
 import { getPermissionString } from "../utils/permission.utils";
+import {
+    getUserDeletionStatus,
+    UserDeletionStatus,
+} from "./user-account-deletion.policy";
 
 /**
  * User repository instance for database operations.
@@ -30,8 +34,16 @@ const vendorDB = AppDataSource.getRepository(Vendor);
  * Fetches all users from the database.
  * @returns Promise<User[]> - Array of all users
  */
-export const fetchAllUser = async (): Promise<User[]> => {
-    return await userDB.find({
+export type AdminUserListItem = Omit<
+    User,
+    "deletionRequestedAt" | "deletionFinalizedAt"
+> & {
+    deletionStatus: UserDeletionStatus;
+    deletionScheduledFor: Date | null;
+};
+
+export const fetchAllUser = async (): Promise<AdminUserListItem[]> => {
+    const users = await userDB.find({
         select: [
             "id",
             "fullName",
@@ -44,7 +56,20 @@ export const fetchAllUser = async (): Promise<User[]> => {
             "updatedAt",
             "profilePicture",
             "provider",
+            "deletionScheduledFor",
+            "deletionFinalizedAt",
         ],
+    });
+
+    return users.map((user) => {
+        const deletionStatus = getUserDeletionStatus(user);
+        const { deletionFinalizedAt: _deletionFinalizedAt, ...adminUser } = user;
+
+        return {
+            ...adminUser,
+            deletionStatus,
+            deletionScheduledFor: user.deletionScheduledFor ?? null,
+        };
     });
 };
 
@@ -133,6 +158,9 @@ export const findUserByEmailLogin = async (
             provider: true,
             isVerified: true,
             password: true,
+            deletionRequestedAt: true,
+            deletionScheduledFor: true,
+            deletionFinalizedAt: true,
         },
     });
 };

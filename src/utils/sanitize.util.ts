@@ -120,6 +120,9 @@ export interface SanitizedUser {
     role: UserRole;
     isVerified: boolean;
     profilePicture?: string;
+    // Needed by the frontend to adapt auth flows (e.g. Google accounts have
+    // no password, so the delete-account modal must not ask for one).
+    provider?: string;
     address: {
         id: number;
         city: string;
@@ -143,6 +146,7 @@ export const sanitizeUser = (user: User): SanitizedUser => {
         role: user.role,
         isVerified: user.isVerified,
         profilePicture: user.profilePicture || undefined,
+        provider: user.provider,
 
         address: user.address
             ? {

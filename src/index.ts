@@ -51,6 +51,7 @@ import {
   startOrderCleanupJob,
   tokenCleanUp,
   finalizeVendorAccountDeletions,
+  finalizeUserAccountDeletions,
 } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
@@ -208,6 +209,7 @@ AppDataSource.initialize()
     startOrderCleanupJob();
     removeUnverifiedVendors();
     finalizeVendorAccountDeletions();
+    finalizeUserAccountDeletions();
     staleDeviceTokenCleanUp();
     // await updateAllProductPrices(AppDataSource)
 
