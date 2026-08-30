@@ -887,6 +887,88 @@ export const sendOrderStatusEmail = async (
     });
 };
 
+export const sendOrderItemCancelledEmail = async (
+    to: string,
+    orderNumber: string,
+    itemName: string,
+    quantity: number,
+    cancellationRemark?: string | null,
+    subject = "An Item From Your Order Has Been Cancelled",
+) => {
+    const orderLabel = `#${orderNumber}`;
+    const accountUrl = `${config.FRONTEND_URL.replace(/\/$/, "")}/user-profile`;
+
+    await transporter.sendMail({
+        from: `<${config.USER_EMAIL}>`,
+        to,
+        subject,
+        html: `
+            <div style="margin:0;padding:0;background:#f4f4f4;font-family:Arial,Helvetica,sans-serif;color:#111827;">
+                <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;background:#f4f4f4;">
+                    <tr>
+                        <td align="center" style="padding:24px 12px;">
+                            <table role="presentation" width="700" cellspacing="0" cellpadding="0" style="max-width:95%;border-collapse:collapse;background:#ffffff;border-radius:10px;overflow:hidden;box-shadow:0 2px 10px rgba(0,0,0,0.06);">
+
+                                <!-- Header -->
+                                <tr>
+                                    <td style="background:linear-gradient(135deg, #ff7a1a, #ff9a3d);padding:28px 30px;text-align:center;">
+                                        <div style="font-size:12px;font-weight:700;letter-spacing:0.08em;text-transform:uppercase;color:#fff2e6;">DajuVai Order Update</div>
+                                        <h1 style="margin:8px 0 0;color:#ffffff;font-size:22px;letter-spacing:0.4px;">An item from your order has been cancelled</h1>
+                                    </td>
+                                </tr>
+
+                                <!-- Body -->
+                                <tr>
+                                    <td style="padding:30px;">
+                                        <p style="font-size:15px;color:#333;margin:0 0 24px;">The following item from your order could not be fulfilled and has been cancelled. Its amount has been deducted from your order total.</p>
+
+                                        <!-- Cancelled item -->
+                                        <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;margin-bottom:24px;border:1px solid #f0e3d8;border-radius:8px;overflow:hidden;">
+                                            <tr style="background-color:#fafafa;">
+                                                <td style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
+                                                    <div style="font-size:12px;font-weight:700;letter-spacing:0.06em;text-transform:uppercase;color:#888;">Order ${escapeHtml(orderLabel)}</div>
+                                                    <div style="margin-top:5px;font-size:16px;font-weight:800;color:#2b2b2b;">${escapeHtml(itemName)} <span style="font-size:13px;font-weight:600;color:#888;">&times;${escapeHtml(quantity)}</span></div>
+                                                </td>
+                                                <td align="right" style="padding:16px 18px;border-bottom:1px solid #f0e3d8;">
+                                                    <span style="display:inline-block;padding:8px 13px;border-radius:999px;background:#ffe4e6;color:#be123c;font-size:12px;font-weight:800;letter-spacing:0.04em;text-transform:uppercase;">Item Cancelled</span>
+                                                </td>
+                                            </tr>
+                                            ${cancellationRemark ? `
+                                            <tr>
+                                                <td colspan="2" style="padding:14px 18px;background:#fef2f2;font-size:13px;line-height:1.6;color:#991b1b;">
+                                                    <strong style="text-transform:uppercase;letter-spacing:0.04em;font-size:11px;">Reason:</strong> ${escapeHtml(cancellationRemark)}
+                                                </td>
+                                            </tr>` : ""}
+                                        </table>
+
+                                        <a href="${escapeHtml(accountUrl)}" style="display:inline-block;padding:12px 22px;border-radius:8px;background:#ff7a1a;color:#ffffff;text-decoration:none;font-size:14px;font-weight:700;">View Order Details</a>
+
+                                        <p style="margin:22px 0 0;font-size:13px;line-height:1.6;color:#888;">The rest of your order is unaffected. If you have any questions, please contact DajuVai support and reference order ${escapeHtml(orderLabel)}.</p>
+                                    </td>
+                                </tr>
+
+                                <!-- Info strip -->
+                                <tr>
+                                    <td style="padding:18px 30px;background-color:#fff4e9;font-size:14px;color:#7a4a1f;">
+                                        You can track your order's progress anytime from your account.
+                                    </td>
+                                </tr>
+
+                                <!-- Footer -->
+                                <tr>
+                                    <td style="padding:20px 30px;border-top:1px solid #eee;font-size:12px;color:#999;text-align:center;">
+                                        This is an automated message from DajuVai. Please do not reply to this email.
+                                    </td>
+                                </tr>
+                            </table>
+                        </td>
+                    </tr>
+                </table>
+            </div>
+        `,
+    });
+};
+
 export const userOrderCancelledEmail = (
     userName: string,
     orderNumber: string,

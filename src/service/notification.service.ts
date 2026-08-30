@@ -11,7 +11,7 @@ import { DevicePlatform } from "../entities/deviceToken.entity";
 import { RegisterDeviceInput } from "../utils/zod_validations/push.zod";
 import { orderPlacedRecipients } from "./notification-audience.policy";
 import { deliverWithRetry } from "../utils/delivery-retry.utils";
-import { sendTransactionalEmail } from "../utils/nodemailer.utils";
+import { sendTransactionalEmail, sendOrderItemCancelledEmail } from "../utils/nodemailer.utils";
 import logger from "../utils/logger";
 
 export class NotificationService {
@@ -192,6 +192,73 @@ export class NotificationService {
                 body: `You have received a new order #${orderDisplayNumber}`,
                 data,
             }),
+        ]);
+    }
+
+    /**
+     * Notifies the customer when a single order item is cancelled during
+     * fulfillment review: in-app feed entry, FCM push, and transactional
+     * email. The parent-order notifications still fire separately via
+     * changeOrderStatus() if the whole order ends up cancelled.
+     */
+    async notifyOrderItemCancelled(
+        order: Pick<Order, "id" | "orderNumber"> & {
+            orderedById?: number | null;
+            orderedBy?: Pick<User, "id" | "email"> | null;
+        },
+        item: {
+            productNameSnapshot?: string | null;
+            quantity?: number | null;
+            cancellationRemark?: string | null;
+        },
+    ): Promise<void> {
+        const userId = order.orderedBy?.id ?? order.orderedById;
+        if (!userId) return;
+
+        const orderDisplayNumber = order.orderNumber || order.id;
+        const itemName = item.productNameSnapshot || "An item";
+        const title = "Item Cancelled";
+        const feedMessage = `${itemName} from your order #${orderDisplayNumber} has been cancelled.`;
+
+        await this.notificationRepo.save(
+            this.notificationRepo.create({
+                title,
+                message: feedMessage,
+                type: NotificationType.ORDER_STATUS_UPDATED,
+                target: NotificationTarget.USER,
+                orderId: order.id,
+                createdById: userId,
+            }),
+        );
+
+        await Promise.all([
+            this.push(await deviceTokenService.getTokensForUser(userId), {
+                title,
+                body: feedMessage,
+                data: { type: "ORDER_ITEM_CANCELLED", orderId: String(order.id) },
+            }),
+            ...(order.orderedBy?.email
+                ? [
+                      (async () => {
+                          const delivery = await deliverWithRetry(() =>
+                              sendOrderItemCancelledEmail(
+                                  order.orderedBy!.email!,
+                                  String(orderDisplayNumber),
+                                  itemName,
+                                  item.quantity ?? 1,
+                                  item.cancellationRemark ?? null,
+                              ),
+                          );
+                          if (delivery.status === "failed") {
+                              logger.error("[Notification] email delivery failed", {
+                                  eventType: "ORDER_ITEM_CANCELLED",
+                                  attempts: delivery.attempts,
+                                  error: delivery.error,
+                              });
+                          }
+                      })(),
+                  ]
+                : []),
         ]);
     }
 

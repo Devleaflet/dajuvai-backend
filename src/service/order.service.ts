@@ -22,7 +22,7 @@ import {
     CheckoutDraftStatus,
     CHECKOUT_DRAFT_TTL_MS,
 } from "../entities/checkoutDraft.entity";
-import { OrderItem } from "../entities/orderItems.entity";
+import { OrderItem, ItemFulfillmentStatus } from "../entities/orderItems.entity";
 import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
 import {
     OrderStatusHistory,
@@ -37,6 +37,7 @@ import {
 import {
     InvalidOrderStatusTransitionError,
     OrderStateChangedError,
+    BadRequestError,
 } from "../errors/HttpErrors";
 import { Cart } from "../entities/cart.entity";
 import { CartItem } from "../entities/cartItem.entity";
@@ -3448,6 +3449,202 @@ export class OrderService {
     }
 
     /**
+     * Returns a cancelled/unfulfilled order item's claimed stock to its
+     * variant (or product when unvarianted). Stock is claimed once at
+     * payment success, so every restock path must call this exactly once
+     * per item.
+     */
+    private async restockOrderItem(item: OrderItem): Promise<void> {
+        if (item.variantId) {
+            const variant = await this.variantRepository.findOne({
+                where: { id: item.variantId },
+            });
+            if (variant) {
+                variant.stock += item.quantity;
+                variant.status = this.determineInventoryStatus(variant.stock);
+                await this.variantRepository.save(variant);
+            }
+        } else {
+            const product = await this.productRepository.findOne({
+                where: { id: item.productId },
+            });
+            if (product) {
+                product.stock += item.quantity;
+                product.status = this.determineInventoryStatus(product.stock);
+                await this.productRepository.save(product);
+            }
+        }
+    }
+
+    /**
+     * Admin confirm/cancel of a single order item (multi-vendor partial
+     * availability, spec §4-§7). Mutates OrderItem.fulfillmentStatus only —
+     * the parent order stays one order. Parent Order.status is derived
+     * afterwards via changeOrderStatus() so the permission check, audit
+     * log, history row, emails, notifications and socket push all stay on
+     * the single sanctioned path.
+     *
+     * Rules enforced here (backend-side, spec §11):
+     * - Terminal parent orders (DELIVERED/CANCELLED/NOT_RECEIVED/RETURNED)
+     *   are locked — a delivered item can never be cancelled via this flow.
+     * - Repeated identical requests are safe no-ops.
+     * - CANCELLED is terminal for an item and requires a non-blank remark.
+     * - Cancelling restocks the item exactly once.
+     */
+    async updateOrderItemFulfillment(
+        orderId: number,
+        itemId: number,
+        targetStatus: ItemFulfillmentStatus,
+        options: {
+            changedByUserId: number;
+            auditActorType: AuditActorType;
+            cancellationRemark?: string | null;
+        },
+    ): Promise<SanitizedOrderFull> {
+        const order = await this.orderRepository.findOne({
+            where: { id: orderId },
+            relations: [
+                "orderedBy",
+                "shippingAddress",
+                "orderItems",
+                "orderItems.product",
+                "orderItems.vendor",
+                "orderItems.vendor.district",
+                "orderItems.variant",
+                "vendorShippings",
+            ],
+            withDeleted: true,
+        });
+
+        if (!order) {
+            throw new APIError(404, "Order not found");
+        }
+
+        const lockedStatuses = [
+            OrderStatus.DELIVERED,
+            OrderStatus.CANCELLED,
+            OrderStatus.NOT_RECEIVED,
+            OrderStatus.RETURNED,
+        ];
+        if (lockedStatuses.includes(order.status)) {
+            throw new APIError(
+                409,
+                `Order is already ${order.status}; item fulfillment can no longer be changed.`,
+            );
+        }
+
+        const item = order.orderItems.find((i) => i.id === itemId);
+        if (!item) {
+            throw new APIError(404, "Order item not found");
+        }
+
+        const previousStatus =
+            item.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING;
+
+        // Safe duplicate handling: a repeated identical request is a no-op.
+        if (previousStatus === targetStatus) {
+            return sanitizeOrderFull(order);
+        }
+
+        // CANCELLED is terminal — reconfirming would need a stock re-claim
+        // path that doesn't exist, so it's rejected outright.
+        if (previousStatus === ItemFulfillmentStatus.CANCELLED) {
+            throw new APIError(
+                409,
+                "Item is already cancelled and cannot be reconfirmed.",
+            );
+        }
+
+        if (targetStatus === ItemFulfillmentStatus.CANCELLED) {
+            const remark = options.cancellationRemark?.trim();
+            if (!remark) {
+                // Defense in depth — the zod schema already rejects blank
+                // remarks, but the service must never rely on that alone.
+                throw new BadRequestError(
+                    "Cancellation remark is required when cancelling an item",
+                );
+            }
+            item.cancellationRemark = remark.slice(0, 1000);
+            item.cancelledAt = new Date();
+            item.confirmedAt = null;
+            await this.restockOrderItem(item);
+        } else {
+            item.confirmedAt = new Date();
+        }
+
+        item.fulfillmentStatus = targetStatus;
+        item.updatedById = options.changedByUserId;
+        await this.orderItemRepository.save(item);
+
+        await auditService.record({
+            module: "ORDER",
+            action:
+                targetStatus === ItemFulfillmentStatus.CANCELLED
+                    ? "ITEM_FULFILLMENT_CANCELLED"
+                    : "ITEM_FULFILLMENT_CONFIRMED",
+            entityType: "OrderItem",
+            entityId: String(item.id),
+            actor: {
+                type: options.auditActorType,
+                id: options.changedByUserId,
+            },
+            summary: `Order ${order.orderNumber} item ${item.productNameSnapshot ?? item.id} ${targetStatus.toLowerCase()} during fulfillment review`,
+            before: { fulfillmentStatus: previousStatus },
+            after: {
+                fulfillmentStatus: targetStatus,
+                cancellationRemark: item.cancellationRemark ?? null,
+            },
+        });
+
+        // Customer notification (in-app + push + email) for item-level
+        // cancellation. Fire-and-forget: delivery failure must never fail
+        // the cancellation itself. Whole-order notifications still fire
+        // separately through changeOrderStatus() when everything cancels.
+        if (targetStatus === ItemFulfillmentStatus.CANCELLED) {
+            void this.notificationService
+                .notifyOrderItemCancelled(order, item)
+                .catch((error) =>
+                    console.error(
+                        "Failed to send item cancellation notification:",
+                        error,
+                    ),
+                );
+        }
+
+        // Parent order derivation (spec §7) — always routed through
+        // changeOrderStatus() so audit/history/emails/sockets stay intact.
+        const allCancelled = order.orderItems.every(
+            (i) => i.fulfillmentStatus === ItemFulfillmentStatus.CANCELLED,
+        );
+        const anyPending = order.orderItems.some(
+            (i) =>
+                (i.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING) ===
+                ItemFulfillmentStatus.PENDING,
+        );
+
+        if (allCancelled) {
+            return this.changeOrderStatus(orderId, OrderStatus.CANCELLED, {
+                actorRole: "ADMIN",
+                changedByUserId: options.changedByUserId,
+                auditActorType: options.auditActorType,
+                reason:
+                    "All order items were cancelled during fulfillment review",
+            });
+        }
+
+        if (!anyPending && order.status === OrderStatus.ORDER_PLACED) {
+            return this.changeOrderStatus(orderId, OrderStatus.CONFIRMED, {
+                actorRole: "ADMIN",
+                changedByUserId: options.changedByUserId,
+                auditActorType: options.auditActorType,
+                reason: "All items reviewed; at least one item confirmed",
+            });
+        }
+
+        return this.getOrderDetails(orderId);
+    }
+
+    /**
      * The single function permitted to write Order.status anywhere in the
      * codebase. Every other status-changing code path — the admin/staff
      * free-form endpoint, delivery.admin.service.ts's markAtWarehouse/
@@ -3551,29 +3748,13 @@ export class OrderService {
                 console.error("Failed to release promo usage:", err),
             );
             for (const item of order.orderItems) {
-                if (item.variantId) {
-                    const variant = await this.variantRepository.findOne({
-                        where: { id: item.variantId },
-                    });
-                    if (variant) {
-                        variant.stock += item.quantity;
-                        variant.status = this.determineInventoryStatus(
-                            variant.stock,
-                        );
-                        await this.variantRepository.save(variant);
-                    }
-                } else {
-                    const product = await this.productRepository.findOne({
-                        where: { id: item.productId },
-                    });
-                    if (product) {
-                        product.stock += item.quantity;
-                        product.status = this.determineInventoryStatus(
-                            product.stock,
-                        );
-                        await this.productRepository.save(product);
-                    }
+                // Items cancelled through the item-level fulfillment
+                // workflow already restocked at cancellation time — skipping
+                // them here prevents double-crediting stock.
+                if (item.fulfillmentStatus === ItemFulfillmentStatus.CANCELLED) {
+                    continue;
                 }
+                await this.restockOrderItem(item);
             }
         }
 

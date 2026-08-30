@@ -9,6 +9,7 @@ import {
     IOrderCreateRequest,
     IShippingAddressRequest,
     IUpdateOrderStatusRequest,
+    IUpdateOrderItemFulfillmentRequest,
 } from "../interface/order.interface";
 import {
     BadRequestError,
@@ -514,6 +515,45 @@ export class OrderController {
                 reason,
                 note,
                 expectedCurrentStatus,
+            },
+        );
+
+        res.status(200).json({ success: true, data: updatedOrder });
+    }
+
+    /**
+     * @desc Confirm or cancel a single order item (multi-vendor partial
+     *       availability). Cancellations require a remark; the backend
+     *       re-validates everything the frontend enforced.
+     * @route PUT /order/admin/:orderId/items/:itemId/fulfillment
+     * @access Admin/Staff only
+     */
+    async updateOrderItemFulfillment(
+        req: AuthRequest<{ orderId: string; itemId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const orderId = parseInt(req.params.orderId, 10);
+        const itemId = parseInt(req.params.itemId, 10);
+        if (isNaN(orderId) || isNaN(itemId)) {
+            throw new BadRequestError("Invalid order or item ID");
+        }
+        if (!req.user) throw new AuthError("User not authenticated");
+
+        const { status, cancellationRemark } =
+            req.body as IUpdateOrderItemFulfillmentRequest;
+
+        const updatedOrder = await this.orderService.updateOrderItemFulfillment(
+            orderId,
+            itemId,
+            status,
+            {
+                changedByUserId: req.user.id,
+                auditActorType:
+                    req.user.role === UserRole.STAFF
+                        ? AuditActorType.STAFF
+                        : AuditActorType.ADMIN,
+                cancellationRemark,
             },
         );
 

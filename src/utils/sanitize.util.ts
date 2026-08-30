@@ -7,11 +7,12 @@ import {
     PaymentStatus,
     PaymentMethod,
 } from "../entities/order.entity";
-import { OrderItem } from "../entities/orderItems.entity";
+import { OrderItem, ItemFulfillmentStatus } from "../entities/orderItems.entity";
 import { Address } from "../entities/address.entity";
 import { PaymentOption } from "../entities/vendorPaymentOption";
 import { DiscountType } from "../entities/product.enum";
 import { PromoType } from "../entities/promo.entity";
+import { computeCancelledAmount } from "./orderFulfillment.util";
 
 export interface SanitizedVendor {
     id: number;
@@ -181,6 +182,10 @@ export interface SanitizedOrderItem {
     price: number;
     variantId: number | null;
     collectedAtWarehouse: boolean;
+    fulfillmentStatus: ItemFulfillmentStatus;
+    cancellationRemark: string | null;
+    confirmedAt: Date | null;
+    cancelledAt: Date | null;
     productNameSnapshot?: string | null;
     skuSnapshot?: string | null;
     imageSnapshot?: string | null;
@@ -229,6 +234,8 @@ const toNumber = (value: unknown, fallback = 0): number => {
     const parsed = Number(value);
     return Number.isFinite(parsed) ? parsed : fallback;
 };
+
+const round2 = (value: number): number => Math.round(value * 100) / 100;
 
 const buildOrderItemPriceBreakdown = (item: OrderItem) => {
     const unitPrice = toNumber(item.unitPriceSnapshot ?? item.price);
@@ -281,6 +288,11 @@ export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => {
         price: item.price,
         variantId: item.variantId ?? null,
         collectedAtWarehouse: item.collectedAtWarehouse,
+        fulfillmentStatus:
+            item.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING,
+        cancellationRemark: item.cancellationRemark ?? null,
+        confirmedAt: item.confirmedAt ?? null,
+        cancelledAt: item.cancelledAt ?? null,
         productNameSnapshot: item.productNameSnapshot ?? null,
         skuSnapshot: item.skuSnapshot ?? null,
         imageSnapshot: item.imageSnapshot ?? null,
@@ -335,6 +347,13 @@ export interface SanitizedOrderFull {
     discountTotal: number;
     taxTotal: number;
     serviceCharge: number;
+    // Cancelled-item deduction (spec §9.1): sum of the final payable line
+    // values of CANCELLED items, always computed server-side from persisted
+    // item pricing. finalTotal is what the customer ultimately pays (COD)
+    // or retains after partial refund (prepaid).
+    cancelledAmount: number;
+    cancelledItemCount: number;
+    finalTotal: number;
     status: OrderStatus;
     deliveryStatus: DeliveryStatus;
     paymentStatus: PaymentStatus;
@@ -418,6 +437,19 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
     const promoShippingDiscount =
         promoApplyOn === PromoType.SHIPPING ? promoDiscountTotal : 0;
 
+    // Cancelled-item impact, derived from the items themselves — never a
+    // client-supplied value (spec §11).
+    const rawItems = order.orderItems ?? [];
+    const cancelledAmount = round2(computeCancelledAmount(rawItems));
+    const cancelledItemCount = rawItems.filter(
+        (item) =>
+            (item.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING) ===
+            ItemFulfillmentStatus.CANCELLED,
+    ).length;
+    const finalTotal = round2(
+        Math.max(0, Number(order.totalPrice) - cancelledAmount),
+    );
+
     return {
         id: order.id,
         orderNumber: order.orderNumber,
@@ -427,6 +459,9 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
         discountTotal: order.discountTotal,
         taxTotal: order.taxTotal,
         serviceCharge: order.serviceCharge,
+        cancelledAmount,
+        cancelledItemCount,
+        finalTotal,
         status: order.status,
         deliveryStatus: order.deliveryStatus,
         paymentStatus: order.paymentStatus,

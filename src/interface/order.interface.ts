@@ -1,6 +1,7 @@
 
 import { Province } from '../entities/address.entity';
 import { OrderStatus, PaymentMethod, PaymentStatus } from '../entities/order.entity';
+import { ItemFulfillmentStatus } from '../entities/orderItems.entity';
 
 export interface IShippingAddressRequest {
     province: Province;
@@ -56,6 +57,11 @@ export interface IUpdateOrderStatusRequest {
     expectedCurrentStatus?: OrderStatus;
     reason: string;
     note?: string;
+}
+
+export interface IUpdateOrderItemFulfillmentRequest {
+    status: ItemFulfillmentStatus;
+    cancellationRemark?: string | null;
 }
 
 export interface IOrderResponse {

@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { OrderStatus } from '../../entities/order.entity';
 import { PaymentMethod } from '../../entities/order.entity';
+import { ItemFulfillmentStatus } from '../../entities/orderItems.entity';
 
 /**
  * Enum schema for Nepal provinces used in shipping addresses.
@@ -101,3 +102,34 @@ export const updateOrderStatusSchema = z.object({
     reason: z.string().min(1, "Reason is required").max(500),
     note: z.string().max(1000).optional(),
 });
+
+/**
+ * Schema for item-level fulfillment updates (multi-vendor partial
+ * availability). CANCELLED requires a meaningful, non-blank cancellation
+ * remark (spec §5) — null, empty and whitespace-only values are rejected.
+ * CONFIRMED needs no remark.
+ */
+export const updateOrderItemFulfillmentSchema = z
+    .object({
+        status: z.nativeEnum(ItemFulfillmentStatus),
+        cancellationRemark: z
+            .string()
+            .trim()
+            .max(1000, "Cancellation remark must not exceed 1000 characters")
+            .optional()
+            .nullable(),
+    })
+    .superRefine((data, ctx) => {
+        if (
+            data.status === ItemFulfillmentStatus.CANCELLED &&
+            (!data.cancellationRemark ||
+                data.cancellationRemark.trim().length === 0)
+        ) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["cancellationRemark"],
+                message:
+                    "Cancellation remark is required when cancelling an item",
+            });
+        }
+    });

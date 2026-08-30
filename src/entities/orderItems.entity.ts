@@ -10,6 +10,7 @@ import { Product } from "./product.entity";
 import { Vendor } from "./vendor.entity";
 import { Order } from "./order.entity";
 import { Variant } from "./variant.entity";
+import { User } from "./user.entity";
 
 export enum OrderStatus {
     PENDING = "PENDING",
@@ -18,6 +19,18 @@ export enum OrderStatus {
     SHIPPED = "SHIPPED",
     OUT_FOR_DELIVERY = "OUT_FOR_DELIVERY",
     DELIVERED = "DELIVERED",
+}
+
+/**
+ * Independent per-item fulfillment state (multi-vendor partial
+ * availability). One customer order stays one order; each item is
+ * confirmed or cancelled individually by admin. Parent Order.status
+ * is derived from these in OrderService.updateOrderItemFulfillment().
+ */
+export enum ItemFulfillmentStatus {
+    PENDING = "PENDING",
+    CONFIRMED = "CONFIRMED",
+    CANCELLED = "CANCELLED",
 }
 
 @Entity("order_items")
@@ -99,6 +112,31 @@ export class OrderItem {
     // did this item reach warehouse from vendor
     @Column({ default: false })
     collectedAtWarehouse: boolean;
+
+    @Column({
+        type: "enum",
+        enum: ItemFulfillmentStatus,
+        default: ItemFulfillmentStatus.PENDING,
+    })
+    fulfillmentStatus: ItemFulfillmentStatus;
+
+    // Mandatory when fulfillmentStatus = CANCELLED; null otherwise.
+    @Column({ type: "varchar", length: 1000, nullable: true })
+    cancellationRemark?: string | null;
+
+    @Column({ type: "timestamptz", nullable: true })
+    confirmedAt?: Date | null;
+
+    @Column({ type: "timestamptz", nullable: true })
+    cancelledAt?: Date | null;
+
+    // Admin/staff account that last confirmed/cancelled this item.
+    @ManyToOne(() => User, { nullable: true, onDelete: "SET NULL" })
+    @JoinColumn({ name: "updatedById" })
+    updatedBy?: User | null;
+
+    @Column({ nullable: true })
+    updatedById?: number | null;
 
     @CreateDateColumn()
     createdAt: Date;

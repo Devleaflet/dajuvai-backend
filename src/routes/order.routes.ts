@@ -17,6 +17,7 @@ import {
     createOrderSchema,
     shippingAddressSchema,
     updateOrderStatusSchema,
+    updateOrderItemFulfillmentSchema,
 } from "../utils/zod_validations/order.zod";
 import { asyncHandler } from "../utils/asyncHandler.utils";
 
@@ -1657,6 +1658,92 @@ router.put(
     checkPermission(ModuleName.ORDER, PermissionLevel.CREATE_EDIT),
     validateZod(updateOrderStatusSchema),
     asyncHandler(orderController.updateOrderStatus.bind(orderController)),
+);
+
+/**
+ * @swagger
+ * /api/order/admin/{orderId}/items/{itemId}/fulfillment:
+ *   put:
+ *     summary: Confirm or cancel a single order item (multi-vendor fulfillment)
+ *     description: |
+ *       Item-level fulfillment for multi-vendor orders. The parent order
+ *       stays one order; each item is reviewed independently.
+ *       - CONFIRMED: item can be fulfilled; no remark needed.
+ *       - CANCELLED: mandatory non-blank cancellation remark (max 1000
+ *         chars); the item's stock is restocked and its final payable value
+ *         is deducted as cancelledAmount in the order summary.
+ *       Repeated identical requests are safe no-ops. Terminal orders
+ *       (DELIVERED/CANCELLED/NOT_RECEIVED/RETURNED) reject changes. When
+ *       every item ends up CANCELLED the parent order becomes CANCELLED;
+ *       when no item is pending and at least one is confirmed, an
+ *       ORDER_PLACED order advances to CONFIRMED.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [CONFIRMED, CANCELLED, PENDING]
+ *                 example: "CANCELLED"
+ *               cancellationRemark:
+ *                 type: string
+ *                 maxLength: 1000
+ *                 example: "Vendor out of stock"
+ *     responses:
+ *       200:
+ *         description: Item fulfillment updated; returns the full sanitized order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   description: Full sanitized order, including per-item fulfillmentStatus and the order-level cancelledAmount/cancelledItemCount/finalTotal
+ *       400:
+ *         description: Invalid IDs or validation error (e.g. missing cancellation remark)
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin or Staff access required
+ *       404:
+ *         description: Order or order item not found
+ *       409:
+ *         description: Order/item locked (terminal state) or item already cancelled
+ *       500:
+ *         description: Internal server error
+ */
+router.put(
+    "/admin/:orderId/items/:itemId/fulfillment",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.CREATE_EDIT),
+    validateZod(updateOrderItemFulfillmentSchema),
+    asyncHandler(
+        orderController.updateOrderItemFulfillment.bind(orderController),
+    ),
 );
 
 /**
