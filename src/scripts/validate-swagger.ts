@@ -51,11 +51,21 @@ const missingRequestDocumentation: Array<{ method: string; path: string; propert
 const missingPathParameters: Array<{ method: string; path: string; parameter: string }> = [];
 const missingResponseStatuses: Array<{ method: string; path: string; status: number }> = [];
 const emptySuccessResponses: Array<{ method: string; path: string; status: string }> = [];
+const missingOperationDescriptions: Array<{ method: string; path: string }> = [];
+const securityMismatches: Array<{ method: string; path: string; expected: boolean }> = [];
 
 for (const route of mountedRouteInventory) {
   const path = documentedPath(route.path);
   const operation = document.paths?.[path]?.[route.method.toLowerCase()];
   if (!operation) continue;
+
+  if (!String(operation.description ?? "").trim()) {
+    missingOperationDescriptions.push({ method: route.method, path });
+  }
+  const expectedSecurity = route.requiresAuthentication ? [{ bearerAuth: [] }] : [];
+  if (JSON.stringify(operation.security ?? []) !== JSON.stringify(expectedSecurity)) {
+    securityMismatches.push({ method: route.method, path, expected: route.requiresAuthentication });
+  }
 
   if (route.validationProperty === "body" && !operation.requestBody) {
     missingRequestDocumentation.push({ method: route.method, path, property: "body", schema: route.validationSchema });
@@ -95,7 +105,9 @@ if (
   missingRequestDocumentation.length ||
   missingPathParameters.length ||
   missingResponseStatuses.length ||
-  emptySuccessResponses.length
+  emptySuccessResponses.length ||
+  missingOperationDescriptions.length ||
+  securityMismatches.length
 ) {
   console.error(JSON.stringify({
     unresolvedRefs,
@@ -106,6 +118,8 @@ if (
     missingPathParameters,
     missingResponseStatuses,
     emptySuccessResponses,
+    missingOperationDescriptions,
+    securityMismatches,
   }, null, 2));
   process.exitCode = 1;
 } else {

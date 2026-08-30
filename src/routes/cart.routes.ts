@@ -36,6 +36,11 @@ const cartController = new CartController();
  *                 type: integer
  *                 example: 60
  *                 description: Optional variant ID if product has variants
+ *               source:
+ *                 type: string
+ *                 enum: [buy_now, add_to_cart]
+ *                 example: add_to_cart
+ *                 description: Action that initiated the cart request; Buy Now skips the cart push notification
  *             required:
  *               - productId
  *               - quantity

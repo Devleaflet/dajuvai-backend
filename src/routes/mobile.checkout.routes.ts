@@ -69,6 +69,10 @@ checkoutRouter.get(
  *         $ref: '#/components/responses/BadRequest'
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 checkoutRouter.post(
     "/mobile-estimate",
@@ -98,7 +102,7 @@ checkoutRouter.post(
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/CreateOrderResponse'
+ *               $ref: '#/components/schemas/CreateOrderDraftResponse'
  *       201:
  *         description: Order created successfully.
  *         content:
@@ -109,6 +113,10 @@ checkoutRouter.post(
  *         $ref: '#/components/responses/BadRequest'
  *       401:
  *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 checkoutRouter.post(
     "/mobile-order",

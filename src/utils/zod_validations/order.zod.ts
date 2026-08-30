@@ -65,14 +65,25 @@ export const createOrderSchema = z.object({
     shippingAddress: shippingAddressSchema,
     paymentMethod: PaymentMethodEnum,
     phoneNumber: z.string()
-        .min(10, "Phone number must be 10 digits").max(10, "Phone number must be 10 digits"),
+        .regex(/^\d{10}$/, "Phone number must be 10 digits"),
+    serviceCharge: z.number().nonnegative().optional(),
+    instrumentName: z.string().trim().max(100).optional(),
     promoCode: z.string().optional(),
     fullName: z.string().optional(),
+    idempotencyKey: z.string().trim().min(1).max(100).optional(),
     isBuyNow: z.boolean().optional(),
-    productId: z.number().int().optional(),
-    variantId: z.number().optional(),
+    productId: z.number().int().positive().optional(),
+    variantId: z.number().int().positive().optional(),
     quantity: z.number().int().positive().optional().default(1), 
     ageRestrictedAcknowledged: z.boolean().optional().default(false),
+}).superRefine((data, ctx) => {
+    if (data.isBuyNow === true && data.productId === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["productId"],
+            message: "productId is required when isBuyNow is true",
+        });
+    }
 });
 
 export const mobileCheckoutEstimateSchema = z.object({
@@ -82,6 +93,14 @@ export const mobileCheckoutEstimateSchema = z.object({
     productId: z.number().int().positive().optional(),
     variantId: z.number().int().positive().optional(),
     quantity: z.number().int().positive().optional(),
+}).superRefine((data, ctx) => {
+    if (data.isBuyNow === true && data.productId === undefined) {
+        ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["productId"],
+            message: "productId is required when isBuyNow is true",
+        });
+    }
 });
 
 

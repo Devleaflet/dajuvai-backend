@@ -9,6 +9,7 @@ export type MountedRoute = {
   validationSchema?: string;
   validationSchemaFile?: string;
   validationProperty?: "body" | "query" | "params";
+  middleware: string[];
   responseStatuses: number[];
 };
 
@@ -26,6 +27,25 @@ const normalizePath = (value: string) => {
 
 const authMiddlewarePattern =
   /\b(authMiddleware|combinedAuthMiddleware|vendorAuthMiddleware|isVendor|isAdmin|isAdminOrStaff|isRider|requireUserRole|isAccountOwner|isVendorAccountOwnerOrAdminOrStaff|restrictToVendorOrAdmin|canReviewProduct|canDeleteReview)\b/;
+const documentedMiddlewareNames = [
+  "authMiddleware",
+  "combinedAuthMiddleware",
+  "vendorAuthMiddleware",
+  "isVendor",
+  "isAdmin",
+  "isAdminOrStaff",
+  "isRider",
+  "requireUserRole",
+  "isAccountOwner",
+  "isAccountOwnerOrAdminOrStaff",
+  "isVendorAccountOwnerOrAdminOrStaff",
+  "restrictToVendorOrAdmin",
+  "canReviewProduct",
+  "canDeleteReview",
+  "checkPermission",
+  "validateZod",
+  "asyncHandler",
+];
 
 const resolveRouteFile = (fromFile: string, importPath: string) => {
   const base = path.resolve(path.dirname(fromFile), importPath);
@@ -135,6 +155,9 @@ const collectFromRouter = (
       validationSchemaFile: validation?.[1] ? imports.get(validation[1]) : undefined,
       validationProperty: (validation?.[2] as MountedRoute["validationProperty"]) ??
         (validation ? "body" : undefined),
+      middleware: documentedMiddlewareNames.filter((name) =>
+        new RegExp(`\\b${name}\\b`).test(call),
+      ),
       responseStatuses: responseStatusesFor(call, imports),
     });
   }

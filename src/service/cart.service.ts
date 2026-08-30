@@ -127,7 +127,7 @@ export class CartService {
      */
 
     async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
-        const { productId, quantity, variantId } = data;
+        const { productId, quantity, variantId, source } = data;
 
         // Validate product
         const product = await this.productRepository.findOne({
@@ -238,8 +238,12 @@ export class CartService {
         cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         const savedCart = await this.cartRepository.save(cart);
 
-        // Push notification (fire-and-forget)
-        new NotificationService().notifyAddToCart(userId, name).catch(() => {});
+        // Buy Now uses this endpoint to create its checkout item but should
+        // not produce an "Added to Cart" push. Missing source stays on the
+        // legacy notification behavior.
+        if (source !== 'buy_now') {
+            new NotificationService().notifyAddToCart(userId, name).catch(() => {});
+        }
 
         return savedCart;
     }

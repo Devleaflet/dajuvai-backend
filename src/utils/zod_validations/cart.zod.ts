@@ -7,7 +7,10 @@ export const addToCartSchema = z.object({
     // Quantity must be a positive integer
     quantity: z.number().int().positive('Quantity must be a positive integer'),
 
-    variantId: z.number().int().optional()
+    variantId: z.number().int().optional(),
+
+    // Buy Now shares this endpoint but must not trigger the cart push.
+    source: z.enum(['buy_now', 'add_to_cart']).optional(),
 });
 
 export const removeFromCartSchema = z.object({

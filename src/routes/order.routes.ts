@@ -15,6 +15,7 @@ import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { validateZod } from "../middlewares/validation.middleware";
 import {
     createOrderSchema,
+    mobileCheckoutEstimateSchema,
     shippingAddressSchema,
     updateOrderStatusSchema,
 } from "../utils/zod_validations/order.zod";
@@ -253,71 +254,27 @@ router.post(
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               cartData:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     productId:
- *                       type: integer
- *                       example: 1
- *                     quantity:
- *                       type: integer
- *                       example: 2
- *               promoCode:
- *                 type: string
- *                 example: "SUMMER2025"
+ *             $ref: '#/components/schemas/MobileCheckoutEstimateRequest'
  *     responses:
  *       200:
  *         description: Checkout estimate
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     merchandiseSubtotal:
- *                       type: number
- *                       example: 4200
- *                     priceBreakdown:
- *                       type: object
- *                       properties:
- *                         actualPrice:
- *                           type: number
- *                           example: 5000
- *                         productDiscountTotal:
- *                           type: number
- *                           example: 300
- *                         dealDiscountTotal:
- *                           type: number
- *                           example: 500
- *                         promoDiscountTotal:
- *                           type: number
- *                           example: 100
- *                         lineItems:
- *                           type: array
- *                           items:
- *                             type: object
- *                     shippingTotal:
- *                       type: number
- *                       example: 200
- *                     discountTotal:
- *                       type: number
- *                       example: 100
- *                     grandTotal:
- *                       type: number
- *                       example: 4300
+ *               $ref: '#/components/schemas/CheckoutEstimateResponse'
+ *       400:
+ *         $ref: '#/components/responses/BadRequest'
+ *       401:
+ *         $ref: '#/components/responses/Unauthorized'
+ *       404:
+ *         $ref: '#/components/responses/NotFound'
+ *       500:
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.post(
     "/estimate",
     authMiddleware,
+    validateZod(mobileCheckoutEstimateSchema),
     asyncHandler(orderController.estimateCheckout.bind(orderController)),
 );
 
@@ -2661,13 +2618,13 @@ router.post(
  *                   type: integer
  *                   example: 15
  *       400:
- *         description: Invalid or expired promo code
+ *         $ref: '#/components/responses/BadRequest'
  *       401:
- *         description: Unauthorized
+ *         $ref: '#/components/responses/Unauthorized'
  *       404:
  *         description: Promo code not found
  *       500:
- *         description: Internal server error
+ *         $ref: '#/components/responses/InternalServerError'
  */
 router.post(
     "/check-promo",

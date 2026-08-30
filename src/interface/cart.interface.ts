@@ -12,4 +12,5 @@ export interface ICartAddRequest {
     productId: number;
     variantId?: number; 
     quantity: number;
+    source?: 'buy_now' | 'add_to_cart';
 }

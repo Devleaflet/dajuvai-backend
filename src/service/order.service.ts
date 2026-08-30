@@ -68,6 +68,7 @@ import {
     normalizePromoCode,
     isPromoUsable,
     calculatePromoDiscount,
+    PromoEligibilityReason,
 } from "./promoRules";
 import { DealStatus } from "../entities/deal.entity";
 import { VendorService } from "./vendor.service";
@@ -1275,9 +1276,12 @@ export class OrderService {
         };
     }
 
-    async checkAvailablePromocode(promoCode: string, userId: number) {
+    async getPromoAvailability(
+        promoCode: string,
+        userId: number,
+    ): Promise<{ promo: Promo | null; reason: PromoEligibilityReason }> {
         const normalized = normalizePromoCode(promoCode);
-        if (!normalized) return null;
+        if (!normalized) return { promo: null, reason: "NOT_FOUND" };
 
         const promo = await this.promoService.findPromoByCode(normalized);
 
@@ -1294,8 +1298,16 @@ export class OrderService {
                   .getCount()) > 0
             : false;
 
-        const { usable } = isPromoUsable(promo, { alreadyUsedByUser });
-        return usable ? promo : null;
+        const eligibility = isPromoUsable(promo, { alreadyUsedByUser });
+        return {
+            promo: eligibility.usable ? promo : null,
+            reason: eligibility.reason,
+        };
+    }
+
+    async checkAvailablePromocode(promoCode: string, userId: number) {
+        const { promo } = await this.getPromoAvailability(promoCode, userId);
+        return promo;
     }
 
     async trackOrder(email: string, orderNumber: string) {

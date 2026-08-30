@@ -301,6 +301,15 @@ for (const [aliasPath, canonicalPath] of Object.entries(legacyPathAliases)) {
 
 const operationKey = (method: string, routePath: string) =>
   `${method.toLowerCase()} ${routePath}`;
+const routeMetadata = new Map(
+  mountedRouteInventory.map((route) => [
+    operationKey(
+      route.method,
+      route.path.replace(/:\w+/g, (name) => `{${name.slice(1)}}`),
+    ),
+    route,
+  ]),
+);
 const routeSecurity = new Map(
   mountedRouteInventory.map((route) => [
     operationKey(
@@ -311,12 +320,60 @@ const routeSecurity = new Map(
   ]),
 );
 
+// These endpoints historically carried hand-written inline examples that
+// drifted from the shared controller contract. Keep the generated document
+// authoritative for the checkout client while route comments are migrated.
+const orderCreateOperation = swaggerDocument.paths?.["/api/order"]?.post as
+  | Record<string, any>
+  | undefined;
+if (orderCreateOperation) {
+  orderCreateOperation.requestBody = {
+    required: true,
+    content: {
+      "application/json": {
+        schema: { $ref: "#/components/schemas/CreateOrderRequest" },
+      },
+    },
+  };
+  orderCreateOperation.responses = {
+    ...(orderCreateOperation.responses ?? {}),
+    "200": {
+      description: "Online checkout draft created; redirect to the payment gateway.",
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/CreateOrderDraftResponse" },
+        },
+      },
+    },
+    "201": {
+      description: "Cash-on-delivery order created successfully.",
+      content: {
+        "application/json": {
+          schema: { $ref: "#/components/schemas/CreateOrderResponse" },
+        },
+      },
+    },
+  };
+}
+
 for (const [routePath, pathItem] of Object.entries(swaggerDocument.paths ?? {})) {
   for (const method of ["get", "post", "put", "patch", "delete"]) {
     const operation = pathItem[method] as Record<string, unknown> | undefined;
     if (!operation) continue;
     const requiresAuthentication = routeSecurity.get(operationKey(method, routePath));
     if (requiresAuthentication === undefined) continue;
+    const route = routeMetadata.get(operationKey(method, routePath));
+    if (!String(operation.description ?? "").trim()) {
+      operation.description = [
+        `Mounted ${method.toUpperCase()} ${routePath}.`,
+        requiresAuthentication ? "Requires a valid bearer token." : "Public endpoint.",
+        route?.validationSchema
+          ? `Validates ${route.validationSchema} on ${route.validationProperty ?? "body"}.`
+          : "No route-level Zod validation middleware is mounted.",
+        "Errors use the standard API error envelope.",
+      ].join(" ");
+    }
+    operation["x-middleware"] = route?.middleware ?? [];
     operation.security = requiresAuthentication ? [{ bearerAuth: [] }] : [];
 
     const responses = operation.responses as Record<string, unknown> | undefined;

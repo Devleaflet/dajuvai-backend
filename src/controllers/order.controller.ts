@@ -11,6 +11,7 @@ import {
     IUpdateOrderStatusRequest,
 } from "../interface/order.interface";
 import {
+    APIError,
     BadRequestError,
     AuthError,
     ForbiddenError,
@@ -837,14 +838,27 @@ export class OrderController {
     ): Promise<void> {
         const { promoCode } = req.body as { promoCode: string };
         const userId = req.user?.id;
-        const promo = await this.orderService.checkAvailablePromocode(
+        const availability = await this.orderService.getPromoAvailability(
             promoCode,
             userId,
         );
-        if (promo) {
-            res.status(200).json({ success: true, data: promo });
+        if (availability.promo) {
+            res.status(200).json({ success: true, data: availability.promo });
             return;
         }
-        throw new NotFoundError("Promo code");
+
+        const messageByReason = {
+            NOT_FOUND: "Promo code not found",
+            INVALID: "Promo code is inactive",
+            USAGE_EXHAUSTED: "Promo code usage limit has been reached",
+            ALREADY_USED: "Promo code has already been used on this account",
+            OK: "Promo code is not available",
+        } as const;
+
+        throw new APIError(
+            404,
+            messageByReason[availability.reason],
+            "PROMO_NOT_AVAILABLE",
+        );
     }
 }

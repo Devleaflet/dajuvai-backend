@@ -8,7 +8,7 @@ export interface UploadTransformPreset {
     width: number;
     height?: number;
     crop: "limit";
-    quality: "auto:good";
+    quality: "auto:good" | "auto:best";
     fetch_format: "auto";
 }
 
@@ -26,10 +26,12 @@ const UPLOAD_TRANSFORMS: Record<string, UploadTransformPreset> = {
         fetch_format: "auto",
     },
     banners: {
-        width: 1920,
-        height: 1080,
+        // Square limit preserves panoramic hero artwork and portrait
+        // special-deal artwork without cropping either orientation.
+        width: 2560,
+        height: 2560,
         crop: "limit",
-        quality: "auto:good",
+        quality: "auto:best",
         fetch_format: "auto",
     },
     "profile-pictures": {
