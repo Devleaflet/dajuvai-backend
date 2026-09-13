@@ -97,12 +97,22 @@ export class DeliveryAdminService {
     async getRiderById(riderId: number) {
         const rider = await this.riderRepository.findOne({
             where: { id: riderId },
-            relations: ["assignments"],
+            // The order is loaded so a rider's history can name each delivery by
+            // its order number. The order id alone is an internal handle and
+            // means nothing to an administrator reading the list.
+            relations: ["assignments", "assignments.order"],
         });
         if (!rider) throw new APIError(404, "rider not found");
         return {
             ...sanitizeRiderForDelivery(rider),
-            assignments: (rider as any).assignments ?? [],
+            // Only the two identifying fields of the order are exposed; the rest
+            // of it is not this endpoint's to hand out.
+            assignments: ((rider as any).assignments ?? []).map((assignment: any) => ({
+                ...assignment,
+                order: assignment.order
+                    ? { id: assignment.order.id, orderNumber: assignment.order.orderNumber ?? null }
+                    : null,
+            })),
         };
     }
 
