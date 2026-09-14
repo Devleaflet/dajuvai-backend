@@ -97,12 +97,27 @@ export class VendorController {
         return { token, refreshToken };
     }
 
+    /**
+     * Reads `page` and `limit` from the query.
+     *
+     * The service has always taken both, but the controllers called it with no
+     * arguments, so its defaults applied and every caller silently received
+     * only the first 50 vendors with no way to reach the rest.
+     */
+    private pagination(query: Record<string, unknown>): { page: number; limit: number } {
+        const page = Math.max(1, Number(query.page) || 1);
+        // Capped so a client cannot ask for the entire table in one request.
+        const limit = Math.min(100, Math.max(1, Number(query.limit) || 50));
+        return { page, limit };
+    }
+
     async getVendors(
-        _req: VendorAuthRequest,
+        req: VendorAuthRequest,
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
-        const vendors = await this.vendorService.fetchAllVendors();
+        const { page, limit } = this.pagination(req.query as Record<string, unknown>);
+        const vendors = await this.vendorService.fetchAllVendors(page, limit);
 
         const vendorForAdmin = vendors.map((v) => sanitizeVendorForAdmin(v));
 
@@ -122,12 +137,13 @@ export class VendorController {
     }
 
     async getUnapprovedVendorList(
-        _req: AuthRequest,
+        req: AuthRequest,
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
+        const { page, limit } = this.pagination(req.query as Record<string, unknown>);
         const unapprovedList =
-            await this.vendorService.fetchAllUnapprovedVendor();
+            await this.vendorService.fetchAllUnapprovedVendor(page, limit);
         res.status(200).json({ success: true, data: unapprovedList });
     }
 

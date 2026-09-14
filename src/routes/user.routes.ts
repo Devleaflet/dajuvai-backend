@@ -776,8 +776,15 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *       403:
  *         description: Forbidden - Not an admin
  */
-userRouter.get("/users", userController.getUsers.bind(userController));
-//authMiddleware, isAdminOrStaff,
+// Guarded: this returns every user with their name, email and phone number.
+// The middleware was commented out, leaving the whole customer list readable
+// by anyone who could reach the server.
+userRouter.get(
+    "/users",
+    authMiddleware,
+    isAdminOrStaff,
+    userController.getUsers.bind(userController),
+);
 
 /**
  * @swagger
