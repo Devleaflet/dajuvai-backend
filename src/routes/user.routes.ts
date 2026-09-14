@@ -1390,6 +1390,10 @@ userRouter.get(
                     email: user.email,
                     role: user.role || UserRole.USER,
                     username: user.username,
+                    // The console shows this beside the account name. The column
+                    // already exists and other endpoints return it; this one
+                    // omitted it, so an admin had no picture anywhere.
+                    profilePicture: user.profilePicture || null,
                     ...(permissions ? { permissions } : {}),
                 },
             });
