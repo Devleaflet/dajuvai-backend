@@ -1832,7 +1832,14 @@ userRouter.put(
  *       404:
  *         description: User not found
  */
-userRouter.get("/users/:id", userController.getUserById.bind(userController));
+// Guarded like the PUT on the same path: this returns a full user record, so
+// it is the account's owner's to read. It was reachable by anyone.
+userRouter.get(
+    "/users/:id",
+    authMiddleware,
+    isAccountOwner,
+    userController.getUserById.bind(userController),
+);
 
 /**
  * @swagger
