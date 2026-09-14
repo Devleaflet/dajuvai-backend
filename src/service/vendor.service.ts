@@ -624,6 +624,8 @@ export class VendorService {
                             ? updateData.telePhone
                             : vendor.telePhone,
                     taxNumber: updateData.taxNumber ?? vendor.taxNumber,
+                    businessRegNumber:
+                        updateData.businessRegNumber ?? vendor.businessRegNumber,
                     taxDocuments:
                         updateData.taxDocuments ?? vendor.taxDocuments,
                     citizenshipDocuments:

@@ -223,6 +223,9 @@ export const updateVendorSchema2 = z.object({
     .optional(),
   telePhone: optionalVendorTelephoneSchema.nullable(),
 
+  // Business registration number. Plain business data, unlike the email, which
+  // is the login identity and has its own verified change flow.
+  businessRegNumber: z.string().min(1).optional(),
   taxNumber: z.string().optional(),
   taxDocuments: z.array(z.string().url()).optional(),
   citizenshipDocuments: z.array(z.string().url()).optional(),
