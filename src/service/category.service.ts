@@ -105,7 +105,11 @@ export class CategoryService {
             throw new APIError(403, 'User not found or not an admin');
         }
 
-        let imageUrl: string | undefined;
+        // Two ways in: a multipart file, which is uploaded here, or an image
+        // URL already uploaded through /api/image. The URL was validated by the
+        // schema and then ignored, so an admin that uploads first and sends the
+        // link got a category with no image and no error.
+        let imageUrl: string | undefined = dto.image ?? undefined;
 
         // Upload image if provided
         if (file) {
@@ -219,6 +223,12 @@ export class CategoryService {
             // Upload new image first so a failed upload never leaves the
             // category without any image, then clean up the old asset.
             imageUrl = await this.uploadCategoryImageFile(file);
+            await this.deleteStoredImage(category.image, imageUrl);
+        } else if (dto.image !== undefined) {
+            // An image URL uploaded elsewhere. `null` clears it, which is why
+            // undefined (field absent) and null (field cleared) are treated
+            // differently here rather than collapsed with `??`.
+            imageUrl = dto.image ?? undefined;
             await this.deleteStoredImage(category.image, imageUrl);
         }
 

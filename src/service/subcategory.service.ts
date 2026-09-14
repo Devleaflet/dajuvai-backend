@@ -140,8 +140,9 @@ export class SubcategoryService {
             throw new APIError(403, "User not found or not an admin");
         }
 
-        // Optional image upload
-        let imageUrl: string | undefined;
+        // Either a multipart file, uploaded here, or a URL already uploaded
+        // through /api/image and sent in the body.
+        let imageUrl: string | undefined = dto.image ?? undefined;
         if (file) {
             imageUrl = await this.uploadSubcategoryImageFile(file);
         }
@@ -254,6 +255,11 @@ export class SubcategoryService {
             // Upload new image first so a failed upload never leaves the
             // subcategory without any image, then clean up the old asset.
             imageUrl = await this.uploadSubcategoryImageFile(file);
+            await this.deleteStoredImage(subcategory.image, imageUrl);
+        } else if (dto.image !== undefined) {
+            // An image URL uploaded elsewhere; null clears it. Absent and
+            // cleared mean different things, so `??` would be wrong here.
+            imageUrl = dto.image ?? undefined;
             await this.deleteStoredImage(subcategory.image, imageUrl);
         }
 
