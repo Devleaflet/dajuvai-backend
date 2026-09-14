@@ -2280,6 +2280,75 @@ export class ProductService {
   }
 
   /**
+   * Archives one variant, leaving the product and its siblings alone.
+   *
+   * The counterpart to restoreVariant. Until now a variant could only be
+   * archived as a side effect of an update that omitted it, which meant the
+   * only way to retire one was to resend every other variant correctly.
+   */
+  async archiveVariant(
+    productId: number,
+    variantId: number,
+    actor: ProductActor,
+  ): Promise<void> {
+    // The `variants` relation is deliberately not loaded, for the same reason
+    // restoreVariant avoids it: a later save would cascade-diff a stale child
+    // list against the rows actually in the database.
+    const product = await this.productRepository.findOne({
+      where: { id: productId },
+      relations: ["vendor"],
+      withDeleted: true,
+    });
+    if (!product) {
+      throw new APIError(404, "Product not found");
+    }
+
+    await this.assertProductOwner(product, actor, "archive variants of");
+
+    if (product.deletedAt) {
+      throw new APIError(
+        400,
+        "This product is already archived — its variants were archived with it",
+      );
+    }
+
+    const variant = await this.variantRepository.findOne({
+      where: { id: variantId, productId },
+    });
+    if (!variant) {
+      throw new APIError(404, "Variant not found");
+    }
+
+    // A variant product with no variants left has no price and no stock, and
+    // updateProduct refuses to save one. Archiving the product is the honest
+    // action there, so say so rather than leaving it in that state.
+    const activeCount = await this.variantRepository.count({ where: { productId } });
+    if (activeCount <= 1) {
+      throw new APIError(
+        400,
+        "This is the product's last variant — archive the product itself instead",
+      );
+    }
+
+    await this.dataSource.transaction(async (manager) => {
+      // Carts and wishlists pointing at it would otherwise reference something
+      // a shopper can no longer buy; the update path prunes them the same way.
+      await manager.getRepository(CartItem).delete({ variantId });
+      await manager.getRepository(WishlistItem).delete({ variantId });
+      await manager.getRepository(Variant).softDelete(variantId);
+    });
+
+    // Stock and status are aggregated from the variants, and nothing else
+    // recomputes them outside updateProduct.
+    const remaining = await this.variantRepository.find({ where: { productId } });
+    const inventory = this.aggregateVariantInventory(remaining);
+    product.stock = inventory.stock;
+    product.status = inventory.status;
+    await this.productRepository.save(product);
+    await this.productSearchIndexer.rebuildProduct(productId);
+  }
+
+  /**
    * Lists archived (soft-deleted) products so a vendor/admin has somewhere
    * to find and restore them — every other product read excludes them by
    * design. Vendors only see their own; admins (actor.vendorId undefined)

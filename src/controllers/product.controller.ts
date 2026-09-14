@@ -336,6 +336,33 @@ export class ProductController {
         });
     }
 
+    async archiveVariant(
+        req: CombinedAuthRequest<{ id: string; variantId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const id = Number(req.params.id);
+        const variantId = Number(req.params.variantId);
+
+        if (isNaN(id) || isNaN(variantId)) {
+            throw new BadRequestError("Invalid product or variant ID");
+        }
+
+        if (!req.user && !req.vendor) {
+            throw new BadRequestError("Not authenticated");
+        }
+
+        await this.productService.archiveVariant(id, variantId, {
+            userId: req.user?.id,
+            vendorId: req.vendor?.id,
+        });
+
+        res.status(200).json({
+            success: true,
+            msg: "Variant archived successfully",
+        });
+    }
+
     /**
      * @method getArchivedProducts
      * @route GET /products/archived

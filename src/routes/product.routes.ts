@@ -407,6 +407,51 @@ productRouter.patch(
 
 /**
  * @swagger
+ * /api/product/{id}/variant/{variantId}:
+ *   delete:
+ *     summary: Archive a single variant
+ *     description: Soft-deletes one variant of a product, leaving the product and its other variants active. Refuses when the product is itself archived, or when this is the product's last remaining variant. Requires vendor or admin authentication.
+ *     tags:
+ *       - Product
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the product the variant belongs to
+ *       - in: path
+ *         name: variantId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the variant to archive
+ *     responses:
+ *       200:
+ *         description: Variant archived successfully
+ *       400:
+ *         description: Product already archived, or this is its last variant
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not permitted to archive variants of this product
+ *       404:
+ *         description: Product or variant not found
+ *       500:
+ *         description: Internal server error
+ */
+// /api/product/:id/variant/:variantId — archives a single variant.
+productRouter.delete(
+    "/:id/variant/:variantId",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    productController.archiveVariant.bind(productController),
+);
+
+/**
+ * @swagger
  * /api/product/image/upload:
  *   post:
  *     summary: Upload product images to Cloudinary
