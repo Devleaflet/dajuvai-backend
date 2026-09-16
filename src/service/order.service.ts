@@ -77,6 +77,8 @@ import { Vendor } from "../entities/vendor.entity";
 import config from "../config/env.config";
 import {
     sanitizeOrderFull,
+    sanitizeOrderForList,
+    type SanitizedOrderListRow,
     sanitizeOrderForVendor,
     SanitizedOrderFull,
     SanitizedVendorOrderView,
@@ -3320,7 +3322,7 @@ export class OrderService {
      */
     async getAllOrders(
         params: IAdminOrderQueryParams = {},
-    ): Promise<IPaginatedResult<SanitizedOrderFull>> {
+    ): Promise<IPaginatedResult<SanitizedOrderListRow>> {
         const page = Math.max(1, Number(params.page) || 1);
         // Safe upper bound: never let a client request an unbounded page size.
         const limit = Math.min(100, Math.max(1, Number(params.limit) || 20));
@@ -3477,7 +3479,7 @@ export class OrderService {
             .filter((o): o is Order => !!o);
 
         return {
-            items: sortedOrders.map(sanitizeOrderFull),
+            items: sortedOrders.map(sanitizeOrderForList),
             pagination: {
                 page,
                 limit,

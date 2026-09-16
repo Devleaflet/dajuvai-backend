@@ -422,6 +422,47 @@ function buildVendorShippingBreakdown(order: Order): SanitizedVendorShipping[] {
     });
 }
 
+/**
+ * One order line as a *list* needs it, which is far less than a detail view.
+ *
+ * `sanitizeOrderFull` was serving both, so every row of the orders table
+ * carried each line's price breakdown, its name/SKU/image snapshots and its
+ * joined product and variant — about 1.5 KB per order, roughly half the row,
+ * to render a count and a vendor name. At a hundred rows that is 425 KB, most
+ * of it never read.
+ *
+ * Both consoles were checked before narrowing this: the Next admin table shows
+ * the number of lines, and the React admin derives the distinct vendor names
+ * and the total quantity. Those are exactly the fields kept.
+ */
+export interface SanitizedOrderListItem {
+    id: number;
+    quantity: number;
+    vendorId: number | null;
+    vendor: { id: number; businessName: string | null } | null;
+}
+
+export const sanitizeOrderListItem = (
+    item: OrderItem,
+): SanitizedOrderListItem => ({
+    id: item.id,
+    quantity: item.quantity,
+    vendorId: item.vendorId ?? null,
+    vendor: item.vendor
+        ? { id: item.vendor.id, businessName: item.vendor.businessName ?? null }
+        : null,
+});
+
+/** An order as the admin list shows it: the full record minus each line's detail. */
+export type SanitizedOrderListRow = Omit<SanitizedOrderFull, "orderItems"> & {
+    orderItems: SanitizedOrderListItem[];
+};
+
+export const sanitizeOrderForList = (order: Order): SanitizedOrderListRow => ({
+    ...sanitizeOrderFull(order),
+    orderItems: (order.orderItems ?? []).map(sanitizeOrderListItem),
+});
+
 export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
     const orderItems = (order.orderItems ?? []).map(sanitizeOrderItem);
     const lineBreakdowns = orderItems.map((item) => item.priceBreakdown);
