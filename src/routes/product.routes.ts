@@ -431,6 +431,17 @@ productRouter.patch(
  *     responses:
  *       200:
  *         description: Variant archived successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: Variant archived successfully
  *       400:
  *         description: Product already archived, or this is its last variant
  *       401:

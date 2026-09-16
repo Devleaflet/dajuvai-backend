@@ -99,6 +99,12 @@ checkoutRouter.post(
  *           application/json:
  *             schema:
  *               $ref: '#/components/schemas/CreateOrderDraftResponse'
+ *       201:
+ *         description: Order created outright, which is what CASH_ON_DELIVERY does — there is no redirect to follow
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/CreateOrderResponse'
  *       400:
  *         $ref: '#/components/responses/BadRequest'
  *       401:
