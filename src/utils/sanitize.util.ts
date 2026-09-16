@@ -522,6 +522,8 @@ export interface SanitizedVendorOrderView {
     appliedPromoCode: string | null;
     promoApplyOn: PromoType | null;
     vendorPayable: number;
+    cancelledSubtotal: number;
+    cancelledItemCount: number;
     /** Only present so a vendor responsible for fulfillment can see the fee
      * for its own shipment — never the order's other-vendor fees or total. */
     ownShippingFee: number | null;
@@ -541,8 +543,28 @@ export const sanitizeOrderForVendor = (
     const vendorItems = (order.orderItems ?? []).filter(
         (i) => i.vendorId === vendorId,
     );
-    const itemsSubtotal = vendorItems.reduce(
-        (sum, item) => sum + Number(item.price) * item.quantity,
+
+    /*
+     * A cancelled line is not owed to the vendor.
+     *
+     * The subtotal used to sum every line the vendor had on the order,
+     * cancelled ones included, so `vendorPayable` paid them for goods that
+     * were never sent. Cancelled lines are still returned — the vendor needs
+     * to see what was dropped — but they are counted separately.
+     */
+    const lineTotal = (item: OrderItem) => Number(item.price) * item.quantity;
+    const isCancelled = (item: OrderItem) =>
+        item.fulfillmentStatus === ItemFulfillmentStatus.CANCELLED;
+
+    const activeItems = vendorItems.filter((item) => !isCancelled(item));
+    const cancelledItems = vendorItems.filter(isCancelled);
+
+    const itemsSubtotal = activeItems.reduce(
+        (sum, item) => sum + lineTotal(item),
+        0,
+    );
+    const cancelledSubtotal = cancelledItems.reduce(
+        (sum, item) => sum + lineTotal(item),
         0,
     );
 
@@ -576,6 +598,9 @@ export const sanitizeOrderForVendor = (
         shippingAddress: order.shippingAddress ?? null,
         orderItems: vendorItems.map(sanitizeOrderItem),
         itemsSubtotal,
+        /** What was taken off by cancelling lines, as a positive figure. */
+        cancelledSubtotal: Number(cancelledSubtotal.toFixed(2)),
+        cancelledItemCount: cancelledItems.length,
         discountAllocation: Number(discountAllocation.toFixed(2)),
         appliedPromoCode: order.appliedPromoCode ?? null,
         promoApplyOn,
