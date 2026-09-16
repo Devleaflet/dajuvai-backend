@@ -32,6 +32,16 @@ export class Promo {
     @Column({ type: "int", default: 0 })
     usageCount: number;
 
+    /**
+     * How many times one customer may use this code. 0 means unlimited,
+     * matching how `maxUsageCount` already reads.
+     *
+     * Enforced against the PromoRedemption ledger inside the same transaction
+     * that claims the global slot, so the two caps cannot disagree.
+     */
+    @Column({ type: "int", default: 0 })
+    maxUsagePerUser: number;
+
     @CreateDateColumn()
     createdAt: Date;
 

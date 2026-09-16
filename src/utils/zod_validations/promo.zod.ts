@@ -22,6 +22,13 @@ export const createPromoSchema = z.object({
         .int()
         .min(0, "maxUsageCount must be non-negative")
         .default(0),
+
+    /** How many times one customer may use it. 0 is unlimited, as above. */
+    maxUsagePerUser: z
+        .number()
+        .int()
+        .min(0, "maxUsagePerUser must be non-negative")
+        .default(0),
 })
 
 export const deletePromoSchema = z.object({

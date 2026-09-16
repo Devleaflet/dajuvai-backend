@@ -64,6 +64,7 @@ import {
 import { NotificationService } from "./notification.service";
 import crypto from "crypto";
 import axios from "axios";
+import { PromoRedemption } from "../entities/promo-redemption.entity";
 import { Promo, PromoType } from "../entities/promo.entity";
 import {
     normalizePromoCode,
@@ -98,6 +99,26 @@ import { NpsPaymentService } from "./nps-payment.service";
  *
  * @module OrderService
  */
+/** Why a promo claim did not go through, so the caller can say which. */
+type PromoClaimReason = "invalid" | "exhausted" | "per-user";
+
+type PromoClaimResult = { claimed: true } | { claimed: false; reason: PromoClaimReason };
+
+/**
+ * What to tell the customer. "You have already used this code" is a different
+ * problem from "this code is used up", and sending the second for the first
+ * has them waiting for a code that will never work for them again.
+ */
+function promoClaimMessage(reason: PromoClaimReason): string {
+    if (reason === "per-user") {
+        return "You have already used this promo code the maximum number of times. Remove it and try again.";
+    }
+    if (reason === "invalid") {
+        return "That promo code is not valid. Remove it and try again.";
+    }
+    return "Promo code usage limit has been reached. Remove the promo code and try again.";
+}
+
 export class OrderService {
     private orderRepository: Repository<Order>;
     private addressRepository: Repository<Address>;
@@ -852,15 +873,16 @@ export class OrderService {
                 // Claim the promo usage slot atomically with the order save,
                 // exactly like the COD path in reserveStockAndSaveOrder.
                 if (savedOrder.appliedPromoCode) {
-                    const claimed = await this.claimPromoUsage(
+                    const claim = await this.claimPromoUsage(
                         savedOrder.appliedPromoCode,
                         manager,
+                        {
+                            userId: lockedDraft.userId,
+                            orderId: savedOrder.id,
+                        },
                     );
-                    if (!claimed) {
-                        throw new APIError(
-                            400,
-                            "Promo code usage limit has been reached. Remove the promo code and try again.",
-                        );
+                    if (claim.claimed === false) {
+                        throw new APIError(400, promoClaimMessage(claim.reason));
                     }
                 }
 
@@ -1072,8 +1094,8 @@ export class OrderService {
         // One-time-per-user: the promo may only be redeemed once by a user on
         // a completed order. Matching is case-insensitive because old rows can
         // hold codes in mixed case.
-        const alreadyUsedByUser = promo
-            ? (await this.orderRepository
+        const usedByUser = promo
+            ? await this.orderRepository
                   .createQueryBuilder("order")
                   .where(
                       "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
@@ -1082,10 +1104,10 @@ export class OrderService {
                   .andWhere("order.status IN (:...statuses)", {
                       statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
                   })
-                  .getCount()) > 0
-            : false;
+                  .getCount()
+            : 0;
 
-        const { usable } = isPromoUsable(promo, { alreadyUsedByUser });
+        const { usable } = isPromoUsable(promo, { usedByUser });
         if (!usable)
             return { discountAmount: 0, appliedPromoCode: null, applyOn: null };
 
@@ -1110,9 +1132,10 @@ export class OrderService {
     private async claimPromoUsage(
         promoCode: string,
         manager?: EntityManager,
-    ): Promise<boolean> {
+        claimant?: { userId: number; orderId: number },
+    ): Promise<PromoClaimResult> {
         const normalized = normalizePromoCode(promoCode);
-        if (!normalized) return false;
+        if (!normalized) return { claimed: false, reason: "invalid" };
 
         const promoRepo = manager
             ? manager.getRepository(Promo)
@@ -1128,7 +1151,48 @@ export class OrderService {
             )
             .execute();
 
-        return (result.affected ?? 0) > 0;
+        if ((result.affected ?? 0) === 0) {
+            return { claimed: false, reason: "exhausted" };
+        }
+
+        // Nothing more to check without a customer to check against — the
+        // payment callbacks that re-enter this path have already claimed.
+        if (!claimant) return { claimed: true };
+
+        const promo = await promoRepo
+            .createQueryBuilder("promo")
+            .where('LOWER(promo."promoCode") = LOWER(:code)', {
+                code: normalized,
+            })
+            .getOne();
+
+        if (!promo) return { claimed: false, reason: "invalid" };
+
+        // The UPDATE above took a row lock on this promo, so every concurrent
+        // claim for the same code is serialised behind it. That is what makes
+        // counting here safe: no second transaction can insert a redemption
+        // between this count and the insert below.
+        const redemptionRepo = manager
+            ? manager.getRepository(PromoRedemption)
+            : AppDataSource.getRepository(PromoRedemption);
+
+        if (promo.maxUsagePerUser > 0) {
+            const used = await redemptionRepo.count({
+                where: { promoId: promo.id, userId: claimant.userId },
+            });
+
+            if (used >= promo.maxUsagePerUser) {
+                return { claimed: false, reason: "per-user" };
+            }
+        }
+
+        await redemptionRepo.insert({
+            promoId: promo.id,
+            userId: claimant.userId,
+            orderId: claimant.orderId,
+        });
+
+        return { claimed: true };
     }
 
     /**
@@ -1138,9 +1202,18 @@ export class OrderService {
      */
     private async releasePromoUsage(
         promoCode: string | null | undefined,
+        orderId?: number,
     ): Promise<void> {
         const normalized = normalizePromoCode(promoCode);
         if (!normalized) return;
+
+        // The customer's own use goes back too, or cancelling an order would
+        // burn their one allowance for good.
+        if (orderId !== undefined) {
+            await AppDataSource.getRepository(PromoRedemption).delete({
+                orderId,
+            });
+        }
 
         await AppDataSource.getRepository(Promo)
             .createQueryBuilder()
@@ -1282,8 +1355,8 @@ export class OrderService {
 
         const promo = await this.promoService.findPromoByCode(normalized);
 
-        const alreadyUsedByUser = promo
-            ? (await this.orderRepository
+        const usedByUser = promo
+            ? await this.orderRepository
                   .createQueryBuilder("order")
                   .where(
                       "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
@@ -1292,10 +1365,10 @@ export class OrderService {
                   .andWhere("order.status IN (:...statuses)", {
                       statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
                   })
-                  .getCount()) > 0
-            : false;
+                  .getCount()
+            : 0;
 
-        const { usable } = isPromoUsable(promo, { alreadyUsedByUser });
+        const { usable } = isPromoUsable(promo, { usedByUser });
         return usable ? promo : null;
     }
 
@@ -2127,7 +2200,7 @@ export class OrderService {
             await this.orderRepository.save(order);
             if (!alreadyTerminal) {
                 // The order never fulfilled, so give the promo slot back.
-                await this.releasePromoUsage(order.appliedPromoCode).catch(
+                await this.releasePromoUsage(order.appliedPromoCode, order.id).catch(
                     (err) =>
                         console.error("Failed to release promo usage:", err),
                 );
@@ -2523,15 +2596,16 @@ export class OrderService {
             // exhausted (a concurrent order won the race), the whole
             // transaction rolls back — no order, no stock deduction.
             if (savedOrder.appliedPromoCode) {
-                const claimed = await this.claimPromoUsage(
+                const claim = await this.claimPromoUsage(
                     savedOrder.appliedPromoCode,
                     manager,
+                    {
+                        userId: savedOrder.orderedById,
+                        orderId: savedOrder.id,
+                    },
                 );
-                if (!claimed) {
-                    throw new APIError(
-                        400,
-                        "Promo code usage limit has been reached. Remove the promo code and try again.",
-                    );
+                if (claim.claimed === false) {
+                    throw new APIError(400, promoClaimMessage(claim.reason));
                 }
             }
 
@@ -2799,7 +2873,7 @@ export class OrderService {
             order.status = OrderStatus.CANCELLED;
             order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
             // Order never fulfilled — return the claimed promo slot.
-            await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+            await this.releasePromoUsage(order.appliedPromoCode, order.id).catch((err) =>
                 console.error("Failed to release promo usage:", err),
             );
         }
@@ -2860,7 +2934,7 @@ export class OrderService {
         if (shouldRestoreStock) {
             await this.restoreStock(order.orderItems);
             // Order never fulfilled — return the claimed promo slot.
-            await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+            await this.releasePromoUsage(order.appliedPromoCode, order.id).catch((err) =>
                 console.error("Failed to release promo usage:", err),
             );
         }
@@ -3744,7 +3818,7 @@ export class OrderService {
             !terminalUnfulfilled.includes(previousStatus)
         ) {
             // Order never fulfilled — return any claimed promo slot.
-            await this.releasePromoUsage(order.appliedPromoCode).catch((err) =>
+            await this.releasePromoUsage(order.appliedPromoCode, order.id).catch((err) =>
                 console.error("Failed to release promo usage:", err),
             );
             for (const item of order.orderItems) {

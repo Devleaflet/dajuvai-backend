@@ -24,8 +24,6 @@ export class PromoService {
             promoCode: normalizePromoCode(data.promoCode),
         })
 
-        console.log(newpromoCode);
-
         const savedpromoCode = await this.promoRepository.save(newpromoCode);
 
         return savedpromoCode;

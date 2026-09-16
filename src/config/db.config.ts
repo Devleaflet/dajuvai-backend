@@ -22,6 +22,7 @@ import { Contact } from "../entities/contact.entity";
 import { District } from "../entities/district.entity";
 import { HomePageSection } from "../entities/homePage.entity";
 import { Promo } from "../entities/promo.entity";
+import { PromoRedemption } from "../entities/promo-redemption.entity";
 import { Variant } from "../entities/variant.entity";
 import { HomeCategory } from "../entities/home.category";
 import { Notification } from "../entities/notification.entity";
@@ -105,6 +106,7 @@ const AppDataSource = new DataSource({
         District,
         HomePageSection,
         Promo,
+        PromoRedemption,
         Variant,
         HomeCategory,
         Notification,

@@ -30,25 +30,37 @@ export const isUsageExhausted = (
 ): boolean => maxUsageCount > 0 && usageCount >= maxUsageCount;
 
 /**
+ * `maxUsagePerUser === 0` means unlimited, matching `maxUsageCount`.
+ *
+ * This rule used to be hard-coded at exactly one use per customer. It is now
+ * the promo's own setting, and existing codes were backfilled to 1 so they
+ * keep behaving exactly as they did.
+ */
+export const hasReachedPerUserLimit = (
+    usedByUser: number,
+    maxUsagePerUser: number,
+): boolean => maxUsagePerUser > 0 && usedByUser >= maxUsagePerUser;
+
+/**
  * Decide whether a promo code may be used right now. Callers pass the
- * already-resolved promo row (or null when the code doesn't exist) plus
- * whether the current user has already redeemed it (one-time-per-user
- * rule). Pure and deterministic.
+ * already-resolved promo row (or null when the code doesn't exist) plus how
+ * many times this customer has already redeemed it. Pure and deterministic.
  */
 export const isPromoUsable = (
     promo: {
         isValid: boolean | null | undefined;
         usageCount: number;
         maxUsageCount: number;
+        maxUsagePerUser?: number | null;
     } | null,
-    opts: { alreadyUsedByUser: boolean },
+    opts: { usedByUser: number },
 ): PromoEligibility => {
     if (!promo) return { usable: false, reason: "NOT_FOUND" };
     if (promo.isValid === false) return { usable: false, reason: "INVALID" };
     if (isUsageExhausted(promo.usageCount, promo.maxUsageCount)) {
         return { usable: false, reason: "USAGE_EXHAUSTED" };
     }
-    if (opts.alreadyUsedByUser) {
+    if (hasReachedPerUserLimit(opts.usedByUser, promo.maxUsagePerUser ?? 1)) {
         return { usable: false, reason: "ALREADY_USED" };
     }
     return { usable: true, reason: "OK" };
