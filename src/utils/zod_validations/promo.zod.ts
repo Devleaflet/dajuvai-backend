@@ -31,7 +31,15 @@ export const createPromoSchema = z.object({
         .default(0),
 })
 
-export const deletePromoSchema = z.object({
+/**
+ * `:id` for any route that addresses one promo.
+ *
+ * The coercion is load-bearing, not decoration: Express gives every path
+ * parameter as a string, and `promoRepository.save({ id: "14", ... })` treats
+ * a string primary key as unset and INSERTs, which trips the unique index on
+ * `promoCode` and surfaces as a 409 on an ordinary edit.
+ */
+export const promoIdParamSchema = z.object({
     id: z
         .string()
         .transform(Number)
@@ -42,4 +50,4 @@ export const editPromoSchema = createPromoSchema.partial();
 
 export type UpdatePromoCodeInput = z.infer<typeof editPromoSchema>;
 export type CreatePromoCodeInput = z.infer<typeof createPromoSchema>;
-export type DeletePromoCodeInput = z.infer<typeof deletePromoSchema>;
+export type PromoIdParam = z.infer<typeof promoIdParamSchema>;

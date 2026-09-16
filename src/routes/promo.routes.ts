@@ -4,7 +4,7 @@ import { authMiddleware, isAdminOrStaff, validateZod } from "../middlewares/auth
 import { checkPermission } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { PromoController } from "../controllers/promo.controller";
-import { createPromoSchema, deletePromoSchema, editPromoSchema } from "../utils/zod_validations/promo.zod";
+import { createPromoSchema, editPromoSchema, promoIdParamSchema } from "../utils/zod_validations/promo.zod";
 
 const promoRouter = Router();
 
@@ -300,7 +300,7 @@ promoRouter.post("/", authMiddleware, isAdminOrStaff, checkPermission(ModuleName
  *                   type: string
  *                   example: Internal Server Error
  */
-promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.DELETE), validateZod(deletePromoSchema, "params"), promoController.deletePromo.bind(promoController));
+promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.DELETE), validateZod(promoIdParamSchema, "params"), promoController.deletePromo.bind(promoController));
 
 
 /**
@@ -385,6 +385,6 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, checkPermission(Modul
  *       404:
  *         description: Promo code not found
  */
-promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.CREATE_EDIT), validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
+promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.CREATE_EDIT), validateZod(promoIdParamSchema, "params"), validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
 
 export default promoRouter;

@@ -8,6 +8,7 @@ export const allowedOrigins = [
   "https://dev.dajuvai.com",
   "https://5srbcmrc-5173.inc1.devtunnels.ms",
   "http://localhost:3000",
+  "http://localhost:3001",
   "https://project-f6q8p.vercel.app",
   "https://dajuvai-nextjs-frontend.vercel.app",
   "https://lens-boneless-able.ngrok-free.dev",

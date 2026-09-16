@@ -1,7 +1,7 @@
 import { Repository } from "typeorm";
 import { Promo } from '../entities/promo.entity';
 import AppDataSource from "../config/db.config";
-import { CreatePromoCodeInput, DeletePromoCodeInput, UpdatePromoCodeInput } from "../utils/zod_validations/promo.zod";
+import { CreatePromoCodeInput, PromoIdParam, UpdatePromoCodeInput } from "../utils/zod_validations/promo.zod";
 import { APIError } from "../utils/ApiError.utils";
 import { normalizePromoCode } from "./promoRules";
 
@@ -29,7 +29,7 @@ export class PromoService {
         return savedpromoCode;
     }
 
-    async deletePromo(data: DeletePromoCodeInput) {
+    async deletePromo(data: PromoIdParam) {
 
         const promo = await this.promoRepository.findOne({
             where: {
@@ -65,9 +65,13 @@ export class PromoService {
         })
     }
 
-    async updatePromoCodeById(promoCode: number, data: UpdatePromoCodeInput) {
+    async updatePromoCodeById(promoId: number, data: UpdatePromoCodeInput) {
         const payload: Partial<UpdatePromoCodeInput> & { id: number } = {
-            id: promoCode,
+            // Coerced here as well as in the route's params schema. `save()`
+            // reads a string primary key as "no key yet" and INSERTs, so a
+            // caller that skips the middleware would silently turn every edit
+            // into a duplicate-code 409 rather than failing loudly.
+            id: Number(promoId),
             ...data,
         };
         if (data.promoCode) {

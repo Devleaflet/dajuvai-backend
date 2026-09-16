@@ -64,8 +64,8 @@ export class PromoController {
     res
       .status(200)
       .json({
-        sucess: true,
-        msg: "Promo code update succesfully",
+        success: true,
+        msg: "Promo code updated successfully",
         data: updatePromo,
       });
   }
