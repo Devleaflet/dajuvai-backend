@@ -9,6 +9,10 @@ import {
     PaymentMethod,
     DeliveryStatus,
 } from "../entities/order.entity";
+import {
+    OrderStatusChangedByRole,
+    OrderStatusHistory,
+} from "../entities/orderStatusHistory.entity";
 import { sendOrderStatusEmail } from "./nodemailer.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { NotificationService } from "../service/notification.service";
@@ -23,6 +27,37 @@ import { OrderService } from "../service/order.service";
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
 const orderItemRepo = AppDataSource.getRepository(OrderItem);
+const orderStatusHistoryRepo = AppDataSource.getRepository(OrderStatusHistory);
+
+/**
+ * Records an automatic status change the same way an admin's is recorded.
+ *
+ * These jobs used to move an order to CANCELLED and write nothing, so the
+ * order's history simply stopped at whatever a human last did — leaving a
+ * Cancelled order whose timeline says "Confirmed" and no explanation anywhere.
+ * The actor enum already had SYSTEM for this.
+ */
+const recordSystemStatusChange = async (
+    order: Order,
+    previousStatus: OrderStatus,
+    reason: string,
+): Promise<void> => {
+    try {
+        await orderStatusHistoryRepo.save(
+            orderStatusHistoryRepo.create({
+                orderId: order.id,
+                previousStatus,
+                newStatus: order.status,
+                changedByRole: OrderStatusChangedByRole.SYSTEM,
+                changedByUserId: null,
+                reason,
+            }),
+        );
+    } catch {
+        // The order is already cancelled; failing to write its history entry
+        // must not undo that or stop the rest of the batch.
+    }
+};
 const vendorRepo = AppDataSource.getRepository(Vendor);
 
 /**
@@ -143,9 +178,15 @@ export const orderCleanUp = () => {
                     }
                 }
 
+                const previousStatus = order.status;
                 order.status = OrderStatus.CANCELLED;
                 order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
                 await orderDB.save(order);
+                await recordSystemStatusChange(
+                    order,
+                    previousStatus,
+                    "Confirmed but still unpaid after 24 hours, so the order was cancelled and its stock returned.",
+                );
             }
         } catch (err) {
             // silent fail for cron
@@ -196,9 +237,15 @@ export const startOrderCleanupJob = () => {
                     }
                 }
 
+                const previousStatus = order.status;
                 order.status = OrderStatus.CANCELLED;
                 order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
                 await orderDB.save(order);
+                await recordSystemStatusChange(
+                    order,
+                    previousStatus,
+                    "Online payment was not completed within 15 minutes, so the order was cancelled and its stock returned.",
+                );
 
                 const userEmail = order.orderedBy?.email;
                 const orderItems = await orderItemRepo.find({
