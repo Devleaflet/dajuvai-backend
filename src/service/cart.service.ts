@@ -238,8 +238,12 @@ export class CartService {
         cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
         const savedCart = await this.cartRepository.save(cart);
 
-        // Push notification (fire-and-forget)
-        new NotificationService().notifyAddToCart(userId, name).catch(() => {});
+        // Push notification (fire-and-forget). Not for Buy Now: that path goes
+        // straight to checkout and never shows a cart, so "added to cart" is a
+        // notification about something the customer did not do.
+        if (data.source !== "buy_now") {
+            new NotificationService().notifyAddToCart(userId, name).catch(() => {});
+        }
 
         return savedCart;
     }

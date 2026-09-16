@@ -94,17 +94,11 @@ checkoutRouter.post(
  *             $ref: '#/components/schemas/CreateOrderRequest'
  *     responses:
  *       200:
- *         description: Order created with payment redirect flow.
+ *         description: Draft order created; pay via redirectUrl when present
  *         content:
  *           application/json:
  *             schema:
- *               $ref: '#/components/schemas/CreateOrderResponse'
- *       201:
- *         description: Order created successfully.
- *         content:
- *           application/json:
- *             schema:
- *               $ref: '#/components/schemas/CreateOrderResponse'
+ *               $ref: '#/components/schemas/CreateOrderDraftResponse'
  *       400:
  *         $ref: '#/components/responses/BadRequest'
  *       401:

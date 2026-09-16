@@ -365,6 +365,31 @@ export const swaggerSchemas = {
       quantity: { type: "integer", minimum: 1, example: 1 },
     },
   },
+  /**
+   * What checkout returns before payment: the draft order plus whatever the
+   * gateway needs next. Online payment answers with a redirect; cash on
+   * delivery has nothing to redirect to and returns the order alone.
+   */
+  CreateOrderDraftResponse: {
+    type: "object",
+    required: ["success", "data"],
+    properties: {
+      success: { type: "boolean", example: true },
+      data: { $ref: "#/components/schemas/Order" },
+      redirectUrl: {
+        type: "string",
+        nullable: true,
+        description: "Where to send the customer to pay. Absent for cash on delivery.",
+        example: "https://gateway.example/pay/abc123",
+      },
+      idempotencyKey: {
+        type: "string",
+        nullable: true,
+        description: "Echoed back so a retried checkout resolves to this same draft.",
+        example: "checkout-123",
+      },
+    },
+  },
   CreateOrderResponse: {
     type: "object",
     required: ["success", "data", "orderSummary", "orderId", "orderNumber", "paymentMethod", "paymentStatus", "subtotal", "shippingTotal", "discountTotal", "taxTotal", "grandTotal", "itemCount", "priceBreakdown"],

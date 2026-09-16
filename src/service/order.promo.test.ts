@@ -11,6 +11,7 @@ describe("OrderService promo availability", () => {
                 isValid: true,
                 usageCount: 6,
                 maxUsageCount: 0,
+                maxUsagePerUser: 1,
             }),
         };
         service.orderRepository = {
@@ -21,9 +22,12 @@ describe("OrderService promo availability", () => {
             }),
         };
 
+        // The method is checkAvailablePromocode; it answers with the promo when
+        // it may be used and null when it may not. This test named an earlier
+        // draft of it that never shipped.
         await expect(
-            service.getPromoAvailability(" NEW_NEW ", 97),
-        ).resolves.toEqual({ promo: null, reason: "ALREADY_USED" });
+            service.checkAvailablePromocode(" NEW_NEW ", 97),
+        ).resolves.toBeNull();
     });
 });
 

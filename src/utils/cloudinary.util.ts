@@ -8,7 +8,7 @@ export interface UploadTransformPreset {
     width: number;
     height?: number;
     crop: "limit";
-    quality: "auto:good";
+    quality: "auto:good" | "auto:best";
     fetch_format: "auto";
 }
 
@@ -26,10 +26,16 @@ const UPLOAD_TRANSFORMS: Record<string, UploadTransformPreset> = {
         fetch_format: "auto",
     },
     banners: {
-        width: 1920,
-        height: 1080,
+        /*
+         * Banners are the largest artwork on the storefront and the first thing
+         * a shopper sees, so they are stored at a higher ceiling and a better
+         * quality than product photography. `limit` never enlarges, so a
+         * smaller upload stays exactly as supplied.
+         */
+        width: 2560,
+        height: 2560,
         crop: "limit",
-        quality: "auto:good",
+        quality: "auto:best",
         fetch_format: "auto",
     },
     "profile-pictures": {

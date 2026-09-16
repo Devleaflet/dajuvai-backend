@@ -38,75 +38,7 @@ const orderController = new OrderController();
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - shippingAddress
- *               - paymentMethod
- *               - phoneNumber
- *             properties:
- *               shippingAddress:
- *                 type: object
- *                 required:
- *                   - province
- *                   - city
- *                   - streetAddress
- *                   - district
- *                 properties:
- *                   province:
- *                     type: string
- *                     enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
- *                     example: "Bagmati"
- *                   city:
- *                     type: string
- *                     minLength: 2
- *                     maxLength: 100
- *                     example: "Kathmandu"
- *                   streetAddress:
- *                     type: string
- *                     minLength: 5
- *                     maxLength: 255
- *                     example: "Pulchowk 123"
- *                   district:
- *                     type: string
- *                     example: "Lalitpur"
- *                   landmark:
- *                     type: string
- *                     description: Optional landmark near the address
- *               paymentMethod:
- *                 type: string
- *                 enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
- *                 example: CASH_ON_DELIVERY
- *               phoneNumber:
- *                 type: string
- *                 minLength: 10
- *                 maxLength: 10
- *                 example: "9812345678"
- *                 description: Must be exactly 10 digits
- *               promoCode:
- *                 type: string
- *                 example: "SUMMER2025"
- *                 description: Optional promo code
- *               fullName:
- *                 type: string
- *                 example: "John Doe"
- *                 description: Optional full name for the order
- *               isBuyNow:
- *                 type: boolean
- *                 example: false
- *                 description: If true, bypasses cart and uses productId/variantId/quantity instead
- *               productId:
- *                 type: integer
- *                 example: 35
- *                 description: Required if isBuyNow is true
- *               variantId:
- *                 type: integer
- *                 example: 60
- *                 description: Optional variant ID for buy-now
- *               quantity:
- *                 type: integer
- *                 example: 1
- *                 default: 1
- *                 description: Quantity for buy-now (defaults to 1)
+ *             $ref: '#/components/schemas/CreateOrderRequest'
  *     responses:
  *       201:
  *         description: Order created successfully (for COD or without redirect)
@@ -147,47 +79,11 @@ const orderController = new OrderController();
  *                       format: date-time
  *                       example: "2025-06-11T12:00:00Z"
  *       200:
- *         description: Order created successfully and redirect URL provided (for ESEWA/KHALTI)
+ *         description: Draft order created; pay via redirectUrl when present
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 101
- *                     totalPrice:
- *                       type: number
- *                       example: 1599.00
- *                     shippingFee:
- *                       type: number
- *                       example: 200
- *                     status:
- *                       type: string
- *                       example: "ORDER_PLACED"
- *                     paymentStatus:
- *                       type: string
- *                       example: "UNPAID"
- *                     paymentMethod:
- *                       type: string
- *                       example: "ESEWA"
- *                     shippingAddressId:
- *                       type: integer
- *                       example: 5
- *                     createdAt:
- *                       type: string
- *                       format: date-time
- *                       example: "2025-06-11T12:00:00Z"
- *                 redirectUrl:
- *                   type: string
- *                   format: uri
- *                   example: "https://esewa.com.np/initiate?tx=abc123"
+ *               $ref: '#/components/schemas/CreateOrderDraftResponse'
  *       400:
  *         description: Invalid input or cart is empty
  *         content:
@@ -254,22 +150,7 @@ router.post(
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             properties:
- *               cartData:
- *                 type: array
- *                 items:
- *                   type: object
- *                   properties:
- *                     productId:
- *                       type: integer
- *                       example: 1
- *                     quantity:
- *                       type: integer
- *                       example: 2
- *               promoCode:
- *                 type: string
- *                 example: "SUMMER2025"
+ *             $ref: '#/components/schemas/MobileCheckoutEstimateRequest'
  *     responses:
  *       200:
  *         description: Checkout estimate

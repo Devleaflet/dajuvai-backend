@@ -65,15 +65,34 @@ export const shippingAddressSchema = z.object({
 export const createOrderSchema = z.object({
     shippingAddress: shippingAddressSchema,
     paymentMethod: PaymentMethodEnum,
-    phoneNumber: z.string()
-        .min(10, "Phone number must be 10 digits").max(10, "Phone number must be 10 digits"),
+    // Digits, not merely ten characters: "98AB345678" is the right length and
+    // is not a phone number, and it reached the order record unchallenged.
+    phoneNumber: z
+        .string()
+        .regex(/^\d{10}$/, "Phone number must be 10 digits"),
     promoCode: z.string().optional(),
     fullName: z.string().optional(),
     isBuyNow: z.boolean().optional(),
     productId: z.number().int().optional(),
     variantId: z.number().optional(),
-    quantity: z.number().int().positive().optional().default(1), 
+    quantity: z.number().int().positive().optional().default(1),
     ageRestrictedAcknowledged: z.boolean().optional().default(false),
+    /** Carried through to the order so the charge shown at checkout is stored. */
+    serviceCharge: z.number().nonnegative().optional(),
+    /** Which instrument the gateway reported, for reconciliation. */
+    instrumentName: z.string().trim().min(1).optional(),
+    /** Lets a retried checkout resolve to the same order rather than a second. */
+    idempotencyKey: z.string().trim().min(1).optional(),
+}).superRefine((values, context) => {
+    // Buy Now skips the cart, so the product is the only thing saying what is
+    // being bought. Without it the order is created with nothing in it.
+    if (values.isBuyNow && values.productId === undefined) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "productId is required for a Buy Now order",
+            path: ["productId"],
+        });
+    }
 });
 
 export const mobileCheckoutEstimateSchema = z.object({
@@ -83,6 +102,16 @@ export const mobileCheckoutEstimateSchema = z.object({
     productId: z.number().int().positive().optional(),
     variantId: z.number().int().positive().optional(),
     quantity: z.number().int().positive().optional(),
+}).superRefine((values, context) => {
+    // Same reasoning as above: an estimate for a Buy Now with no product is an
+    // estimate of nothing.
+    if (values.isBuyNow && values.productId === undefined) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "productId is required for a Buy Now estimate",
+            path: ["productId"],
+        });
+    }
 });
 
 
