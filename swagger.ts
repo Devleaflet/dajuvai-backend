@@ -1,6 +1,7 @@
 import swaggerJSDoc from "swagger-jsdoc";
 import path from "path";
 import { mountedRouteInventory } from "./src/scripts/routeInventory";
+import { operationDescriptions } from "./src/docs/operation-descriptions";
 import { swaggerSchemas } from "./src/docs/swagger.schemas";
 
 const options: swaggerJSDoc.Options = {
@@ -337,6 +338,34 @@ for (const [routePath, pathItem] of Object.entries(swaggerDocument.paths ?? {}))
       for (const [status, responseName] of Object.entries(responseRefs)) {
         if (responses[status]) responses[status] = { $ref: `#/components/responses/${responseName}` };
       }
+    }
+  }
+}
+
+/*
+ * Publish each operation's guards.
+ *
+ * The route inventory already parses which middleware is mounted on every
+ * operation, so the spec states it rather than asking 244 jsdoc blocks to
+ * repeat it by hand -- and it cannot drift, because it is read from the
+ * routes that are actually mounted. A reader can see that an endpoint sits
+ * behind isAdminOrStaff and a checkPermission, not merely that it is
+ * "protected".
+ */
+{
+  const document = swaggerSpec as any;
+  for (const route of mountedRouteInventory) {
+    const documentedPath = route.path.replace(/:\w+/g, (name) => `{${name.slice(1)}}`);
+    const operation = document.paths?.[documentedPath]?.[route.method.toLowerCase()];
+    if (!operation) continue;
+
+    operation["x-middleware"] = route.middleware;
+    operation["x-requires-authentication"] = route.requiresAuthentication;
+
+    // A jsdoc description always wins; this only fills the gaps.
+    if (!operation.description?.trim()) {
+      const described = operationDescriptions[`${route.method} ${documentedPath}`];
+      if (described) operation.description = described;
     }
   }
 }

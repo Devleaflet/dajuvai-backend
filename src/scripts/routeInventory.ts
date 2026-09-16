@@ -6,6 +6,14 @@ export type MountedRoute = {
   path: string;
   source: string;
   requiresAuthentication: boolean;
+  /**
+   * The guard middleware actually mounted on this operation, by name.
+   *
+   * `requiresAuthentication` only says whether any guard is present; the spec
+   * needs to publish which, so a reader can see that an endpoint is behind
+   * `isAdminOrStaff` plus a `checkPermission` rather than merely "protected".
+   */
+  middleware: string[];
   validationSchema?: string;
   validationSchemaFile?: string;
   validationProperty?: "body" | "query" | "params";
@@ -22,6 +30,19 @@ const normalizePath = (value: string) => {
   const withLeadingSlash = value.startsWith("/") ? value : `/${value}`;
   const normalized = withLeadingSlash.replace(/\/+/g, "/").replace(/\/{2,}/g, "/");
   return normalized.length > 1 ? normalized.replace(/\/$/, "") : normalized;
+};
+
+const permissionMiddlewarePattern = /checkPermission\s*\(\s*([A-Za-z_$][\w$.]*)\s*,\s*([A-Za-z_$][\w$.]*)/g;
+
+const collectMiddleware = (call: string, inherited: string[]): string[] => {
+  const names = new Set(inherited);
+  for (const match of call.matchAll(new RegExp(authMiddlewarePattern.source, "g"))) {
+    names.add(match[1]);
+  }
+  for (const match of call.matchAll(permissionMiddlewarePattern)) {
+    names.add(`checkPermission(${match[1]}, ${match[2]})`);
+  }
+  return [...names];
 };
 
 const authMiddlewarePattern =
@@ -113,9 +134,17 @@ const collectFromRouter = (
     ),
   );
   const routes: MountedRoute[] = [];
-  const inheritedAuthentication = [...sourceForRoutes.matchAll(
-    /\b[A-Za-z_$][\w$]*\.use\s*\(([^)]*)\)/g,
-  )].some((match) => authMiddlewarePattern.test(match[1]));
+  const routerLevelCalls = [...sourceForRoutes.matchAll(
+    /[A-Za-z_$][\w$]*\.use\s*\(([^)]*)\)/g,
+  )];
+  const inheritedAuthentication = routerLevelCalls.some((match) =>
+    authMiddlewarePattern.test(match[1]),
+  );
+  // Router-level guards apply to every operation the router owns, so they
+  // belong to each operation's middleware just as much as its own do.
+  const inheritedMiddleware = routerLevelCalls.flatMap((match) =>
+    collectMiddleware(match[1], []),
+  );
 
   const methodPattern = /\b[A-Za-z_$][\w$]*\.(get|post|put|patch|delete)\s*\(\s*["'`]([^"'`]+)["'`]/g;
   for (const match of sourceForRoutes.matchAll(methodPattern)) {
@@ -131,6 +160,7 @@ const collectFromRouter = (
       path: normalizePath(`${mountPrefix}/${match[2]}`),
       source: path.relative(backendRoot, file),
       requiresAuthentication: inheritedAuthentication || authMiddlewarePattern.test(call),
+      middleware: collectMiddleware(call, inheritedMiddleware),
       validationSchema: validation?.[1],
       validationSchemaFile: validation?.[1] ? imports.get(validation[1]) : undefined,
       validationProperty: (validation?.[2] as MountedRoute["validationProperty"]) ??
