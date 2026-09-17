@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { RequestHandler } from "express";
+import rateLimit from "express-rate-limit";
 import { singleUploadMiddleware } from "../config/multer.config";
 import { ImageController } from "../controllers/image.controller";
 import { combinedAuthMiddleware } from "../middlewares/auth.middleware";
@@ -20,6 +21,19 @@ const uploadAuthMiddleware: RequestHandler = (req, res, next) => {
         next(err);
     });
 };
+
+/**
+ * Anonymous uploads only. A registration supplies at most ten documents
+ * (five tax, five citizenship), so twenty per window leaves room for one
+ * full retry without permitting bulk abuse. An authenticated upload is
+ * attributable to an account and is not throttled alongside it.
+ */
+export const anonymousUploadLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    message: "Too many uploads from this address, please try again later.",
+    skip: (req) => Boolean((req as any).user || (req as any).vendor),
+});
 
 /**
  * @swagger
@@ -94,6 +108,8 @@ const uploadAuthMiddleware: RequestHandler = (req, res, next) => {
  *                 message:
  *                   type: string
  *                   example: File storage upload failed
+ *       429:
+ *         description: Too many requests, please try again later
  *       503:
  *         description: Cloudinary is not configured
  *         content:
@@ -114,6 +130,7 @@ const uploadAuthMiddleware: RequestHandler = (req, res, next) => {
 imageRouter.post(
   "/",
   uploadAuthMiddleware,
+  anonymousUploadLimiter,
   singleUploadMiddleware,
   imageController.uploadSingle.bind(imageController),
 );

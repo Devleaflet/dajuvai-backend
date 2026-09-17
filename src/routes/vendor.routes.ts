@@ -1,4 +1,5 @@
 import { Router } from "express";
+import rateLimit from "express-rate-limit";
 import { VendorController } from "../controllers/vendor.controller";
 import {
     authMiddleware,
@@ -32,6 +33,13 @@ import { VendorProductsQuerySchema } from "../utils/zod_validations/product.zod"
 const router = Router();
 const vendorController = new VendorController();
 const productController = new ProductController(AppDataSource);
+
+/** A public endpoint that writes rows and sends mail. */
+export const publicRegistrationLimiter = rateLimit({
+    windowMs: 60 * 60 * 1000,
+    max: 5,
+    message: "Too many registration attempts from this address, please try again later.",
+});
 
 /**
  * @swagger
@@ -1103,6 +1111,7 @@ router.post(
  */
 router.post(
     "/request/register",
+    publicRegistrationLimiter,
     validateZod(vendorSignupSchema),
     vendorController.vendorSignup.bind(vendorController),
 );
@@ -2289,11 +2298,14 @@ router.delete(
  *         description: Validation error
  *       409:
  *         description: Email already in use
+ *       429:
+ *         description: Too many requests, please try again later
  *       500:
  *         description: Internal server error
  */
 router.post(
     "/request/register-v2",
+    publicRegistrationLimiter,
     validateZod(vendorSignupSchemav2),
     vendorController.vendorSignupV2.bind(vendorController),
 );
