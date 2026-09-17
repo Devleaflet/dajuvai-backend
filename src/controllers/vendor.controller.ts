@@ -691,7 +691,12 @@ export class VendorController {
         _next: NextFunction,
     ): Promise<void> {
         const vendorId = req.params.id;
-        const rejectionReason = req.body.rejectionReason;
+        // Quoted verbatim in the email the business receives, so a client
+        // that sends nothing must not turn into "Reason for Rejection:
+        // undefined" in front of them.
+        const rejectionReason =
+            req.body.rejectionReason?.trim() ||
+            "Your application did not meet our vendor requirements.";
 
         const isValid = await this.vendorService.findVendorById(
             Number(vendorId),
