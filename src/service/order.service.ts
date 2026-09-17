@@ -1077,6 +1077,32 @@ export class OrderService {
     /** Single place that applies a promo code — used by both checkout
      * (`createOrderEntity`) and the pre-checkout estimate, so the discount a
      * customer previews always matches what actually gets charged. */
+    /**
+     * How many times this user has already redeemed this promo.
+     *
+     * Must read the same ledger `claimPromoUsage` enforces against. Counting
+     * DELIVERED/CONFIRMED orders instead — as this used to — told a customer
+     * whose earlier order was still ORDER_PLACED that a one-per-customer code
+     * was available, then refused it at submit with a 400. The redemption row
+     * is written when the order is placed and deleted again if it is
+     * cancelled, so the ledger is the honest answer at every point.
+     */
+    private async countPromoRedemptions(
+        promo: Promo | null | undefined,
+        userId: number,
+    ): Promise<number> {
+        if (!promo) return 0;
+
+        return this.promoRedemptionRepo().count({
+            where: { promoId: promo.id, userId },
+        });
+    }
+
+    /** Seam so the redemption ledger can be stubbed without a database. */
+    private promoRedemptionRepo() {
+        return AppDataSource.getRepository(PromoRedemption);
+    }
+
     private async calculateDiscount(
         userId: number,
         promoCode: string | undefined,
@@ -1093,21 +1119,7 @@ export class OrderService {
 
         const promo = await this.promoService.findPromoByCode(normalized);
 
-        // One-time-per-user: the promo may only be redeemed once by a user on
-        // a completed order. Matching is case-insensitive because old rows can
-        // hold codes in mixed case.
-        const usedByUser = promo
-            ? await this.orderRepository
-                  .createQueryBuilder("order")
-                  .where(
-                      "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
-                      { code: normalized, userId },
-                  )
-                  .andWhere("order.status IN (:...statuses)", {
-                      statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
-                  })
-                  .getCount()
-            : 0;
+        const usedByUser = await this.countPromoRedemptions(promo, userId);
 
         const { usable } = isPromoUsable(promo, { usedByUser });
         if (!usable)
@@ -1357,18 +1369,7 @@ export class OrderService {
 
         const promo = await this.promoService.findPromoByCode(normalized);
 
-        const usedByUser = promo
-            ? await this.orderRepository
-                  .createQueryBuilder("order")
-                  .where(
-                      "LOWER(order.appliedPromoCode) = LOWER(:code) AND order.orderedById = :userId",
-                      { code: normalized, userId },
-                  )
-                  .andWhere("order.status IN (:...statuses)", {
-                      statuses: [OrderStatus.DELIVERED, OrderStatus.CONFIRMED],
-                  })
-                  .getCount()
-            : 0;
+        const usedByUser = await this.countPromoRedemptions(promo, userId);
 
         const { usable } = isPromoUsable(promo, { usedByUser });
         return usable ? promo : null;

@@ -14,13 +14,11 @@ describe("OrderService promo availability", () => {
                 maxUsagePerUser: 1,
             }),
         };
-        service.orderRepository = {
-            createQueryBuilder: vi.fn().mockReturnValue({
-                where: vi.fn().mockReturnThis(),
-                andWhere: vi.fn().mockReturnThis(),
-                getCount: vi.fn().mockResolvedValue(1),
-            }),
-        };
+        // Prior use is counted from the redemption ledger, which is what
+        // claimPromoUsage enforces against at order creation.
+        service.promoRedemptionRepo = () => ({
+            count: vi.fn().mockResolvedValue(1),
+        });
 
         // The method is checkAvailablePromocode; it answers with the promo when
         // it may be used and null when it may not. This test named an earlier
@@ -28,6 +26,50 @@ describe("OrderService promo availability", () => {
         await expect(
             service.checkAvailablePromocode(" NEW_NEW ", 97),
         ).resolves.toBeNull();
+    });
+
+    /**
+     * A redemption row is written the moment an order is placed, while the
+     * preview used to count only DELIVERED and CONFIRMED orders. That gap let
+     * checkout accept a one-per-customer code the submit then rejected with a
+     * 400, so a pending order has to read as already-used here too.
+     */
+    it("counts an order still awaiting confirmation as a use", async () => {
+        const service = Object.create(OrderService.prototype) as any;
+        service.promoService = {
+            findPromoByCode: vi.fn().mockResolvedValue({
+                id: 3,
+                promoCode: "new_new",
+                isValid: true,
+                usageCount: 1,
+                maxUsageCount: 0,
+                maxUsagePerUser: 1,
+            }),
+        };
+
+        const count = vi.fn().mockResolvedValue(1);
+        service.promoRedemptionRepo = () => ({ count });
+
+        await expect(
+            service.checkAvailablePromocode("new_new", 97),
+        ).resolves.toBeNull();
+        expect(count).toHaveBeenCalledWith({ where: { promoId: 3, userId: 97 } });
+    });
+
+    it("still offers the promo to a customer who has never redeemed it", async () => {
+        const service = Object.create(OrderService.prototype) as any;
+        const promo = {
+            id: 3,
+            promoCode: "new_new",
+            isValid: true,
+            usageCount: 1,
+            maxUsageCount: 0,
+            maxUsagePerUser: 1,
+        };
+        service.promoService = { findPromoByCode: vi.fn().mockResolvedValue(promo) };
+        service.promoRedemptionRepo = () => ({ count: vi.fn().mockResolvedValue(0) });
+
+        await expect(service.checkAvailablePromocode("new_new", 97)).resolves.toBe(promo);
     });
 });
 
