@@ -729,10 +729,31 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
 
             case "FAILED":
             case "CANCELLED": {
-                // Idempotency guard: skip stock restore if already terminal
-                const alreadyTerminal =
-                    order.status === OrderStatus.CANCELLED ||
-                    order.deliveryStatus === DeliveryStatus.DELIVERY_FAILED;
+                // Idempotency guard. This has to be decided by the database,
+                // not by the `order` row read at the top of the request: a
+                // gateway that retries its notification can deliver twice, and
+                // two handlers reading the same pre-cancelled row would both
+                // restore the stock and both release the promo. The conditional
+                // UPDATE lets exactly one of them through — whoever changes a
+                // row owns the side effects.
+                const cancellation = await orderDb
+                    .createQueryBuilder()
+                    .update(Order)
+                    .set({
+                        paymentStatus: PaymentStatus.UNPAID,
+                        status: OrderStatus.CANCELLED,
+                        deliveryStatus: DeliveryStatus.DELIVERY_FAILED,
+                    })
+                    .where("id = :id", { id: order.id })
+                    .andWhere("status != :cancelled", {
+                        cancelled: OrderStatus.CANCELLED,
+                    })
+                    .andWhere("\"deliveryStatus\" != :failed", {
+                        failed: DeliveryStatus.DELIVERY_FAILED,
+                    })
+                    .execute();
+
+                const alreadyTerminal = (cancellation.affected ?? 0) === 0;
 
                 if (!alreadyTerminal) {
                     // Restore stock for each item
@@ -755,10 +776,11 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                     }
                 }
 
+                // Kept in step with what the UPDATE above wrote, since the
+                // notification service below reads from this instance.
                 order.paymentStatus = PaymentStatus.UNPAID;
                 order.status = OrderStatus.CANCELLED;
                 order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
-                await orderDb.save(order);
 
                 if (!alreadyTerminal) {
                     // Give the promo slot back, as every other cancellation

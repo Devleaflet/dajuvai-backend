@@ -1681,12 +1681,16 @@ export class ProductService {
     idQuery.groupBy("product.id");
 
     let hasOrderBy = false;
-    const applyOrderBy = (column: string, direction: "ASC" | "DESC") => {
+    const applyOrderBy = (
+      column: string,
+      direction: "ASC" | "DESC",
+      nulls?: "NULLS FIRST" | "NULLS LAST",
+    ) => {
       if (hasOrderBy) {
-        idQuery.addOrderBy(column, direction);
+        idQuery.addOrderBy(column, direction, nulls);
         return;
       }
-      idQuery.orderBy(column, direction);
+      idQuery.orderBy(column, direction, nulls);
       hasOrderBy = true;
     };
 
@@ -1700,15 +1704,17 @@ export class ProductService {
         applyOrderBy("sort_name", "ASC");
         break;
       // Grouping an admin's list by who sells each product. The vendor is
-      // already joined for search, and a product without one sorts last
-      // rather than to the top as an empty string would.
+      // already joined for search. A product with no vendor sorts last in
+      // both directions: Postgres defaults to NULLS LAST ascending but NULLS
+      // FIRST descending, which would otherwise open the Z–A list with the
+      // rows that have no vendor at all.
       case "vendor":
         idQuery.addSelect("MIN(vendor.businessName)", "sort_vendor");
-        applyOrderBy("sort_vendor", "ASC");
+        applyOrderBy("sort_vendor", "ASC", "NULLS LAST");
         break;
       case "vendor_desc":
         idQuery.addSelect("MIN(vendor.businessName)", "sort_vendor");
-        applyOrderBy("sort_vendor", "DESC");
+        applyOrderBy("sort_vendor", "DESC", "NULLS LAST");
         break;
       case "oldest":
         idQuery.addSelect("MIN(product.createdAt)", "sort_created_at");

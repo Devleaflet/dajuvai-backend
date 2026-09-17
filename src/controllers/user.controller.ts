@@ -340,7 +340,12 @@ export class UserController {
         // Removing a colleague's access is the kind of change an operator has
         // to be able to account for later. The staff row is gone by now, so
         // the record has to carry who they were.
-        await auditService.record({
+        //
+        // Logged rather than thrown: the delete has already happened, and
+        // failing the response over the audit write would report a successful
+        // removal as a 500 and invite a retry that 404s on the missing row.
+        await auditService
+          .record({
             module: "ACCOUNT",
             action: "STAFF_DELETED",
             entityType: "User",
@@ -352,7 +357,10 @@ export class UserController {
                 fullName: staffExists.fullName ?? null,
                 role: staffExists.role,
             },
-        });
+          })
+          .catch((err) =>
+            console.error(`Failed to audit deletion of staff ${id}:`, err),
+          );
 
         res.status(200).json({
             success: true,
