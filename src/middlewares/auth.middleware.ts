@@ -103,7 +103,8 @@ export const restrictToVendorOrAdmin = async (
 
   if (vendor) {
     // `:vendorId` on the payment-option route, `:id` on the two update routes.
-    const targetId = Number(req.params?.vendorId ?? req.params?.id);
+    const params = (req.params ?? {}) as { vendorId?: string; id?: string };
+    const targetId = Number(params.vendorId ?? params.id);
 
     if (!Number.isInteger(targetId) || targetId !== vendor.id) {
       return next(

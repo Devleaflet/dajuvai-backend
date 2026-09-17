@@ -1,4 +1,6 @@
 import { Request, Response } from "express";
+import { auditService } from "../service/audit.service";
+import { AuditActorType } from "../entities/auditLog.entity";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
@@ -318,7 +320,7 @@ export class UserController {
         });
     }
 
-    async deleteStaff(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
+    async deleteStaff(req: AuthRequest<{ id: string }, {}, {}, {}>, res: Response) {
         const id = req.params.id;
 
         const staffExists = await findUserById(Number(id));
@@ -328,6 +330,23 @@ export class UserController {
         }
 
         await deleteStaffById(Number(id));
+
+        // Removing a colleague's access is the kind of change an operator has
+        // to be able to account for later. The staff row is gone by now, so
+        // the record has to carry who they were.
+        await auditService.record({
+            module: "ACCOUNT",
+            action: "STAFF_DELETED",
+            entityType: "User",
+            entityId: Number(id),
+            actor: { type: AuditActorType.ADMIN, id: req.user?.id ?? null },
+            summary: `Deleted staff account ${staffExists.email}`,
+            before: {
+                email: staffExists.email,
+                fullName: staffExists.fullName ?? null,
+                role: staffExists.role,
+            },
+        });
 
         res.status(200).json({
             success: true,
