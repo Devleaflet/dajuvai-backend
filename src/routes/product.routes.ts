@@ -16,7 +16,10 @@ import {
     restrictToVendorOrAdmin,
     vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
-import { checkPermission } from "../middlewares/permission.middleware";
+import {
+    checkPermission,
+    checkPermissionUnlessVendor,
+} from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
 
@@ -83,6 +86,7 @@ productRouter.get(
     "/archived",
     combinedAuthMiddleware,
     isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.VIEW),
     productController.getArchivedProducts.bind(productController),
 );
 
@@ -254,6 +258,7 @@ productRouter.delete(
     "/:id",
     combinedAuthMiddleware,
     isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
     productController.deleteProductById.bind(productController),
 );
 
@@ -325,6 +330,7 @@ productRouter.patch(
     "/:id/restore",
     combinedAuthMiddleware,
     isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
     productController.restoreProductById.bind(productController),
 );
 

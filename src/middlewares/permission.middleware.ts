@@ -47,3 +47,27 @@ export const checkPermission = (
         }
     };
 };
+
+/**
+ * `checkPermission` for routes behind `combinedAuthMiddleware`.
+ *
+ * A vendor token sets `req.vendor` and no `req.user`, so `checkPermission`
+ * alone would answer 401 and lock vendors out of their own products. Vendor
+ * callers are passed through to the controller, which scopes every one of
+ * these routes to the vendor's own rows; staff and admins go through the
+ * normal module check.
+ */
+export const checkPermissionUnlessVendor = (
+    module: ModuleName,
+    requiredLevel: PermissionLevel,
+) => {
+    const guard = checkPermission(module, requiredLevel);
+
+    return async (req: AuthRequest, res: Response, next: NextFunction) => {
+        if ((req as AuthRequest & { vendor?: unknown }).vendor && !req.user) {
+            return next();
+        }
+
+        return guard(req, res, next);
+    };
+};
