@@ -86,7 +86,13 @@ const promoController = new PromoController();
  *                   type: string
  *                   example: Internal server error
  */
-promoRouter.get("/", promoController.getPromoCode.bind(promoController));
+promoRouter.get(
+  "/",
+  authMiddleware,
+  isAdminOrStaff,
+  checkPermission(ModuleName.PROMO, PermissionLevel.VIEW),
+  promoController.getPromoCode.bind(promoController),
+);
 
 
 /**
