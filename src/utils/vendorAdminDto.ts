@@ -15,6 +15,12 @@ export function toVendorAdminDTO(vendor: Vendor) {
         isVerified: vendor.isVerified,
         isApproved: vendor.isApproved,
         createdAt: vendor.createdAt,
+        // Requesting deletion clears `isApproved`, which lands the vendor in
+        // this very list. Without these two an admin sees only "awaiting
+        // approval" and cannot tell a new applicant from a store on its way
+        // out — and approving the latter does not call off the deletion job.
+        deletionRequestedAt: vendor.deletionRequestedAt ?? null,
+        deletionScheduledFor: vendor.deletionScheduledFor ?? null,
         paymentOptions: vendor.paymentOptions.map(po => ({
             id: po.id,
             paymentType: po.paymentType,

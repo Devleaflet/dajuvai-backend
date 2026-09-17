@@ -75,6 +75,15 @@ export interface SanitizedVendorForAdmin {
     taxNumber: string;
     citizenshipDocuments: string[];
     createdAt: Date;
+    /**
+     * Requesting deletion sets `isApproved` to false, which drops the vendor
+     * out of the approved list and into the unapproved one. Without these an
+     * admin cannot tell a vendor on their way out from a new applicant waiting
+     * to be let in — and approving the former does not call off the job that
+     * finalises the deletion.
+     */
+    deletionRequestedAt: Date | null;
+    deletionScheduledFor: Date | null;
 }
 
 export const sanitizeVendorForAdmin = (
@@ -103,6 +112,8 @@ export const sanitizeVendorForAdmin = (
     businessRegNumber: vendor.businessRegNumber,
     taxNumber: vendor.taxNumber,
     citizenshipDocuments: vendor.citizenshipDocuments,
+    deletionRequestedAt: vendor.deletionRequestedAt ?? null,
+    deletionScheduledFor: vendor.deletionScheduledFor ?? null,
     // Missing here meant the admin panel's vendor-join-date range filter
     // always received `undefined`, making every comparison an Invalid Date
     // (always false) — the filter silently excluded every vendor instead of
