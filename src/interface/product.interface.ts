@@ -49,7 +49,9 @@ export interface IAdminProductQueryParams {
         | "oldest"
         | "newest"
         | "price_low_high"
-        | "price_high_low";
+        | "price_high_low"
+        | "vendor"
+        | "vendor_desc";
 
     // Filtering options
     filter?: "out_of_stock";

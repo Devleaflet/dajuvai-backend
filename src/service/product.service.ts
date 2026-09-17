@@ -1699,6 +1699,17 @@ export class ProductService {
         idQuery.addSelect("MIN(product.name)", "sort_name");
         applyOrderBy("sort_name", "ASC");
         break;
+      // Grouping an admin's list by who sells each product. The vendor is
+      // already joined for search, and a product without one sorts last
+      // rather than to the top as an empty string would.
+      case "vendor":
+        idQuery.addSelect("MIN(vendor.businessName)", "sort_vendor");
+        applyOrderBy("sort_vendor", "ASC");
+        break;
+      case "vendor_desc":
+        idQuery.addSelect("MIN(vendor.businessName)", "sort_vendor");
+        applyOrderBy("sort_vendor", "DESC");
+        break;
       case "oldest":
         idQuery.addSelect("MIN(product.createdAt)", "sort_created_at");
         applyOrderBy("sort_created_at", "ASC");
