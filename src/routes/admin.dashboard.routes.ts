@@ -672,7 +672,6 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  *                   example: "Something went wrong"
  */
 adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardController.getRevenueBySubCategory.bind(adminDashboardController));
-//authMiddleware, isAdmin, 
 
 
 /**

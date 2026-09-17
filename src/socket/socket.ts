@@ -84,8 +84,9 @@ export const initSocket = (server: HttpServer) => {
     });
 
     io.on("connection", (socket) => {
-        console.log(`User connected: ${socket.id}`)
-        console.log(socket)
+        // Never log the socket itself: it serialises `handshake.auth` and
+        // `handshake.headers`, which carry the caller's access token.
+        console.log(`User connected: ${socket.id}`);
         const userId = (socket.data as { userId?: number }).userId;
         if (userId) {
             socket.join(userRoom(userId));
