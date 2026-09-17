@@ -77,8 +77,13 @@ const riderDB = AppDataSource.getRepository(Rider);
 
 /**
  * Authorizes access to vendors and admins only.
+ *
+ * Every route using this guard addresses one vendor row by id, so a vendor is
+ * let through only for their own record. Without that comparison any vendor
+ * token could edit any other vendor, payout details included.
+ *
  * @route Middleware
- * @access Vendor | Admin
+ * @access Vendor (self) | Admin
  */
 export const restrictToVendorOrAdmin = async (
   req: VendorAuthRequest & AuthRequest,
@@ -92,7 +97,20 @@ export const restrictToVendorOrAdmin = async (
     return next(new AuthError("Authentication required"));
   }
 
-  if (user?.role === UserRole.ADMIN || vendor) {
+  if (user?.role === UserRole.ADMIN) {
+    return next();
+  }
+
+  if (vendor) {
+    // `:vendorId` on the payment-option route, `:id` on the two update routes.
+    const targetId = Number(req.params?.vendorId ?? req.params?.id);
+
+    if (!Number.isInteger(targetId) || targetId !== vendor.id) {
+      return next(
+        new ForbiddenError("Not authorized: vendors may only change their own account"),
+      );
+    }
+
     return next();
   }
 
