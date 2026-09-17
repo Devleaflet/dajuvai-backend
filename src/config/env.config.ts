@@ -30,6 +30,17 @@ const config = {
   FIREBASE_SERVICE_ACCOUNT_BASE64:
     process.env.FIREBASE_SERVICE_ACCOUNT_BASE64 || "",
   FIREBASE_PROJECT_ID: process.env.FIREBASE_PROJECT_ID || "",
+  /**
+   * Shared secret proving a request came through the Next console's proxy,
+   * so the client IP it forwards can be trusted for rate-limit keying on the
+   * public endpoints. Must match `TRUSTED_PROXY_SECRET` in dajuvai_next.
+   *
+   * Empty by default, and empty means "trust nothing": the forwarded IP is
+   * ignored and public limiters key by `req.ip`. Set it in production or
+   * every public limiter becomes one global bucket — see
+   * `src/middlewares/publicRateLimit.middleware.ts`.
+   */
+  TRUSTED_PROXY_SECRET: process.env.TRUSTED_PROXY_SECRET || "",
   PUSH_RATE_READ: parseNumber(process.env.PUSH_RATE_READ, 300),
   PUSH_RATE_REGISTER: parseNumber(process.env.PUSH_RATE_REGISTER, 60),
   PUSH_RATE_SEND: parseNumber(process.env.PUSH_RATE_SEND, 120),

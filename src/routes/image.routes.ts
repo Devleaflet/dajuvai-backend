@@ -1,9 +1,10 @@
 import { Router } from "express";
 import type { RequestHandler } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { Options } from "express-rate-limit";
 import { singleUploadMiddleware } from "../config/multer.config";
 import { ImageController } from "../controllers/image.controller";
 import { combinedAuthMiddleware } from "../middlewares/auth.middleware";
+import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 
 const imageRouter = Router();
 const imageController = new ImageController();
@@ -24,13 +25,21 @@ const uploadAuthMiddleware: RequestHandler = (req, res, next) => {
 
 /**
  * Anonymous uploads only. A registration supplies at most ten documents
- * (five tax, five citizenship), so twenty per window leaves room for one
- * full retry without permitting bulk abuse. An authenticated upload is
+ * (five tax, five citizenship), so forty per window is one full registration
+ * plus three retries — a vendor who re-picks the wrong file, or whose phone
+ * drops the connection mid-wizard, must not be locked out of signing up.
+ * Twenty was one retry with no margin. An authenticated upload is
  * attributable to an account and is not throttled alongside it.
+ *
+ * `publicRateLimitKey`, not the default `req.ip`: this endpoint is reached
+ * through the Next console's proxy, whose address is the same on every
+ * request, so the default key would make forty uploads per fifteen minutes a
+ * platform-wide total.
  */
 export const anonymousUploadLimiter = rateLimit({
     windowMs: 15 * 60 * 1000,
-    max: 20,
+    max: 40,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
     message: "Too many uploads from this address, please try again later.",
     skip: (req) => Boolean((req as any).user || (req as any).vendor),
 });

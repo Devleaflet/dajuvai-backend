@@ -1,5 +1,5 @@
 import { Router, Request, Response, NextFunction } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { Options } from "express-rate-limit";
 import passport from "passport";
 import { UserController } from "../controllers/user.controller";
 import {
@@ -28,6 +28,7 @@ import { APIError } from "../utils/ApiError.utils";
 import { UserRole } from "../entities/user.entity";
 import config from "../config/env.config";
 import jwt from "jsonwebtoken";
+import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 
 const userRouter = Router();
 const userController = new UserController();
@@ -39,6 +40,42 @@ export const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 5, // Limit each IP to 5 requests per window
     message: "Too many requests, please try again later.",
+});
+
+/**
+ * `POST /api/auth/verify` — a six-digit code, valid for fifteen minutes.
+ * Without a limiter (and `verifyToken` keeps no attempt counter) the whole
+ * million-code space is guessable inside one token's lifetime.
+ *
+ * Ten per fifteen minutes: a person mistypes a code once or twice, and may
+ * legitimately try the old code before noticing a resend arrived, so five
+ * would bite honest users. Ten caps a guesser at roughly the token's whole
+ * lifetime for ten of a million codes — a 0.001% chance per window.
+ *
+ * Keyed by `publicRateLimitKey`, not `req.ip`: the Next console proxies
+ * every public call, so the default key would be one bucket for everyone.
+ */
+export const verifyCodeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    message: "Too many verification attempts, please request a new code and try again later.",
+});
+
+/**
+ * `GET /api/auth/user/check-email` — answers `{ exists }` for any address,
+ * which is an account-enumeration oracle if it is free to call.
+ *
+ * Twenty per fifteen minutes. The signup wizard fires it once per attempt
+ * (on leaving step 2) and it is advisory, so twenty is far more than any
+ * real registration needs, while eighty lookups an hour makes sweeping a
+ * list of addresses slow enough to be worthless. Same keying as above.
+ */
+export const emailLookupLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    message: "Too many email checks, please try again later.",
 });
 
 /**
@@ -988,9 +1025,12 @@ userRouter.post(
  *         description: Token not found
  *       410:
  *         description: Token expired
+ *       429:
+ *         description: Too many verification attempts (10 per 15 minutes per client)
  */
 userRouter.post(
     "/verify",
+    verifyCodeLimiter,
     validateZod(verifyTokenSchema),
     userController.verifyToken.bind(userController),
 );
@@ -2300,6 +2340,8 @@ userRouter.delete(
  *                 message:
  *                   type: string
  *                   example: Invalid Email
+ *       429:
+ *         description: Too many email checks (20 per 15 minutes per client)
  *       503:
  *         description: Email verification service temporarily unavailable
  *         content:
@@ -2316,6 +2358,7 @@ userRouter.delete(
  */
 userRouter.get(
     "/user/check-email",
+    emailLookupLimiter,
     userController.checkEmailExists.bind(userController),
 );
 

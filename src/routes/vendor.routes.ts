@@ -1,5 +1,5 @@
 import { Router } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { Options } from "express-rate-limit";
 import { VendorController } from "../controllers/vendor.controller";
 import {
     authMiddleware,
@@ -28,16 +28,25 @@ import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { verificationTokenSchema } from "../utils/zod_validations/user.zod";
 import { authRateLimiter } from "./user.routes";
+import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 import { VendorProductsQuerySchema } from "../utils/zod_validations/product.zod";
 
 const router = Router();
 const vendorController = new VendorController();
 const productController = new ProductController(AppDataSource);
 
-/** A public endpoint that writes rows and sends mail. */
+/**
+ * A public endpoint that writes rows and sends mail. Five an hour per real
+ * client: nobody registers twice, and four retries covers a botched attempt.
+ *
+ * `publicRateLimitKey`, not the default `req.ip` — every public call is
+ * proxied by the Next console, so the default would bucket the entire
+ * platform together.
+ */
 export const publicRegistrationLimiter = rateLimit({
     windowMs: 60 * 60 * 1000,
     max: 5,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
     message: "Too many registration attempts from this address, please try again later.",
 });
 
