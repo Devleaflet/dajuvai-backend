@@ -761,6 +761,19 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                 await orderDb.save(order);
 
                 if (!alreadyTerminal) {
+                    // Give the promo slot back, as every other cancellation
+                    // path does. Without this the customer keeps paying for a
+                    // purchase the gateway refused: the redemption row stays
+                    // and their one allowance is gone for good.
+                    await new OrderService()
+                        .releasePromoUsage(order.appliedPromoCode, order.id)
+                        .catch((err) =>
+                            console.error(
+                                `Failed to release promo for order ${order.id}:`,
+                                err,
+                            ),
+                        );
+
                     await notificationService.notifyPaymentFailed(order.id, userId);
                 }
                 break;

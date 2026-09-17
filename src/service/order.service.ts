@@ -1214,7 +1214,7 @@ export class OrderService {
      * is cancelled / payment fails). Guarded so it never drives usageCount
      * below zero.
      */
-    private async releasePromoUsage(
+    async releasePromoUsage(
         promoCode: string | null | undefined,
         orderId?: number,
     ): Promise<void> {
