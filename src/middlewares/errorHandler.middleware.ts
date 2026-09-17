@@ -45,9 +45,26 @@ function normalizeError(err: unknown): APIError {
     // Legacy APIError shape used across older services/controllers (src/utils/ApiError.utils.ts)
     // This prevents intentional 4xx errors from being downgraded to a generic 500.
     if (err && typeof err === "object") {
-        const e = err as { status?: unknown; message?: unknown; stack?: unknown };
+        const e = err as {
+            status?: unknown;
+            message?: unknown;
+            stack?: unknown;
+            errorCode?: unknown;
+        };
         if (typeof e.status === "number" && typeof e.message === "string") {
-            const legacyErr = new APIError(e.status, e.message, "LEGACY_API_ERROR");
+            // Keep the code the thrower chose. Overwriting every legacy error
+            // with "LEGACY_API_ERROR" discarded the one thing a client can
+            // branch on: INVALID_CURRENT_PASSWORD, INVALID_EMAIL and
+            // UPLOAD_NO_FILES are all documented in the OpenAPI spec and none
+            // of them ever reached the wire. "GENERIC_ERROR" is the legacy
+            // default, so it carries no more meaning than the fallback.
+            const legacyCode =
+                typeof e.errorCode === "string" &&
+                e.errorCode !== "" &&
+                e.errorCode !== "GENERIC_ERROR"
+                    ? e.errorCode
+                    : "LEGACY_API_ERROR";
+            const legacyErr = new APIError(e.status, e.message, legacyCode);
             // Preserve the original stack (captured at the real throw site)
             // instead of the one `new APIError(...)` just generated here —
             // otherwise server-side logs point at this normalizer, not the
