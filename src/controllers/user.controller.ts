@@ -265,7 +265,13 @@ export class UserController {
             permissions = await getFormattedStaffPermissions(user.id);
         }
 
-        // Sign JWT token for 7 days
+        // 7 days, where every other login here signs 15 minutes, and where
+        // the cookie below expires in 15 minutes. Deliberately left long: the
+        // legacy Vite admin holds this token in localStorage and has no
+        // refresh interceptor, so shortening it signs every admin out
+        // mid-session. Shorten it to 15m once that app is retired and the
+        // Next console — which mints its own sealed cookie and discards this
+        // one — is the only admin client.
         const token = jwt.sign(
             { id: user.id, email: user.email, role: user.role },
             config.JWT_SECRET,
