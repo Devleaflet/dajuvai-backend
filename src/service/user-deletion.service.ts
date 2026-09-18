@@ -154,6 +154,17 @@ export class UserDeletionService {
         await this.clearDeletionState(id, "User reactivated account via OAuth login");
     }
 
+    /**
+     * Stops a scheduled deletion for a signed-in account.
+     *
+     * The same state change as reactivating through the sign-in screen, minus
+     * the credential check — the caller already holds a valid session for this
+     * account, which is a stronger proof than the password they would retype.
+     */
+    async cancelScheduledDeletion(id: number): Promise<void> {
+        await this.clearDeletionState(id, "User cancelled deletion from account settings");
+    }
+
     private async clearDeletionState(id: number, summary: string): Promise<void> {
         await userRepository.manager.transaction(async (manager) => {
             const currentUser = await manager.findOne(User, { where: { id } });

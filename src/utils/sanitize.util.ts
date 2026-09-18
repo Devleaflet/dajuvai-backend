@@ -369,6 +369,8 @@ export interface SanitizedOrderFull {
     deliveryStatus: DeliveryStatus;
     paymentStatus: PaymentStatus;
     paymentMethod: PaymentMethod;
+    /** Gateway merchant transaction reference; null for cash orders. */
+    mTransactionId: string | null;
     appliedPromoCode: string | null;
     promoApplyOn: PromoType | null;
     phoneNumber: string | null;
@@ -518,6 +520,17 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
         deliveryStatus: order.deliveryStatus,
         paymentStatus: order.paymentStatus,
         paymentMethod: order.paymentMethod,
+        /**
+         * The gateway's merchant transaction reference.
+         *
+         * Carried so a payment result screen can say *which* order a gateway
+         * transaction became: the NPX return page has only the transaction id,
+         * and without this there is no honest way to join the two, so it could
+         * show no order summary at all. It is not a secret — the shopper's own
+         * browser was redirected with it — and it is the reference support asks
+         * for first.
+         */
+        mTransactionId: order.mTransactionId ?? null,
         appliedPromoCode: order.appliedPromoCode ?? null,
         promoApplyOn,
         phoneNumber: order.phoneNumber ?? null,

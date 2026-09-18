@@ -40,6 +40,8 @@ import { SearchQueryMetric } from "../entities/search-query-metric.entity";
 import { StaffPermission } from "../entities/staffPermission.entity";
 import { AuditLog } from "../entities/auditLog.entity";
 import { CheckoutDraft } from "../entities/checkoutDraft.entity";
+import { ProcessedWebhook } from "../entities/processedWebhook.entity";
+import { RevokedToken } from "../entities/revokedToken.entity";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -124,6 +126,8 @@ const AppDataSource = new DataSource({
         StaffPermission,
         AuditLog,
         CheckoutDraft,
+        ProcessedWebhook,
+        RevokedToken,
     ],
     migrations: ["src/migrations/*.ts"],
     // Each migration file commits in its own transaction instead of the

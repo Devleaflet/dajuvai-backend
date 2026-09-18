@@ -7,6 +7,10 @@ import AppDataSource from "./db.config";
 import jwt from "jsonwebtoken";
 import config from "./env.config";
 import { UserDeletionService } from "../service/user-deletion.service";
+import {
+  isIssuedBeforeCutoff,
+  isTokenRevoked,
+} from "../service/token-revocation.service";
 
 // Initialize User repository to interact with the database
 // This sets up TypeORM to perform CRUD operations on the User entity
@@ -58,12 +62,29 @@ passport.use(
       try {
         // Look up user by ID from JWT payload
         const user = await userDB.findOneBy({ id: jwt_payload.id });
-        if (user) {
-          // User found, pass to Passport for successful authentication
-          return done(null, user);
+        if (!user) {
+          // No user found, authentication fails
+          return done(null, false);
         }
-        // No user found, authentication fails
-        return done(null, false);
+
+        /**
+         * Revocation applies here too.
+         *
+         * This strategy is a second front door — `GET /api/auth/me` and the
+         * OAuth routes use it rather than `authMiddleware` — and a token that
+         * has been logged out, or that predates a password reset, must be
+         * refused at every door. Without this check, logging out revoked the
+         * token for one half of the API and not the other.
+         */
+        if (await isTokenRevoked(jwt_payload.jti)) {
+          return done(null, false);
+        }
+
+        if (isIssuedBeforeCutoff(jwt_payload.iat, user.tokensValidFrom)) {
+          return done(null, false);
+        }
+
+        return done(null, user);
       } catch (err) {
         // Handle database or other errors
         return done(err, false);

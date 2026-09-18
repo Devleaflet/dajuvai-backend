@@ -42,6 +42,7 @@ import {
 import { DistrictService } from "../service/district.service";
 import { findUserByEmail } from "../service/user.service";
 import config from "../config/env.config";
+import { newTokenId } from "../service/token-revocation.service";
 import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
 
 /**
@@ -73,7 +74,14 @@ export class VendorController {
 
     private issueVendorSession(res: Response, vendor: any) {
         const token = jwt.sign(
-            { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+            // `jti` so this specific session can be revoked on logout; see
+            // `token-revocation.service.ts`.
+            {
+                id: vendor.id,
+                email: vendor.email,
+                businessName: vendor.businessName,
+                jti: newTokenId(),
+            },
             this.jwtSecret,
             { expiresIn: "15m" },
         );

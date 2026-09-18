@@ -62,6 +62,10 @@ import {
     CombinedAuthRequest,
     isVendor,
 } from "../middlewares/auth.middleware";
+import { AuthError } from "../errors/HttpErrors";
+import { newTokenId, revokeToken } from "../service/token-revocation.service";
+import { TokenSubjectType } from "../entities/revokedToken.entity";
+
 import {
     sendVendorApplicationEmail,
     sendVerificationEmail,
@@ -273,7 +277,7 @@ export class UserController {
         // Next console — which mints its own sealed cookie and discards this
         // one — is the only admin client.
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role },
+            { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
             config.JWT_SECRET,
             { expiresIn: "7d" },
         );
@@ -744,7 +748,7 @@ export class UserController {
 
             // Generate access token (short-lived)
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
@@ -891,7 +895,7 @@ export class UserController {
             );
 
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
@@ -994,7 +998,7 @@ export class UserController {
             }
 
             const newAccessToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
@@ -1021,12 +1025,64 @@ export class UserController {
      * @description Clears both access and refresh token cookies.
      * @access Public
      */
-    async logout(_req: Request, res: Response): Promise<void> {
+    async logout(req: AuthRequest, res: Response): Promise<void> {
+        /**
+         * Clearing the cookie is not logging out.
+         *
+         * The same token is also returned in the response body and kept in
+         * `localStorage` by the legacy admin, so a cleared cookie leaves a
+         * working credential behind. Revoking the `jti` is what makes the
+         * token stop being accepted; the cookies are cleared as well so the
+         * browser stops sending one that will now be refused.
+         *
+         * Tolerant of an unauthenticated call: logging out twice, or with an
+         * already-expired token, is a success from the caller's point of view.
+         */
+        if (req.auth?.jti && req.user?.id) {
+            await revokeToken({
+                jti: req.auth.jti,
+                subjectType: TokenSubjectType.USER,
+                subjectId: req.user.id,
+                expiresAtSeconds: req.auth.exp,
+                reason: "logout",
+            });
+        }
+
         res.clearCookie("token");
         res.clearCookie("refreshToken");
         res.status(200).json({
             success: true,
             message: "Logged out successfully",
+        });
+    }
+
+    /**
+     * @method cancelAccountDeletion
+     * @route POST /auth/me/cancel-deletion
+     * @description Stops a scheduled deletion from inside the app, for an
+     * account still in its grace period. Reachable because
+     * `DELETION_GRACE_ALLOWLIST` in `auth.middleware.ts` lets exactly this
+     * request through; every other authenticated route stays refused.
+     * @access Authenticated (grace period)
+     */
+    async cancelAccountDeletion(req: AuthRequest, res: Response): Promise<void> {
+        if (!req.user) throw new AuthError("User not authenticated");
+
+        if (!req.user.deletionScheduledFor) {
+            // Not an error: the shopper asked for the state they are already
+            // in, and saying so is more useful than a 409.
+            res.status(200).json({
+                success: true,
+                message: "This account is not scheduled for deletion.",
+            });
+            return;
+        }
+
+        await this.userDeletionService.cancelScheduledDeletion(req.user.id);
+
+        res.status(200).json({
+            success: true,
+            message: "Account deletion cancelled. Your account stays active.",
         });
     }
 
@@ -1133,7 +1189,7 @@ export class UserController {
 
             // Issue access + refresh tokens
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
@@ -1533,6 +1589,17 @@ export class UserController {
 
             // Update the entity's password with the hashed password
             user.password = hashedPassword;
+
+            /**
+             * Every session signed before now stops working.
+             *
+             * A password reset is usually someone recovering an account they
+             * believe is compromised. Leaving the attacker's existing token
+             * valid for its full lifetime — up to seven days for an admin —
+             * would make the reset theatre. `authMiddleware` refuses any token
+             * whose `iat` predates this.
+             */
+            user.tokensValidFrom = new Date();
 
             // Clear reset token and expiration to prevent reuse
             user.resetToken = null;

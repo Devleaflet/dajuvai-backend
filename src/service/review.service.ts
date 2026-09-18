@@ -82,10 +82,28 @@ export class ReviewService {
             throw new APIError(404, 'Product not found');
         }
 
-        // Fetch paginated reviews with associated user info
+        // Fetch paginated reviews with the reviewer's display name only.
+        //
+        // `relations: ['user']` on its own loads every column of the relation,
+        // and User.password, resetToken and resetTokenExpire are plain
+        // @Column()s with no `select: false`. This endpoint is public
+        // (review.routes.ts mounts GET /:productId with no auth), so that
+        // combination served a bcrypt hash and a live password-reset token to
+        // anyone who asked for a product's reviews. Naming the columns is what
+        // stops it; do not replace this with a bare `relations` again.
         const [reviews, total] = await this.reviewRepository.findAndCount({
             where: { productId },
-            relations: ['user'],
+            relations: { user: true },
+            select: {
+                id: true,
+                rating: true,
+                comment: true,
+                createdAt: true,
+                updatedAt: true,
+                userId: true,
+                productId: true,
+                user: { id: true, username: true, fullName: true },
+            },
             order: { createdAt: 'DESC' },
             skip: (page - 1) * limit,
             take: limit,

@@ -6,9 +6,16 @@ import { DeliveryStatus, Order, OrderStatus, PaymentStatus } from "../entities/o
 import { Variant } from "../entities/variant.entity";
 import { Product } from "../entities/product.entity";
 import { CheckoutDraft, CheckoutDraftStatus } from "../entities/checkoutDraft.entity";
+import { WebhookProvider } from "../entities/processedWebhook.entity";
+import {
+    claimWebhookEvent,
+    linkWebhookEventToOrder,
+    webhookEventId,
+} from "../service/webhook-dedupe.service";
 import AppDataSource from "../config/db.config";
 import config from "../config/env.config";
 import { APIError } from "../utils/ApiError.utils";
+import { optionalUserIdFromRequest } from "../utils/optionalAuth.utils";
 import { CartService } from "../service/cart.service";
 import { NotificationService } from "../service/notification.service";
 import { OrderService } from "../service/order.service";
@@ -452,6 +459,11 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             if (!Number.isFinite(draftTotal) || Math.abs(draftTotal - Number(amount)) > 0.01) {
                 throw new APIError(400, "Payment amount does not match the checkout total");
             }
+            const draftCallerId = optionalUserIdFromRequest(req);
+            if (draftCallerId !== null && draft.userId !== draftCallerId) {
+                throw new APIError(403, "This checkout belongs to another account");
+            }
+
             draft.mTransactionId = merchantTxnId;
             if (draft.payload) {
                 draft.payload = { ...draft.payload, instrumentName: instrumentCode || null };
@@ -461,6 +473,56 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             const order = await orderDb.findOne({ where: { id: Number(orderId) } });
             if (!order) {
                 throw new APIError(404, "Order not found");
+            }
+
+            /**
+             * Never trust the client-provided amount over the stored order.
+             *
+             * The draft branch above has always done this; the order branch did
+             * not, so a caller who knew any order id could initiate a payment
+             * for any amount they liked — Rs 1 against a Rs 90,000 order — and
+             * the gateway would report a successful payment against it.
+             *
+             * `finalTotal` is what is payable once cancelled lines are removed;
+             * it falls back to `totalPrice` for rows written before that column.
+             * A paisa of tolerance absorbs the decimal-to-float round trip.
+             */
+            const payable = Number(
+                (order as { finalTotal?: string | number | null }).finalTotal ??
+                    order.totalPrice,
+            );
+            if (
+                !Number.isFinite(payable) ||
+                Math.abs(payable - Number(amount)) > 0.01
+            ) {
+                throw new APIError(
+                    400,
+                    "Payment amount does not match the order total",
+                );
+            }
+
+            // An order that is already paid must not be paid again, and one
+            // that was cancelled must not be payable at all.
+            if (order.paymentStatus === PaymentStatus.PAID) {
+                throw new APIError(409, "This order has already been paid");
+            }
+            if (order.status === OrderStatus.CANCELLED) {
+                throw new APIError(409, "This order was cancelled");
+            }
+
+            /**
+             * Ownership, when the caller identifies itself.
+             *
+             * These routes are unauthenticated because the legacy storefront
+             * calls them with no token, and requiring one would stop live
+             * checkouts. So the check is conditional: a request that *does*
+             * carry a session must own the order. Once the legacy app is
+             * retired, replace this with `authMiddleware` on the router and
+             * make the ownership check unconditional.
+             */
+            const callerId = optionalUserIdFromRequest(req);
+            if (callerId !== null && order.orderedById !== callerId) {
+                throw new APIError(403, "This order belongs to another account");
             }
 
             // Update order with merchant transaction info
@@ -685,6 +747,46 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
             throw new APIError(400, "Invalid or missing MerchantTxnId");
         }
 
+        /**
+         * Claim the event before acting on it.
+         *
+         * NPS delivers at least once: a slow response here, a network blip or a
+         * manual replay all produce a second copy of a notification we have
+         * already handled. The cancellation branch below has always been guarded
+         * by a conditional UPDATE; the success branch was not, so a duplicate
+         * re-cleared the cart and sent a second "payment received" notification.
+         *
+         * The insert is the guard. Two simultaneous deliveries both pass a
+         * read-then-act check; only one can insert the unique
+         * `(provider, eventId)` row, and that one owns the side effects. A
+         * duplicate answers the gateway with success and stops — anything else
+         * only earns a third delivery.
+         */
+        const eventId = webhookEventId({
+            merchantTxnId: MerchantTxnId,
+            status: typeof Status === "string" ? Status : null,
+            gatewayTxnId: typeof GatewayTxnId === "string" ? GatewayTxnId : null,
+        });
+
+        const claimed = await claimWebhookEvent({
+            provider: WebhookProvider.NPX,
+            eventId,
+            payload: { MerchantTxnId, GatewayTxnId, Status },
+        });
+
+        if (!claimed) {
+            console.log(
+                JSON.stringify({
+                    level: "info",
+                    event: "webhook.duplicate_ignored",
+                    provider: WebhookProvider.NPX,
+                    eventId,
+                }),
+            );
+            res.send("received");
+            return;
+        }
+
         const order = await orderDb.findOne({
             where: { mTransactionId: MerchantTxnId },
             relations: ["orderItems", "orderItems.product", "orderItems.variant"],
@@ -710,6 +812,8 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
             }
             throw new APIError(404, "Order not found");
         }
+
+        await linkWebhookEventToOrder(WebhookProvider.NPX, eventId, order.id);
 
         const userId = order.orderedById;
         const cartService = new CartService();

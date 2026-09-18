@@ -5,9 +5,14 @@ import jwt, {
 } from "jsonwebtoken";
 import { User, UserRole } from "../entities/user.entity";
 import AppDataSource from "../config/db.config";
+import {
+  isIssuedBeforeCutoff,
+  isTokenRevoked,
+} from "../service/token-revocation.service";
 import { Vendor } from "../entities/vendor.entity";
 import { Product } from "../entities/product.entity";
 import { OrderItem } from "../entities/orderItems.entity";
+import { OrderStatus } from "../entities/order.entity";
 import { Review } from "../entities/reviews.entity";
 import config from "../config/env.config";
 import { Rider } from "../entities/rider.entity";
@@ -27,6 +32,14 @@ import {
 export interface AuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}>
   extends Request<P, ResBody, ReqBody, ReqQuery> {
   user?: User;
+  /**
+   * The claims of the token this request arrived with.
+   *
+   * Carried so a handler can revoke *the token it was called with* — logout
+   * needs the `jti`, and nothing else in the request can tell it apart from
+   * any other session the same account holds.
+   */
+  auth?: { jti?: string; iat?: number; exp?: number };
 }
 
 /**
@@ -152,10 +165,18 @@ export const combinedAuthMiddleware = async (
       return next(new AuthError("Invalid token: missing account id"));
     }
 
+    // One door, two subject types — both get the same revocation rules.
+    if (await isTokenRevoked(decoded.jti as string | undefined)) {
+      return next(new AuthError("This session has been signed out. Please log in again."));
+    }
+
     if (decoded.businessName) {
       const vendor = await vendorDB.findOneBy({ id: accountId });
       if (!vendor) {
         return next(new AuthError("Invalid token: vendor not found"));
+      }
+      if (isIssuedBeforeCutoff(decoded.iat as number | undefined, vendor.tokensValidFrom)) {
+        return next(new AuthError("Your password changed. Please log in again."));
       }
       req.vendor = vendor;
       return next();
@@ -222,9 +243,21 @@ export const vendorAuthMiddleware = async (
       return next(new AuthError("Invalid token: not a vendor session"));
     }
 
+    const vendorClaims = decoded as { jti?: string; iat?: number };
+
+    // Revocation applies to vendors too: a vendor logout and a vendor password
+    // reset must end the session they were issued for.
+    if (await isTokenRevoked(vendorClaims.jti)) {
+      return next(new AuthError("This session has been signed out. Please log in again."));
+    }
+
     const vendor = await vendorDB.findOneBy({ id: decoded.id });
     if (!vendor) {
       return next(new AuthError("Vendor not found"));
+    }
+
+    if (isIssuedBeforeCutoff(vendorClaims.iat, vendor.tokensValidFrom)) {
+      return next(new AuthError("Your password changed. Please log in again."));
     }
     req.vendor = vendor;
     return next();
@@ -240,6 +273,33 @@ export const vendorAuthMiddleware = async (
     return next(err);
   }
 };
+
+
+/**
+ * Routes an account inside its deletion grace period may still reach.
+ *
+ * Deliberately a short, explicit list rather than a flag a route can set:
+ * "which endpoints survive deletion" is a security decision, and it belongs in
+ * one place that can be read in ten seconds. Matched against the mounted path,
+ * so `/api/auth/me/cancel-deletion` and `/api/auth/logout` are reachable while
+ * everything else is refused.
+ */
+const DELETION_GRACE_ALLOWLIST: ReadonlyArray<{ method: string; path: RegExp }> = [
+  // Get out of the grace period.
+  { method: "POST", path: /^\/me\/cancel-deletion$/ },
+  // Read your own account, so the screen offering that button can render.
+  { method: "GET", path: /^\/me$/ },
+  // Leave cleanly.
+  { method: "POST", path: /^\/logout$/ },
+];
+
+function allowsPendingDeletion(req: Request): boolean {
+  // `req.path` is relative to the router this middleware runs in, which is what
+  // the patterns above are written against.
+  return DELETION_GRACE_ALLOWLIST.some(
+    (entry) => entry.method === req.method && entry.path.test(req.path),
+  );
+}
 
 /**
  * Authenticates a user (admin or customer) by verifying the JWT token.
@@ -264,6 +324,9 @@ export const authMiddleware = async (
       email: string;
       role?: string;
       businessName?: string;
+      jti?: string;
+      iat?: number;
+      exp?: number;
     };
 
     // A vendor token verifies fine against the same secret but carries `businessName`
@@ -279,16 +342,45 @@ export const authMiddleware = async (
       return next(new AuthError("User not found. Please log in again."));
     }
 
+    /**
+     * A token can verify and still be withdrawn.
+     *
+     * `jti` is the single-token case — a logout. `tokensValidFrom` is the bulk
+     * case — a password change or reset invalidates every token issued before
+     * it, including ones we have never seen. Neither applies to tokens signed
+     * before this shipped: they carry no `jti`, and an account that has never
+     * revoked anything has `tokensValidFrom` null.
+     */
+    if (await isTokenRevoked(decoded.jti)) {
+      return next(new AuthError("This session has been signed out. Please log in again."));
+    }
+
+    if (isIssuedBeforeCutoff(decoded.iat, user.tokensValidFrom)) {
+      return next(
+        new AuthError("Your password changed. Please log in again."),
+      );
+    }
+
     // Accounts scheduled for deletion (grace period) or already finalized
     // cannot use their old sessions. Reactivation happens via the login
     // flows (email/password reactivation endpoint or Google sign-in).
     if (user.deletionFinalizedAt) {
       return next(new AuthError("This account no longer exists."));
     }
-    if (user.deletionScheduledFor) {
+    /**
+     * An account inside its deletion grace period keeps a usable session for
+     * the few routes that exist to get out of it.
+     *
+     * Blanket rejection was the bug: the app offers "cancel deletion" on the
+     * account screen, and the screen could not be loaded, so the only way back
+     * was to guess that signing out and in again reactivates. Everything else
+     * stays refused — no browsing, no ordering — which is the point of the
+     * grace period.
+     */
+    if (user.deletionScheduledFor && !allowsPendingDeletion(req)) {
       return next(
         new AuthError(
-          "This account is scheduled for deletion. Log in again to reactivate it.",
+          "This account is scheduled for deletion. Cancel the deletion to keep using it.",
         ),
       );
     }
@@ -298,6 +390,7 @@ export const authMiddleware = async (
     }
 
     req.user = user;
+    req.auth = { jti: decoded.jti, iat: decoded.iat, exp: decoded.exp };
     return next();
   } catch (err) {
     if (err instanceof JwtTokenExpiredError) {
@@ -557,17 +650,26 @@ export const canReviewProduct = async (
   try {
     const orderItemRepo = AppDataSource.getRepository(OrderItem);
 
+    // DELIVERED, not CONFIRMED. The old check was backwards in both
+    // directions: CONFIRMED is the status an order holds *before* it ships, so
+    // it let a shopper review something that had not reached them yet, and
+    // because status moves on as the order progresses, an order that actually
+    // arrived no longer matched at all — the one person qualified to review was
+    // the one person refused. A review is a report on a product someone has,
+    // so the order has to have been delivered.
     const purchasedItem = await orderItemRepo
       .createQueryBuilder("orderItem")
       .innerJoinAndSelect("orderItem.order", "order")
       .where("order.orderedById = :userId", { userId })
-      .andWhere("order.status = :status", { status: "CONFIRMED" })
+      .andWhere("order.status = :status", { status: OrderStatus.DELIVERED })
       .andWhere("orderItem.productId = :productId", { productId })
       .getOne();
 
     if (!purchasedItem) {
       return next(
-        new ForbiddenError("You can only review products you have purchased."),
+        new ForbiddenError(
+          "You can only review products from an order that has been delivered to you.",
+        ),
       );
     }
 

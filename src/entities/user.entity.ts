@@ -121,6 +121,18 @@ export class User {
     @Column({ type: "timestamp", nullable: true })
     deletionFinalizedAt?: Date | null;
 
+    /**
+     * Every token issued before this moment is refused.
+     *
+     * Set on a password change or reset, and by an admin ending all sessions.
+     * One write revokes an unbounded number of tokens, including ones that were
+     * never presented to us. Null means nothing has been revoked, which is the
+     * state of every account that predates this column.
+     */
+    @Column({ type: "timestamp", nullable: true })
+    tokensValidFrom?: Date | null;
+
+
     @CreateDateColumn()
     createdAt: Date;
 

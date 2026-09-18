@@ -1174,7 +1174,65 @@ userRouter.post(
  *       500:
  *         description: Internal server error
  */
-userRouter.post("/logout", userController.logout.bind(userController));
+/**
+ * `authMiddleware` first: logout has to know *which* token it is revoking, and
+ * that is the one the middleware decoded. `optionalAuth` is not used because a
+ * caller with no token has nothing to revoke — the route below tolerates that
+ * and still clears the cookies.
+ */
+userRouter.post(
+    "/logout",
+    authMiddleware,
+    userController.logout.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/me/cancel-deletion:
+ *   post:
+ *     summary: Cancel a scheduled account deletion
+ *     description: >
+ *       Stops a deletion that is still inside its 30-day grace period, for the
+ *       signed-in account. This is one of the few routes an account in that
+ *       state may reach — see `DELETION_GRACE_ALLOWLIST` in the auth
+ *       middleware.
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deletion cancelled, or the account was not scheduled for one
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Account deletion cancelled. Your account stays active."
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No token provided. Please log in."
+ */
+userRouter.post(
+    "/me/cancel-deletion",
+    authMiddleware,
+    userController.cancelAccountDeletion.bind(userController),
+);
 
 /**
  * @swagger
