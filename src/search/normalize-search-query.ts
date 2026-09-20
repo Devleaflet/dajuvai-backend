@@ -100,19 +100,65 @@ const inflectionVariants = (token: string): string[] => {
   return [...values];
 };
 
+/**
+ * A token's inflections and the concepts it names *exactly*.
+ *
+ * No guessing here. Everything this returns is something the shopper literally
+ * typed, a plural of it, or a concept whose term it is — so it is safe to treat
+ * as a literal match.
+ */
 const relatedTerms = (token: string): string[] => {
   const values = new Set<string>();
   for (const variant of inflectionVariants(token)) {
     values.add(variant);
     for (const synonym of SEARCH_SYNONYMS[variant] ?? []) values.add(synonym);
-    if (variant.length >= 4) {
-      const fuzzyKey = synonymKeys().find(
-        (key) => similarity(variant, key) >= 0.72,
-      );
-      if (fuzzyKey) {
-        values.add(fuzzyKey);
-        for (const synonym of SEARCH_SYNONYMS[fuzzyKey] ?? []) values.add(synonym);
-      }
+  }
+  return [...values];
+};
+
+/*
+ * How close a token has to be to a concept term before it is treated as a
+ * misspelling of it.
+ *
+ * `similarity` is `1 - editDistance / longerLength`, so the bar is really a
+ * statement about how long a word has to be to survive one edit:
+ *
+ * - at 4 characters one edit scores 0.75 and is rejected;
+ * - at 5 it scores 0.80 and is accepted;
+ * - at 6 it scores 0.83.
+ *
+ * 0.72 with a 4-character floor is what produced the "make up" bug: `make` is
+ * one substitution from `male`, scored 0.75, and pulled in the entire men's
+ * concept — so a cosmetics search returned men's fashion. Four-letter words are
+ * one edit from far too much to guess at.
+ */
+const FUZZY_SYNONYM_THRESHOLD = 0.8;
+const FUZZY_SYNONYM_MIN_LENGTH = 5;
+
+/**
+ * The concepts a token might be a *misspelling* of.
+ *
+ * Kept apart from `relatedTerms` because these are guesses, and a guess must
+ * never widen a search that is already finding real matches. `shops` is one
+ * edit from `shoes`; expanding it inline meant someone searching for shops got
+ * footwear mixed into otherwise valid results. Callers put these behind the
+ * same gate as trigram matching — used only when literal matching found
+ * nothing at all.
+ */
+const fuzzyRelatedTerms = (token: string): string[] => {
+  const values = new Set<string>();
+  for (const variant of inflectionVariants(token)) {
+    if (variant.length < FUZZY_SYNONYM_MIN_LENGTH) continue;
+    // An exact concept term is not a typo of itself, and `relatedTerms` has
+    // already expanded it properly.
+    if (SEARCH_SYNONYMS[variant]) continue;
+
+    const fuzzyKey = synonymKeys().find(
+      (key) => similarity(variant, key) >= FUZZY_SYNONYM_THRESHOLD,
+    );
+    if (fuzzyKey) {
+      values.add(fuzzyKey);
+      for (const synonym of SEARCH_SYNONYMS[fuzzyKey] ?? []) values.add(synonym);
     }
   }
   return [...values];
@@ -129,6 +175,27 @@ export function buildSearchCandidates(input: string): string[] {
   }
 
   return [...new Set(values.map(normalizeSearchQuery).filter(Boolean))];
+}
+
+/**
+ * The typo-recovery half of the expansion, with anything already covered by
+ * `buildSearchCandidates` removed so a caller can score the two tiers apart.
+ */
+export function buildFuzzySearchCandidates(input: string): string[] {
+  const query = normalizeSearchQuery(input);
+  if (!query) return [];
+
+  const strict = new Set(buildSearchCandidates(query));
+  const values: string[] = [];
+  for (const token of query.split(" ").filter(Boolean)) {
+    values.push(...fuzzyRelatedTerms(token));
+  }
+
+  return [
+    ...new Set(
+      values.map(normalizeSearchQuery).filter((value) => value && !strict.has(value)),
+    ),
+  ];
 }
 
 export function resolveTaxonomyCandidates(

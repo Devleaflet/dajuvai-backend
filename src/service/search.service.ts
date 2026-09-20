@@ -9,9 +9,14 @@ import { SearchAliasService } from "./search-alias.service";
 import { SearchLearningService } from "./search-learning.service";
 import { buildCatalogSearchCondition } from "../search/catalog-search";
 import {
+  publicCatalogVisibilityWhere,
+  VENDOR_ALIAS,
+} from "../search/catalog-visibility";
+import {
   buildSearchCandidates,
   normalizeSearchQuery,
 } from "../search/normalize-search-query";
+import type { SearchEventInput } from "../search/search-event.schema";
 import type { SearchSuggestionInput } from "../search/search-suggestion.schema";
 import {
   mergeResolvedFilters,
@@ -19,10 +24,14 @@ import {
   type ProductSearchResult,
   type ResolvedSearchFilters,
   type SearchCatalogInput,
+  type CatalogFacets,
+  type CatalogFacetValue,
   type SearchCatalogResponse,
+  type SuggestionProductResult,
   type TaxonomySuggestion,
 } from "../search/catalog-search.types";
 import { getManualBannerProductIds } from "../utils/bannerProductSelection";
+import { resolveProductAgeRestriction } from "./age-restriction.service";
 
 type ProductSuggestionRow = {
   id: string;
@@ -34,6 +43,9 @@ type ProductSuggestionRow = {
   average_rating: string;
   total_reviews: string;
   in_stock: string;
+  age_restricted: boolean | null;
+  minimum_age: string | null;
+  restriction_message: string | null;
 };
 
 type CatalogRuntimeFilters = {
@@ -69,6 +81,7 @@ export class SearchService {
         categories: [],
         subcategories: [],
         brands: [],
+        facets: { categories: [], subcategories: [], brands: [] },
         totalProducts: 0,
         page: input.page,
         limit: input.limit,
@@ -112,16 +125,18 @@ export class SearchService {
         explicitFilters,
         runtimeFilters,
       );
-      const products = await this.searchProducts(
-        manager,
-        productCondition,
-        input.limit,
-        offset,
-        explicitFilters,
-        input.sort,
-        runtimeFilters,
-      );
-
+      const [products, facets] = await Promise.all([
+        this.searchProducts(
+          manager,
+          productCondition,
+          input.limit,
+          offset,
+          explicitFilters,
+          input.sort,
+          runtimeFilters,
+        ),
+        this.searchFacets(manager, productCondition),
+      ]);
       return {
         query,
         normalizedQuery,
@@ -130,6 +145,7 @@ export class SearchService {
         categories,
         subcategories,
         brands,
+        facets,
         totalProducts,
         page: input.page,
         limit: input.limit,
@@ -141,6 +157,29 @@ export class SearchService {
       resultCount: response.totalProducts,
     }).catch(() => undefined);
     return response;
+  }
+
+  /**
+   * Records what a shopper did with a search result.
+   *
+   * The counterpart to `recordSearch`, which this service already fires for
+   * every catalogue query. Together they are what the alias-candidate rule
+   * reads: enough searches, and enough of them ending well on the same row,
+   * promotes that row to a *candidate* — still inactive, still needing an
+   * administrator to approve it before it affects anybody's results.
+   *
+   * Never throws. Telemetry that can fail a shopper's click is worse than
+   * telemetry that is occasionally missing a row.
+   */
+  async recordSearchOutcome(input: SearchEventInput): Promise<void> {
+    await this.searchLearningService
+      .recordOutcome({
+        normalizedQuery: input.q,
+        targetType: input.targetType,
+        targetId: input.targetId,
+        outcome: input.outcome,
+      })
+      .catch(() => undefined);
   }
 
   private toNumberList(value: number | number[]): number[] {
@@ -171,7 +210,14 @@ export class SearchService {
     const approvedAliases = await this.searchAliasService.resolve(query);
     const searchCondition = buildCatalogSearchCondition(query, approvedAliases);
     if (!searchCondition) {
-      return { query, products: [], categories: [], brands: [], totalProducts: 0 };
+      return {
+        query,
+        products: [],
+        categories: [],
+        subcategories: [],
+        brands: [],
+        totalProducts: 0,
+      };
     }
 
     return this.dataSource.transaction(async (manager) => {
@@ -179,17 +225,202 @@ export class SearchService {
       const lexicalCondition = { ...searchCondition, where: searchCondition.lexicalWhere };
       const lexicalTotal = await this.countProducts(manager, lexicalCondition);
       const productCondition = lexicalTotal > 0 ? lexicalCondition : searchCondition;
-      const [products, categories, brands, totalProducts] = await Promise.all([
-        this.searchProducts(manager, productCondition, input.productLimit),
-        this.searchCategories(manager, query, input.categoryLimit, approvedAliases),
-        this.searchBrands(manager, query, input.brandLimit, approvedAliases),
-        lexicalTotal > 0
-          ? Promise.resolve(lexicalTotal)
-          : this.countProducts(manager, productCondition),
-      ]);
+      const [products, categories, subcategories, brands, totalProducts] =
+        await Promise.all([
+          this.searchSuggestionProducts(manager, productCondition, input.productLimit),
+          this.searchCategories(manager, query, input.categoryLimit, approvedAliases),
+          this.searchSubcategories(
+            manager,
+            query,
+            input.subcategoryLimit,
+            approvedAliases,
+          ),
+          this.searchBrands(manager, query, input.brandLimit, approvedAliases),
+          lexicalTotal > 0
+            ? Promise.resolve(lexicalTotal)
+            : this.countProducts(manager, productCondition),
+        ]);
 
-      return { query, products, categories, brands, totalProducts };
+      return { query, products, categories, subcategories, brands, totalProducts };
     });
+  }
+
+  /**
+   * The products behind the autocomplete panel.
+   *
+   * A separate, deliberately smaller query than `searchProducts`. Autocomplete
+   * runs on a keystroke, after a 250ms debounce, for every visitor typing at
+   * once — it cannot afford what a results page can. Dropped, relative to the
+   * full search:
+   *
+   * - the **review aggregate**, a grouped scan of every review in the system;
+   * - the **sales aggregate**, the same over every order item;
+   * - the **deal join** and the price/rating `HAVING` filters, none of which a
+   *   suggestion row can be narrowed by;
+   * - the **age-restriction projection**, because a suggestion row is a link,
+   *   and the gate fires on the page it opens.
+   *
+   * Kept, because they decide *which* products come back rather than decorate
+   * them: the visibility predicate, the taxonomy and SKU match, and the
+   * relevance ordering — a cheap suggestion that suggests the wrong thing is
+   * not cheaper, it is broken.
+   *
+   * Out-of-stock rows are ordered last rather than filtered out: a shopper
+   * searching for a specific product should still find it, and a panel that
+   * silently omits it reads as "we do not sell this".
+   */
+  private async searchSuggestionProducts(
+    manager: EntityManager,
+    searchCondition: ReturnType<typeof buildCatalogSearchCondition>,
+    limit: number,
+  ): Promise<SuggestionProductResult[]> {
+    const taxonomyTextWhere = searchCondition
+      ? this.buildTaxonomyTextWhere(searchCondition)
+      : "FALSE";
+
+    const rows = await manager
+      .getRepository(Product)
+      .createQueryBuilder("product")
+      .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
+      .leftJoin("product.subcategory", "subcategory")
+      .leftJoin("subcategory.category", "category")
+      .leftJoin("product.vendor", VENDOR_ALIAS)
+      .where(publicCatalogVisibilityWhere())
+      .andWhere(
+        this.buildProductSearchWhere(searchCondition, undefined, taxonomyTextWhere),
+        this.buildProductSearchParameters(searchCondition),
+      )
+      .select("product.id", "id")
+      .addSelect("product.name", "name")
+      .addSelect('COALESCE("product"."productImages"[1], MIN("variants"."variantImages"[1]))', "thumbnail_url")
+      .addSelect('COALESCE(NULLIF("product"."finalPrice", 0), MIN(NULLIF("variants"."finalPrice", 0)), NULLIF("product"."basePrice", 0), MIN(NULLIF("variants"."basePrice", 0)), 0)', "effective_price")
+      .addSelect('COALESCE(NULLIF("product"."basePrice", 0), MIN(NULLIF("variants"."basePrice", 0)), 0)', "original_price")
+      .addSelect('GREATEST(COALESCE("product"."discountPercent", 0), COALESCE(MAX("variants"."discountPercent"), 0))', "discount_percentage")
+      .addSelect("MAX(CASE WHEN COALESCE(\"variants\".stock, \"product\".stock, 0) > 0 AND COALESCE(\"variants\".status::text, \"product\".status::text, '') != 'OUT_OF_STOCK' THEN 1 ELSE 0 END)", "in_stock")
+      .addSelect(this.buildProductNameRelevanceScore(searchCondition), "name_score")
+      .addSelect(`MIN(${searchCondition?.score ?? "0"})`, "search_score")
+      .addSelect(`MAX(CASE WHEN ${taxonomyTextWhere} THEN 350 ELSE 0 END)`, "taxonomy_score")
+      .addSelect(
+        `MAX(CASE WHEN ${searchCondition?.skuMatch ?? "FALSE"} THEN 1 ELSE 0 END)`,
+        "sku_score",
+      )
+      .groupBy("product.id")
+      .orderBy("sku_score", "DESC")
+      .addOrderBy("name_score", "DESC")
+      .addOrderBy("search_score", "DESC")
+      .addOrderBy("taxonomy_score", "DESC")
+      .addOrderBy("in_stock", "DESC")
+      .addOrderBy("product.createdAt", "DESC")
+      .addOrderBy("product.id", "DESC")
+      .limit(limit)
+      .getRawMany<Omit<ProductSuggestionRow, "average_rating" | "total_reviews" | "age_restricted" | "minimum_age" | "restriction_message">>();
+
+    return rows.map((row) => ({
+      id: Number(row.id),
+      name: row.name,
+      thumbnailUrl: row.thumbnail_url,
+      effectivePrice: Number(row.effective_price),
+      originalPrice: Number(row.original_price),
+      discountPercentage: Number(row.discount_percentage),
+      inStock: Number(row.in_stock) > 0,
+    }));
+  }
+
+  /**
+   * How many matches sit in each department, shelf and brand.
+   *
+   * One grouped pass rather than three, folded into three lists here: the
+   * grouping key is (category, subcategory, brand) and every facet is a
+   * projection of it, so asking the database three times would be three scans
+   * of the same rows.
+   *
+   * `COUNT(DISTINCT product.id)` because the variants join multiplies rows —
+   * a product with four variants would otherwise count four times.
+   *
+   * ponytail: counted against the query and the visibility rules only, not
+   * against the shopper's other selected filters. So "Electronics 40" means
+   * "40 of the matches for your search are in Electronics", not "40 after your
+   * price filter". Making each facet respect every *other* filter means one
+   * query per dimension; worth doing when the catalogue is big enough for the
+   * difference to mislead, which at this size it is not.
+   */
+  private async searchFacets(
+    manager: EntityManager,
+    searchCondition: ReturnType<typeof buildCatalogSearchCondition>,
+  ): Promise<CatalogFacets> {
+    const taxonomyTextWhere = searchCondition
+      ? this.buildTaxonomyTextWhere(searchCondition)
+      : "FALSE";
+
+    const rows = await manager
+      .getRepository(Product)
+      .createQueryBuilder("product")
+      .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
+      .leftJoin("product.subcategory", "subcategory")
+      .leftJoin("subcategory.category", "category")
+      .leftJoin("product.vendor", VENDOR_ALIAS)
+      .where(publicCatalogVisibilityWhere())
+      .andWhere(
+        this.buildProductSearchWhere(searchCondition, undefined, taxonomyTextWhere),
+        this.buildProductSearchParameters(searchCondition),
+      )
+      .select("category.id", "category_id")
+      .addSelect("category.name", "category_name")
+      .addSelect("subcategory.id", "subcategory_id")
+      .addSelect("subcategory.name", "subcategory_name")
+      .addSelect("product.brand", "brand")
+      .addSelect("COUNT(DISTINCT product.id)", "n")
+      .groupBy("category.id")
+      .addGroupBy("category.name")
+      .addGroupBy("subcategory.id")
+      .addGroupBy("subcategory.name")
+      .addGroupBy("product.brand")
+      .getRawMany<{
+        category_id: number | null;
+        category_name: string | null;
+        subcategory_id: number | null;
+        subcategory_name: string | null;
+        brand: string | null;
+        n: string;
+      }>();
+
+    const categories = new Map<number, CatalogFacetValue>();
+    const subcategories = new Map<number, CatalogFacetValue>();
+    const brands = new Map<string, CatalogFacetValue>();
+
+    const add = <K>(
+      into: Map<K, CatalogFacetValue>,
+      key: K | null,
+      label: string | null,
+      count: number,
+    ) => {
+      if (key === null || !label) return;
+      const existing = into.get(key);
+      // Summed rather than assigned: one category appears once per
+      // (subcategory, brand) combination in the grouped rows.
+      if (existing) existing.count += count;
+      else into.set(key, { id: key as never, label, count });
+    };
+
+    for (const row of rows) {
+      const count = Number(row.n);
+      add(categories, row.category_id, row.category_name, count);
+      add(subcategories, row.subcategory_id, row.subcategory_name, count);
+      add(brands, row.brand?.trim() || null, row.brand?.trim() || null, count);
+    }
+
+    // Biggest first: a facet list is a way into the results, so the widest door
+    // goes at the top. Ties fall back to the name for a stable order.
+    const sorted = (values: Map<unknown, CatalogFacetValue>): CatalogFacetValue[] =>
+      [...values.values()].sort(
+        (left, right) => right.count - left.count || left.label.localeCompare(right.label),
+      );
+
+    return {
+      categories: sorted(categories),
+      subcategories: sorted(subcategories),
+      brands: sorted(brands),
+    };
   }
 
   private async searchProducts(
@@ -227,7 +458,8 @@ export class SearchService {
       .leftJoin("product.deal", "deal")
       .leftJoin(`(${ratingQuery.getQuery()})`, "rating", "rating.product_id = product.id")
       .leftJoin(`(${salesQuery.getQuery()})`, "sales", "sales.product_id = product.id")
-      .where("product.deletedAt IS NULL")
+      .leftJoin("product.vendor", VENDOR_ALIAS)
+      .where(publicCatalogVisibilityWhere())
       .andWhere(
         this.buildProductSearchWhere(searchCondition, resolvedFilters, taxonomyTextWhere),
         this.buildProductSearchParameters(searchCondition, resolvedFilters),
@@ -242,6 +474,19 @@ export class SearchService {
       .addSelect('COALESCE("rating"."total_reviews", 0)', "total_reviews")
       .addSelect('COALESCE("sales"."sold_quantity", 0)', "sold_quantity")
       .addSelect("MAX(CASE WHEN COALESCE(\"variants\".stock, \"product\".stock, 0) > 0 AND COALESCE(\"variants\".status::text, \"product\".status::text, '') != 'OUT_OF_STOCK' THEN 1 ELSE 0 END)", "in_stock")
+      /*
+       * Age restriction lives on the category, which is already joined.
+       *
+       * Aggregated rather than added to the GROUP BY: a product has exactly one
+       * category, so `BOOL_OR`/`MAX`/`MIN` each return that one row's value,
+       * and the grouping stays as it was. Projecting these is what lets a
+       * search result card carry the same gate as every other listing — it
+       * reported every result unrestricted before, because the columns simply
+       * were not selected.
+       */
+      .addSelect("BOOL_OR(COALESCE(category.isAgeRestricted, FALSE))", "age_restricted")
+      .addSelect("MAX(category.minimumAge)", "minimum_age")
+      .addSelect("MIN(category.restrictionMessage)", "restriction_message")
       .addSelect(
         this.buildProductNameRelevanceScore(searchCondition),
         "name_score",
@@ -250,6 +495,18 @@ export class SearchService {
       .addSelect(
         `MAX(CASE WHEN ${taxonomyTextWhere} THEN 350 ELSE 0 END)`,
         "taxonomy_score",
+      )
+      /*
+       * `MAX`, where `search_score` uses `MIN`.
+       *
+       * This is the one matching term that varies between a product's variants,
+       * so it cannot live inside `search_score`: one non-matching variant would
+       * drag a `MIN` to zero and hide the product whose SKU was typed. `MAX`
+       * asks the right question — does *any* variant carry this SKU.
+       */
+      .addSelect(
+        `MAX(CASE WHEN ${searchCondition?.skuMatch ?? "FALSE"} THEN 1 ELSE 0 END)`,
+        "sku_score",
       )
       .groupBy("product.id")
       .addGroupBy("rating.product_id")
@@ -275,7 +532,10 @@ export class SearchService {
     } else if (sort === "best_selling") {
       query.orderBy("sold_quantity", "DESC");
     } else {
-      query.orderBy("name_score", "DESC");
+      // Above every text tier: a shopper who typed a part number has told you
+      // exactly which product they want, and no name relevance outranks that.
+      query.orderBy("sku_score", "DESC");
+      query.addOrderBy("name_score", "DESC");
       query.addOrderBy("search_score", "DESC");
     }
     query
@@ -297,6 +557,19 @@ export class SearchService {
       totalReviews: Number(row.total_reviews),
       inStock: Number(row.in_stock) > 0,
       matchedVariant: null,
+      // Through the shared resolver rather than re-deriving the rule here:
+      // `resolveProductAgeRestriction` is the one place that decides what a
+      // missing or zero `minimumAge` means on a restricted category.
+      ageRestriction: resolveProductAgeRestriction({
+        id: Number(row.id),
+        subcategory: {
+          category: {
+            isAgeRestricted: Boolean(row.age_restricted),
+            minimumAge: row.minimum_age === null ? null : Number(row.minimum_age),
+            restrictionMessage: row.restriction_message,
+          },
+        },
+      } as never),
     }));
   }
 
@@ -550,7 +823,11 @@ export class SearchService {
     const rows = await manager
       .getRepository(Product)
       .createQueryBuilder("product")
-      .where("product.deletedAt IS NULL")
+      // A brand facet is built from products, so it inherits their visibility:
+      // an unapproved vendor's brand must not be offered as a filter that then
+      // returns nothing.
+      .leftJoin("product.vendor", VENDOR_ALIAS)
+      .where(publicCatalogVisibilityWhere())
       .andWhere("product.brand IS NOT NULL")
       .andWhere(
         `(${candidateWhere}) OR similarity(LOWER(product.brand), :exact) >= :threshold`,
@@ -594,7 +871,15 @@ export class SearchService {
       .createQueryBuilder("product")
       .leftJoin("product.subcategory", "subcategory")
       .leftJoin("subcategory.category", "category")
-      .where("product.deletedAt IS NULL")
+      // The search condition can now reference `variants.sku`, so the alias has
+      // to exist here too. `getCount` counts distinct product ids, so joining a
+      // to-many relation does not inflate the total.
+      .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
+      // The same predicate as `searchProducts`, and it has to stay that way:
+      // a count computed over a wider set than the page it describes is how a
+      // listing claims 86 results and renders 34.
+      .leftJoin("product.vendor", VENDOR_ALIAS)
+      .where(publicCatalogVisibilityWhere())
       .andWhere(
         this.buildProductSearchWhere(
           searchCondition,
@@ -608,13 +893,13 @@ export class SearchService {
       this.applyAdvancedFilters(query, runtimeFilters);
       return query.getCount();
     }
-    query
-      .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
-      .leftJoin(
-        `(${manager.getRepository(Review).createQueryBuilder("review").select("review.productId", "product_id").addSelect("AVG(review.rating)", "average_rating").groupBy("review.productId").getQuery()})`,
-        "rating",
-        "rating.product_id = product.id",
-      );
+    // `variants` is already joined above for the SKU term; joining it twice is
+    // a duplicate-alias error.
+    query.leftJoin(
+      `(${manager.getRepository(Review).createQueryBuilder("review").select("review.productId", "product_id").addSelect("AVG(review.rating)", "average_rating").groupBy("review.productId").getQuery()})`,
+      "rating",
+      "rating.product_id = product.id",
+    );
     query.select("product.id", "id").groupBy("product.id").addGroupBy("rating.product_id").addGroupBy("rating.average_rating");
     this.applyAdvancedFilters(query, runtimeFilters);
     return (await query.getRawMany()).length;

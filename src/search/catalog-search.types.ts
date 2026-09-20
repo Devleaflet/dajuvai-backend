@@ -1,3 +1,4 @@
+import type { AgeRestriction } from "../service/age-restriction.service";
 import { z } from "zod";
 
 const queryBoolean = z.preprocess(
@@ -71,6 +72,51 @@ export interface ProductSearchResult {
   totalReviews: number;
   inStock: boolean;
   matchedVariant: null;
+  /**
+   * The category's gate, carried on the result itself.
+   *
+   * Same shape `withAgeRestriction` attaches everywhere else, so a search
+   * result card and a category listing card read it identically. Search used
+   * not to project it at all, which left every result reporting itself
+   * unrestricted.
+   */
+  ageRestriction: AgeRestriction;
+}
+
+/**
+ * A product as autocomplete returns it.
+ *
+ * Narrower than `ProductSearchResult` on purpose: rating and review counts cost
+ * two grouped scans over every review and order item in the system, and a
+ * suggestion row — a thumbnail, a name and a price — has nowhere to show them.
+ */
+export interface SuggestionProductResult {
+  id: number;
+  name: string;
+  thumbnailUrl: string | null;
+  effectivePrice: number;
+  originalPrice: number;
+  discountPercentage: number;
+  inStock: boolean;
+}
+
+/**
+ * One row of a facet list: the thing, and how many matches are in it.
+ *
+ * `id` is the taxonomy id for categories and subcategories, and the brand's own
+ * name for brands — brands are a product column here rather than a table, so
+ * the name is the only identifier they have.
+ */
+export interface CatalogFacetValue {
+  id: number | string;
+  label: string;
+  count: number;
+}
+
+export interface CatalogFacets {
+  categories: CatalogFacetValue[];
+  subcategories: CatalogFacetValue[];
+  brands: CatalogFacetValue[];
 }
 
 export interface SearchCatalogResponse {
@@ -81,6 +127,8 @@ export interface SearchCatalogResponse {
   categories: TaxonomySuggestion[];
   subcategories: TaxonomySuggestion[];
   brands: BrandSuggestion[];
+  /** Counts for the current query, for filter controls that show them. */
+  facets: CatalogFacets;
   totalProducts: number;
   page: number;
   limit: number;

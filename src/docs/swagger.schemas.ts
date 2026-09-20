@@ -226,6 +226,53 @@ export const swaggerSchemas = {
       totalReviews: { type: "integer", example: 21 },
       inStock: { type: "boolean", example: true },
       matchedVariant: { type: "object", nullable: true, example: null },
+      ageRestriction: {
+        type: "object",
+        required: ["isRestricted", "minimumAge", "restrictionMessage"],
+        properties: {
+          isRestricted: { type: "boolean", example: false },
+          minimumAge: { type: "integer", nullable: true, example: null },
+          restrictionMessage: { type: "string", nullable: true, example: null },
+        },
+      },
+    },
+  },
+  SearchSuggestionProduct: {
+    type: "object",
+    required: ["id", "name", "effectivePrice", "originalPrice", "inStock"],
+    description:
+      "Compact product row for autocomplete. Deliberately omits averageRating and totalReviews: both cost a grouped scan over every review and order item, which is not affordable on a keystroke. Use /api/search/catalog for the full projection.",
+    properties: {
+      id: { type: "integer", example: 12 },
+      name: { type: "string", example: "Glow Face Wash" },
+      thumbnailUrl: { type: "string", nullable: true, format: "uri" },
+      effectivePrice: { type: "number", example: 450 },
+      originalPrice: { type: "number", example: 500 },
+      discountPercentage: { type: "number", example: 10 },
+      inStock: { type: "boolean", example: true },
+    },
+  },
+  CatalogFacetValue: {
+    type: "object",
+    required: ["id", "label", "count"],
+    properties: {
+      id: {
+        oneOf: [{ type: "integer" }, { type: "string" }],
+        description: "Taxonomy id for categories and subcategories; the brand name for brands, which are a product column rather than a table.",
+        example: 7,
+      },
+      label: { type: "string", example: "Beauty & Fragrance" },
+      count: { type: "integer", example: 32 },
+    },
+  },
+  CatalogFacets: {
+    type: "object",
+    required: ["categories", "subcategories", "brands"],
+    description: "Match counts for the current query and the public visibility rules. Not narrowed by the caller's other selected filters.",
+    properties: {
+      categories: { type: "array", items: { $ref: "#/components/schemas/CatalogFacetValue" } },
+      subcategories: { type: "array", items: { $ref: "#/components/schemas/CatalogFacetValue" } },
+      brands: { type: "array", items: { $ref: "#/components/schemas/CatalogFacetValue" } },
     },
   },
   TaxonomySuggestion: {
@@ -247,7 +294,7 @@ export const swaggerSchemas = {
   },
   SearchCatalogResponse: {
     type: "object",
-    required: ["query", "normalizedQuery", "resolvedFilters", "products", "categories", "subcategories", "brands", "totalProducts", "page", "limit", "totalPages"],
+    required: ["query", "normalizedQuery", "resolvedFilters", "products", "categories", "subcategories", "brands", "facets", "totalProducts", "page", "limit", "totalPages"],
     properties: {
       query: { type: "string", example: "cosmetics" },
       normalizedQuery: { type: "string", example: "cosmetics" },
@@ -265,6 +312,7 @@ export const swaggerSchemas = {
       categories: { type: "array", items: { $ref: "#/components/schemas/TaxonomySuggestion" } },
       subcategories: { type: "array", items: { $ref: "#/components/schemas/TaxonomySuggestion" } },
       brands: { type: "array", items: { $ref: "#/components/schemas/BrandSuggestion" } },
+      facets: { $ref: "#/components/schemas/CatalogFacets" },
       totalProducts: { type: "integer", example: 42 },
       page: { type: "integer", example: 1 },
       limit: { type: "integer", example: 40 },
@@ -273,11 +321,19 @@ export const swaggerSchemas = {
   },
   SearchSuggestionsResponse: {
     type: "object",
-    required: ["query", "products", "categories", "brands", "totalProducts"],
+    required: [
+      "query",
+      "products",
+      "categories",
+      "subcategories",
+      "brands",
+      "totalProducts",
+    ],
     properties: {
       query: { type: "string", example: "headphones" },
-      products: { type: "array", items: { $ref: "#/components/schemas/SearchProductResult" } },
+      products: { type: "array", items: { $ref: "#/components/schemas/SearchSuggestionProduct" } },
       categories: { type: "array", items: { $ref: "#/components/schemas/TaxonomySuggestion" } },
+      subcategories: { type: "array", items: { $ref: "#/components/schemas/TaxonomySuggestion" } },
       brands: { type: "array", items: { $ref: "#/components/schemas/BrandSuggestion" } },
       totalProducts: { type: "integer", example: 11 },
     },
