@@ -4,6 +4,7 @@ import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from '../middlew
 import { checkPermission } from '../middlewares/permission.middleware';
 import { ModuleName, PermissionLevel } from '../entities/permission.enum';
 import { createDealSchema, updateDealSchema } from '../utils/zod_validations/deal.zod';
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const dealController = new DealController();
@@ -265,8 +266,8 @@ router.patch('/:id', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: The unique identifier of the deal
+ *           type: string
+ *         description: The deal id, or its URL slug
  *     responses:
  *       200:
  *         description: Deal found successfully
@@ -345,7 +346,7 @@ router.patch('/:id', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/:id', dealController.getDealById.bind(dealController));
+router.get('/:id', resolveSlugParam("deals"), dealController.getDealById.bind(dealController));
 
 /**
  * @swagger

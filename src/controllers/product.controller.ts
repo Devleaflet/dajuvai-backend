@@ -1,3 +1,6 @@
+import { canSeeHiddenCatalog, optionalCallerFromRequest } from "../utils/optionalAuth.utils";
+import { hiddenProductIds } from "../search/catalog-visibility";
+import AppDataSource from "../config/db.config";
 import { Request, Response, NextFunction } from "express";
 import {
     AuthRequest,
@@ -35,6 +38,14 @@ export class ProductController {
         this.cloudinaryService = new CloudinaryService();
     }
 
+    private async vendorIsPublic(vendorId: number): Promise<boolean> {
+        const rows: unknown[] = await AppDataSource.query(
+            `SELECT 1 FROM vendor WHERE id = $1 AND "isApproved" = TRUE AND "isVerified" = TRUE`,
+            [vendorId],
+        );
+        return rows.length > 0;
+    }
+
     /**
      * @method getProductDetailById
      * @route GET /products/:id
@@ -49,6 +60,14 @@ export class ProductController {
 
         const product =
             await this.productService.getProductDetailsById(productId);
+        // A delisted product (vendor un-approved or being deleted) is a 404 to
+        // shoppers; its vendor and the back office still open it to manage it.
+        if (
+            (await hiddenProductIds(AppDataSource.manager, [productId])).length &&
+            !canSeeHiddenCatalog(optionalCallerFromRequest(req), product.vendorId)
+        ) {
+            throw new NotFoundError("Product");
+        }
         const averageRating =
             await this.reviewService.getReviewsByProductId(productId);
 
@@ -199,6 +218,15 @@ export class ProductController {
     ) {
         const { vendorId } = req.params;
         const { page, limit, search, sortBy, status } = req.query;
+
+        // The public store of a vendor that is not approved does not exist;
+        // the vendor's own dashboard and the back office read it regardless.
+        if (
+            !(await this.vendorIsPublic(Number(vendorId))) &&
+            !canSeeHiddenCatalog(optionalCallerFromRequest(req), Number(vendorId))
+        ) {
+            throw new NotFoundError("Vendor");
+        }
 
         const { products, total } =
             await this.productService.getProductsByVendorId(

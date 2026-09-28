@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authMiddleware, canDeleteReview, canReviewProduct, validateZod } from '../middlewares/auth.middleware';
 import { createReviewSchema, updateReviewSchema } from '../utils/zod_validations/review.zod';
 import { ReviewController } from '../controllers/reviews.controller';
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const reviewController = new ReviewController();
@@ -93,9 +94,9 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  *       - in: path
  *         name: productId
  *         schema:
- *           type: integer
+ *           type: string
  *         required: true
- *         description: ID of the product to get reviews for
+ *         description: The product id, or its URL slug
  *     responses:
  *       200:
  *         description: List of reviews and average rating retrieved successfully
@@ -179,7 +180,7 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  *       500:
  *         description: Internal server error
  */
-router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewController));
+router.get('/:productId', resolveSlugParam("products", "productId"), reviewController.getReviewsByProductId.bind(reviewController));
 
 /**
  * @swagger

@@ -1,3 +1,4 @@
+import { extractCloudinaryPublicId } from '../utils/cloudinary.util';
 import { Repository } from 'typeorm';
 import { Category } from '../entities/category.entity';
 import { User, UserRole } from '../entities/user.entity';
@@ -49,6 +50,10 @@ export class CategoryService {
         skipIfEquals?: string,
     ): Promise<void> {
         if (!url || (skipIfEquals && url === skipIfEquals)) return;
+        // The same asset can come back under a different URL (a resized
+        // delivery URL round-tripped by an edit form). Deleting it would
+        // break the image this record still points at.
+        if (skipIfEquals && extractCloudinaryPublicId(url) === extractCloudinaryPublicId(skipIfEquals)) return;
         const result = await this.cloudinaryService.deleteByUrl(url);
         if (!result.success) {
             console.warn(`[CategoryService] Image cleanup failed for ${url}: ${result.error}`);
@@ -232,8 +237,8 @@ export class CategoryService {
             await this.deleteStoredImage(category.image, imageUrl);
         }
 
-        // Update fields
-        await this.categoryRepository.update(id, {
+        // Update fields. save(), not update(), so a rename also moves the slug.
+        await this.categoryRepository.save(Object.assign(category, {
             name: dto.name ?? category.name,
             image: imageUrl,
             ...(dto.isAgeRestricted === undefined ? {} : {
@@ -241,7 +246,7 @@ export class CategoryService {
                 minimumAge: dto.isAgeRestricted ? (dto.minimumAge ?? 18) : null,
                 restrictionMessage: dto.isAgeRestricted ? (dto.restrictionMessage ?? null) : null,
             }),
-        });
+        }));
 
         // Return updated category
         return this.categoryRepository.findOne({ where: { id }, relations: ['subcategories', 'createdBy'] });

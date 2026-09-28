@@ -496,6 +496,7 @@ router.get(
  */
 router.get(
     "/payment/success",
+    authMiddleware,
     asyncHandler(orderController.handlePaymentSuccess.bind(orderController)),
 );
 
@@ -569,6 +570,7 @@ router.get(
  */
 router.get(
     "/payment/cancel",
+    authMiddleware,
     asyncHandler(orderController.handlePaymentCancel.bind(orderController)),
 );
 
@@ -2553,6 +2555,7 @@ router.delete(
  */
 router.post(
     "/esewa/success",
+    authMiddleware,
     orderController.esewaPaymentSuccess.bind(orderController),
 );
 
@@ -2589,6 +2592,7 @@ router.post(
  */
 router.post(
     "/esewa/fail",
+    authMiddleware,
     orderController.esewaPaymentFailed.bind(orderController),
 );
 

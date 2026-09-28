@@ -12,6 +12,7 @@ import {
 	updateBannerSchema,
 } from "../utils/zod_validations/banner.zod";
 import multer from "multer";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const bannerController = new BannerController();
@@ -283,8 +284,8 @@ router.patch(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: Banner ID
+ *           type: string
+ *         description: The banner id, or its URL slug
  *     responses:
  *       200:
  *         description: Banner details
@@ -323,7 +324,7 @@ router.patch(
  *                   type: string
  *                   example: "Error message describing what went wrong"
  */
-router.get("/:id", bannerController.getBannerById.bind(bannerController));
+router.get("/:id", resolveSlugParam("banners"), bannerController.getBannerById.bind(bannerController));
 
 /**
  * @swagger

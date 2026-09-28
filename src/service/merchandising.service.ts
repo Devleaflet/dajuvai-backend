@@ -21,6 +21,7 @@ export interface NewItem {
 
 interface EntityRow {
     id: number;
+    slug: string;
     name: string;
     image: string | null;
     categoryId?: number;
@@ -32,6 +33,8 @@ interface ItemRowBase {
     entityId: number;
     displayOrder: number;
     visible: boolean;
+    /** The category or subcategory slug, for building its storefront URL. */
+    slug: string;
     name: string;
     image: string | null;
 }
@@ -45,6 +48,7 @@ export interface MegaMenuCategoryRow extends ItemRowBase {
 export interface FlatItemRow extends ItemRowBase {
     entityType: PlacementEntityType;
     categoryId: number | null;
+    categorySlug: string | null;
     categoryName: string | null;
 }
 
@@ -106,7 +110,7 @@ export class MerchandisingService {
         if (ids.length === 0) return new Map();
         if (entityType === "category") {
             const rows = await AppDataSource.getRepository(Category).find({ where: { id: In(ids) } });
-            return new Map(rows.map((r) => [r.id, { id: r.id, name: r.name, image: r.image ?? null }]));
+            return new Map(rows.map((r) => [r.id, { id: r.id, slug: r.slug, name: r.name, image: r.image ?? null }]));
         }
         const rows = await AppDataSource.getRepository(Subcategory).find({
             where: { id: In(ids) },
@@ -115,7 +119,7 @@ export class MerchandisingService {
         return new Map(
             rows.map((r) => [
                 r.id,
-                { id: r.id, name: r.name, image: r.image ?? null, categoryId: r.category?.id },
+                { id: r.id, slug: r.slug, name: r.name, image: r.image ?? null, categoryId: r.category?.id },
             ]),
         );
     }
@@ -153,6 +157,7 @@ export class MerchandisingService {
                         entityId: row.entityId,
                         displayOrder: row.displayOrder,
                         visible: row.visible,
+                        slug: entity.slug,
                         name: entity.name,
                         image: entity.image,
                         subcategories: [] as MegaMenuSubcategoryRow[],
@@ -171,6 +176,7 @@ export class MerchandisingService {
                     entityId: row.entityId,
                     displayOrder: row.displayOrder,
                     visible: row.visible,
+                    slug: entity.slug,
                     name: entity.name,
                     image: entity.image,
                 });
@@ -188,13 +194,15 @@ export class MerchandisingService {
             rows.filter((r) => r.entityType === "subcategory").map((r) => r.entityId),
         );
 
-        const parentNames = new Map<number, string>();
+        const parents = new Map<number, { name: string; slug: string }>();
         for (const entity of subcategoryEntities.values()) {
-            if (entity.categoryId !== undefined && !parentNames.has(entity.categoryId)) {
+            if (entity.categoryId !== undefined && !parents.has(entity.categoryId)) {
                 const parentCategory = await AppDataSource.getRepository(Category).findOneBy({
                     id: entity.categoryId,
                 });
-                if (parentCategory) parentNames.set(entity.categoryId, parentCategory.name);
+                if (parentCategory) {
+                    parents.set(entity.categoryId, { name: parentCategory.name, slug: parentCategory.slug });
+                }
             }
         }
 
@@ -211,10 +219,12 @@ export class MerchandisingService {
                     entityType: row.entityType,
                     displayOrder: row.displayOrder,
                     visible: row.visible,
+                    slug: entity.slug,
                     name: entity.name,
                     image: entity.image,
                     categoryId: entity.categoryId ?? null,
-                    categoryName: entity.categoryId !== undefined ? parentNames.get(entity.categoryId) ?? null : null,
+                    categorySlug: entity.categoryId !== undefined ? parents.get(entity.categoryId)?.slug ?? null : null,
+                    categoryName: entity.categoryId !== undefined ? parents.get(entity.categoryId)?.name ?? null : null,
                 };
             })
             .filter((row): row is FlatItemRow => row !== null);
@@ -362,7 +372,7 @@ export class MerchandisingService {
             if (opts.categoryId) {
                 const scoped = available.filter((sc) => sc.category?.id === opts.categoryId);
                 return {
-                    items: scoped.map((sc) => ({ id: sc.id, name: sc.name, image: sc.image ?? null })),
+                    items: scoped.map((sc) => ({ id: sc.id, slug: sc.slug, name: sc.name, image: sc.image ?? null })),
                 };
             }
 
@@ -376,7 +386,7 @@ export class MerchandisingService {
                         subcategories: [],
                     });
                 }
-                groups.get(sc.category.id)!.subcategories.push({ id: sc.id, name: sc.name, image: sc.image ?? null });
+                groups.get(sc.category.id)!.subcategories.push({ id: sc.id, slug: sc.slug, name: sc.name, image: sc.image ?? null });
             }
             return { groups: [...groups.values()].sort((a, b) => a.categoryName.localeCompare(b.categoryName)) };
         }
@@ -387,7 +397,7 @@ export class MerchandisingService {
         return {
             items: categories
                 .filter((c) => !placed.has(c.id))
-                .map((c) => ({ id: c.id, name: c.name, image: c.image ?? null })),
+                .map((c) => ({ id: c.id, slug: c.slug, name: c.name, image: c.image ?? null })),
         };
     }
 
@@ -440,7 +450,7 @@ export class MerchandisingService {
      * endpoint, whose response shape predates per-subcategory placement.
      */
     async getCategoriesWithSubcategories(slug: string): Promise<
-        { categoryId: number; name: string; image: string | null; subcategories: EntityRow[] }[]
+        { categoryId: number; slug: string; name: string; image: string | null; subcategories: EntityRow[] }[]
     > {
         const placement = await this.assertPlacement(slug);
         const rows = await this.itemRepo.find({
@@ -460,10 +470,12 @@ export class MerchandisingService {
                 if (!category) return null;
                 return {
                     categoryId: category.id,
+                    slug: category.slug,
                     name: category.name,
                     image: category.image ?? null,
                     subcategories: (category.subcategories ?? []).map((sc) => ({
                         id: sc.id,
+                        slug: sc.slug,
                         name: sc.name,
                         image: sc.image ?? null,
                     })),

@@ -250,13 +250,11 @@ export const updateStaffById = async (id: number, data: any) => {
         updateData.password = await bcrypt.hash(password, 10);
     }
 
-    await userDB.update(
-        {
-            id,
-            role: UserRole.STAFF,
-        },
-        updateData,
-    );
+    // save(), not update(), so a name change also moves the slug.
+    const staff = await userDB.findOne({ where: { id, role: UserRole.STAFF } });
+    if (staff) {
+        await userDB.save({ id, ...updateData });
+    }
 
     const updateStaff = await userDB.findOne({
         where: { id },
@@ -307,7 +305,9 @@ export const updateUserService = async (
     }
 
     const { address, ...userData } = data;
-    await userDB.update(id, userData);
+    // save(), not update(), so a name change also moves the slug. Saving a
+    // partial object leaves the (separately updated) address relation alone.
+    await userDB.save({ id, ...userData });
 
     return await userDB.findOne({
         where: { id },

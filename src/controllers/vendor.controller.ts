@@ -1,3 +1,5 @@
+import { canSeeHiddenCatalog, optionalCallerFromRequest } from "../utils/optionalAuth.utils";
+import { randomInt } from "crypto";
 import { Request, Response, NextFunction } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
@@ -51,7 +53,8 @@ import { createAuthAccountConflict } from "../service/auth-account-conflict.poli
  */
 class TokenUtils {
     static generateToken(): string {
-        return Math.floor(100000 + Math.random() * 900000).toString();
+        // A CSPRNG: Math.random is predictable enough to guess reset codes.
+        return randomInt(100000, 1000000).toString();
     }
 
     static async hashToken(token: string): Promise<string> {
@@ -572,15 +575,18 @@ export class VendorController {
         if (vendor.resetTokenExpire < new Date()) {
             throw new GoneError("Reset token expired");
         }
-        const isMatch =
-            vendor.resetToken === token ||
-            (await bcrypt.compare(token, vendor.resetToken));
+        // Only the bcrypt comparison: an equality check also accepted the
+        // stored hash itself as a valid code.
+        const isMatch = await bcrypt.compare(token, vendor.resetToken);
         if (!isMatch) throw new BadRequestError("Invalid reset token");
 
         const hashedPassword = await bcrypt.hash(newPass, 10);
         vendor.password = hashedPassword;
         vendor.resetToken = null;
         vendor.resetTokenExpire = null;
+        // End every session issued before the reset, as a customer reset does:
+        // a reset is what someone does when they think the password leaked.
+        vendor.tokensValidFrom = new Date();
         await this.vendorService.saveVendor(vendor);
 
         res.status(200).json({
@@ -599,10 +605,21 @@ export class VendorController {
 
         const vendor = await this.vendorService.getVendorByIdService(id);
         if (!vendor) throw new NotFoundError("Vendor");
+        const full = await this.vendorService.findVendorById(id);
+        if (
+            !(full?.isApproved && full?.isVerified) &&
+            !canSeeHiddenCatalog(optionalCallerFromRequest(req), id)
+        ) {
+            throw new NotFoundError("Vendor");
+        }
 
+        // Public store page. Payout details (bank account numbers, wallet
+        // ids, QR codes) are the vendor's business, not the shopper's; the
+        // vendor reads its own through /auth/vendor.
+        const { paymentOptions: _payout, ...publicVendor } = vendor;
         res.status(200).json({
             success: true,
-            data: { ...vendor, password: null },
+            data: publicVendor,
         });
     }
 
@@ -686,7 +703,12 @@ export class VendorController {
         );
 
         if (approveVendor.affected && approveVendor.affected > 0) {
-            await sendVendorApprovedEmail(isValid.email, isValid.businessName);
+            // The approval is saved. A mail failure must not report it as failed
+            // (the admin would retry an action that already happened), and the
+            // admin should not wait on SMTP for the answer.
+            void sendVendorApprovedEmail(isValid.email, isValid.businessName).catch((error) =>
+                console.error(`Vendor ${vendorId} approved, but the email failed:`, error),
+            );
             res.status(200).json({ success: true, message: "Vendor approved" });
         } else {
             throw new BadRequestError("Approval failed");
@@ -718,11 +740,12 @@ export class VendorController {
         );
 
         if (rejectVendor.affected && rejectVendor.affected > 0) {
-            await sendVendorRejectedEmail(
+            // Same as approval: the rejection is done; the email is best-effort.
+            void sendVendorRejectedEmail(
                 isValid.email,
                 isValid.businessName,
                 rejectionReason,
-            );
+            ).catch((error) => console.error(`Vendor ${vendorId} rejected, but the email failed:`, error));
             res.status(200).json({ success: true, message: "Vendor rejected" });
         } else {
             throw new BadRequestError("Rejection failed");

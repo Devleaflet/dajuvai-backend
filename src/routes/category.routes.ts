@@ -13,7 +13,7 @@ import {
     validateZod,
     vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
-import { checkPermission } from "../middlewares/permission.middleware";
+import { checkPermission, checkPermissionUnlessVendor } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { multerOptions, uploadMiddleware } from "../config/multer.config";
 import multer from "multer";
@@ -29,6 +29,7 @@ import {
 } from "../utils/zod_validations/subcategory.zod";
 import AppDataSource from "../config/db.config";
 import { responseCache } from "../middlewares/responseCache.middleware";
+import { resolveSlugParam, resolveSlugQuery } from "../middlewares/slug.middleware";
 
 const router = Router();
 const productController = new ProductController(AppDataSource);
@@ -204,8 +205,8 @@ router.get(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: The ID of the category to retrieve
+ *           type: string
+ *         description: The category id, or its URL slug
  *     responses:
  *       200:
  *         description: Category retrieved successfully
@@ -265,6 +266,7 @@ router.get(
 
 router.get(
     "/:id",
+    resolveSlugParam("category"),
     responseCache({ ttlSeconds: 300 }),
     categoryController.getCategoryById.bind(categoryController),
 );
@@ -674,8 +676,8 @@ router.post(
  *         name: categoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the parent category
+ *           type: string
+ *         description: The category id, or its URL slug
  *     responses:
  *       200:
  *         description: A list of subcategories
@@ -729,6 +731,7 @@ router.post(
 
 router.get(
     "/:categoryId/subcategories",
+    resolveSlugParam("category", "categoryId"),
     responseCache({ ttlSeconds: 300 }),
     subcategoryController.getSubcategories.bind(subcategoryController),
 );
@@ -745,14 +748,14 @@ router.get(
  *         name: categoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the parent category
+ *           type: string
+ *         description: The category id, or its URL slug
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the subcategory
+ *           type: string
+ *         description: The subcategory id, or its URL slug
  *     responses:
  *       200:
  *         description: Subcategory found
@@ -806,6 +809,8 @@ router.get(
 
 router.get(
     "/:categoryId/subcategories/:id",
+    resolveSlugParam("category", "categoryId"),
+    resolveSlugParam("subcategory"),
     responseCache({ ttlSeconds: 300 }),
     subcategoryController.getSubcategoryById.bind(subcategoryController),
 );
@@ -1413,6 +1418,16 @@ router.post(
  */
 router.get(
     "/all/products",
+    resolveSlugQuery({
+        categoryId: "category",
+        categoryIds: "category",
+        subcategoryId: "subcategory",
+        subcategoryIds: "subcategory",
+        dealId: "deals",
+        dealIds: "deals",
+        bannerId: "banners",
+        vendorId: "vendor",
+    }),
     responseCache({ ttlSeconds: 60 }),
     productController.getAllProducts.bind(productController),
 );
@@ -1429,20 +1444,20 @@ router.get(
  *         name: categoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the parent category
+ *           type: string
+ *         description: The category id, or its URL slug
  *       - in: path
  *         name: subcategoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the subcategory
+ *           type: string
+ *         description: The subcategory id, or its URL slug
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the product
+ *           type: string
+ *         description: The product id, or its URL slug
  *     responses:
  *       200:
  *         description: Product retrieved successfully
@@ -1546,6 +1561,9 @@ router.get(
 
 router.get(
     "/:categoryId/subcategories/:subcategoryId/products/:id",
+    resolveSlugParam("category", "categoryId"),
+    resolveSlugParam("subcategory", "subcategoryId"),
+    resolveSlugParam("products"),
     responseCache({ ttlSeconds: 60 }),
     productController.getProductById.bind(productController),
 );
@@ -1793,6 +1811,7 @@ router.put(
     "/:categoryId/subcategories/:subcategoryId/products/:id",
     combinedAuthMiddleware,
     isVendorAccountOwnerOrAdminOrStaff,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.CREATE_EDIT),
     productController.updateProduct.bind(productController),
 );
 

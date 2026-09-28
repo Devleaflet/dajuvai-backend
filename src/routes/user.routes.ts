@@ -82,9 +82,11 @@ export const emailLookupLimiter = rateLimit({
  * @swagger
  * /api/auth/admin/signup:
  *   post:
- *     summary: Register a new admin user
- *     description: Creates a new admin account with a secure hashed password and sets a JWT cookie.
+ *     summary: Register a new admin user (admin-only)
+ *     description: An existing admin creates another admin account, verified immediately. The caller's own session is unchanged; no token is issued for the new account.
  *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -135,12 +137,6 @@ export const emailLookupLimiter = rateLimit({
  *                     email:
  *                       type: string
  *                       example: admin@example.com
- *                     role:
- *                       type: string
- *                       example: ADMIN
- *                 token:
- *                   type: string
- *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *       400:
  *         description: Validation error (e.g., invalid email, password mismatch)
  *         content:
@@ -177,9 +173,15 @@ export const emailLookupLimiter = rateLimit({
  *                 message:
  *                   type: string
  *                   example: "Registration service temporarily unavailable"
+ *       401:
+ *         description: No valid token
+ *       403:
+ *         description: Caller is not an admin
  */
 userRouter.post(
     "/admin/signup",
+    authMiddleware,
+    isAdmin,
     userController.adminSignup.bind(userController),
 );
 

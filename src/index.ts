@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import { redactEntitySecrets } from "./utils/response-redaction.utils";
 import passport from "passport";
 import cookieParser from "cookie-parser";
 import swaggerUi from "swagger-ui-express";
@@ -11,7 +12,7 @@ import cors from "cors";
 import { createServer } from "http";
 import { corsOptions } from "./config/cors.config";
 import { initSocket } from "./socket/socket";
-import config from "./config/env.config";
+import config, { missingConfig } from "./config/env.config";
 import { cacheInvalidationMiddleware } from "./middlewares/cacheInvalidation.middleware";
 import logger from "./utils/logger";
 import {
@@ -111,6 +112,10 @@ process.on("unhandledRejection", (reason: unknown) => {
 
 app.use(cors(corsOptions));
 
+// Password hashes, reset tokens and the like never reach a response body,
+// whichever query loaded them. See response-redaction.utils.ts.
+app.set("json replacer", redactEntitySecrets);
+
 // Middleware to parse JSON request bodies
 app.use(express.json());
 
@@ -198,6 +203,15 @@ app.use(notFoundHandler);
 app.use(globalErrorHandler);
 
 const port = config.PORT;
+
+const { required: missingRequired, payments: missingPayments } = missingConfig();
+if (missingRequired.length && config.NODE_ENV === "production") {
+  logger.error(`Refusing to start: missing ${missingRequired.join(", ")}`);
+  process.exit(1);
+}
+if (missingPayments.length) {
+  logger.warn(`Payment settings missing, those gateways will refuse every payment: ${missingPayments.join(", ")}`);
+}
 
 // Initialize database connection
 AppDataSource.initialize()

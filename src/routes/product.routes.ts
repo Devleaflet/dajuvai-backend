@@ -22,6 +22,7 @@ import {
 } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
@@ -102,8 +103,8 @@ productRouter.get(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the product
+ *           type: string
+ *         description: The product id, or its URL slug
  *     responses:
  *       200:
  *         description: Product retrieved successfully
@@ -218,6 +219,7 @@ productRouter.get(
  */
 productRouter.get(
     "/:id",
+    resolveSlugParam("products"),
     responseCache({ ttlSeconds: 60 }),
     productController.getProductDetailById.bind(productController),
 );
@@ -534,6 +536,7 @@ productRouter.delete(
 productRouter.post(
     "/image/upload",
     combinedAuthMiddleware,
+    isAdminOrVendor,
     uploadMiddleware,
     productController.uplaodImage.bind(productController),
 );

@@ -42,6 +42,8 @@ import { AuditLog } from "../entities/auditLog.entity";
 import { CheckoutDraft } from "../entities/checkoutDraft.entity";
 import { ProcessedWebhook } from "../entities/processedWebhook.entity";
 import { RevokedToken } from "../entities/revokedToken.entity";
+import { SlugRedirect } from "../entities/slugRedirect.entity";
+import { SlugSubscriber } from "../subscribers/slug.subscriber";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -128,7 +130,9 @@ const AppDataSource = new DataSource({
         CheckoutDraft,
         ProcessedWebhook,
         RevokedToken,
+        SlugRedirect,
     ],
+    subscribers: [SlugSubscriber],
     migrations: ["src/migrations/*.ts"],
     // Each migration file commits in its own transaction instead of the
     // TypeORM default (all pending migrations sharing one transaction) —

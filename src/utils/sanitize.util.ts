@@ -16,6 +16,7 @@ import { computeCancelledAmount } from "./orderFulfillment.util";
 
 export interface SanitizedVendor {
     id: number;
+    slug: string;
     businessName: string;
     email: string;
     phoneNumber: string;
@@ -34,6 +35,7 @@ export interface SanitizedVendor {
 
 export const sanitizeVendor = (vendor: Vendor): SanitizedVendor => ({
     id: vendor.id,
+    slug: vendor.slug,
     businessName: vendor.businessName,
     email: vendor.email,
     phoneNumber: vendor.phoneNumber,
@@ -54,6 +56,7 @@ export const sanitizeVendor = (vendor: Vendor): SanitizedVendor => ({
 
 export interface SanitizedVendorForAdmin {
     id: number;
+    slug: string;
     businessName: string;
     email: string;
     phoneNumber: string;
@@ -90,6 +93,7 @@ export const sanitizeVendorForAdmin = (
     vendor: Vendor,
 ): SanitizedVendorForAdmin => ({
     id: vendor.id,
+    slug: vendor.slug,
     businessName: vendor.businessName,
     email: vendor.email,
     phoneNumber: vendor.phoneNumber,
@@ -123,6 +127,7 @@ export const sanitizeVendorForAdmin = (
 
 export interface SanitizedUser {
     id: number;
+    slug: string;
     fullName: string;
     name: string;
     username?: string;
@@ -149,6 +154,7 @@ export const sanitizeUser = (user: User): SanitizedUser => {
     const fullName = user.fullName || user.username || "Unknown Customer";
     return {
         id: user.id,
+        slug: user.slug,
         fullName: user.fullName,
         name: fullName,
         username: user.username || undefined,
@@ -176,6 +182,7 @@ export const sanitizeUser = (user: User): SanitizedUser => {
 export const sanitizeAdmin = (user: User) => {
     return {
         id: user.id,
+        slug: user.slug,
         fullName: user.fullName,
         username: user.username,
         email: user.email,
@@ -220,6 +227,7 @@ export interface SanitizedOrderItem {
     };
     product: {
         id: number;
+        slug: string;
         name: string;
         productImages: string[];
         finalPrice: number | null;
@@ -312,6 +320,7 @@ export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => {
         product: item.product
             ? {
                   id: item.product.id,
+                  slug: item.product.slug,
                   name: item.product.name,
                   productImages: item.product.productImages ?? [],
                   finalPrice: item.product.finalPrice ?? null,
@@ -452,7 +461,7 @@ export interface SanitizedOrderListItem {
     id: number;
     quantity: number;
     vendorId: number | null;
-    vendor: { id: number; businessName: string | null } | null;
+    vendor: { id: number; slug: string; businessName: string | null } | null;
 }
 
 export const sanitizeOrderListItem = (
@@ -462,7 +471,7 @@ export const sanitizeOrderListItem = (
     quantity: item.quantity,
     vendorId: item.vendorId ?? null,
     vendor: item.vendor
-        ? { id: item.vendor.id, businessName: item.vendor.businessName ?? null }
+        ? { id: item.vendor.id, slug: item.vendor.slug, businessName: item.vendor.businessName ?? null }
         : null,
 });
 

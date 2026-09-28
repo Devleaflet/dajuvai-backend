@@ -1,3 +1,4 @@
+import { extractCloudinaryPublicId } from "../utils/cloudinary.util";
 import { Repository } from "typeorm";
 import { Subcategory } from "../entities/subcategory.entity";
 import { Category } from "../entities/category.entity";
@@ -61,6 +62,10 @@ export class SubcategoryService {
         skipIfEquals?: string,
     ): Promise<void> {
         if (!url || (skipIfEquals && url === skipIfEquals)) return;
+        // The same asset can come back under a different URL (a resized
+        // delivery URL round-tripped by an edit form). Deleting it would
+        // break the image this record still points at.
+        if (skipIfEquals && extractCloudinaryPublicId(url) === extractCloudinaryPublicId(skipIfEquals)) return;
         const result = await this.cloudinaryService.deleteByUrl(url);
         if (!result.success) {
             console.warn(
@@ -263,11 +268,11 @@ export class SubcategoryService {
             await this.deleteStoredImage(subcategory.image, imageUrl);
         }
 
-        // Update subcategory data
-        await this.subcategoryRepository.update(id, {
+        // Update subcategory data. save(), not update(), so a rename also moves the slug.
+        await this.subcategoryRepository.save(Object.assign(subcategory, {
             name: dto.name ?? subcategory.name,
             image: imageUrl,
-        });
+        }));
 
         // Fetch and return updated subcategory with relations
         const updatedSubcategory = await this.subcategoryRepository.findOne({

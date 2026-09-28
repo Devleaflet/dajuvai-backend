@@ -199,7 +199,7 @@ export class WishlistService {
                 relations: ["items", "items.product", "items.variant"],
             });
             if (!wishlist) {
-                return wishlistRepository.create({ userId, items: [] });
+                throw new APIError(404, "Wishlist item not found");
             }
 
             // Find the item to remove
@@ -207,7 +207,9 @@ export class WishlistService {
                 (item) => item.id === wishlistItemId,
             );
             if (!wishlistItem) {
-                return wishlist;
+                // Not in this customer's wishlist: say so, rather than a 200
+                // that reads as "removed" when nothing happened.
+                throw new APIError(404, "Wishlist item not found");
             }
 
             // Delete the item

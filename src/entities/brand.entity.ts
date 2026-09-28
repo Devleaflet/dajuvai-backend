@@ -5,6 +5,7 @@ import {
     OneToMany,
     CreateDateColumn,
     UpdateDateColumn,
+    Index,
 } from "typeorm";
 import { Product } from "./product.entity";
 
@@ -12,6 +13,11 @@ import { Product } from "./product.entity";
 export class Brand {
     @PrimaryGeneratedColumn()
     id: number;
+
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_brands_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
 
     @Column({ unique: true })
     name: string;

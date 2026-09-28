@@ -32,6 +32,11 @@ export class User {
     @PrimaryGeneratedColumn()
     id: number;
 
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_user_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
+
     @Column({ nullable: true })
     fullName: string;
 

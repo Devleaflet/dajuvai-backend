@@ -113,10 +113,13 @@ export const resetPasswordSchema = z
   });
 
 /**
- * Schema to update vendor info.
- * Fields optional except for id which must be a positive integer.
+ * Schema to update vendor info. All fields optional.
+ *
+ * Password and email are not profile fields: this update is written straight
+ * to the row, so a password here was stored in plain text (breaking login),
+ * and an email here skipped verification. Both have their own flows.
  */
-export const updateVendorSchema = vendorSignupSchema.partial();
+export const updateVendorSchema = vendorSignupSchema.omit({ password: true, email: true }).partial();
 
 // -------------------- v2 vendor regiter scehma - Add payment options for vendors ------------------------------------------------------
 

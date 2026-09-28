@@ -80,7 +80,7 @@ export class NpsPaymentService {
             if (rawStatus === "success") {
                 status = "Success";
             } else if (
-                ["failed", "failure", "cancelled", "canceled", "declined"].includes(
+                ["fail", "failed", "failure", "cancelled", "canceled", "declined"].includes(
                     rawStatus,
                 )
             ) {

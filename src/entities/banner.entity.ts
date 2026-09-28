@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToMany, JoinTable } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, ManyToOne, JoinColumn, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToMany, JoinTable, Index } from 'typeorm';
 import { User } from './user.entity';
 import { Product } from './product.entity';
 import { Category } from './category.entity';
@@ -30,6 +30,11 @@ export enum ProductSource {
 export class Banner {
     @PrimaryGeneratedColumn()
     id: number;
+
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_banners_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
 
     @Column({ unique: true })
     name: string;

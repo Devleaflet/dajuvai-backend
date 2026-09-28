@@ -7,22 +7,23 @@ import config from '../config/env.config';
 export class PaymentService {
     
     // Base URL for the Nepal Payment Gateway sandbox environment
-    private baseUrl = config.NPG_BASE_URL || 'https://merchantsandbox.nepalpayment.com/api/merchant/v2';
+    private baseUrl = config.NPG_BASE_URL;
 
     // Merchant ID from environment variables or fallback default
-    private merchantId = config.NPS_MERCHANT_ID || '7468';
+    private merchantId = config.NPS_MERCHANT_ID;
 
     // API username for authenticating with Nepal Payment Gateway
-    private apiUsername = config.NPS_API_USERNAME || 'leaflet';
+    private apiUsername = config.NPS_API_USERNAME;
 
     // API password for authenticating with Nepal Payment Gateway
-    private apiPassword = config.NPS_API_PASSWORD || 'Leaflet@123';
+    private apiPassword = config.NPS_API_PASSWORD;
 
-    // Secret key used for generating secure hashes or signatures
-    private secretKey = config.NPS_SECRET_KEY || 'Test@123Test';
+    // Secret key used for generating secure hashes or signatures. Deliberately
+    // no fallback: without a configured secret every signature is rejected.
+    private secretKey = config.NPS_SECRET_KEY;
 
     // Access code for identifying the merchant during API requests
-    private accessCode = config.NPS_ACCESS_CODE || 'LFD100';
+    private accessCode = config.NPS_ACCESS_CODE;
 
 
 
@@ -115,6 +116,10 @@ export class PaymentService {
      * @access Public
      */
     async verifyPayment(transactionId: string, orderId: string, responseData: any): Promise<boolean> {
+        if (!this.secretKey) {
+            throw new APIError(503, 'Payment verification is not configured');
+        }
+
         // Prepare payload for signature verification, including essential payment details
         const payload = {
             merchantId: this.merchantId,
@@ -130,7 +135,9 @@ export class PaymentService {
         const signature = this.generateSignature(payload);
 
         // Verify that the signature matches the one received in responseData
-        if (signature !== responseData.signature) {
+        const received = Buffer.from(String(responseData.signature ?? ''));
+        const expected = Buffer.from(signature);
+        if (received.length !== expected.length || !crypto.timingSafeEqual(received, expected)) {
             // Throw error if signature is invalid to prevent tampering
             throw new APIError(400, 'Invalid payment signature');
         }

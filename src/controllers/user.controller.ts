@@ -1,3 +1,4 @@
+import { randomInt } from "crypto";
 import { Request, Response } from "express";
 import { auditService } from "../service/audit.service";
 import { AuditActorType } from "../entities/auditLog.entity";
@@ -91,7 +92,8 @@ class TokenUtils {
      * @returns {string} A randomly generated 6-digit token as a string.
      */
     static generateToken(): string {
-        return Math.floor(100000 + Math.random() * 900000).toString();
+        // A CSPRNG: Math.random is predictable enough to guess reset codes.
+        return randomInt(100000, 1000000).toString();
     }
 
     /**
@@ -128,11 +130,11 @@ export class UserController {
     /**
      * @method adminSignup
      * @route POST /auth/admin/signup
-     * @description Registers a new admin user with immediate verification and JWT issuance.
+     * @description Lets an existing admin register another admin account, verified immediately.
      * @param {AuthRequest<{}, {}, ISignupRequest>} req - HTTP request with signup data and authentication context.
-     * @param {Response} res - HTTP response object used to return status, token, and user data.
-     * @returns {Promise<void>} Responds with the created user object and authentication token in a cookie.
-     * @access Public (Admin Signup)
+     * @param {Response} res - HTTP response object used to return status and user data.
+     * @returns {Promise<void>} Responds with the created user object.
+     * @access Admin only
      */
     async adminSignup(
         req: AuthRequest<{}, {}, ISignupRequest>,
@@ -172,27 +174,9 @@ export class UserController {
             role: UserRole.ADMIN,
         });
 
-        //  Generate JWT and set cookie
-        const token = jwt.sign(
-            {
-                id: user.id,
-                email: user.email,
-                username: user.username,
-                role: user.role,
-            },
-            this.jwtSecret,
-            { expiresIn: "2h" },
-        );
-
-        // Set httpOnly cookie with token
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 2 * 60 * 60 * 1000,
-        });
-
-        // Send successful response with user data and token
+        // No token or cookie: the caller is an admin creating a colleague, and
+        // signing the response in as the new account would silently switch the
+        // caller's own session to it.
         res.status(201).json({
             success: true,
             user: {
@@ -200,7 +184,6 @@ export class UserController {
                 username: user.username,
                 email: user.email,
             },
-            token,
         });
     }
 
@@ -600,11 +583,16 @@ export class UserController {
                 isVerified: true,
             });
 
-            //  Send email with raw verification code
+            // Send email with raw verification code. The account above is
+            // already created and usable, so a mail outage must not turn this
+            // into a 503 — the shopper would retry and be told the email is
+            // already registered.
             await sendVerificationEmail(
                 email,
                 "Email Verification Code",
                 verificationToken,
+            ).catch((mailError) =>
+                console.error("Signup verification email failed:", mailError),
             );
 
             //  Generate JWT and set cookie
@@ -1425,7 +1413,11 @@ export class UserController {
             if (isVendor) {
                 const vendorEmail = (entity as Vendor).email;
                 const businessName = (entity as Vendor).businessName;
-                await sendVendorApplicationEmail(vendorEmail, businessName);
+                // The account is already verified and saved; the receipt email is
+                // best-effort and must not turn a success into an error.
+                void sendVendorApplicationEmail(vendorEmail, businessName).catch((error) =>
+                    console.error("Vendor application email failed:", error),
+                );
             }
 
             // Respond with 200 OK and success message
@@ -1577,9 +1569,9 @@ export class UserController {
             if (user.resetTokenExpire < new Date()) {
                 throw new APIError(410, "Reset token expired");
             }
-            const isMatch =
-                user.resetToken === token ||
-                (await bcrypt.compare(token, user.resetToken));
+            // Only the bcrypt comparison: an equality check also accepted the
+            // stored hash itself as a valid code.
+            const isMatch = await bcrypt.compare(token, user.resetToken);
             if (!isMatch) {
                 throw new APIError(400, "Invalid reset token");
             }
@@ -1740,8 +1732,6 @@ export class UserController {
                 return;
             }
 
-            console.log(req.body);
-
             // Validate and parse user ID from URL parameters
             const id = parseInt(req.params.id, 10);
             if (isNaN(id)) {
@@ -1751,12 +1741,22 @@ export class UserController {
             const userExists = await findUserById(id);
 
             if (!userExists) {
-                throw new APIError(404, "USer does not existsf");
+                throw new APIError(404, "User does not exist");
             }
 
             // Enforce role update restrictions: only admins can change roles
             if (parsed.data.role && req.user?.role !== UserRole.ADMIN) {
                 throw new APIError(403, "Only admins can change roles");
+            }
+
+            // The email is the login identity. Customers change it through the
+            // verified change-email flow; only an admin may set it directly.
+            if (
+                parsed.data.email &&
+                parsed.data.email !== userExists.email &&
+                req.user?.role !== UserRole.ADMIN
+            ) {
+                throw new APIError(403, "Use the change-email flow to change your email");
             }
 
             // Proceed to update user data with validated input
@@ -1817,8 +1817,6 @@ export class UserController {
         res: Response,
     ): Promise<void> {
         try {
-            console.log(req.user);
-            console.log(req.body);
             // Validate request body using Zod schema
             const parsed = changeEmailSchema.safeParse(req.body);
             if (!parsed.success) {
@@ -1840,13 +1838,16 @@ export class UserController {
             const existingUser = await findUserByEmail(newEmail);
             const existingVendor = await findVendorByEmail(newEmail);
 
-            const isVendor = vendor;
-
-            const entity = isVendor ? existingVendor : existingUser;
+            const isVendor = Boolean(vendor);
 
             if (existingUser || existingVendor) {
                 throw new APIError(409, "Email already in use.");
             }
+
+            // The account being changed is the caller's own. (This used to be
+            // the account found by the *new* email, which the 409 above
+            // guarantees is null, so every request failed with a 503.)
+            const entity = isVendor ? vendor : user;
 
             // Generate verification token and JWT for email change
             const verificationToken = TokenUtils.generateToken();

@@ -214,9 +214,10 @@ export const swaggerSchemas = {
   },
   SearchProductResult: {
     type: "object",
-    required: ["id", "name", "effectivePrice", "originalPrice", "inStock"],
+    required: ["id", "slug", "name", "effectivePrice", "originalPrice", "inStock"],
     properties: {
       id: { type: "integer", example: 12 },
+      slug: { type: "string", example: "glow-face-wash", description: "URL identifier; accepted wherever the id is" },
       name: { type: "string", example: "Glow Face Wash" },
       thumbnailUrl: { type: "string", nullable: true, format: "uri" },
       effectivePrice: { type: "number", example: 450 },
@@ -239,12 +240,13 @@ export const swaggerSchemas = {
   },
   SearchSuggestionProduct: {
     type: "object",
-    required: ["id", "name", "effectivePrice", "originalPrice", "inStock"],
+    required: ["id", "slug", "name", "effectivePrice", "originalPrice", "inStock"],
     description:
       "Compact product row for autocomplete. Deliberately omits averageRating and totalReviews: both cost a grouped scan over every review and order item, which is not affordable on a keystroke. Use /api/search/catalog for the full projection.",
     properties: {
       id: { type: "integer", example: 12 },
       name: { type: "string", example: "Glow Face Wash" },
+      slug: { type: "string", example: "glow-face-wash" },
       thumbnailUrl: { type: "string", nullable: true, format: "uri" },
       effectivePrice: { type: "number", example: 450 },
       originalPrice: { type: "number", example: 500 },
@@ -261,6 +263,7 @@ export const swaggerSchemas = {
         description: "Taxonomy id for categories and subcategories; the brand name for brands, which are a product column rather than a table.",
         example: 7,
       },
+      slug: { type: "string", example: "beauty-and-fragrance", description: "Categories and subcategories only" },
       label: { type: "string", example: "Beauty & Fragrance" },
       count: { type: "integer", example: 32 },
     },
@@ -277,9 +280,10 @@ export const swaggerSchemas = {
   },
   TaxonomySuggestion: {
     type: "object",
-    required: ["id", "name"],
+    required: ["id", "slug", "name"],
     properties: {
       id: { type: "integer", example: 7 },
+      slug: { type: "string", example: "cosmetics-and-beauty" },
       name: { type: "string", example: "Cosmetics & Beauty" },
       image: { type: "string", nullable: true, format: "uri" },
     },

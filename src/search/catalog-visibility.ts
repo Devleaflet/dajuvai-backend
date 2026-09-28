@@ -1,4 +1,5 @@
-import type { SelectQueryBuilder } from "typeorm";
+import type { EntityManager, SelectQueryBuilder } from "typeorm";
+import { Product } from "../entities/product.entity";
 
 /**
  * What makes a product visible to the public catalogue.
@@ -66,4 +67,24 @@ export function publicCatalogVisibilityWhere(productAlias = "product"): string {
     AND ${VENDOR_ALIAS}.isApproved = TRUE
     AND ${VENDOR_ALIAS}.isVerified = TRUE
   )`;
+}
+
+/**
+ * The ids among `productIds` that the public may not see — and therefore
+ * may not buy. A product listed yesterday can be hidden today (its vendor
+ * un-approved, or deleted): the cart and checkout ask this before selling it.
+ * Ids that do not exist at all are not returned; callers already 404 those.
+ */
+export async function hiddenProductIds(manager: EntityManager, productIds: number[]): Promise<number[]> {
+  if (!productIds.length) return [];
+  const rows = await manager
+    .getRepository(Product)
+    .createQueryBuilder("product")
+    .withDeleted()
+    .leftJoin("product.vendor", VENDOR_ALIAS)
+    .select("product.id", "id")
+    .where("product.id IN (:...productIds)", { productIds })
+    .andWhere(`NOT COALESCE(${publicCatalogVisibilityWhere()}, FALSE)`)
+    .getRawMany<{ id: number }>();
+  return rows.map((row) => Number(row.id));
 }

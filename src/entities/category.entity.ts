@@ -1,4 +1,4 @@
-import { Entity, PrimaryGeneratedColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn, ManyToOne } from 'typeorm';
+import { Entity, PrimaryGeneratedColumn, Column, OneToMany, CreateDateColumn, UpdateDateColumn, ManyToOne, Index } from 'typeorm';
 import { User } from './user.entity';
 import { Subcategory } from './subcategory.entity';
 
@@ -7,6 +7,11 @@ import { Subcategory } from './subcategory.entity';
 export class Category {
     @PrimaryGeneratedColumn()
     id: number;
+
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_category_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
 
     @Column({ unique: true })
     name: string;

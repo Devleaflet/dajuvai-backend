@@ -49,19 +49,23 @@ const config = {
   CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || "",
   CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || "",
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || "",
-  NPS_MERCHANT_ID: process.env.NPS_MERCHANT_ID || "7468",
-  NPS_API_USERNAME: process.env.NPS_API_USERNAME || "leaflet",
-  NPS_API_PASSWORD: process.env.NPS_API_PASSWORD || "Leaflet@123",
-  NPS_SECRET_KEY: process.env.NPS_SECRET_KEY || "Test@123Test",
-  NPS_ACCESS_CODE: process.env.NPS_ACCESS_CODE || "LFD100",
+  // Payment credentials come from the environment only. A credential in
+  // source is readable by everyone with repository access, forever, and a
+  // missing one should fail loudly rather than fall back to a shared value.
+  NPS_MERCHANT_ID: process.env.NPS_MERCHANT_ID || "",
+  NPS_API_USERNAME: process.env.NPS_API_USERNAME || "",
+  NPS_API_PASSWORD: process.env.NPS_API_PASSWORD || "",
+  // No fallback: a secret that lives in source can sign a forged "paid" callback.
+  NPS_SECRET_KEY: process.env.NPS_SECRET_KEY || "",
+  NPS_ACCESS_CODE: process.env.NPS_ACCESS_CODE || "",
   NPS_GATEWAY_URL:
     process.env.NPS_GATEWAY_URL || "https://gateway.nepalpayment.com/",
   NPG_BASE_URL: process.env.NPG_BASE_URL || "",
-  NPX_MERCHANT_ID: process.env.NPX_MERCHANT_ID || "545",
-  NPX_MERCHANT_NAME: process.env.NPX_MERCHANT_NAME || "dajuvaiapi",
-  NPX_API_USERNAME: process.env.NPX_API_USERNAME || "dajuvaiapi",
-  NPX_API_PASSWORD: process.env.NPX_API_PASSWORD || "W#8rXp2!kL9z@Vm",
-  NPX_SECRET_KEY: process.env.NPX_SECRET_KEY || "gT7$yMn#45v!QbA",
+  NPX_MERCHANT_ID: process.env.NPX_MERCHANT_ID || "",
+  NPX_MERCHANT_NAME: process.env.NPX_MERCHANT_NAME || "",
+  NPX_API_USERNAME: process.env.NPX_API_USERNAME || "",
+  NPX_API_PASSWORD: process.env.NPX_API_PASSWORD || "",
+  NPX_SECRET_KEY: process.env.NPX_SECRET_KEY || "",
   NPX_BASE_URL:
     process.env.NPX_BASE_URL || "https://apigateway.nepalpayment.com",
 
@@ -72,5 +76,24 @@ const config = {
     pageLimit: parseNumber(process.env.PAGE_LIMIT, 20),
   },
 };
+
+/**
+ * Names of required settings that are empty. Checked once at startup: the
+ * server refuses to boot in production without the secrets that sign
+ * sessions, and says which payment integrations are switched off.
+ */
+export const missingConfig = () => ({
+    required: (["DATABASE_URL", "JWT_SECRET", "JWT_REFRESH_SECRET"] as const).filter((key) => !config[key]),
+    payments: ([
+        "NPX_MERCHANT_ID",
+        "NPX_MERCHANT_NAME",
+        "NPX_API_USERNAME",
+        "NPX_API_PASSWORD",
+        "NPX_SECRET_KEY",
+        "ESEWA_MERCHANT",
+        "SECRET_KEY",
+        "ESEWA_PAYMENT_URL",
+    ] as const).filter((key) => !config[key]),
+});
 
 export default config;

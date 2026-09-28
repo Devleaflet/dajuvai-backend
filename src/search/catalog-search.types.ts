@@ -52,6 +52,7 @@ export interface ResolvedSearchFilters {
 
 export interface TaxonomySuggestion {
   id: number;
+  slug: string;
   name: string;
   image?: string | null;
 }
@@ -63,6 +64,7 @@ export interface BrandSuggestion {
 
 export interface ProductSearchResult {
   id: number;
+  slug: string;
   name: string;
   thumbnailUrl: string | null;
   effectivePrice: number;
@@ -92,6 +94,7 @@ export interface ProductSearchResult {
  */
 export interface SuggestionProductResult {
   id: number;
+  slug: string;
   name: string;
   thumbnailUrl: string | null;
   effectivePrice: number;
@@ -109,6 +112,8 @@ export interface SuggestionProductResult {
  */
 export interface CatalogFacetValue {
   id: number | string;
+  /** Categories and subcategories only; brands have no table, so no slug. */
+  slug?: string;
   label: string;
   count: number;
 }

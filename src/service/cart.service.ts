@@ -1,3 +1,4 @@
+import { hiddenProductIds } from "../search/catalog-visibility";
 import { Repository } from 'typeorm';
 import { CartItem } from '../entities/cartItem.entity';
 import { Cart } from '../entities/cart.entity';
@@ -128,6 +129,11 @@ export class CartService {
 
     async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
         const { productId, quantity, variantId } = data;
+
+        // A product whose vendor is no longer approved is off the shelf.
+        if ((await hiddenProductIds(AppDataSource.manager, [productId])).length) {
+            throw new APIError(404, 'Product not found');
+        }
 
         // Validate product
         const product = await this.productRepository.findOne({

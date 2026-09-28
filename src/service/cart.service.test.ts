@@ -12,6 +12,12 @@ vi.mock("./notification.service", () => ({
     },
 }));
 
+const { hiddenProductIds } = vi.hoisted(() => ({
+    hiddenProductIds: vi.fn().mockResolvedValue([] as number[]),
+}));
+
+vi.mock("../search/catalog-visibility", () => ({ hiddenProductIds }));
+
 const makeCartService = () => {
     const product = {
         id: 123,
@@ -86,6 +92,16 @@ describe("CartService.addToCart notification source", () => {
         });
 
         expect(notifyAddToCart).toHaveBeenCalledOnce();
+    });
+
+    it("refuses a product the public catalogue no longer shows", async () => {
+        const { service, cartItemRepository } = makeCartService();
+        hiddenProductIds.mockResolvedValueOnce([123]);
+
+        await expect(service.addToCart(7, { productId: 123, quantity: 1 })).rejects.toMatchObject({
+            status: 404,
+        });
+        expect(cartItemRepository.save).not.toHaveBeenCalled();
     });
 });
 

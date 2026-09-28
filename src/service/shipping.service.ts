@@ -2,6 +2,7 @@ import { Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { District } from "../entities/district.entity";
 import { APIError } from "../utils/ApiError.utils";
+import { roundMoney } from "../utils/pricing.utils";
 
 export const SAME_DISTRICT_FEE = 100;
 export const CROSS_DISTRICT_FEE = 200;
@@ -50,8 +51,8 @@ export function calculateGrandTotal(input: {
   discountTotal: number;
   taxTotal: number;
 }): number {
-  return (
-    input.merchandiseSubtotal - input.discountTotal + input.shippingTotal + input.taxTotal
+  return roundMoney(
+    input.merchandiseSubtotal - input.discountTotal + input.shippingTotal + input.taxTotal,
   );
 }
 

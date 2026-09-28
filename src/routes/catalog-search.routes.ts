@@ -4,6 +4,7 @@ import AppDataSource from "../config/db.config";
 import { CatalogSearchController } from "../controllers/catalog-search.controller";
 import { SearchService } from "../service/search.service";
 import { asyncHandler } from "../utils/asyncHandler.utils";
+import { resolveSlugQuery } from "../middlewares/slug.middleware";
 
 const router = Router();
 const controller = new CatalogSearchController(new SearchService(AppDataSource));
@@ -101,6 +102,16 @@ const catalogSearchRateLimiter = rateLimit({
  *       400:
  *         description: Invalid query
  */
-router.get("/catalog", catalogSearchRateLimiter, asyncHandler(controller.search.bind(controller)));
+router.get(
+    "/catalog",
+    catalogSearchRateLimiter,
+    resolveSlugQuery({
+        categoryIds: "category",
+        subcategoryIds: "subcategory",
+        dealIds: "deals",
+        bannerId: "banners",
+    }),
+    asyncHandler(controller.search.bind(controller)),
+);
 
 export default router;

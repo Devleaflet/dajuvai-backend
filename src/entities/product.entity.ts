@@ -8,6 +8,7 @@ import {
   JoinColumn,
   CreateDateColumn,
   UpdateDateColumn,
+    Index,
 } from "typeorm";
 import { Subcategory } from "./subcategory.entity";
 import { Vendor } from "./vendor.entity";
@@ -23,6 +24,11 @@ import { Variant } from "./variant.entity";
 export class Product {
   @PrimaryGeneratedColumn()
   id: number;
+
+  /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+  @Index("UQ_products_slug", { unique: true })
+  @Column({ type: "varchar", length: 128 })
+  slug: string;
 
   @Column()
   name: string;

@@ -35,6 +35,7 @@ import { resolveProductAgeRestriction } from "./age-restriction.service";
 
 type ProductSuggestionRow = {
   id: string;
+  slug: string;
   name: string;
   thumbnail_url: string | null;
   effective_price: string;
@@ -291,6 +292,7 @@ export class SearchService {
         this.buildProductSearchParameters(searchCondition),
       )
       .select("product.id", "id")
+      .addSelect("product.slug", "slug")
       .addSelect("product.name", "name")
       .addSelect('COALESCE("product"."productImages"[1], MIN("variants"."variantImages"[1]))', "thumbnail_url")
       .addSelect('COALESCE(NULLIF("product"."finalPrice", 0), MIN(NULLIF("variants"."finalPrice", 0)), NULLIF("product"."basePrice", 0), MIN(NULLIF("variants"."basePrice", 0)), 0)', "effective_price")
@@ -317,6 +319,7 @@ export class SearchService {
 
     return rows.map((row) => ({
       id: Number(row.id),
+      slug: row.slug,
       name: row.name,
       thumbnailUrl: row.thumbnail_url,
       effectivePrice: Number(row.effective_price),
@@ -365,8 +368,10 @@ export class SearchService {
         this.buildProductSearchParameters(searchCondition),
       )
       .select("category.id", "category_id")
+      .addSelect("category.slug", "category_slug")
       .addSelect("category.name", "category_name")
       .addSelect("subcategory.id", "subcategory_id")
+      .addSelect("subcategory.slug", "subcategory_slug")
       .addSelect("subcategory.name", "subcategory_name")
       .addSelect("product.brand", "brand")
       .addSelect("COUNT(DISTINCT product.id)", "n")
@@ -377,8 +382,10 @@ export class SearchService {
       .addGroupBy("product.brand")
       .getRawMany<{
         category_id: number | null;
+        category_slug: string | null;
         category_name: string | null;
         subcategory_id: number | null;
+        subcategory_slug: string | null;
         subcategory_name: string | null;
         brand: string | null;
         n: string;
@@ -393,19 +400,20 @@ export class SearchService {
       key: K | null,
       label: string | null,
       count: number,
+      slug?: string | null,
     ) => {
       if (key === null || !label) return;
       const existing = into.get(key);
       // Summed rather than assigned: one category appears once per
       // (subcategory, brand) combination in the grouped rows.
       if (existing) existing.count += count;
-      else into.set(key, { id: key as never, label, count });
+      else into.set(key, { id: key as never, label, count, ...(slug ? { slug } : {}) });
     };
 
     for (const row of rows) {
       const count = Number(row.n);
-      add(categories, row.category_id, row.category_name, count);
-      add(subcategories, row.subcategory_id, row.subcategory_name, count);
+      add(categories, row.category_id, row.category_name, count, row.category_slug);
+      add(subcategories, row.subcategory_id, row.subcategory_name, count, row.subcategory_slug);
       add(brands, row.brand?.trim() || null, row.brand?.trim() || null, count);
     }
 
@@ -465,6 +473,7 @@ export class SearchService {
         this.buildProductSearchParameters(searchCondition, resolvedFilters),
       )
       .select("product.id", "id")
+      .addSelect("product.slug", "slug")
       .addSelect("product.name", "name")
       .addSelect('COALESCE("product"."productImages"[1], MIN("variants"."variantImages"[1]))', "thumbnail_url")
       .addSelect('COALESCE(NULLIF("product"."finalPrice", 0), MIN(NULLIF("variants"."finalPrice", 0)), NULLIF("product"."basePrice", 0), MIN(NULLIF("variants"."basePrice", 0)), 0)', "effective_price")
@@ -548,6 +557,7 @@ export class SearchService {
 
     return rows.map((row) => ({
       id: Number(row.id),
+      slug: row.slug,
       name: row.name,
       thumbnailUrl: row.thumbnail_url,
       effectivePrice: Number(row.effective_price),
@@ -747,16 +757,18 @@ export class SearchService {
         },
       )
       .select("category.id", "id")
+      .addSelect("category.slug", "slug")
       .addSelect("category.name", "name")
       .addSelect("category.image", "image")
       .orderBy("CASE WHEN LOWER(category.name) = :exact THEN 0 WHEN LOWER(category.name) LIKE :prefix THEN 1 ELSE 2 END", "ASC")
       .addOrderBy("category.name", "ASC")
       .setParameters({ exact: query, prefix: `${query}%` })
       .limit(limit)
-      .getRawMany<{ id: string; name: string; image: string | null }>();
+      .getRawMany<{ id: string; slug: string; name: string; image: string | null }>();
 
     return rows.map((row) => ({
       id: Number(row.id),
+      slug: row.slug,
       name: row.name,
       image: row.image,
     }));
@@ -788,6 +800,7 @@ export class SearchService {
         },
       )
       .select("subcategory.id", "id")
+      .addSelect("subcategory.slug", "slug")
       .addSelect("subcategory.name", "name")
       .addSelect("subcategory.image", "image")
       .orderBy(
@@ -797,10 +810,11 @@ export class SearchService {
       .addOrderBy("subcategory.name", "ASC")
       .setParameters({ exact: query, prefix: `${query}%` })
       .limit(limit)
-      .getRawMany<{ id: string; name: string; image: string | null }>();
+      .getRawMany<{ id: string; slug: string; name: string; image: string | null }>();
 
     return rows.map((row) => ({
       id: Number(row.id),
+      slug: row.slug,
       name: row.name,
       image: row.image,
     }));

@@ -76,6 +76,7 @@
     "backfill:legacy-pricing": "ts-node src/scripts/backfill-legacy-pricing.ts",
     "check:routes": "ts-node src/scripts/routeInventory.ts",
     "validate:swagger": "ts-node src/scripts/validate-swagger.ts",
+    "check:slugs": "ts-node src/scripts/check-slugs.ts",
     "dev": "ts-node src/index.ts",
     "start": "nodemon src/index.ts",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js --dataSource src/data-source.ts",

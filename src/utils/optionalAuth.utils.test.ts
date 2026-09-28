@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 import { describe, expect, it } from "vitest";
 
 import config from "../config/env.config";
-import { optionalUserIdFromRequest } from "./optionalAuth.utils";
+import { canSeeHiddenCatalog, optionalCallerFromRequest, optionalUserIdFromRequest } from "./optionalAuth.utils";
 
 /**
  * This helper guards the payment routes, which cannot demand a token yet — the
@@ -58,5 +58,25 @@ describe("optionalUserIdFromRequest", () => {
         expect(
             optionalUserIdFromRequest(request({ authorization: `Bearer ${sign({ email: "x" })}` })),
         ).toBeNull();
+    });
+});
+
+describe("canSeeHiddenCatalog", () => {
+    const vendorToken = sign({ id: 5, email: "v@example.com", businessName: "Shop" });
+    const adminToken = sign({ id: 5, email: "a@example.com", role: "admin" });
+    const userToken = sign({ id: 5, email: "u@example.com", role: "user" });
+    const caller = (token: string) => optionalCallerFromRequest(request({ authorization: `Bearer ${token}` }));
+
+    it("lets the back office and the owning vendor see a hidden listing", () => {
+        expect(canSeeHiddenCatalog(caller(adminToken), 9)).toBe(true);
+        expect(canSeeHiddenCatalog(caller(vendorToken), 5)).toBe(true);
+    });
+
+    it("keeps it from shoppers, other vendors and forged tokens", () => {
+        expect(canSeeHiddenCatalog(caller(userToken), 5)).toBe(false);
+        expect(canSeeHiddenCatalog(caller(vendorToken), 9)).toBe(false);
+        expect(canSeeHiddenCatalog(null, 5)).toBe(false);
+        const forged = jwt.sign({ id: 1, role: "admin" }, "not-the-secret");
+        expect(caller(forged)).toBeNull();
     });
 });

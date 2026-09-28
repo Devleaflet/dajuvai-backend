@@ -225,7 +225,10 @@ export const vendorAuthMiddleware = async (
   next: NextFunction,
 ): Promise<void> => {
   const vendorToken =
-    req.cookies.vendorToken || req.headers.authorization?.split(" ")[1];
+    // The token the client sent explicitly wins over an ambient cookie, as in
+    // combinedAuthMiddleware: a leftover cookie from another session must not
+    // decide who this request is.
+    req.headers.authorization?.split(" ")[1] || req.cookies.vendorToken;
 
   if (!vendorToken) {
     return next(new AuthError("Authentication token is missing"));
@@ -312,7 +315,8 @@ export const authMiddleware = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
+  // Explicit bearer first, then the cookie — see vendorAuthMiddleware.
+  const token = req.headers.authorization?.split(" ")[1] || req.cookies.token;
 
   if (!token) {
     return next(new AuthError("No token provided. Please log in."));

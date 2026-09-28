@@ -30,6 +30,7 @@ import { verificationTokenSchema } from "../utils/zod_validations/user.zod";
 import { authRateLimiter } from "./user.routes";
 import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 import { VendorProductsQuerySchema } from "../utils/zod_validations/product.zod";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const vendorController = new VendorController();
@@ -385,8 +386,8 @@ router.get(
  *         name: vendorId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the vendor
+ *           type: string
+ *         description: The vendor id, or its URL slug
  *         example: 12
  *       - in: query
  *         name: page
@@ -474,6 +475,7 @@ router.get(
  */
 router.get(
     "/:vendorId/products",
+    resolveSlugParam("vendor", "vendorId"),
     validateZod(VendorProductsQuerySchema, "query"),
     productController.getProductsByVendorId.bind(productController),
 );
@@ -489,9 +491,9 @@ router.get(
  *       - in: path
  *         name: id
  *         required: true
- *         description: ID of the vendor to retrieve
+ *         description: The vendor id, or its URL slug
  *         schema:
- *           type: integer
+ *           type: string
  *           example: 5
  *     responses:
  *       200:
@@ -546,7 +548,7 @@ router.get(
  *                   type: string
  *                   example: "Vendor service temporarily unavailable"
  */
-router.get("/:id", vendorController.getVendorById.bind(vendorController));
+router.get("/:id", resolveSlugParam("vendor"), vendorController.getVendorById.bind(vendorController));
 
 // /api/vendors/auth/vendor
 /**

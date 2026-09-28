@@ -8,6 +8,7 @@ import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from "../middlew
 import { checkPermission } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const homePageSectionController = new HomePageSectionController();
@@ -480,9 +481,9 @@ router.get(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *           minimum: 1
- *         description: Homepage section ID
+ *         description: The homepage section id, or its URL slug
  *         example: 1
  *     responses:
  *       200:
@@ -567,6 +568,7 @@ router.get(
  */
 router.get(
     "/:id",
+    resolveSlugParam("homepage_section"),
     responseCache({ ttlSeconds: 30 }),
     homePageSectionController.getHomePageSectionById.bind(homePageSectionController)
 );

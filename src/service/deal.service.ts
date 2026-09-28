@@ -78,12 +78,8 @@ export class DealService {
             throw new APIError(404, "Deal not found");
         }
 
-        const updatedData = {
-            ...deal,
-            ...dto,
-        };
-
-        await this.dealRepository.update(id, updatedData);
+        // save(), not update(), so a rename also moves the slug.
+        await this.dealRepository.save(Object.assign(deal, dto));
 
         // findOneOrFail throws if entity doesn't exist (safer for chained logic)
         return await this.dealRepository.findOneOrFail({ where: { id } });
@@ -104,6 +100,11 @@ export class DealService {
         });
         if (!deal) {
             throw new APIError(404, "Deal not found");
+        }
+        // Served publicly: the author's name, not their contact details.
+        if (deal.createdBy) {
+            const { id: authorId, fullName, username } = deal.createdBy;
+            deal.createdBy = { id: authorId, fullName, username } as User;
         }
         return deal;
     }

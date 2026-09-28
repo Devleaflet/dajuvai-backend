@@ -1,3 +1,4 @@
+import { hiddenProductIds } from "../search/catalog-visibility";
 import { Brackets, EntityManager, In, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { APIError } from "../errors/ApiError";
@@ -38,7 +39,10 @@ import {
     InvalidOrderStatusTransitionError,
     OrderStateChangedError,
     BadRequestError,
+    ConflictError,
+    NotFoundError,
 } from "../errors/HttpErrors";
+import { decodeEsewaReturn, sameAmount, verifyEsewaReturn } from "../utils/esewa.util";
 import { Cart } from "../entities/cart.entity";
 import { CartItem } from "../entities/cartItem.entity";
 import { User } from "../entities/user.entity";
@@ -51,7 +55,7 @@ import { PromoService } from "./promo.service";
 import { DiscountType, InventoryStatus } from "../entities/product.enum";
 import { Variant } from "../entities/variant.entity";
 import { findUserById } from "./user.service";
-import { resolveFinalPrice } from "../utils/pricing.utils";
+import { resolveFinalPrice, roundMoney } from "../utils/pricing.utils";
 import {
     sendCustomerOrderEmail,
     sendOrderStatusEmail,
@@ -571,19 +575,28 @@ export class OrderService {
         const orderItems = this.createOrderItems(items);
 
         // Calculate subtotal from items
-        const merchandiseSubtotal = items.reduce((sum, item) => {
-            const linePrice = this.calculateLineItemPrice(item);
-            return sum + linePrice * item.quantity;
-        }, 0);
+        const merchandiseSubtotal = roundMoney(
+            items.reduce((sum, item) => {
+                const linePrice = this.calculateLineItemPrice(item);
+                return sum + linePrice * item.quantity;
+            }, 0),
+        );
 
         // apply promo code if provided
-        const { discountAmount, appliedPromoCode, applyOn } =
+        const { discountAmount, appliedPromoCode, applyOn, refusal } =
             await this.calculateDiscount(
                 userId,
                 orderData.promoCode,
                 merchandiseSubtotal,
                 shippingTotal,
-            );
+            );
+
+        // The customer asked for a discount and is not getting it. Placing the
+        // order anyway charges more than they agreed to at checkout; stop and
+        // say why, so they can remove the code and decide.
+        if (refusal) {
+            throw new APIError(400, promoClaimMessage(refusal), "PROMO_NOT_APPLICABLE");
+        }
 
         const taxTotal = 0; // no tax feature exists yet; kept for formula completeness
         const totalPrice = calculateGrandTotal({
@@ -868,6 +881,9 @@ export class OrderService {
                     phoneNumber: payload.phoneNumber,
                 });
 
+                // Lock stock rows before inserting items; see reserveStockAndSaveOrder.
+                await this.lockStockRows(orderEntity.orderItems ?? [], manager);
+
                 let savedOrder = await manager
                     .getRepository(Order)
                     .save(orderEntity);
@@ -1112,18 +1128,23 @@ export class OrderService {
         discountAmount: number;
         appliedPromoCode: string | null;
         applyOn: PromoType | null;
+        /** Why a code the customer entered gives nothing; null when none was entered or it applied. */
+        refusal: PromoClaimReason | null;
     }> {
         const normalized = normalizePromoCode(promoCode);
         if (!normalized)
-            return { discountAmount: 0, appliedPromoCode: null, applyOn: null };
+            return { discountAmount: 0, appliedPromoCode: null, applyOn: null, refusal: null };
 
         const promo = await this.promoService.findPromoByCode(normalized);
 
         const usedByUser = await this.countPromoRedemptions(promo, userId);
 
-        const { usable } = isPromoUsable(promo, { usedByUser });
-        if (!usable)
-            return { discountAmount: 0, appliedPromoCode: null, applyOn: null };
+        const { usable, reason } = isPromoUsable(promo, { usedByUser });
+        if (!usable) {
+            const refusal: PromoClaimReason =
+                reason === "ALREADY_USED" ? "per-user" : reason === "USAGE_EXHAUSTED" ? "exhausted" : "invalid";
+            return { discountAmount: 0, appliedPromoCode: null, applyOn: null, refusal };
+        }
 
         const discountAmount = calculatePromoDiscount(
             promo,
@@ -1135,6 +1156,7 @@ export class OrderService {
             discountAmount,
             appliedPromoCode: promo.promoCode,
             applyOn: promo.applyOn,
+            refusal: null,
         };
     }
 
@@ -1277,8 +1299,10 @@ export class OrderService {
 
             let variant = null;
             if (variantId) {
+                // Bound to the product: a cheap product's variant id must not
+                // price an expensive product's line (the cart already does this).
                 variant = await this.variantRepository.findOne({
-                    where: { id: variantId },
+                    where: { id: variantId, productId },
                 });
                 if (!variant) throw new APIError(404, "Variant not found");
             }
@@ -1288,6 +1312,7 @@ export class OrderService {
             const cart = await this.getCart(userId);
             items = cart.items;
         }
+        await this.assertItemsPurchasable(items);
 
         const customerDistrict =
             await this.shippingService.resolveDistrictByName(
@@ -1313,9 +1338,8 @@ export class OrderService {
                 })),
             );
 
-        const merchandiseSubtotal = vendorGroups.reduce(
-            (sum, g) => sum + g.merchandiseSubtotal,
-            0,
+        const merchandiseSubtotal = roundMoney(
+            vendorGroups.reduce((sum, g) => sum + g.merchandiseSubtotal, 0),
         );
 
         const { discountAmount, appliedPromoCode } =
@@ -1490,8 +1514,9 @@ export class OrderService {
 
                 let variant = null;
                 if (variantId) {
+                    // Bound to the product, as in the estimate above.
                     variant = await this.variantRepository.findOne({
-                        where: { id: variantId },
+                        where: { id: variantId, productId },
                     });
                     if (!variant) throw new APIError(404, "Variant not found");
                 }
@@ -1521,7 +1546,8 @@ export class OrderService {
                 );
             }
 
-            // Check stock before creating the order
+            // Check availability and stock before creating the order
+            await this.assertItemsPurchasable(items);
             await this.validateStock(items);
 
             // Either fetch user's existing address or create a new one based on input
@@ -1593,6 +1619,14 @@ export class OrderService {
                 order = await this.reserveStockAndSaveOrder(
                     order,
                     vendorShippingRows,
+                    isBuyNow
+                        ? undefined
+                        : {
+                              userId,
+                              cartItemIds: items
+                                  .map((item: { id?: number }) => item.id)
+                                  .filter((id): id is number => Number.isInteger(id)),
+                          },
                 );
 
                 // 🔹 Only clear cart if it's not Buy Now
@@ -1682,71 +1716,61 @@ export class OrderService {
         }
     }
 
-    async esewaSuccess(token: string, orderId?: number, draftId?: number) {
+    /**
+     * Settles an eSewa payment from the token on the shopper's return trip.
+     *
+     * eSewa has no webhook, so this is the only settlement path, and the
+     * token arrives through the shopper's browser. It is therefore trusted
+     * only once its HMAC signature checks out against our merchant secret, it
+     * names our merchant code, it resolves to a draft the caller owns, and the
+     * amount eSewa reports equals the amount we priced. Anything less and an
+     * unsigned `{"status":"COMPLETE"}` would buy anything.
+     *
+     * Only drafts are settled: every eSewa checkout has created a draft since
+     * the draft flow shipped, so `orderId` is accepted for old clients but
+     * never used to mark an order paid.
+     */
+    async esewaSuccess(userId: number, token: string, _orderId?: number, draftId?: number) {
         try {
-            let object = JSON.parse(
-                Buffer.from(token, "base64").toString("ascii"),
-            );
+            const payload = decodeEsewaReturn(token);
+            if (
+                !payload ||
+                !verifyEsewaReturn(payload, config.SECRET_KEY) ||
+                payload.productCode !== config.ESEWA_MERCHANT
+            ) {
+                throw new BadRequestError("Invalid eSewa payment response");
+            }
 
-            if (object.status !== "COMPLETE") {
-                // Cancel the pending draft (nothing was reserved), or release
-                // the stock reserved at order creation for legacy orders —
-                // otherwise a non-complete eSewa callback leaves it locked
-                // up forever.
-                const pendingDraft = draftId
-                    ? await this.checkoutDraftRepository.findOne({
-                          where: {
-                              id: draftId,
-                              status: CheckoutDraftStatus.PENDING,
-                          },
-                      })
-                    : null;
-                if (pendingDraft) {
-                    await this.cancelCheckoutDraft(
-                        pendingDraft,
-                        "eSewa returned non-complete status",
-                    );
-                } else if (orderId) {
-                    await this.esewaFailed(orderId);
+            const draft = await this.checkoutDraftRepository.findOne({
+                where: { esewaTransactionUuid: payload.transactionUuid },
+            });
+            if (!draft || draft.userId !== userId || (draftId !== undefined && draft.id !== draftId)) {
+                throw new NotFoundError("Checkout session");
+            }
+
+            if (payload.status !== "COMPLETE") {
+                // Nothing was reserved for a draft, so cancelling it is a
+                // status flip — but it frees the shopper to check out again.
+                if (draft.status === CheckoutDraftStatus.PENDING) {
+                    await this.cancelCheckoutDraft(draft, "eSewa returned non-complete status");
                 }
-                throw new APIError(400, "Payment not completed");
+                throw new BadRequestError("Payment not completed");
             }
 
-            // Draft-based checkout: resolve by the eSewa transaction uuid —
-            // unambiguous even though draft ids and order ids share a number
-            // space. Falls back to legacy order handling for orders created
-            // before the draft flow shipped.
-            const draft = object.transaction_uuid
-                ? await this.checkoutDraftRepository.findOne({
-                      where: {
-                          esewaTransactionUuid: object.transaction_uuid,
-                      },
-                  })
-                : null;
-
-            if (draft) {
-                const order = await this.materializeDraftOrder(
-                    draft,
-                    object.transaction_uuid,
+            const expected = draft.totals?.totalPrice;
+            if (expected === undefined || !sameAmount(payload.totalAmount, expected)) {
+                console.error(
+                    `eSewa amount mismatch for draft ${draft.id}: paid ${payload.totalAmount}, expected ${expected}`,
                 );
-                return {
-                    success: true,
-                    orderId: order.id,
-                    orderNumber: order.orderNumber,
-                };
+                throw new BadRequestError("Paid amount does not match the order total");
             }
 
-            if (!orderId) {
-                throw new APIError(404, "Checkout session not found");
-            }
-
-            // order success (legacy path)
-            await this.orderSuccess(orderId, object.transaction_uuid);
-
-            // Send emails to customer and vendors
-            await this.sendOrderEmails(orderId);
-
-            return { success: true, orderId };
+            const order = await this.materializeDraftOrder(draft, payload.transactionUuid);
+            return {
+                success: true,
+                orderId: order.id,
+                orderNumber: order.orderNumber,
+            };
         } catch (err) {
             // Same fix as createOrder above: this used to unconditionally wrap
             // *any* error — including the intentional 400 "Payment not completed"
@@ -2145,26 +2169,29 @@ export class OrderService {
         }
     }
 
-    async esewaFailed(orderId?: number, draftId?: number) {
+    async esewaFailed(userId: number, orderId?: number, draftId?: number) {
         // Draft-based checkout resolution first — the draft flow never
         // reserved stock or claimed promos, so failure handling is a single
         // idempotent status flip.
         if (draftId) {
             const draft = await this.checkoutDraftRepository.findOne({
-                where: { id: draftId },
+                where: { id: draftId, userId },
             });
-            if (draft && draft.status === CheckoutDraftStatus.PENDING) {
+            if (!draft) {
+                throw new NotFoundError("Checkout session");
+            }
+            if (draft.status === CheckoutDraftStatus.PENDING) {
                 await this.cancelCheckoutDraft(draft, "eSewa payment failed");
                 return { success: true };
             }
-            if (draft && !orderId && draft.orderId) {
-                // Completed draft — route the failure callback to its order.
-                orderId = draft.orderId;
+            if (draft.status === CheckoutDraftStatus.COMPLETED) {
+                // The order behind a completed draft exists only because a
+                // signed eSewa payment settled it. A stale failure redirect
+                // (browser back, a second tab) must not cancel a paid order.
+                throw new ConflictError("This payment has already completed");
             }
-            if (!orderId) {
-                // Already cancelled/expired with no order — nothing to do.
-                return { success: true };
-            }
+            // Already cancelled or expired — nothing to undo.
+            return { success: true };
         }
 
         try {
@@ -2181,9 +2208,7 @@ export class OrderService {
                 ],
                 withDeleted: true,
             });
-            if (!order) {
-                throw new APIError(404, "Order not found");
-            }
+            this.assertPaymentAbandonable(order, userId);
 
             // Idempotency guard: a duplicate failure callback for an order
             // that's already terminal must not restore stock a second time.
@@ -2225,8 +2250,29 @@ export class OrderService {
             }
             return { success: true };
         } catch (err) {
+            if (err instanceof APIError) throw err;
             console.error("Esewa payment failure handling failed:", err);
             throw new APIError(500, "Esewa payment verification failed");
+        }
+    }
+
+    /**
+     * Shopper-initiated "my payment failed / I cancelled" callbacks may only
+     * undo the caller's own, still-unpaid online order that nobody has
+     * accepted yet. Without this, anyone could cancel any order by id —
+     * delivered ones included — restocking goods that already left.
+     */
+    private assertPaymentAbandonable(order: Order | null, userId: number): asserts order is Order {
+        if (!order || order.orderedById !== userId) {
+            throw new NotFoundError("Order");
+        }
+        const untouched = order.status === OrderStatus.ORDER_PLACED || order.status === OrderStatus.CANCELLED;
+        if (
+            order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY ||
+            order.paymentStatus === PaymentStatus.PAID ||
+            !untouched
+        ) {
+            throw new ConflictError("This order can no longer be cancelled from the payment page");
         }
     }
 
@@ -2359,6 +2405,24 @@ export class OrderService {
     }
 
     // Separate method for stock validation
+    /**
+     * Refuses items the public catalogue no longer shows — a vendor that was
+     * un-approved or is being deleted keeps its rows, and a cart filled
+     * before that must not still check them out.
+     */
+    private async assertItemsPurchasable(items: Array<{ product?: { id: number; name?: string } }>): Promise<void> {
+        const ids = [...new Set(items.map((item) => Number(item.product?.id)).filter(Number.isInteger))];
+        const hidden = new Set(await hiddenProductIds(AppDataSource.manager, ids));
+        const blocked = items.find((item) => hidden.has(Number(item.product?.id)));
+        if (blocked) {
+            throw new APIError(
+                409,
+                `"${blocked.product?.name ?? "A product"}" is no longer available. Remove it from your cart to continue.`,
+                "PRODUCT_UNAVAILABLE",
+            );
+        }
+    }
+
     private async validateStock(cartItems: CartItem[]): Promise<void> {
         const variantIds = [
             ...new Set(
@@ -2495,6 +2559,7 @@ export class OrderService {
                       .createQueryBuilder("variant")
                       .setLock("pessimistic_write")
                       .where("variant.id IN (:...ids)", { ids: variantIds })
+                      .orderBy("variant.id")
                       .getMany()
                 : Promise.resolve([]),
             productIds.length
@@ -2502,6 +2567,7 @@ export class OrderService {
                       .createQueryBuilder("product")
                       .setLock("pessimistic_write")
                       .where("product.id IN (:...ids)", { ids: productIds })
+                      .orderBy("product.id")
                       .getMany()
                 : Promise.resolve([]),
         ]);
@@ -2586,11 +2652,40 @@ export class OrderService {
             vendorMerchandiseSubtotal: number;
             vendorTotal: number;
         }> = [],
+        consumeCart?: { userId: number; cartItemIds: number[] },
     ): Promise<Order> {
         return await AppDataSource.transaction(async (manager) => {
             const orderRepo = manager.getRepository(Order);
             const vendorShippingRepo =
                 manager.getRepository(OrderVendorShipping);
+
+            // A cart checkout consumes the cart lines it priced, in this
+            // transaction. The cart row is locked first, so a second
+            // submission of the same checkout (a double click, a retried
+            // request, a second tab) waits here, then finds its lines gone
+            // and stops — instead of placing the same order twice.
+            if (consumeCart) {
+                await manager.query(`SELECT id FROM carts WHERE "userId" = $1 FOR UPDATE`, [consumeCart.userId]);
+                const remaining: { id: number }[] = consumeCart.cartItemIds.length
+                    ? await manager.query(`SELECT id FROM cart_items WHERE id = ANY($1)`, [consumeCart.cartItemIds])
+                    : [];
+                if (!consumeCart.cartItemIds.length || remaining.length !== consumeCart.cartItemIds.length) {
+                    throw new APIError(
+                        409,
+                        "Your cart changed while this order was being placed. It may already have been placed — check your orders before trying again.",
+                        "CART_CHANGED",
+                    );
+                }
+                await manager.query(`DELETE FROM cart_items WHERE id = ANY($1)`, [consumeCart.cartItemIds]);
+            }
+
+            // Stock rows are locked *before* the order is written. Inserting
+            // order items takes a FOR KEY SHARE lock on each product through
+            // the foreign key; two checkouts that both hold it and then both
+            // ask for FOR UPDATE in `updateStock` deadlock, and Postgres kills
+            // one of them with a 500. Locking first makes the second buyer
+            // wait, then see the real stock and get a clean "insufficient".
+            await this.lockStockRows(order.orderItems ?? [], manager);
 
             let savedOrder = await orderRepo.save(order);
 
@@ -2643,6 +2738,39 @@ export class OrderService {
 
             return savedOrder;
         });
+    }
+
+    /**
+     * Takes FOR UPDATE on every product and variant row the items touch, in
+     * id order, so any two transactions locking overlapping rows acquire them
+     * in the same sequence and cannot deadlock on each other.
+     */
+    private async lockStockRows(orderItems: Array<{ productId?: number; variantId?: number | null }>, manager: EntityManager): Promise<void> {
+        const ids = (pick: (item: { productId?: number; variantId?: number | null }) => unknown) =>
+            [...new Set(orderItems.map(pick).map(Number).filter((id) => Number.isInteger(id) && id > 0))];
+        const variantIds = ids((item) => item.variantId);
+        const productIds = ids((item) => item.productId);
+
+        if (productIds.length) {
+            await manager
+                .getRepository(Product)
+                .createQueryBuilder("product")
+                .select("product.id")
+                .setLock("pessimistic_write")
+                .where("product.id IN (:...ids)", { ids: productIds })
+                .orderBy("product.id")
+                .getMany();
+        }
+        if (variantIds.length) {
+            await manager
+                .getRepository(Variant)
+                .createQueryBuilder("variant")
+                .select("variant.id")
+                .setLock("pessimistic_write")
+                .where("variant.id IN (:...ids)", { ids: variantIds })
+                .orderBy("variant.id")
+                .getMany();
+        }
     }
 
     /**
@@ -2709,6 +2837,7 @@ export class OrderService {
                       .createQueryBuilder("variant")
                       .setLock("pessimistic_write")
                       .where("variant.id IN (:...ids)", { ids: variantIds })
+                      .orderBy("variant.id")
                       .getMany()
                 : Promise.resolve([]),
             productIds.length
@@ -2716,6 +2845,7 @@ export class OrderService {
                       .createQueryBuilder("product")
                       .setLock("pessimistic_write")
                       .where("product.id IN (:...ids)", { ids: productIds })
+                      .orderBy("product.id")
                       .getMany()
                 : Promise.resolve([]),
         ]);
@@ -2835,6 +2965,7 @@ export class OrderService {
     }
 
     async verifyPayment(
+        userId: number,
         orderId: number,
         transactionId: string,
         responseData: any,
@@ -2854,17 +2985,16 @@ export class OrderService {
             withDeleted: true,
         });
 
-        // If order doesn't exist, throw a 404 error
-        if (!order) {
-            throw new APIError(404, "Order not found");
-        }
+        this.assertPaymentAbandonable(order, userId);
 
         // Verify payment status using external payment service (e.g., Esewa/Khalti)
-        const isSuccessful = await this.paymentService.verifyPayment(
-            transactionId,
-            orderId.toString(),
-            responseData,
-        );
+        // A validly signed response for a different amount is not payment for this order.
+        const isSuccessful =
+            (await this.paymentService.verifyPayment(
+                transactionId,
+                orderId.toString(),
+                responseData,
+            )) && sameAmount(responseData.amount, order.totalPrice);
 
         const previousStatus = order.status;
 
@@ -2915,7 +3045,7 @@ export class OrderService {
      * @returns {Promise<void>} - Resolves once the order is updated.
      * @access Public (called when a user cancels payment)
      */
-    async handlePaymentCancel(orderId: number): Promise<void> {
+    async handlePaymentCancel(userId: number, orderId: number): Promise<void> {
         const order = await this.orderRepository.findOne({
             where: { id: orderId },
             relations: [
@@ -2926,9 +3056,7 @@ export class OrderService {
             withDeleted: true,
         });
 
-        if (!order) {
-            throw new APIError(404, "Order not found");
-        }
+        this.assertPaymentAbandonable(order, userId);
 
         const shouldRestoreStock =
             order.status !== OrderStatus.CANCELLED &&
@@ -3004,7 +3132,7 @@ export class OrderService {
             const lineTotal = this.calculateLineItemPrice(item) * item.quantity;
             const existing = groups.get(vendor.id);
             if (existing) {
-                existing.merchandiseSubtotal += lineTotal;
+                existing.merchandiseSubtotal = roundMoney(existing.merchandiseSubtotal + lineTotal);
                 continue;
             }
 
@@ -3047,7 +3175,7 @@ export class OrderService {
             const lineTotal = Number(item.price) * item.quantity;
             const existing = groups.get(vendor.id);
             if (existing) {
-                existing.merchandiseSubtotal += lineTotal;
+                existing.merchandiseSubtotal = roundMoney(existing.merchandiseSubtotal + lineTotal);
                 continue;
             }
 

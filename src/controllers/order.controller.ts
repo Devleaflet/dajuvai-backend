@@ -315,6 +315,7 @@ export class OrderController {
             throw new BadRequestError("Missing orderId or transactionId");
 
         const order = await this.orderService.verifyPayment(
+            req.user.id,
             parseInt(orderId, 10),
             transactionId,
             req.query,
@@ -336,7 +337,7 @@ export class OrderController {
 
         if (!orderId) throw new BadRequestError("Missing orderId");
 
-        await this.orderService.handlePaymentCancel(parseInt(orderId, 10));
+        await this.orderService.handlePaymentCancel(req.user.id, parseInt(orderId, 10));
         res.status(200).json({ success: false, message: "Payment cancelled" });
     }
 
@@ -401,14 +402,21 @@ export class OrderController {
     }
 
     async getOrderById(
-        req: Request<{ id: string }>,
+        req: AuthRequest<{ id: string }>,
         res: Response,
         _next: NextFunction,
     ): Promise<void> {
         const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) throw new NotFoundError("Order");
 
         const order = await this.orderService.getOrderById(id);
-        if (!order) throw new NotFoundError("Order");
+        // The customer's name, phone and address are on this record: only
+        // its owner or the back office may read it. 404, not 403, so order
+        // ids cannot be probed for existence.
+        const isBackOffice = req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF;
+        if (!order || (!isBackOffice && order.orderedBy?.id !== req.user.id)) {
+            throw new NotFoundError("Order");
+        }
 
         res.status(200).json({ success: true, data: order });
     }
@@ -804,6 +812,7 @@ export class OrderController {
             throw new BadRequestError("draftId must be an integer");
         }
         const result = await this.orderService.esewaSuccess(
+            req.user.id,
             token,
             orderId !== undefined && orderId !== null
                 ? Number(orderId)
@@ -856,6 +865,7 @@ export class OrderController {
             throw new BadRequestError("orderId or draftId is required");
         }
         const result = await this.orderService.esewaFailed(
+            req.user.id,
             orderId !== undefined && orderId !== null
                 ? Number(orderId)
                 : undefined,

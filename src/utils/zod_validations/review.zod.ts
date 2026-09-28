@@ -25,7 +25,9 @@ export const createReviewSchema = z.object({
         .max(500, 'Comment cannot exceed 500 characters'),
 });
 
-export const updateReviewSchema = createReviewSchema.partial()
+// No productId: moving a review onto another product would bypass the
+// "only buyers may review" check that runs at creation.
+export const updateReviewSchema = createReviewSchema.omit({ productId: true }).partial();
 
 export type CreateReviewInput = z.infer<typeof createReviewSchema>;
 export type UpdateReviewInput = z.infer<typeof updateReviewSchema>;

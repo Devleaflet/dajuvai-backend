@@ -15,12 +15,15 @@ import {
 import AppDataSource from "../config/db.config";
 import config from "../config/env.config";
 import { APIError } from "../utils/ApiError.utils";
-import { optionalUserIdFromRequest } from "../utils/optionalAuth.utils";
+import { AuthRequest, authMiddleware } from "../middlewares/auth.middleware";
+import { sameAmount } from "../utils/esewa.util";
 import { CartService } from "../service/cart.service";
 import { NotificationService } from "../service/notification.service";
 import { OrderService } from "../service/order.service";
 import {
     NPS_CONFIG,
+    NpsPaymentService,
+    NpsTransactionStatus,
     generateNpsSignature,
     getNpsAuthHeader,
 } from "../service/nps-payment.service";
@@ -34,6 +37,36 @@ const draftDb = AppDataSource.getRepository(CheckoutDraft);
 const CONFIG = NPS_CONFIG;
 const generateSignature = generateNpsSignature;
 const getAuthHeader = getNpsAuthHeader;
+
+/**
+ * Settles a pending draft on the gateway's own verdict.
+ *
+ * Only the gateway's `CheckTransactionStatus` answer is trusted — never a
+ * status in a query string or request body — and a success is honoured only
+ * when the amount the gateway collected is the amount the draft was priced
+ * at. Returns quietly on anything else; the draft stays pending for the next
+ * notification or poll.
+ */
+async function settleDraftFromGateway(
+    draft: CheckoutDraft,
+    merchantTxnId: string,
+    verdict: { status: NpsTransactionStatus; raw: any },
+): Promise<void> {
+    if (draft.status !== CheckoutDraftStatus.PENDING) return;
+    const orderService = new OrderService();
+    if (verdict.status === "Success") {
+        const collected = verdict.raw?.data?.Amount;
+        if (!sameAmount(collected, draft.totals?.totalPrice ?? NaN)) {
+            console.error(
+                `[NPX] Amount mismatch for draft ${draft.id}: gateway collected ${collected}, draft total ${draft.totals?.totalPrice}`,
+            );
+            return;
+        }
+        await orderService.materializeDraftOrder(draft, merchantTxnId);
+    } else if (verdict.status === "Failed") {
+        await orderService.cancelCheckoutDraft(draft, "Gateway reported failure");
+    }
+}
 
 const requirePaymentFields = (body: Record<string, unknown>, fields: string[]) => {
     const missing = fields.filter((field) => body[field] === undefined || body[field] === null || body[field] === "");
@@ -258,7 +291,8 @@ paymentRouter.post("/service-charge", async (req: Request, res: Response) => {
  *                   example: "Failed to get process ID"
  */
 // 3. Get Process ID
-paymentRouter.post("/process-id", async (req: Request, res: Response) => {
+// Signs a request with the merchant secret, so it is not an open service.
+paymentRouter.post("/process-id", authMiddleware, async (req: Request, res: Response) => {
     try {
         const { amount, merchantTxnId } = req.body;
         const validationError = requirePaymentFields(req.body, ["amount", "merchantTxnId"]);
@@ -369,8 +403,9 @@ paymentRouter.post("/process-id", async (req: Request, res: Response) => {
  *                   example: "Internal server error"
  */
 // 4. Initiate Payment (Complete Flow)
-paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
+paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<{}, {}, Record<string, any>>, res: Response) => {
     try {
+        const callerId = req.user!.id;
         const { amount, instrumentCode, transactionRemarks, orderId, draftId } =
             req.body;
         const validationError = requirePaymentFields(req.body, ["amount"]);
@@ -394,6 +429,90 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
         }
 
         const merchantTxnId = `TXN_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+
+        // Everything about the request is checked before the gateway is
+        // contacted; `persist` records the transaction once it exists.
+        let persist: () => Promise<unknown>;
+
+        if (hasDraftId) {
+            // Draft-based checkout: no order exists yet — it materializes
+            // only after the gateway confirms success.
+            const draft = await draftDb.findOne({ where: { id: Number(draftId) } });
+            if (!draft || draft.status !== CheckoutDraftStatus.PENDING || draft.userId !== callerId) {
+                throw new APIError(404, "Checkout session not found or no longer active");
+            }
+            if (draft.expiresAt && draft.expiresAt <= new Date()) {
+                throw new APIError(410, "This checkout session has expired. Please check out again.");
+            }
+            // Never trust the client-provided amount over the priced draft.
+            const draftTotal = Number(draft.totals?.totalPrice);
+            if (!Number.isFinite(draftTotal) || Math.abs(draftTotal - Number(amount)) > 0.01) {
+                throw new APIError(400, "Payment amount does not match the checkout total");
+            }
+
+            persist = () => {
+                draft.mTransactionId = merchantTxnId;
+                if (draft.payload) {
+                    draft.payload = { ...draft.payload, instrumentName: instrumentCode || null };
+                }
+                return draftDb.save(draft);
+            };
+        } else {
+            const order = await orderDb.findOne({ where: { id: Number(orderId) } });
+            if (!order) {
+                throw new APIError(404, "Order not found");
+            }
+            // Ownership before anything else: otherwise re-initiating a
+            // stranger's order overwrote its transaction id (orphaning the
+            // payment they made), and the amount check below answered
+            // "does order N cost X?" for anyone.
+            if (order.orderedById !== callerId) {
+                throw new APIError(404, "Order not found");
+            }
+
+            /**
+             * Never trust the client-provided amount over the stored order.
+             *
+             * The draft branch above has always done this; the order branch did
+             * not, so a caller who knew any order id could initiate a payment
+             * for any amount they liked — Rs 1 against a Rs 90,000 order — and
+             * the gateway would report a successful payment against it.
+             *
+             * `finalTotal` is what is payable once cancelled lines are removed;
+             * it falls back to `totalPrice` for rows written before that column.
+             * A paisa of tolerance absorbs the decimal-to-float round trip.
+             */
+            const payable = Number(
+                (order as { finalTotal?: string | number | null }).finalTotal ??
+                    order.totalPrice,
+            );
+            if (
+                !Number.isFinite(payable) ||
+                Math.abs(payable - Number(amount)) > 0.01
+            ) {
+                throw new APIError(
+                    400,
+                    "Payment amount does not match the order total",
+                );
+            }
+
+            // An order that is already paid must not be paid again, and one
+            // that was cancelled must not be payable at all.
+            if (order.paymentStatus === PaymentStatus.PAID) {
+                throw new APIError(409, "This order has already been paid");
+            }
+            if (order.status === OrderStatus.CANCELLED) {
+                throw new APIError(409, "This order was cancelled");
+            }
+
+
+            persist = () => {
+                // Update order with merchant transaction info
+                order.mTransactionId = merchantTxnId;
+                order.instrumentName = instrumentCode;
+                return orderDb.save(order);
+            };
+        }
 
         const processData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
@@ -444,93 +563,7 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
             CONFIG.SECRET_KEY,
         );
 
-        if (hasDraftId) {
-            // Draft-based checkout: no order exists yet — it materializes
-            // only after the gateway confirms success.
-            const draft = await draftDb.findOne({ where: { id: Number(draftId) } });
-            if (!draft || draft.status !== CheckoutDraftStatus.PENDING) {
-                throw new APIError(404, "Checkout session not found or no longer active");
-            }
-            if (draft.expiresAt && draft.expiresAt <= new Date()) {
-                throw new APIError(410, "This checkout session has expired. Please check out again.");
-            }
-            // Never trust the client-provided amount over the priced draft.
-            const draftTotal = Number(draft.totals?.totalPrice);
-            if (!Number.isFinite(draftTotal) || Math.abs(draftTotal - Number(amount)) > 0.01) {
-                throw new APIError(400, "Payment amount does not match the checkout total");
-            }
-            const draftCallerId = optionalUserIdFromRequest(req);
-            if (draftCallerId !== null && draft.userId !== draftCallerId) {
-                throw new APIError(403, "This checkout belongs to another account");
-            }
-
-            draft.mTransactionId = merchantTxnId;
-            if (draft.payload) {
-                draft.payload = { ...draft.payload, instrumentName: instrumentCode || null };
-            }
-            await draftDb.save(draft);
-        } else {
-            const order = await orderDb.findOne({ where: { id: Number(orderId) } });
-            if (!order) {
-                throw new APIError(404, "Order not found");
-            }
-
-            /**
-             * Never trust the client-provided amount over the stored order.
-             *
-             * The draft branch above has always done this; the order branch did
-             * not, so a caller who knew any order id could initiate a payment
-             * for any amount they liked — Rs 1 against a Rs 90,000 order — and
-             * the gateway would report a successful payment against it.
-             *
-             * `finalTotal` is what is payable once cancelled lines are removed;
-             * it falls back to `totalPrice` for rows written before that column.
-             * A paisa of tolerance absorbs the decimal-to-float round trip.
-             */
-            const payable = Number(
-                (order as { finalTotal?: string | number | null }).finalTotal ??
-                    order.totalPrice,
-            );
-            if (
-                !Number.isFinite(payable) ||
-                Math.abs(payable - Number(amount)) > 0.01
-            ) {
-                throw new APIError(
-                    400,
-                    "Payment amount does not match the order total",
-                );
-            }
-
-            // An order that is already paid must not be paid again, and one
-            // that was cancelled must not be payable at all.
-            if (order.paymentStatus === PaymentStatus.PAID) {
-                throw new APIError(409, "This order has already been paid");
-            }
-            if (order.status === OrderStatus.CANCELLED) {
-                throw new APIError(409, "This order was cancelled");
-            }
-
-            /**
-             * Ownership, when the caller identifies itself.
-             *
-             * These routes are unauthenticated because the legacy storefront
-             * calls them with no token, and requiring one would stop live
-             * checkouts. So the check is conditional: a request that *does*
-             * carry a session must own the order. Once the legacy app is
-             * retired, replace this with `authMiddleware` on the router and
-             * make the ownership check unconditional.
-             */
-            const callerId = optionalUserIdFromRequest(req);
-            if (callerId !== null && order.orderedById !== callerId) {
-                throw new APIError(403, "This order belongs to another account");
-            }
-
-            // Update order with merchant transaction info
-            order.mTransactionId = merchantTxnId;
-            order.instrumentName = instrumentCode;
-
-            await orderDb.save(order);
-        }
+        await persist();
 
         res.json({
             success: true,
@@ -599,57 +632,43 @@ paymentRouter.post("/initiate-payment", async (req: Request, res: Response) => {
  *                   example: "Failed to check transaction status"
  */
 // 5. Check Transaction Status
-paymentRouter.post("/check-status", async (req: Request, res: Response) => {
+paymentRouter.post("/check-status", authMiddleware, async (req: AuthRequest, res: Response) => {
     try {
-        const { merchantTxnId } = req.body;
+        const { merchantTxnId } = req.body as { merchantTxnId?: unknown };
+        if (typeof merchantTxnId !== "string" || !merchantTxnId) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "merchantTxnId is required" });
+            return;
+        }
 
-        const requestData: Record<string, string> = {
-            MerchantId: CONFIG.MERCHANT_ID,
-            MerchantName: CONFIG.MERCHANT_NAME,
-            MerchantTxnId: merchantTxnId,
-        };
+        // A transaction id is not a secret — it is in the payment URL — so
+        // it only answers for the account that started the payment.
+        const callerId = req.user!.id;
+        const [draft, order] = await Promise.all([
+            draftDb.findOne({ where: { mTransactionId: merchantTxnId, userId: callerId } }),
+            orderDb.findOne({ where: { mTransactionId: merchantTxnId, orderedById: callerId } }),
+        ]);
+        if (!draft && !order) {
+            res.status(404).json({ success: false, message: "Transaction not found" });
+            return;
+        }
 
-        requestData.Signature = generateSignature(
-            requestData,
-            CONFIG.SECRET_KEY,
-        );
+        const verdict = await new NpsPaymentService().checkTransactionStatus(merchantTxnId);
+        if (!verdict.raw) {
+            res.status(502).json({ error: "Failed to check transaction status" });
+            return;
+        }
+        res.json(verdict.raw);
 
-        const response = await axios.post(
-            `${CONFIG.BASE_URL}/CheckTransactionStatus`,
-            requestData,
-            {
-                headers: {
-                    Authorization: getAuthHeader(),
-                    "Content-Type": "application/json",
-                },
-            },
-        );
-
-        res.json(response.data);
-
-        // Settle a pending checkout draft based on the gateway verdict.
-        // Response is already sent — failures here only log.
-        try {
-            const draft = await draftDb.findOne({
-                where: {
-                    mTransactionId: merchantTxnId,
-                    status: CheckoutDraftStatus.PENDING,
-                },
-            });
-            if (draft) {
-                const rawStatus = String(response.data?.data?.Status ?? "");
-                const orderService = new OrderService();
-                if (/success/i.test(rawStatus)) {
-                    await orderService.materializeDraftOrder(draft, merchantTxnId);
-                } else if (/fail|cancel|declin/i.test(rawStatus)) {
-                    await orderService.cancelCheckoutDraft(draft, "Gateway reported failure");
-                }
-            }
-        } catch (error) {
-            console.error("[CHECKOUT-DRAFT] Settlement after check-status failed:", error);
+        // Response is already sent — settlement failures here only log.
+        if (draft) {
+            await settleDraftFromGateway(draft, merchantTxnId, verdict).catch((error) =>
+                console.error("[CHECKOUT-DRAFT] Settlement after check-status failed:", error),
+            );
         }
     } catch (error: any) {
-        res.status(500).json({ error: "Failed to check transaction status" });
+        if (!res.headersSent) {
+            res.status(500).json({ error: "Failed to check transaction status" });
+        }
     }
 });
 
@@ -741,10 +760,29 @@ paymentRouter.get("/response", (req: Request, res: Response) => {
  */
 paymentRouter.get("/notification", async (req: Request, res: Response) => {
     try {
-        const { MerchantTxnId, GatewayTxnId, Status } = req.query;
+        const { MerchantTxnId, GatewayTxnId } = req.query;
 
         if (!MerchantTxnId || typeof MerchantTxnId !== "string") {
             throw new APIError(400, "Invalid or missing MerchantTxnId");
+        }
+
+        /**
+         * The notification is a prompt to look, not a verdict.
+         *
+         * This URL is public and unsigned, so a `Status=SUCCESS` in its query
+         * string is whatever the caller typed: trusting it let anyone mark
+         * their own unpaid order paid, or cancel someone else's. The outcome
+         * is taken from the gateway itself, over our authenticated API, along
+         * with the amount it actually collected.
+         */
+        const verdict = await new NpsPaymentService().checkTransactionStatus(MerchantTxnId);
+        const Status =
+            verdict.status === "Success" ? "SUCCESS" : verdict.status === "Failed" ? "FAILED" : null;
+        if (!Status) {
+            // Pending or unreachable: nothing to act on yet. The gateway
+            // notifies again, and the shopper's status poll settles it too.
+            res.send("received");
+            return;
         }
 
         /**
@@ -764,7 +802,7 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
          */
         const eventId = webhookEventId({
             merchantTxnId: MerchantTxnId,
-            status: typeof Status === "string" ? Status : null,
+            status: Status,
             gatewayTxnId: typeof GatewayTxnId === "string" ? GatewayTxnId : null,
         });
 
@@ -798,15 +836,7 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                 where: { mTransactionId: MerchantTxnId },
             });
             if (draft) {
-                if (draft.status === CheckoutDraftStatus.PENDING) {
-                    const orderService = new OrderService();
-                    const statusUpper = String(Status || "").toUpperCase();
-                    if (statusUpper === "SUCCESS") {
-                        await orderService.materializeDraftOrder(draft, MerchantTxnId);
-                    } else if (statusUpper === "FAILED" || statusUpper === "CANCELLED") {
-                        await orderService.cancelCheckoutDraft(draft, "Gateway notification");
-                    }
-                }
+                await settleDraftFromGateway(draft, MerchantTxnId, verdict);
                 res.send("received");
                 return;
             }
@@ -819,8 +849,16 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
         const cartService = new CartService();
         const notificationService = new NotificationService();
 
-        switch ((Status as string).toUpperCase()) {
-            case "SUCCESS":
+        switch (Status) {
+            case "SUCCESS": {
+                const collected = verdict.raw?.data?.Amount;
+                const payable = (order as { finalTotal?: string | number | null }).finalTotal ?? order.totalPrice;
+                if (!sameAmount(collected, payable)) {
+                    console.error(
+                        `[NPX] Amount mismatch for order ${order.id}: gateway collected ${collected}, payable ${payable}`,
+                    );
+                    break;
+                }
                 order.paymentStatus = PaymentStatus.PAID;
                 order.status = OrderStatus.CONFIRMED;
                 await cartService.clearCart(userId);
@@ -830,9 +868,9 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                     userId,
                 );
                 break;
+            }
 
-            case "FAILED":
-            case "CANCELLED": {
+            case "FAILED": {
                 // Idempotency guard. This has to be decided by the database,
                 // not by the `order` row read at the top of the request: a
                 // gateway that retries its notification can deliver twice, and

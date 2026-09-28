@@ -34,6 +34,13 @@ const toFiniteMoney = (value: unknown, field: string): number => {
 const toMinorUnits = (value: number): number => Math.round(value * 100);
 const fromMinorUnits = (value: number): number => Number((value / 100).toFixed(2));
 
+/**
+ * A money amount to the paisa. Summing two-decimal prices in floating point
+ * drifts (899.55 × 3 + 250 is 2948.6499999999996), and that drift reached API
+ * responses and the order's stored total. Round wherever a total is produced.
+ */
+export const roundMoney = (value: number): number => fromMinorUnits(toMinorUnits(value));
+
 export const normalizeDiscountType = (
     value?: DiscountType | string | null,
 ): DiscountType => {

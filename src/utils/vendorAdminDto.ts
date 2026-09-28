@@ -3,6 +3,7 @@ import { Vendor } from "../entities/vendor.entity";
 export function toVendorAdminDTO(vendor: Vendor) {
     return {
         id: vendor.id,
+        slug: vendor.slug,
         businessName: vendor.businessName,
         email: vendor.email,
         phoneNumber: vendor.phoneNumber,

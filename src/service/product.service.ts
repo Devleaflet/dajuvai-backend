@@ -27,6 +27,7 @@ import { Variant } from "../entities/variant.entity";
 import { DiscountType, ProductSortOption } from "../entities/product.enum"; // adjust path as needed
 import { OrderStatus } from "../entities/order.entity";
 import { sanitizeVendor } from "../utils/sanitize.util";
+import { publicCatalogVisibilityWhere, VENDOR_ALIAS } from "../search/catalog-visibility";
 import { calculatePriceSnapshot, normalizeLegacyProductDiscount, normalizeLegacyVariantDiscount } from "../utils/pricing.utils";
 import { OrderItem } from "../entities/orderItems.entity";
 import { CartItem } from "../entities/cartItem.entity";
@@ -1157,7 +1158,8 @@ export class ProductService {
       .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
       .leftJoin(`(${ratingQuery.getQuery()})`, "rating", "rating.product_id = product.id")
       .leftJoin(`(${salesQuery.getQuery()})`, "sales", "sales.product_id = product.id")
-      .where("product.deletedAt IS NULL")
+      .leftJoin("product.vendor", VENDOR_ALIAS)
+        .where(publicCatalogVisibilityWhere())
       .select("product.id", "id")
       .addSelect(effectivePrice, "effective_price")
       .addSelect(ratingAverage, "avg_rating")
@@ -1240,7 +1242,8 @@ export class ProductService {
         .leftJoin("subcategory.category", "category")
         .leftJoin("product.deal", "deal")
         .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
-        .where("product.deletedAt IS NULL");
+        .leftJoin("product.vendor", VENDOR_ALIAS)
+        .where(publicCatalogVisibilityWhere());
       if (taxonomyFilter) countQuery.andWhere(taxonomyFilter.condition, taxonomyFilter.parameters);
       if (bannerId !== undefined) {
         if (manualBannerProductIds !== null) {
@@ -1283,7 +1286,8 @@ export class ProductService {
         .leftJoin("subcategory.category", "category")
         .leftJoin("product.deal", "deal")
         .leftJoin("product.variants", "variants", "variants.deletedAt IS NULL")
-        .where("product.deletedAt IS NULL")
+        .leftJoin("product.vendor", VENDOR_ALIAS)
+        .where(publicCatalogVisibilityWhere())
         .select("product.id", "id")
         .addSelect("product.createdAt", "created_at")
         .distinct(true)
@@ -1326,7 +1330,7 @@ export class ProductService {
       .leftJoinAndSelect("product.subcategory", "subcategory")
       .leftJoinAndSelect("subcategory.category", "category")
       .leftJoin("product.vendor", "vendor")
-      .addSelect(["vendor.id", "vendor.businessName", "vendor.districtId", "vendor.createdAt", "vendor.updatedAt"])
+      .addSelect(["vendor.id", "vendor.slug", "vendor.businessName", "vendor.districtId", "vendor.createdAt", "vendor.updatedAt"])
       .leftJoinAndSelect("product.deal", "deal")
       .leftJoinAndSelect("product.variants", "variants", "variants.deletedAt IS NULL")
       .where("product.id IN (:...productIds)", { productIds })
@@ -1845,10 +1849,7 @@ export class ProductService {
     };
   }
 
-  async getProductById(
-    id: number,
-    subcategoryId: number,
-  ): Promise<Product | null> {
+  async getProductById(id: number, subcategoryId: number) {
     const product = await this.productRepository
       .createQueryBuilder("product")
       .leftJoinAndSelect("product.vendor", "vendor")
@@ -1870,7 +1871,12 @@ export class ProductService {
     normalized.variants = (product.variants ?? []).map((v) =>
       normalizeLegacyVariantDiscount(v),
     );
-    return normalized;
+    // Public endpoint: the joined vendor row carries its password hash, reset
+    // token and verification code. Same public shape as the product detail.
+    return {
+      ...normalized,
+      vendor: product.vendor ? sanitizeVendor(product.vendor) : null,
+    };
   }
   async getVendorIdByProductId(productId: number): Promise<number> {
     const product = await this.productRepository.findOne({

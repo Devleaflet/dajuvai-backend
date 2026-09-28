@@ -1,3 +1,4 @@
+import { User } from "../entities/user.entity";
 import { ILike, In, Repository } from "typeorm";
 import {
     Banner,
@@ -227,6 +228,7 @@ export class BannerService {
             where: { id },
             select: [
                 "id",
+                "slug",
                 "name",
                 "desktopImage",
                 "mobileImage",
@@ -253,6 +255,14 @@ export class BannerService {
             throw new APIError(404, "Banner not found");
         }
 
+        // This is served publicly, and the relation loads the whole author
+        // row — password hash and reset token included. Keep the name only,
+        // the same fields the banner list returns.
+        if (banner.createdBy) {
+            const { id: authorId, fullName, username } = banner.createdBy;
+            banner.createdBy = { id: authorId, fullName, username } as User;
+        }
+
         return banner;
     }
 
@@ -274,6 +284,7 @@ export class BannerService {
             ],
             select: {
                 id: true,
+                slug: true,
                 name: true,
                 desktopImage: true,
                 mobileImage: true,
@@ -284,31 +295,33 @@ export class BannerService {
                 productSource: true,
                 placementAfterSection: true,
                 externalLink: true,
+                // Public endpoint: the author's name, never their contact details.
                 createdBy: {
                     id: true,
                     fullName: true,
                     username: true,
-                    email: true,
-                    phoneNumber: true,
-                    role: true,
                 },
                 selectedProducts: {
                     id: true,
                 },
                 selectedCategory: {
                     id: true,
+                    slug: true,
                     name: true,
                 },
                 selectedDeal: {
                     id: true,
+                    slug: true,
                     name: true,
                 },
                 selectedSubcategory: {
                     id: true,
+                    slug: true,
                     name: true,
                     image: true,
                     category: {
                         id: true,
+                        slug: true,
                         name: true,
                     },
                 },

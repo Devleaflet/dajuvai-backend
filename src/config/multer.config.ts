@@ -30,6 +30,9 @@ export const multerOptions = {
     },
     limits: {
         fileSize: MAX_UPLOAD_SIZE,
+        // Without a count, one request could buffer any number of 5 MB parts
+        // in memory. Ten covers a product's gallery.
+        files: 10,
     },
 };
 

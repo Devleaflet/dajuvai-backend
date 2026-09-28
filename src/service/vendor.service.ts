@@ -72,6 +72,7 @@ export class VendorService {
             select: {
                 email: true,
                 id: true,
+                slug: true,
                 businessName: true,
             },
         });
@@ -247,12 +248,13 @@ export class VendorService {
             });
         }
 
-        const updateFinalData = {
-            ...updateData,
-            district: district,
-        };
+        const vendor = await this.vendorRepository.findOne({ where: { id } });
+        if (!vendor) return null;
 
-        await this.vendorRepository.update(id, updateFinalData);
+        // save(), not update(): a new business name must also move the store's
+        // slug, which only the entity subscriber on save() does.
+        Object.assign(vendor, updateData, district ? { district } : {});
+        await this.vendorRepository.save(vendor);
 
         return this.vendorRepository.findOne({ where: { id } });
     }

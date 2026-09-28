@@ -19,8 +19,10 @@ export function responseCache(options: ResponseCacheOptions) {
     return (req: Request, res: Response, next: NextFunction) => {
         if (req.method !== "GET") return next();
 
-        // Safety: avoid caching personalized/authenticated responses.
-        if (req.headers.authorization) return next();
+        // Safety: avoid caching personalized/authenticated responses. A session
+        // arrives as a bearer header or as the `token` cookie; either one means
+        // the response may be the caller's own and must not be shared.
+        if (req.headers.authorization || req.cookies?.token) return next();
 
         // Debug escape hatch.
         if (req.query && (req.query as any).noCache === "1") return next();
@@ -44,7 +46,10 @@ export function responseCache(options: ResponseCacheOptions) {
                     key,
                     {
                         statusCode: res.statusCode,
-                        body: JSON.stringify(body),
+                        // Through the app's replacer, exactly as res.json()
+                        // serialises it, so a cache hit never carries fields
+                        // the live response stripped.
+                        body: JSON.stringify(body, req.app.get("json replacer")),
                         contentType: "application/json",
                     },
                     ttlSeconds
