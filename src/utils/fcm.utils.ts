@@ -24,6 +24,8 @@ export interface PushResult {
     failureCount: number;
     /** Tokens FCM reported as dead. Caller should deactivate these. */
     invalidTokens: string[];
+    /** Every token that did not receive the message, dead or not. */
+    failedTokens: string[];
     messageIds: string[];
 }
 
@@ -89,6 +91,7 @@ export async function sendToTokens(tokens: string[], payload: PushPayload): Prom
         successCount: 0,
         failureCount: 0,
         invalidTokens: [],
+        failedTokens: [],
         messageIds: [],
     };
     if (!tokens.length) return result;
@@ -109,6 +112,7 @@ export async function sendToTokens(tokens: string[], payload: PushPayload): Prom
                     return;
                 }
                 result.failureCount++;
+                result.failedTokens.push(batch[index]);
                 const code = res.error?.code ?? "unknown";
                 if (INVALID_TOKEN_CODES.has(code)) {
                     result.invalidTokens.push(batch[index]);
@@ -122,6 +126,7 @@ export async function sendToTokens(tokens: string[], payload: PushPayload): Prom
             // Whole batch blew up (network, auth). Count as failures but do not
             // deactivate — these tokens are not proven dead.
             result.failureCount += batch.length;
+            result.failedTokens.push(...batch);
             logger.error("[FCM] batch send error", {
                 batchSize: batch.length,
                 error: error instanceof Error ? error.message : String(error),

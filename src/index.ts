@@ -73,6 +73,8 @@ import deliveryAdminRouter from "./routes/delivery.admin.routes";
 import searchAliasRouter from "./routes/search-alias.routes";
 import deliveryRiderRouter from "./routes/delivery.rider.routes";
 import adminAuditRouter from "./routes/admin/admin.audit.routes";
+import adminBroadcastRouter from "./routes/admin/admin.broadcast.routes";
+import { startBroadcastWorker } from "./jobs/broadcast.jobs";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, "uploads");
@@ -176,6 +178,7 @@ app.use("/api/admin/users", adminUsersRouter);
 app.use("/api/admin/placements", merchandisingAdminRouter);
 app.use("/api/admin/search-aliases", searchAliasRouter);
 app.use("/api/admin/audit-logs", adminAuditRouter);
+app.use("/api/admin/broadcasts", adminBroadcastRouter);
 
 // admin delivery
 app.use("/api/admin/delivery", deliveryAdminRouter);
@@ -227,6 +230,7 @@ AppDataSource.initialize()
     finalizeUserAccountDeletions();
     expireStaleCheckoutDraftsJob();
     staleDeviceTokenCleanUp();
+    startBroadcastWorker();
     // await updateAllProductPrices(AppDataSource)
 
     // Start Express + WebSocket server

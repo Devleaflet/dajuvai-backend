@@ -89,6 +89,10 @@ export class User {
     @Column({ default: false })
     isVerified: boolean;
 
+    // Broadcast campaign email only; transactional mail ignores it.
+    @Column({ type: "boolean", default: true })
+    marketingEmailsEnabled: boolean;
+
     @Column({ nullable: true })
     password?: string;
 

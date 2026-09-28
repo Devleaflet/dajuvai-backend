@@ -28,6 +28,7 @@ import { VendorService } from "../service/vendor.service";
 import { PaymentService } from "../service/payment.service";
 import { Order, PaymentMethod } from "../entities/order.entity";
 import AppDataSource from "../config/db.config";
+import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
 import { Vendor } from "../entities/vendor.entity";
 import { In, Repository } from "typeorm";
 import { NotificationService } from "../service/notification.service";
@@ -174,6 +175,8 @@ export class OrderController {
                         quantity: item.quantity,
                         price: item.price,
                         variantAttributes: item.variant?.attributes || null,
+                        vendorId: item.vendorId,
+                        vendorName: vendor?.businessName || null,
                         vendorDistrict: vendor?.district?.name || null,
                     };
                 });
@@ -194,6 +197,9 @@ export class OrderController {
                             required: codAgeSummary.containsRestrictedItems,
                             minimumAge: codAgeSummary.minimumRequiredAge,
                         },
+                        null,
+                        // Each seller's own shipping, shown in their block.
+                        await AppDataSource.getRepository(OrderVendorShipping).findBy({ orderId: order.id }),
                     );
                 } catch (error) {
                     console.log("Failed to send customer order email:", error);

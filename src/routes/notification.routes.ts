@@ -1,4 +1,8 @@
 import { Router } from "express";
+import rateLimit, { Options } from "express-rate-limit";
+import { AdminBroadcastController } from "../controllers/admin.broadcast.controller";
+import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
+import { unsubscribeSchema } from "../utils/zod_validations/broadcast.zod";
 import { NotificationController } from "../controllers/notification.controller";
 import {
   combinedAuthMiddleware,
@@ -652,6 +656,56 @@ notificationRoutes.patch(
   "/:id",
   combinedAuthMiddleware,
   controller.markReadController.bind(controller),
+);
+
+// No token: the link arrives in an email. The signed token is the credential,
+// so this only needs to stop someone hammering it.
+const unsubscribeLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 30,
+  keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+  message: "Too many requests, please try again later.",
+});
+
+/**
+ * @swagger
+ * /api/notification/unsubscribe:
+ *   post:
+ *     summary: Opt out of broadcast campaign email
+ *     description: Public. The token comes from the unsubscribe link in a broadcast email. Transactional email (orders, security) is unaffected.
+ *     tags: [Notifications]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [token]
+ *             properties:
+ *               token: { type: string }
+ *     responses:
+ *       200:
+ *         description: Unsubscribed.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean }
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     unsubscribed: { type: boolean }
+ *       400: { description: The link is not valid. }
+ *       404: { description: The account no longer exists. }
+ *       429: { description: Too many requests. }
+ */
+const broadcastController = new AdminBroadcastController();
+notificationRoutes.post(
+  "/unsubscribe",
+  unsubscribeLimiter,
+  validateZod(unsubscribeSchema),
+  broadcastController.unsubscribe.bind(broadcastController),
 );
 
 export default notificationRoutes;

@@ -5,7 +5,8 @@ import {
     CreateDateColumn,
     UpdateDateColumn,
     ManyToOne,
-    JoinColumn
+    JoinColumn,
+    Index
 } from "typeorm";
 import { Vendor } from "./vendor.entity";
 import { User } from "./user.entity";
@@ -57,6 +58,21 @@ export class Notification {
     //  Mark if the notification is read or not
     @Column({ default: false })
     isRead: boolean;
+
+    // Set on notifications written by a broadcast campaign.
+    @Column({ type: "varchar", length: 500, nullable: true })
+    imageUrl?: string | null;
+
+    // BroadcastActionType and its value (product/store id or slug, or a URL).
+    @Column({ type: "varchar", length: 50, nullable: true })
+    actionType?: string | null;
+
+    @Column({ type: "varchar", length: 255, nullable: true })
+    actionValue?: string | null;
+
+    @Index()
+    @Column({ type: "uuid", nullable: true })
+    broadcastId?: string | null;
 
     // //  Link to related page (e.g. /orders/123)
     // @Column({ nullable: true })

@@ -155,3 +155,14 @@ export const emitOrderStatusUpdate = (order: Order) => {
         io.to(vendorRoom(vendorId)).emit("order:statusUpdated", payload);
     }
 };
+
+// A new in-app notification for one customer or vendor — today only
+// broadcasts send these live; everything else is picked up on the next fetch.
+export const emitNotification = (
+    ownerType: "user" | "vendor",
+    ownerId: number,
+    notification: Record<string, unknown>,
+) => {
+    if (!io) return;
+    io.to(ownerType === "user" ? userRoom(ownerId) : vendorRoom(ownerId)).emit("notification:new", notification);
+};

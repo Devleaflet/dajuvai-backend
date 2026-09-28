@@ -92,6 +92,10 @@ export class Vendor {
     @Column({ default: false })
     isApproved: boolean;
 
+    // Broadcast campaign email only; transactional mail ignores it.
+    @Column({ type: "boolean", default: true })
+    marketingEmailsEnabled: boolean;
+
     @Column({ type: "timestamp", nullable: true })
     deletionRequestedAt: Date | null;
 

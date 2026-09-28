@@ -32,6 +32,7 @@ import { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 import { CommissionDocument } from "../entities/commissionDocument.entity";
 import { DeviceToken } from "../entities/deviceToken.entity";
 import { NotificationDispatch } from "../entities/notificationDispatch.entity";
+import { Broadcast, BroadcastContent, BroadcastDelivery, BroadcastRecipient } from "../entities/broadcast.entity";
 import { Placement } from "../entities/placement.entity";
 import { PlacementItem } from "../entities/placementItem.entity";
 import { SearchAlias } from "../entities/search-alias.entity";
@@ -120,6 +121,10 @@ const AppDataSource = new DataSource({
         CommissionDocument,
         DeviceToken,
         NotificationDispatch,
+        Broadcast,
+        BroadcastContent,
+        BroadcastRecipient,
+        BroadcastDelivery,
         Placement,
         PlacementItem,
         SearchAlias,

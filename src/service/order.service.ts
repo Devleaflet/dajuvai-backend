@@ -2082,6 +2082,8 @@ export class OrderService {
                 quantity: item.quantity,
                 price: item.price,
                 variantAttributes: item.variant?.attributes || null,
+                vendorId: item.vendorId,
+                vendorName: vendor?.businessName || null,
                 vendorDistrict: vendor?.district?.name || null,
                 basePriceSnapshot: Number(item.basePriceSnapshot) || 0,
                 productDiscountSnapshot:
@@ -4005,6 +4007,15 @@ export class OrderService {
 
         const statusSideEffects: Array<() => Promise<void>> = [];
 
+        // The order's items and totals, built once for every status email.
+        // Best effort: without them the emails still go out, just shorter.
+        let emailDetailsPromise: Promise<AdminOrderEmailData | undefined> | null = null;
+        const emailDetails = () =>
+            (emailDetailsPromise ??= this.buildAdminOrderEmailData(order).catch((error) => {
+                console.error("Failed to build order details for status emails:", error);
+                return undefined;
+            }));
+
         if (order.orderedBy?.email) {
             statusSideEffects.push(async () => {
                 try {
@@ -4012,6 +4023,8 @@ export class OrderService {
                         order.orderedBy!.email,
                         order.orderNumber,
                         order.status,
+                        undefined,
+                        { orderId: order.id, order: await emailDetails() },
                     );
                 } catch (error) {
                     console.error(
@@ -4034,12 +4047,16 @@ export class OrderService {
             ];
 
             statusSideEffects.push(async () => {
+                const details = await emailDetails();
                 await Promise.all(
                     vendorEmails.map((email) =>
                         sendVendorOrderStatusEmail(
                             email,
                             order.orderNumber,
                             order.status,
+                            undefined,
+                            // Each vendor sees only their own items.
+                            { vendor: details?.vendors.find((v) => v.email === email) },
                         ).catch((error) => {
                             console.error(
                                 "Failed to send vendor status email:",
@@ -4054,8 +4071,8 @@ export class OrderService {
         if (targetStatus === OrderStatus.DELIVERED && config.USER_EMAIL) {
             statusSideEffects.push(async () => {
                 try {
-                    const deliveredEmailData =
-                        await this.buildAdminOrderEmailData(order);
+                    const deliveredEmailData = await emailDetails();
+                    if (!deliveredEmailData) return;
                     await sendAdminOrderDeliveredEmail(
                         config.USER_EMAIL!,
                         deliveredEmailData,

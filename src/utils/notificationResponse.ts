@@ -22,6 +22,11 @@ export type NotificationResponse = {
   target: NotificationTarget;
   isRead: boolean;
   orderId?: number;
+  /** Set on broadcast notifications: what tapping it opens. */
+  imageUrl: string | null;
+  actionType: string | null;
+  actionValue: string | null;
+  broadcastId: string | null;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -75,6 +80,10 @@ export const serializeNotification = (
     target: notification.target,
     isRead: Boolean(notification.isRead),
     ...(notification.orderId !== undefined && { orderId: notification.orderId }),
+    imageUrl: notification.imageUrl ?? null,
+    actionType: notification.actionType ?? null,
+    actionValue: notification.actionValue ?? null,
+    broadcastId: notification.broadcastId ?? null,
     createdAt: notification.createdAt,
     updatedAt: notification.updatedAt,
   };

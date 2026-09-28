@@ -25,6 +25,11 @@ const config = {
   FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET || "",
   FACEBOOK_CALLBACK_URL: process.env.FACEBOOK_CALLBACK_URL || "",
   FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
+  // The logo in every email header. Hosted on Cloudinary as a trimmed PNG:
+  // email clients do not all show WebP, and inline attachments get clipped.
+  EMAIL_LOGO_URL:
+    process.env.EMAIL_LOGO_URL ||
+    "https://res.cloudinary.com/dlzoli69m/image/upload/e_trim/h_144,c_scale/v1790626996/dajuvai/brand/email-logo.png",
   USER_EMAIL: process.env.USER_EMAIL || "",
   PASS_EMAIL: process.env.PASS_EMAIL || "",
   FIREBASE_SERVICE_ACCOUNT_BASE64:
@@ -46,6 +51,25 @@ const config = {
   PUSH_RATE_SEND: parseNumber(process.env.PUSH_RATE_SEND, 120),
   PUSH_RATE_MULTICAST: parseNumber(process.env.PUSH_RATE_MULTICAST, 30),
   PUSH_RATE_BROADCAST: parseNumber(process.env.PUSH_RATE_BROADCAST, 15),
+  // Broadcast campaigns queue through Redis (BullMQ). Without REDIS_URL, or
+  // with BROADCAST_ENABLED unset, drafts can still be written but nothing sends.
+  BROADCAST_ENABLED: process.env.BROADCAST_ENABLED === "true",
+  REDIS_URL: process.env.REDIS_URL || "",
+  // Dedicated SMTP for campaign mail; falls back to the Gmail account above,
+  // which Google caps at roughly 500 messages a day.
+  SMTP_HOST: process.env.SMTP_HOST || "",
+  SMTP_PORT: parseNumber(process.env.SMTP_PORT, 587),
+  SMTP_SECURE: process.env.SMTP_SECURE === "true",
+  SMTP_USER: process.env.SMTP_USER || "",
+  SMTP_PASSWORD: process.env.SMTP_PASSWORD || "",
+  BROADCAST_EMAIL_CONCURRENCY: parseNumber(process.env.BROADCAST_EMAIL_CONCURRENCY, 5),
+  BROADCAST_EMAIL_BATCH: parseNumber(process.env.BROADCAST_EMAIL_BATCH, 50),
+  BROADCAST_FCM_BATCH: parseNumber(process.env.BROADCAST_FCM_BATCH, 200),
+  BROADCAST_INAPP_BATCH: parseNumber(process.env.BROADCAST_INAPP_BATCH, 500),
+  BROADCAST_RETRY_ATTEMPTS: parseNumber(process.env.BROADCAST_RETRY_ATTEMPTS, 3),
+  // Records every push and email as skipped instead of sending it. In-app
+  // notifications are still written: they never leave the database.
+  BROADCAST_DRY_RUN: process.env.BROADCAST_DRY_RUN === "true",
   CLOUDINARY_CLOUD_NAME: process.env.CLOUDINARY_CLOUD_NAME || "",
   CLOUDINARY_API_KEY: process.env.CLOUDINARY_API_KEY || "",
   CLOUDINARY_API_SECRET: process.env.CLOUDINARY_API_SECRET || "",
