@@ -367,6 +367,9 @@ export class UserController {
         }
 
         const { permissions, ...profileData } = req.body;
+        // Login lowercases what it looks up, so a mixed-case email saved here
+        // would lock the staff member out. Signup lowercases for the same reason.
+        if (profileData.email) profileData.email = this.toLowerEmail(profileData.email);
 
         const updatedStaff = await updateStaffById(Number(id), profileData);
 
@@ -416,7 +419,9 @@ export class UserController {
         res: Response,
     ): Promise<void> {
         //  Body already validated by validateZod(signupSchema) middleware
-        const { email, password, permissions, fullName } = req.body;
+        // phoneNumber is required by staffSignupSchema; it used to be validated and
+        // then dropped here, so every staff account was created without one.
+        const { email, password, permissions, fullName, phoneNumber } = req.body;
 
         //  Prepare hashed password and verification token
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -437,6 +442,7 @@ export class UserController {
             email: loweredCaseEmail,
             password: hashedPassword,
             fullName: fullName || null,
+            phoneNumber,
             verificationCode: null,
             isVerified: true,
             verificationCodeExpire: null,

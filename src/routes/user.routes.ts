@@ -25,15 +25,51 @@ import {
 } from "../utils/zod_validations/user.zod";
 import { deleteUserDataByFacebookId, getFormattedStaffPermissions } from "../service/user.service";
 import { APIError } from "../utils/ApiError.utils";
-import { UserRole } from "../entities/user.entity";
+import { AuthProvider, UserRole } from "../entities/user.entity";
+import {
+    issueUserSessionTokens,
+    oauthCallbackUrl,
+    OAuthProvider,
+} from "../service/oauth.service";
 import config from "../config/env.config";
-import jwt from "jsonwebtoken";
 import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 
 const userRouter = Router();
 const userController = new UserController();
 
 const frontendUrl = config.FRONTEND_URL;
+
+/**
+ * Ends a web social sign-in, for Google and Facebook alike: the browser goes
+ * to `<frontend>/auth/<provider>/callback` with either `?error=<code>` (a
+ * fixed set, see `OAUTH_ERROR_CODES`) or the same token pair password login
+ * issues. One handler so the two providers cannot drift.
+ */
+const oauthCallback =
+    (provider: OAuthProvider) => (req: Request, res: Response, next: NextFunction) => {
+        const fail = (code: string) => res.redirect(oauthCallbackUrl(frontendUrl, provider, { error: code }));
+
+        // The user pressed Cancel on the provider's consent screen.
+        if (req.query.error === "access_denied") return fail("access_denied");
+
+        passport.authenticate(provider, { session: false }, (err: any, result: any, info: any) => {
+            if (err || (result && !result.user)) {
+                console.error(`${provider} OAuth callback error:`, err ?? "no user");
+                return fail("server_error");
+            }
+            if (!result) return fail(info?.message || "authentication_error");
+
+            const { token, refreshToken } = issueUserSessionTokens(result.user);
+            const cookie = {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "none" as const,
+            };
+            res.cookie("token", token, { ...cookie, maxAge: 15 * 60 * 1000 });
+            res.cookie("refreshToken", refreshToken, { ...cookie, maxAge: 24 * 60 * 60 * 1000 });
+            res.redirect(oauthCallbackUrl(frontendUrl, provider, { token, refreshToken }));
+        })(req, res, next);
+    };
 
 // Rate limiter for sensitive endpoints
 export const authRateLimiter = rateLimit({
@@ -200,14 +236,14 @@ userRouter.post(
  *           schema:
  *             type: object
  *             required:
- *               - username
  *               - email
  *               - password
- *               - confirmPassword
+ *               - phoneNumber
+ *               - permissions
  *             properties:
- *               username:
+ *               fullName:
  *                 type: string
- *                 example: staff_user
+ *                 example: Sita Sharma
  *               email:
  *                 type: string
  *                 format: email
@@ -217,11 +253,21 @@ userRouter.post(
  *                 format: password
  *                 minLength: 8
  *                 example: Password123!@#
- *               confirmPassword:
+ *               phoneNumber:
  *                 type: string
- *                 format: password
- *                 minLength: 8
- *                 example: Password123!@#
+ *                 minLength: 10
+ *                 maxLength: 10
+ *                 example: "9800000000"
+ *               permissions:
+ *                 type: object
+ *                 description: >
+ *                   Per-module access level. Modules: order, delivery, catalog, promo,
+ *                   deal, vendor, banner, arrangement, customer, category, product, audit.
+ *                   Levels: 1 = view, 2 = create/edit, 3 = delete.
+ *                 additionalProperties:
+ *                   type: integer
+ *                   enum: [1, 2, 3]
+ *                 example: { order: 2, customer: 1 }
  *     responses:
  *       201:
  *         description: Staff user registered successfully
@@ -1313,100 +1359,18 @@ userRouter.post(
  * /api/auth/google/callback:
  *   get:
  *     summary: Google OAuth callback handler
- *     description: Handles the callback from Google OAuth. Sets a JWT cookie and redirects to the frontend.
+ *     description: >
+ *       Handles the callback from Google OAuth. Redirects to
+ *       `<FRONTEND_URL>/auth/google/callback?token=…&refreshToken=…` on success (the same
+ *       15-minute access / 1-day refresh pair as password login), or `?error=<code>` where
+ *       code is one of access_denied, email_registered_manually, google_email_required,
+ *       invalid_state, server_error, authentication_error.
  *     tags: [Authentication]
  *     responses:
  *       302:
  *         description: Redirects to frontend with token on success, or with error on failure
  */
-userRouter.get(
-    "/google/callback",
-
-    (req: any, res: Response, next: any) => {
-        passport.authenticate(
-            "google",
-            { session: false },
-            (err: any, authResult: any, info: any) => {
-                if (err) {
-                    console.error("Google OAuth callback error:", err);
-                    return res.redirect(
-                        `${frontendUrl}/auth/google/callback?error=server_error`,
-                    );
-                }
-                if (!authResult) {
-                    return res.redirect(
-                        `${frontendUrl}/auth/google/callback?error=${info?.message || "authentication_error"}`,
-                    );
-                }
-                req.user = authResult;
-                next();
-            },
-        )(req, res, next);
-    },
-
-    async (req: any, res: Response) => {
-        try {
-            const { user } = req.user;
-
-            if (!user) {
-                console.error("Google OAuth failed - no user");
-
-                return res.redirect(
-                    `${frontendUrl}/auth/google/callback?error=authentication_error`,
-                );
-            }
-
-            const token = jwt.sign(
-                {
-                    id: user.id,
-                    email: user.email,
-                    role: user.role,
-                },
-                config.JWT_SECRET,
-                {
-                    expiresIn: "15m",
-                },
-            );
-
-            const refreshToken = jwt.sign(
-                {
-                    id: user.id,
-                    email: user.email,
-                    role: user.role,
-                },
-                config.JWT_REFRESH_SECRET,
-                {
-                    expiresIn: "1d",
-                },
-            );
-
-            res.cookie("token", token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "none",
-                maxAge: 15 * 60 * 1000,
-            });
-
-            res.cookie("refreshToken", refreshToken, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "none",
-                maxAge: 24 * 60 * 60 * 1000,
-            });
-
-            // Redirect to frontend callback with token and refreshToken
-            res.redirect(
-                `${frontendUrl}/auth/google/callback?token=${token}&refreshToken=${refreshToken}`,
-            );
-        } catch (error) {
-            console.error("Google OAuth callback error:", error);
-
-            res.redirect(
-                `${frontendUrl}/auth/google/callback?error=authentication_error`,
-            );
-        }
-    },
-);
+userRouter.get("/google/callback", oauthCallback(AuthProvider.GOOGLE));
 
 /**
  * @swagger
@@ -1645,36 +1609,30 @@ userRouter.get(
  * /api/auth/facebook/callback:
  *   get:
  *     summary: Facebook OAuth callback
- *     description: Callback endpoint for Facebook OAuth authentication
+ *     description: >
+ *       Callback endpoint for Facebook OAuth. Redirects to
+ *       `<FRONTEND_URL>/auth/facebook/callback?token=…&refreshToken=…` on success, or
+ *       `?error=<code>` where code is one of access_denied, email_registered_manually,
+ *       facebook_email_required, invalid_state, server_error, authentication_error.
  *     tags: [Authentication]
  *     parameters:
  *       - in: query
  *         name: code
- *         required: true
+ *         required: false
  *         schema:
  *           type: string
- *         description: Authorization code from Facebook
+ *         description: Authorization code from Facebook (absent when the user cancels)
+ *       - in: query
+ *         name: state
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: OAuth state nonce, checked against the oauth_state cookie
  *     responses:
  *       302:
- *         description: Redirects to frontend with JWT token
+ *         description: Redirects to frontend with tokens on success, or with error on failure
  */
-userRouter.get(
-    "/facebook/callback",
-    passport.authenticate("facebook", {
-        session: false,
-        failureRedirect: "/api/auth/login?error=facebook_auth_failed",
-    }),
-    (req: any, res: Response) => {
-        const { user, token } = req.user;
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            maxAge: 2 * 60 * 60 * 1000,
-            sameSite: "none",
-        });
-        res.redirect(`${frontendUrl}/google-auth-callback`);
-    },
-);
+userRouter.get("/facebook/callback", oauthCallback(AuthProvider.FACEBOOK));
 
 /**
  * @swagger

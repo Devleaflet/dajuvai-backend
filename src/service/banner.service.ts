@@ -42,7 +42,11 @@ export class BannerService {
         this.cloudinaryService = new CloudinaryService();
 
         if (!cronScheduled) {
-            cron.schedule("0 */5 * * *", async () => {
+            // Keeps the stored column close to the truth for anything that reads
+            // it directly. Reads do not depend on it — see `withLiveStatus`.
+            // Was every five hours, which left a banner that had started or
+            // ended labelled wrongly in the admin for up to five hours.
+            cron.schedule("* * * * *", async () => {
                 await this.updateBannerStatuses();
             });
             cronScheduled = true;
@@ -263,7 +267,7 @@ export class BannerService {
             banner.createdBy = { id: authorId, fullName, username } as User;
         }
 
-        return banner;
+        return this.withLiveStatus(banner);
     }
 
     async getAllBanners(type?: BannerType): Promise<Banner[]> {
@@ -332,8 +336,20 @@ export class BannerService {
             if (banner.createdBy) {
                 delete (banner.createdBy as any).address;
             }
-            return banner;
+            return this.withLiveStatus(banner);
         });
+    }
+
+    /**
+     * Status is a function of the dates and nothing else, so it is worked out
+     * at read time rather than trusted from the stored column, which only the
+     * cron refreshes. Serving the stored value is what let the admin list call
+     * a banner Active after its end date had passed, while the storefront —
+     * which also checks the dates — had already stopped showing it.
+     */
+    private withLiveStatus(banner: Banner): Banner {
+        banner.status = this.determineStatus(banner.startDate, banner.endDate);
+        return banner;
     }
 
     private determineStatus(startDate: Date, endDate: Date): BannerStatus {

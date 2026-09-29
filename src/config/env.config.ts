@@ -7,6 +7,9 @@ const parseNumber = (value: string | undefined, fallback: number) => {
   return Number.isFinite(parsed) ? parsed : fallback;
 };
 
+const googleCallbackUrl =
+  process.env.GOOGLE_CALLBACK_URL || "http://localhost:4000/api/auth/google/callback";
+
 const config = {
   NODE_ENV: process.env.NODE_ENV || "development",
   PORT: parseNumber(process.env.PORT, 4000),
@@ -18,12 +21,17 @@ const config = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET || "",
   GOOGLE_ANDROID_CLIENT_ID: process.env.GOOGLE_ANDROID_CLIENT_ID || "",
   GOOGLE_IOS_CLIENT_ID: process.env.GOOGLE_IOS_CLIENT_ID || "",
-  GOOGLE_CALLBACK_URL:
-    process.env.GOOGLE_CALLBACK_URL ||
-    "http://localhost:4000/api/auth/google/callback",
+  // Must match the "Authorized redirect URI" in the Google Cloud console
+  // exactly: <backend origin>/api/auth/google/callback.
+  GOOGLE_CALLBACK_URL: googleCallbackUrl,
   FACEBOOK_APP_ID: process.env.FACEBOOK_APP_ID || "",
   FACEBOOK_APP_SECRET: process.env.FACEBOOK_APP_SECRET || "",
-  FACEBOOK_CALLBACK_URL: process.env.FACEBOOK_CALLBACK_URL || "",
+  // Must match a "Valid OAuth Redirect URI" in the Meta app's Facebook Login
+  // settings: <backend origin>/api/auth/facebook/callback. Defaults to the
+  // Google callback's origin, since both are served by this backend.
+  FACEBOOK_CALLBACK_URL:
+    process.env.FACEBOOK_CALLBACK_URL ||
+    googleCallbackUrl.replace(/\/google\/callback\/?$/, "/facebook/callback"),
   FRONTEND_URL: process.env.FRONTEND_URL || "http://localhost:5173",
   // The logo in every email header. Hosted on Cloudinary as a trimmed PNG:
   // email clients do not all show WebP, and inline attachments get clipped.

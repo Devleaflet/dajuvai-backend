@@ -13,6 +13,7 @@ import { StaffSignUpInput } from "../utils/zod_validations/user.zod";
 import { StaffPermission } from "../entities/staffPermission.entity";
 import { PermissionAction, PermissionLevel } from "../entities/permission.enum";
 import { getPermissionString } from "../utils/permission.utils";
+import { deriveSignInProvider } from "../utils/signInProvider.util";
 import {
     getUserDeletionStatus,
     UserDeletionStatus,
@@ -36,7 +37,7 @@ const vendorDB = AppDataSource.getRepository(Vendor);
  */
 export type AdminUserListItem = Omit<
     User,
-    "deletionRequestedAt" | "deletionFinalizedAt"
+    "deletionRequestedAt" | "deletionFinalizedAt" | "googleId" | "facebookId"
 > & {
     deletionStatus: UserDeletionStatus;
     deletionScheduledFor: Date | null;
@@ -56,6 +57,9 @@ export const fetchAllUser = async (): Promise<AdminUserListItem[]> => {
             "updatedAt",
             "profilePicture",
             "provider",
+            // Read only to derive `provider` below; stripped before returning.
+            "googleId",
+            "facebookId",
             "deletionScheduledFor",
             "deletionFinalizedAt",
         ],
@@ -63,10 +67,16 @@ export const fetchAllUser = async (): Promise<AdminUserListItem[]> => {
 
     return users.map((user) => {
         const deletionStatus = getUserDeletionStatus(user);
-        const { deletionFinalizedAt: _deletionFinalizedAt, ...adminUser } = user;
+        const {
+            deletionFinalizedAt: _deletionFinalizedAt,
+            googleId: _googleId,
+            facebookId: _facebookId,
+            ...adminUser
+        } = user;
 
         return {
             ...adminUser,
+            provider: deriveSignInProvider(user),
             deletionStatus,
             deletionScheduledFor: user.deletionScheduledFor ?? null,
         };

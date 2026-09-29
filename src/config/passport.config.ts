@@ -3,8 +3,12 @@ import { Strategy as GoogleStrategy } from "passport-google-oauth20";
 import { Strategy as FacebookStrategy } from "passport-facebook";
 import { ExtractJwt, Strategy as JwtStrategy } from "passport-jwt";
 import { AuthProvider, User } from "../entities/user.entity";
+import {
+  cookieStateStore,
+  OAuthProvider,
+  resolveOAuthUser,
+} from "../service/oauth.service";
 import AppDataSource from "./db.config";
-import jwt from "jsonwebtoken";
 import config from "./env.config";
 import { UserDeletionService } from "../service/user-deletion.service";
 import {
@@ -93,170 +97,51 @@ passport.use(
   ),
 );
 
-// Configures Google OAuth 2.0 Strategy for Google login
-// Purpose: Allows users to authenticate via Google, creating new users if needed and issuing a JWT
-// How it works:
-// - Redirects users to Google for login
-// - On callback, checks if user exists by googleId
-// - Creates a new user if none exists, then generates a JWT
-// Major Features:
-// - Seamless Google OAuth integration for single sign-on
-// - Automatic user creation with Google profile data (email, name)
-// - JWT generation for session management (2-hour expiry)
-// - Marks users as verified since Google validates emails
-// - Robust error handling for database operations
+// Google and Facebook web sign-in. Both share one verify function
+// (`resolveOAuthUser`) so their account-linking rules cannot drift, and both
+// carry an OAuth `state` nonce (`cookieStateStore`) against login CSRF. Tokens
+// are issued in the route callback (`issueUserSessionTokens`), not here.
+const verifyOAuth =
+  (provider: OAuthProvider) =>
+  async (_accessToken: string, _refreshToken: string, profile: any, done: any) => {
+    try {
+      const result = await resolveOAuthUser(
+        provider,
+        profile,
+        userDB,
+        () => new UserDeletionService(),
+      );
+      if ("error" in result) return done(null, false, { message: result.error });
+      return done(null, { user: result.user });
+    } catch (error) {
+      return done(error, false);
+    }
+  };
+
 passport.use(
   new GoogleStrategy(
     {
       clientID: config.GOOGLE_CLIENT_ID,
       clientSecret: config.GOOGLE_CLIENT_SECRET,
       callbackURL: config.GOOGLE_CALLBACK_URL,
+      store: cookieStateStore as any,
     },
-    async (accessToken, refreshToken, profile, done) => {
-      try {
-        // Check if user exists with the Google ID
-        let user = await userDB.findOne({
-          where: { googleId: profile.id },
-        });
-
-        if (!user) {
-          // Check if a user with the same email already exists
-          user = await userDB.findOne({
-            where: { email: profile.emails[0].value },
-          });
-
-          if (user) {
-            if (user.provider !== AuthProvider.GOOGLE) {
-              return done(null, false, {
-                message: "email_registered_manually",
-              });
-            }
-
-            user.googleId = profile.id;
-            user.isVerified = true;
-            user.provider = AuthProvider.GOOGLE;
-            await userDB.save(user);
-          } else {
-            // No user with this email or Google ID; create a new user
-            user = userDB.create({
-              googleId: profile.id,
-              email: profile.emails[0].value,
-              username: profile.displayName,
-              isVerified: true,
-              provider: AuthProvider.GOOGLE,
-            });
-            await userDB.save(user);
-          }
-        }
-
-        // Account-deletion grace handling:
-        // - Signing in with Google during the grace period reactivates the
-        //   account (the OAuth sign-in is strong proof of identity).
-        // - Once the grace period has elapsed the account is finalized
-        //   (PII anonymized) and Google sign-in starts a fresh account.
-        if (user.deletionScheduledFor && !user.deletionFinalizedAt) {
-          const userDeletionService = new UserDeletionService();
-          if (user.deletionScheduledFor <= new Date()) {
-            await userDeletionService.finalizeUserDeletion(user.id);
-            user = userDB.create({
-              googleId: profile.id,
-              email: profile.emails[0].value,
-              username: profile.displayName,
-              isVerified: true,
-              provider: AuthProvider.GOOGLE,
-            });
-            await userDB.save(user);
-          } else {
-            await userDeletionService.reactivateOAuthUser(user.id);
-          }
-        }
-
-        // Generate JWT for session
-        const token = jwt.sign(
-          {
-            id: user.id,
-            email: user.email,
-            username: user.username || profile.displayName,
-            role: user.role,
-          },
-          config.JWT_SECRET,
-          { expiresIn: "2h" },
-        );
-
-        // Pass user and token to Passport
-        return done(null, { user, token });
-      } catch (error) {
-        // Handle database or other errors
-        return done(error, false);
-      }
-    },
+    verifyOAuth(AuthProvider.GOOGLE),
   ),
 );
 
-// Configures Facebook OAuth Strategy for Facebook login
-// Purpose: Enables authentication via Facebook, creating new users if needed and issuing a JWT
-// How it works:
-// - Redirects users to Facebook for login
-// - On callback, checks if user exists by facebookId
-// - Creates a new user if none exists, then generates a JWT
-// Major Features:
-// - Facebook OAuth integration for single sign-on
-// - Retrieves specific profile fields (id, name, email, photos)
-// - Automatic user creation with Facebook profile data
-// - JWT generation for session management (2-hour expiry)
-// - Marks users as verified since Facebook validates emails
-// - Robust error handling for database operations
 passport.use(
   new FacebookStrategy(
     {
-      clientID: config.FACEBOOK_APP_ID, // Facebook app ID from env
-      clientSecret: config.FACEBOOK_APP_SECRET, // Facebook app secret from env
-      callbackURL: config.FACEBOOK_CALLBACK_URL || config.GOOGLE_CALLBACK_URL.replace('google', 'facebook'),
-      profileFields: ["id", "displayName", "photos", "email"], // Specific data to retrieve from Facebook
-    },
-    async (accessToken, refreshToken, profile, done) => {
-      try {
-        // Check if user exists with the Facebook ID
-        let user = await userDB.findOne({
-          where: { facebookId: profile.id },
-        });
-        if (!user) {
-          // Create new user with Facebook profile data
-          user = await userDB.findOne({
-            where: { email: profile.emails[0].value },
-          });
-
-          if (user) {
-            user.facebookId = profile.id;
-            user.isVerified = true; // Facebook verified
-            await userDB.save(user);
-          } else {
-            user = userDB.create({
-              facebookId: profile.id,
-              email: profile.emails[0].value,
-              username: profile.displayName,
-              isVerified: true,
-            });
-            await userDB.save(user);
-          }
-        }
-        // Generate JWT for session
-        const token = jwt.sign(
-          {
-            id: user.id,
-            email: user.email,
-            username: user.username || profile.displayName,
-            role: user.role,
-          },
-          config.JWT_SECRET, // Secret key for signing
-          { expiresIn: "2h" }, // Token expires in 2 hours
-        );
-        // Pass user and token to Passport
-        return done(null, { user, token });
-      } catch (error) {
-        // Handle database or other errors
-        return done(error, false);
-      }
-    },
+      clientID: config.FACEBOOK_APP_ID,
+      clientSecret: config.FACEBOOK_APP_SECRET,
+      callbackURL: config.FACEBOOK_CALLBACK_URL,
+      profileFields: ["id", "displayName", "photos", "email"],
+      // appsecret_proof on Graph calls, so a leaked user token alone cannot
+      // be used with this app's id.
+      enableProof: true,
+      store: cookieStateStore as any,
+    } as any,
+    verifyOAuth(AuthProvider.FACEBOOK),
   ),
 );

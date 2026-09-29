@@ -43,6 +43,8 @@ export const staffSignupSchema = z.object({
         banner: z.nativeEnum(PermissionLevel).optional(),
         arrangement: z.nativeEnum(PermissionLevel).optional(),
         customer: z.nativeEnum(PermissionLevel).optional(),
+        // Was missing, so a category grant at creation was silently stripped.
+        category: z.nativeEnum(PermissionLevel).optional(),
         product: z.nativeEnum(PermissionLevel).optional(),
         audit: z.nativeEnum(PermissionLevel).optional(),
     })
