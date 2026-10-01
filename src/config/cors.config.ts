@@ -1,5 +1,4 @@
 import { CorsOptions } from "cors";
-import config from "./env.config";
 
 export const allowedOrigins = [
   "https://dajuvai-frontend-ykrq.vercel.app",
@@ -17,10 +16,9 @@ export const allowedOrigins = [
 export const corsOptions: CorsOptions = {
   origin: (origin, callback) => {
     if (!origin) {
-      if (config.NODE_ENV === "production") {
-        return callback(new Error("CORS: No origin header in production"));
-      }
-      return callback(null, true);
+      // Server-to-server calls have no Origin header. Let them continue
+      // without adding browser CORS headers.
+      return callback(null, false);
     }
     if (allowedOrigins.includes(origin)) {
       callback(null, origin);

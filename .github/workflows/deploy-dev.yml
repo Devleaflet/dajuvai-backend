@@ -1,32 +1,26 @@
-name: Deploy backend production
+name: Deploy backend development
 
 permissions:
   contents: read
 
 on:
   workflow_dispatch:
-    inputs:
-      run_migrations:
-        description: "Run pending production database migrations before replacing the API (back up the database first)"
-        type: boolean
-        default: false
 
 concurrency:
-  group: deploy-backend-production
+  group: deploy-backend-development
   cancel-in-progress: false
 
 jobs:
   verify:
     runs-on: ubuntu-latest
-    # Existing token/email tests need configured values; these never leave CI.
     env:
       JWT_SECRET: ci-placeholder-secret-at-least-32-characters
       JWT_REFRESH_SECRET: ci-another-placeholder-secret-at-least-32-characters
       USER_EMAIL: ci@example.invalid
       PASS_EMAIL: ci-placeholder
     steps:
-      - name: Require production branch
-        run: test "$GITHUB_REF_NAME" = master
+      - name: Require development branch
+        run: test "$GITHUB_REF_NAME" = develop
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
@@ -39,14 +33,13 @@ jobs:
   deploy:
     needs: verify
     runs-on: ubuntu-latest
-    environment: production
+    environment: development
     steps:
       - name: Verify VPS configuration
         env:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
-          PROD_BACKEND_SERVICE: ${{ vars.PROD_BACKEND_SERVICE }}
           SSH_FINGERPRINT: ${{ secrets.SERVER_SSH_FINGERPRINT }}
-        run: test -n "$DEPLOY_DIR" && test -n "$PROD_BACKEND_SERVICE" && test -n "$SSH_FINGERPRINT"
+        run: test -n "$DEPLOY_DIR" && test -n "$SSH_FINGERPRINT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
       - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
       - name: Log in to registry
@@ -57,8 +50,8 @@ jobs:
       - name: Keep the running image as :previous
         # The rollback target. Only two tags per image, so the registry (on the
         # VPS disk) stops growing with every deploy. Fails only on a first deploy.
-        run: docker buildx imagetools create -t registry.dajuvai.com/backend/dajuvai-backend-prod-v1:previous registry.dajuvai.com/backend/dajuvai-backend-prod-v1:latest || echo "No :latest yet"
-      - name: Build and push production image
+        run: docker buildx imagetools create -t registry.dajuvai.com/backend/dajuvai-backend-dev-v1:previous registry.dajuvai.com/backend/dajuvai-backend-dev-v1:latest || echo "No :latest yet"
+      - name: Build and push development image
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
         with:
           context: .
@@ -66,51 +59,59 @@ jobs:
           # Plain single-image manifests: the registry's garbage collector
           # mishandles attestation indexes and can delete tagged layers.
           provenance: false
-          tags: registry.dajuvai.com/backend/dajuvai-backend-prod-v1:latest
+          tags: registry.dajuvai.com/backend/dajuvai-backend-dev-v1:latest
       - name: Deploy on VPS
         uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262
         env:
           DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
-          PROD_BACKEND_SERVICE: ${{ vars.PROD_BACKEND_SERVICE }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           fingerprint: ${{ secrets.SERVER_SSH_FINGERPRINT }}
-          envs: DEPLOY_DIR,PROD_BACKEND_SERVICE
+          envs: DEPLOY_DIR
           command_timeout: 20m
           script: |
             set -eu
             cd "$DEPLOY_DIR"
-            if ! grep -q 'backend/dajuvai-backend-prod-v1' docker-compose.yml; then
-              echo 'docker-compose.yml still uses the old backend image name; update it first (DEPLOYMENT.md step 13)'
-              exit 1
-            fi
-            if [ ! -s redis-prod.env ] || grep -q 'replace-with' redis-prod.env; then
-              echo 'Missing or unfinished redis-prod.env'
-              exit 1
-            fi
+            for file in postgres-dev.env redis-dev.env backend-dev.env; do
+              if [ ! -s "$file" ] || grep -q 'replace-with' "$file"; then
+                echo "Missing or unfinished $file"
+                exit 1
+              fi
+            done
             docker compose config --quiet
-            docker compose up -d redis-prod
+            docker compose pull dajuvai-backend-dev
+            docker compose up -d postgres-dev redis-dev
             for attempt in $(seq 1 30); do
-              if docker compose exec -T redis-prod sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping' | grep -qx PONG; then break; fi
+              if docker compose exec -T postgres-dev sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; then break; fi
               if [ "$attempt" -eq 30 ]; then exit 1; fi
               sleep 2
             done
-            docker compose pull "$PROD_BACKEND_SERVICE"
-            if [ "${{ inputs.run_migrations }}" = "true" ]; then
-              docker compose run --rm --no-deps "$PROD_BACKEND_SERVICE" npm run migration:run
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T redis-dev sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping' | grep -qx PONG; then break; fi
+              if [ "$attempt" -eq 30 ]; then exit 1; fi
+              sleep 2
+            done
+            # Migrations alter tables that predate them, so an empty database
+            # cannot be migrated. Load the baseline from docs/DEPLOYMENT.md first.
+            baseline=$(echo "SELECT to_regclass('public.migrations') IS NOT NULL" \
+              | docker compose exec -T postgres-dev sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA')
+            if [ "$baseline" != t ]; then
+              echo 'postgres-dev has no baseline schema; load it before deploying (see DEPLOYMENT.md)'
+              exit 1
             fi
-            docker compose up -d --no-deps "$PROD_BACKEND_SERVICE"
-            container=$(docker compose ps -q "$PROD_BACKEND_SERVICE")
+            docker compose run --rm --no-deps dajuvai-backend-dev npm run migration:run
+            docker compose up -d --no-deps dajuvai-backend-dev
+            container=$(docker compose ps -q dajuvai-backend-dev)
             for attempt in $(seq 1 30); do
               state=$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null || echo starting)
               if [ "$state" = healthy ]; then exit 0; fi
               if [ "$state" = unhealthy ]; then
-                docker compose logs --tail 80 "$PROD_BACKEND_SERVICE"
+                docker compose logs --tail 80 dajuvai-backend-dev
                 exit 1
               fi
               sleep 5
             done
-            docker compose logs --tail 80 "$PROD_BACKEND_SERVICE"
+            docker compose logs --tail 80 dajuvai-backend-dev
             exit 1
