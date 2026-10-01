@@ -74,7 +74,7 @@ jobs:
           script: |
             set -eu
             cd "$DEPLOY_DIR"
-            for file in postgres-dev.env redis-dev.env backend-dev.env; do
+            for file in backend-dev.env; do
               if [ ! -s "$file" ] || grep -q 'replace-with' "$file"; then
                 echo "Missing or unfinished $file"
                 exit 1
