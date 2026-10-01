@@ -94,11 +94,11 @@ jobs:
               sleep 2
             done
             # Migrations alter tables that predate them, so an empty database
-            # cannot be migrated. Load the baseline from docs/DEPLOYMENT.md first.
+            # cannot be migrated. Load the baseline first.
             baseline=$(echo "SELECT to_regclass('public.migrations') IS NOT NULL" \
               | docker compose exec -T postgres-dev sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA')
             if [ "$baseline" != t ]; then
-              echo 'postgres-dev has no baseline schema; load it before deploying (see DEPLOYMENT.md)'
+              echo 'postgres-dev has no baseline schema; load it before deploying'
               exit 1
             fi
             docker compose run --rm --no-deps dajuvai-backend-dev npm run migration:run

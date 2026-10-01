@@ -83,12 +83,12 @@ jobs:
             set -eu
             cd "$DEPLOY_DIR"
             if ! grep -q 'backend/dajuvai-backend-prod-v1' docker-compose.yml; then
-              echo 'docker-compose.yml still uses the old backend image name; update it first (DEPLOYMENT.md step 13)'
+              echo 'docker-compose.yml still uses the old backend image name; update it first'
               exit 1
             fi
             for key in REDIS_PASSWORD TRUSTED_PROXY_SECRET NPX_MERCHANT_ID NPX_SECRET_KEY; do
               if ! grep -qE "^$key=." .be.env; then
-                echo ".be.env has no $key; see DEPLOYMENT.md Step 13"
+                echo ".be.env has no $key; add it first"
                 exit 1
               fi
             done
