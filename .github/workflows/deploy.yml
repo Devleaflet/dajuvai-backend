@@ -86,10 +86,12 @@ jobs:
               echo 'docker-compose.yml still uses the old backend image name; update it first (DEPLOYMENT.md step 13)'
               exit 1
             fi
-            if ! grep -q '^REDIS_PASSWORD=.' .be.env; then
-              echo '.be.env has no REDIS_PASSWORD; run setup-env.sh apply-prod first'
-              exit 1
-            fi
+            for key in REDIS_PASSWORD TRUSTED_PROXY_SECRET NPX_MERCHANT_ID NPX_SECRET_KEY; do
+              if ! grep -qE "^$key=." .be.env; then
+                echo ".be.env has no $key; see DEPLOYMENT.md Step 13"
+                exit 1
+              fi
+            done
             docker compose config --quiet
             docker compose up -d redis-prod
             for attempt in $(seq 1 30); do
