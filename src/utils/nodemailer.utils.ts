@@ -28,6 +28,12 @@ import {
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
 const transporter = nodemailer.createTransport({
     service: "Gmail",
+    // One kept-alive connection instead of a TLS handshake per email, and a
+    // ceiling on each stage so an unreachable mail server fails in seconds.
+    pool: true,
+    connectionTimeout: 10_000,
+    greetingTimeout: 10_000,
+    socketTimeout: 30_000,
     auth: {
         user: config.USER_EMAIL, // Your Gmail email address
         pass: config.PASS_EMAIL, // App password or actual password (prefer app password for security)
@@ -190,6 +196,25 @@ export const sendVerificationEmail = async (
           });
 
     await transporter.sendMail({ from: FROM(), to, subject: sub, html });
+};
+
+/**
+ * Sends a code email without holding the request open.
+ *
+ * Every code is saved (hashed) before its email goes out, so the response does
+ * not depend on delivery — but awaiting SMTP made it: a slow or unreachable
+ * mail server turned signups, logins and resets that had already succeeded
+ * into gateway timeouts, and the retry then failed as "already registered".
+ * Failures are logged; the user can always ask for a new code.
+ */
+export const sendVerificationEmailInBackground = (
+    to: string,
+    sub: string,
+    token: string,
+): void => {
+    void sendVerificationEmail(to, sub, token).catch((error) =>
+        console.error(`"${sub}" email failed:`, error),
+    );
 };
 
 type CustomerOrderItem = {

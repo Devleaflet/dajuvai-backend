@@ -26,8 +26,8 @@ import {
 import { validateZod } from "../middlewares/auth.middleware";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
-import { verificationTokenSchema } from "../utils/zod_validations/user.zod";
-import { authRateLimiter } from "./user.routes";
+import { resetCodeSchema, verificationTokenSchema } from "../utils/zod_validations/user.zod";
+import { authRateLimiter, verifyCodeLimiter } from "./user.routes";
 import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 import { VendorProductsQuerySchema } from "../utils/zod_validations/product.zod";
 import { resolveSlugParam } from "../middlewares/slug.middleware";
@@ -1617,6 +1617,61 @@ router.post(
     authRateLimiter,
     validateZod(resetPasswordSchema),
     vendorController.resetPassword.bind(vendorController),
+);
+
+/**
+ * @swagger
+ * /api/vendors/reset-password/verify:
+ *   post:
+ *     summary: Check a password reset code
+ *     description: Confirms the six-digit code emailed by forgot-password is correct and unexpired, without using it up, so the client can ask for the new password only after the code is known to be right. reset-password re-checks the code. Rate limited to 10 attempts per 15 minutes per client. No authentication required.
+ *     tags: [Vendors]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - token
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               token:
+ *                 type: string
+ *                 pattern: "^[0-9]{6}$"
+ *           example:
+ *             email: "user@example.com"
+ *             token: "123456"
+ *     responses:
+ *       200:
+ *         description: Code is valid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Code verified
+ *       400:
+ *         description: Code is incorrect, or the body failed validation
+ *       404:
+ *         description: No account for submitted email
+ *       410:
+ *         description: Code expired, already used, or replaced by a newer one
+ *       429:
+ *         description: Too many attempts
+ */
+router.post(
+    "/reset-password/verify",
+    verifyCodeLimiter,
+    validateZod(resetCodeSchema),
+    vendorController.verifyResetCode.bind(vendorController),
 );
 
 /**

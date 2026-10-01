@@ -13,6 +13,7 @@ import {
     adminResetPasswordSchema,
     changeEmailSchema,
     loginSchema,
+    resetCodeSchema,
     resetPasswordSchema,
     signupSchema,
     staffSignupSchema,
@@ -74,7 +75,10 @@ const oauthCallback =
 // Rate limiter for sensitive endpoints
 export const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 5, // Limit each IP to 5 requests per window
+    max: 5, // Limit each client to 5 requests per window
+    // Keyed on the real client behind the Next proxy, not the proxy itself —
+    // otherwise every shopper shares one allowance.
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
     message: "Too many requests, please try again later.",
 });
 
@@ -1757,6 +1761,61 @@ userRouter.post(
     authRateLimiter,
     validateZod(resetPasswordSchema),
     userController.resetPassword.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/reset-password/verify:
+ *   post:
+ *     summary: Check a password reset code
+ *     description: Confirms the six-digit code emailed by forgot-password is correct and unexpired, without using it up, so the client can ask for the new password only after the code is known to be right. reset-password re-checks the code. Rate limited to 10 attempts per 15 minutes per client. No authentication required.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - token
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               token:
+ *                 type: string
+ *                 pattern: "^[0-9]{6}$"
+ *           example:
+ *             email: "user@example.com"
+ *             token: "123456"
+ *     responses:
+ *       200:
+ *         description: Code is valid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Code verified
+ *       400:
+ *         description: Code is incorrect, or the body failed validation
+ *       404:
+ *         description: No account for submitted email
+ *       410:
+ *         description: Code expired, already used, or replaced by a newer one
+ *       429:
+ *         description: Too many attempts
+ */
+userRouter.post(
+    "/reset-password/verify",
+    verifyCodeLimiter,
+    validateZod(resetCodeSchema),
+    userController.verifyResetCode.bind(userController),
 );
 
 /**

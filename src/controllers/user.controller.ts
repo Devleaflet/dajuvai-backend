@@ -69,13 +69,14 @@ import { TokenSubjectType } from "../entities/revokedToken.entity";
 
 import {
     sendVendorApplicationEmail,
-    sendVerificationEmail,
+    sendVerificationEmailInBackground,
 } from "../utils/nodemailer.utils";
 import AppDataSource from "../config/db.config";
 import { VendorService } from "../service/vendor.service";
 import { UserDeletionService } from "../service/user-deletion.service";
 import { isUserDeletionGracePeriodActive } from "../service/user-account-deletion.policy";
 import { sanitizeUser } from "../utils/sanitize.util";
+import { assertResetCode } from "../utils/resetCode.utils";
 import { Vendor } from "../entities/vendor.entity";
 
 const googleClient = new OAuth2Client(config.GOOGLE_CLIENT_ID);
@@ -528,7 +529,7 @@ export class UserController {
 
             if (existingAccount) {
                 const conflict = createAuthAccountConflict(
-                    "customerAccountExists",
+                    "emailRegisteredAsVendor",
                 );
                 throw new APIError(
                     conflict.status,
@@ -564,7 +565,7 @@ export class UserController {
 
                 // Save updated user and send verification email
                 await saveUser(existingUser);
-                await sendVerificationEmail(
+                sendVerificationEmailInBackground(
                     email,
                     "Email Verification Code",
                     verificationToken,
@@ -578,7 +579,9 @@ export class UserController {
                 return;
             }
 
-            // Create and save new user (first-time signup)
+            // Create and save new user (first-time signup). Unverified until the
+            // emailed code is entered: every client shows the code screen next,
+            // and login refuses an unverified account (sending it a fresh code).
             const user = await createUser({
                 username,
                 email: loweredEmail,
@@ -586,51 +589,29 @@ export class UserController {
                 verificationCode: hashedToken,
                 verificationCodeExpire: expire,
                 role: UserRole.USER,
-                isVerified: true,
+                isVerified: false,
             });
 
-            // Send email with raw verification code. The account above is
-            // already created and usable, so a mail outage must not turn this
-            // into a 503 — the shopper would retry and be told the email is
-            // already registered.
-            await sendVerificationEmail(
+            // In the background: see sendVerificationEmailInBackground. "Resend
+            // code" and signing in both issue a new code if this one is lost.
+            sendVerificationEmailInBackground(
                 email,
                 "Email Verification Code",
                 verificationToken,
-            ).catch((mailError) =>
-                console.error("Signup verification email failed:", mailError),
             );
 
-            //  Generate JWT and set cookie
-            const token = jwt.sign(
-                {
-                    id: user.id,
-                    email: user.email,
-                    username: user.username,
-                    role: user.role,
-                },
-                this.jwtSecret,
-                { expiresIn: "2h" },
-            );
-
-            // Set secure cookie with token
-            res.cookie("token", token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === "production",
-                sameSite: "strict",
-                maxAge: 2 * 60 * 60 * 1000, // 2 hours
-            });
-
-            //  Return user and token (without password or verificationCode)
+            // No session: an unverified account cannot sign in, so issuing a
+            // token here would be the one way around verification.
             res.status(201).json({
                 success: true,
+                message:
+                    "Account created. Enter the code we emailed you to verify it.",
                 user: {
                     id: user.id,
                     username: user.username,
                     email: user.email,
                     role: user.role,
                 },
-                token,
             });
         } catch (error) {
             console.log(error);
@@ -691,7 +672,7 @@ export class UserController {
                 );
                 if (vendor) {
                     const conflict = createAuthAccountConflict(
-                        "customerAccountExists",
+                        "emailRegisteredAsVendor",
                     );
                     throw new APIError(
                         conflict.status,
@@ -702,24 +683,36 @@ export class UserController {
                 throw new APIError(404, "Customer account does not exist");
             }
 
-            if (user.provider !== AuthProvider.LOCAL) {
-                throw new APIError(
-                    403,
-                    "This account was created with Google. Please log in using Google.",
-                );
-            }
-
-            if (!user.isVerified) {
-                throw new APIError(
-                    403,
-                    "Please verify your email before logging in",
-                );
-            }
+            this.assertPasswordAccount(user, "log in");
 
             // Compare password
             const isMatch = await bcrypt.compare(password, user.password);
             if (!isMatch) {
                 throw new APIError(401, "Invalid credentials");
+            }
+
+            // After the password check, so only the owner learns the account is
+            // unverified and only the owner can make it send email. Someone who
+            // closed the code screen at signup comes back through here, so the
+            // refusal carries a fresh code rather than a dead end.
+            if (!user.isVerified) {
+                // The login lookup selects only a few columns; the resend
+                // counters live on the full row.
+                const fullUser = await findUserByEmail(user.email);
+                const sent = await this.issueVerificationCode(fullUser).then(
+                    () => true,
+                    (sendError) => {
+                        console.error("Login verification code failed:", sendError);
+                        return false;
+                    },
+                );
+                throw new APIError(
+                    403,
+                    sent
+                        ? "Please verify your email before logging in. We've sent a new code to your email."
+                        : "Please verify your email before logging in. Use the code we sent earlier, or request a new one in a few minutes.",
+                    "EMAIL_NOT_VERIFIED",
+                );
             }
 
             // Accounts scheduled for deletion cannot log in normally — the
@@ -1214,6 +1207,62 @@ export class UserController {
     }
 
     /**
+     * Google and Facebook accounts have no password of their own, so neither
+     * signing in with one nor resetting one means anything for them. Says which
+     * provider to use instead of a generic refusal.
+     */
+    private assertPasswordAccount(user: User, purpose: "log in" | "password"): void {
+        if (user.provider === AuthProvider.LOCAL) return;
+        const provider = user.provider === AuthProvider.FACEBOOK ? "Facebook" : "Google";
+        throw new APIError(
+            403,
+            purpose === "log in"
+                ? `This account is linked to ${provider}. Please sign in with ${provider}.`
+                : `This account is linked to ${provider}, so it has no password to reset or change. Please sign in with ${provider}.`,
+            "SOCIAL_ACCOUNT",
+        );
+    }
+
+    /**
+     * Emails a new 15-minute verification code to a user or vendor, three per
+     * ten minutes before a cooldown. Shared by "resend code" and by login, which
+     * sends one to an account that never finished verifying.
+     */
+    private async issueVerificationCode(entity: User | Vendor): Promise<void> {
+        const now = new Date();
+        if (entity.resendBlockUntil && entity.resendBlockUntil > now) {
+            const remainingMinutes = Math.ceil(
+                (entity.resendBlockUntil.getTime() - now.getTime()) / 60_000,
+            );
+            throw new APIError(
+                429,
+                `Too many verification attempts. Please try again in ${remainingMinutes} minute(s).`,
+            );
+        }
+
+        // The block has passed: start a new allowance.
+        if (entity.resendCount >= 3) {
+            entity.resendCount = 0;
+            entity.resendBlockUntil = null;
+        }
+
+        const verificationToken = TokenUtils.generateToken();
+        entity.verificationCode = await TokenUtils.hashToken(verificationToken);
+        entity.verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
+        entity.resendCount += 1;
+        if (entity.resendCount >= 3) {
+            entity.resendBlockUntil = new Date(Date.now() + 10 * 60 * 1000);
+        }
+
+        await (entity instanceof Vendor ? saveVendor(entity) : saveUser(entity as User));
+        sendVerificationEmailInBackground(
+            entity.email,
+            "Email Verification Code",
+            verificationToken,
+        );
+    }
+
+    /**
      * @method sendVerificationToken
      * @route POST /auth/resend-verification
      * @description Sends a new email verification token to a user or vendor.
@@ -1262,57 +1311,7 @@ export class UserController {
                 }
             }
 
-            // Reference the correct entity (user or vendor) for further processing
-            const entity = isVendor ? vendor : user;
-            const now = new Date();
-
-            // Check if the entity is currently blocked from resending verification tokens
-            if (entity.resendBlockUntil && entity.resendBlockUntil > now) {
-                // Calculate remaining block time in minutes
-                const remainingSeconds = Math.ceil(
-                    (entity.resendBlockUntil.getTime() - now.getTime()) / 1000,
-                );
-                const remainingMinutes = Math.ceil(remainingSeconds / 60);
-                // Respond with 429 Too Many Requests and inform about the cooldown period
-                throw new APIError(
-                    429,
-                    `Too many verification attempts. Please try again in ${remainingMinutes} minute(s).`,
-                );
-            }
-
-            // Reset resend count and block if the resend limit has been reached
-            if (entity.resendCount >= 3) {
-                entity.resendCount = 0;
-                entity.resendBlockUntil = null;
-            }
-
-            // Generate a new 6-digit verification token (raw, for emailing)
-            const verificationToken = TokenUtils.generateToken();
-            // Hash the token securely before storing it in the database
-            const hashedToken = await TokenUtils.hashToken(verificationToken);
-            // Set token expiration time to 15 minutes from now
-            const expire = new Date(Date.now() + 15 * 60 * 1000);
-
-            // Update entity with new hashed token and expiration
-            entity.verificationCode = hashedToken;
-            entity.verificationCodeExpire = expire;
-            // Increment resend attempt counter
-            entity.resendCount += 1;
-
-            // If resend attempts hit limit, set block duration of 10 minutes
-            if (entity.resendCount >= 3) {
-                entity.resendBlockUntil = new Date(Date.now() + 10 * 60 * 1000);
-            }
-
-            // Save updated user or vendor entity back to the database
-            await (isVendor ? saveVendor(vendor) : saveUser(user));
-
-            // Send verification email containing the raw token to the user's or vendor's email address
-            await sendVerificationEmail(
-                entity.email,
-                "Email Verification Code",
-                verificationToken,
-            );
+            await this.issueVerificationCode(isVendor ? vendor : user);
 
             // Respond with HTTP 202 Accepted to indicate the token has been sent
             res.status(202).json({
@@ -1451,181 +1450,110 @@ export class UserController {
     /**
      * @method forgotPassword
      * @route POST /auth/forgot-password
-     * @description Handles a password reset request by generating and emailing a reset token.
-     * Sends a token with 15-minute expiry to the user's or vendor's email if found.
+     * @description Emails a six-digit, 15-minute password reset code.
      *
-     * @param {Request<{}, {}, IVerificationTokenRequest>} req - Express request with email field.
-     * @param {Response} res - Express response object for sending HTTP responses.
-     * @returns {Promise<void>} Sends success message on token generation or appropriate error.
-     * @throws {APIError} On validation failure, user/vendor not found, or internal issues.
+     * An unknown address is answered with a 404 saying so. Login and signup
+     * already reveal whether an email is registered, so hiding it here would
+     * protect nothing and only leave a shopper waiting on an email that will
+     * never come. Accounts that sign in with Google or Facebook have no
+     * password, and are told which provider to use instead.
      * @access Public
      */
     async forgotPassword(
         req: Request<{}, {}, IVerificationTokenRequest>,
         res: Response,
     ): Promise<void> {
-        try {
-            // Validate request body using Zod schema to ensure email is provided and correctly formatted
-            const parsed = verificationTokenSchema.safeParse(req.body);
-            if (!parsed.success) {
-                // Respond with 400 Bad Request if validation fails, including detailed error information
-                res.status(400).json({
-                    success: false,
-                    errors: parsed.error.errors,
-                });
-                return;
-            }
-
-            // Extract email from validated data
-            const email = this.toLowerEmail(parsed.data.email);
-            const user = await findUserByEmail(email);
-            if (!user) {
-                throw new APIError(404, "User does not exist");
-            }
-
-            if (user.provider === AuthProvider.GOOGLE) {
-                throw new APIError(
-                    400,
-                    "google registered users cannot change password, please login through google.",
-                );
-            }
-
-            // Generate a new password reset token and set its expiration time (1 minutes from now)
-            const token = TokenUtils.generateToken();
-            const hashedToken = await TokenUtils.hashToken(token);
-            const tokenExpire = new Date(Date.now() + 15 * 60 * 1000);
-
-            // Store the reset token and expiration time in the entity
-            user.resetToken = hashedToken;
-            user.resetTokenExpire = tokenExpire;
-
-            // Save the updated entity to the database
-            await saveUser(user);
-
-            // Send an email to the user or vendor with the reset token and instructions
-            await sendVerificationEmail(user.email, "Reset Password", token);
-
-            // Respond with 202 Accepted indicating the reset email has been sent successfully
-            res.status(202).json({
-                success: true,
-                message: "Password reset request sent",
-            });
-        } catch (error) {
-            console.log(error);
-            // Handle expected API errors with their respective status and message
-            if (error instanceof APIError) {
-                res.status(error.status).json({
-                    success: false,
-                    message: error.message,
-                });
-            } else {
-                // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(
-                    503,
-                    "Password reset service temporarily unavailable",
-                );
-            }
+        const email = this.toLowerEmail(req.body.email);
+        const user = await findUserByEmail(email);
+        if (!user) {
+            throw new APIError(
+                404,
+                "We couldn't find an account with that email. Check it, or create a new account.",
+                "ACCOUNT_NOT_FOUND",
+            );
         }
+        this.assertPasswordAccount(user, "password");
+
+        const token = TokenUtils.generateToken();
+        user.resetToken = await TokenUtils.hashToken(token);
+        user.resetTokenExpire = new Date(Date.now() + 15 * 60 * 1000);
+        await saveUser(user);
+
+        sendVerificationEmailInBackground(user.email, "Reset Password", token);
+
+        res.status(202).json({
+            success: true,
+            message: "We've emailed you a 6-digit reset code.",
+        });
+    }
+
+    /**
+     * @method verifyResetCode
+     * @route POST /auth/reset-password/verify
+     * @description Checks an emailed reset code without spending it, so the
+     * new password is only asked for once the code is known to be right.
+     * `resetPassword` checks it again; this is a courtesy, not the gate.
+     * @access Public
+     */
+    async verifyResetCode(
+        req: Request<{}, {}, { email: string; token: string }>,
+        res: Response,
+    ): Promise<void> {
+        const user = await findUserByEmail(this.toLowerEmail(req.body.email));
+        if (!user) {
+            throw new APIError(404, "We couldn't find an account with that email.", "ACCOUNT_NOT_FOUND");
+        }
+        this.assertPasswordAccount(user, "password");
+        await assertResetCode(user, req.body.token);
+
+        res.status(200).json({ success: true, message: "Code verified" });
     }
 
     /**
      * @method resetPassword
      * @route POST /auth/reset-password
-     * @description Resets the user's or vendor's password using a valid reset token.
-     * Verifies the token, hashes the new password, updates the entity, and clears the token.
-     *
-     * @param {Request<{}, {}, IResetPasswordRequest>} req - Express request containing reset token and new password.
-     * @param {Response} res - Express response object to return result.
-     * @returns {Promise<void>} Sends success message upon successful password reset.
-     * @throws {APIError} For invalid or expired token, user/vendor not found, or unexpected errors.
+     * @description Sets a new password with a valid reset code, then clears
+     * the code and ends every existing session.
      * @access Public
      */
     async resetPassword(
         req: Request<{}, {}, IResetPasswordRequest>,
         res: Response,
     ): Promise<void> {
-        try {
-            // Validate request body using Zod schema to ensure newPass and token are provided and valid
-            const parsed = resetPasswordSchema.safeParse(req.body);
-            if (!parsed.success) {
-                // Respond with 400 Bad Request if validation fails, including error details
-                res.status(400).json({
-                    success: false,
-                    errors: parsed.error.errors,
-                });
-                return;
-            }
-
-            // Extract new password and reset token from validated data
-            const { newPass, token } = parsed.data;
-            const email = this.toLowerEmail(parsed.data.email);
-            const user = await findUserByEmail(email);
-            if (!user) {
-                throw new APIError(404, "User does not exist");
-            }
-            if (user.provider === AuthProvider.GOOGLE) {
-                throw new APIError(
-                    400,
-                    "google registered users cannot change password, please login through google.",
-                );
-            }
-            if (!user.resetToken || !user.resetTokenExpire) {
-                throw new APIError(410, "Reset token no longer valid");
-            }
-            if (user.resetTokenExpire < new Date()) {
-                throw new APIError(410, "Reset token expired");
-            }
-            // Only the bcrypt comparison: an equality check also accepted the
-            // stored hash itself as a valid code.
-            const isMatch = await bcrypt.compare(token, user.resetToken);
-            if (!isMatch) {
-                throw new APIError(400, "Invalid reset token");
-            }
-
-            // Hash the new password securely using bcrypt with salt rounds = 10
-            const hashedPassword = await bcrypt.hash(newPass, 10);
-
-            // Update the entity's password with the hashed password
-            user.password = hashedPassword;
-
-            /**
-             * Every session signed before now stops working.
-             *
-             * A password reset is usually someone recovering an account they
-             * believe is compromised. Leaving the attacker's existing token
-             * valid for its full lifetime — up to seven days for an admin —
-             * would make the reset theatre. `authMiddleware` refuses any token
-             * whose `iat` predates this.
-             */
-            user.tokensValidFrom = new Date();
-
-            // Clear reset token and expiration to prevent reuse
-            user.resetToken = null;
-            user.resetTokenExpire = null;
-
-            // Save the updated entity to the database
-            await saveUser(user);
-
-            // Respond with 200 OK indicating password reset was successful
-            res.status(200).json({
-                success: true,
-                message: "Password reset successfully",
-            });
-        } catch (error) {
-            // Handle known API errors with their specific status and message
-            if (error instanceof APIError) {
-                res.status(error.status).json({
-                    success: false,
-                    message: error.message,
-                });
-            } else {
-                // Handle unexpected errors with generic 503 Service Unavailable
-                throw new APIError(
-                    503,
-                    "Password reset service temporarily unavailable",
-                );
-            }
+        const { newPass, token } = req.body;
+        const user = await findUserByEmail(this.toLowerEmail(req.body.email));
+        if (!user) {
+            throw new APIError(404, "We couldn't find an account with that email.", "ACCOUNT_NOT_FOUND");
         }
+        this.assertPasswordAccount(user, "password");
+        await assertResetCode(user, token);
+
+        user.password = await bcrypt.hash(newPass, 10);
+
+        /**
+         * Every session signed before now stops working.
+         *
+         * A password reset is usually someone recovering an account they
+         * believe is compromised. Leaving the attacker's existing token
+         * valid for its full lifetime — up to seven days for an admin —
+         * would make the reset theatre. `authMiddleware` refuses any token
+         * whose `iat` predates this.
+         */
+        user.tokensValidFrom = new Date();
+
+        // The code arrived by email, which is all verification proves, so an
+        // account that never finished signup can sign in after resetting.
+        user.isVerified = true;
+
+        // Clear reset token and expiration to prevent reuse
+        user.resetToken = null;
+        user.resetTokenExpire = null;
+        await saveUser(user);
+
+        res.status(200).json({
+            success: true,
+            message: "Password reset successfully",
+        });
     }
 
     async adminChangeVendorPassword(
@@ -1871,7 +1799,7 @@ export class UserController {
             await (isVendor ? saveVendor(vendor) : saveUser(user));
 
             // Send verification email to new address
-            await sendVerificationEmail(
+            sendVerificationEmailInBackground(
                 newEmail,
                 "Verify New Email",
                 verificationToken,

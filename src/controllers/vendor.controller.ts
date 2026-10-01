@@ -7,7 +7,7 @@ import { AuthRequest, VendorAuthRequest } from "../middlewares/auth.middleware";
 import {
     sendVendorApprovedEmail,
     sendVendorRejectedEmail,
-    sendVerificationEmail,
+    sendVerificationEmailInBackground,
 } from "../utils/nodemailer.utils";
 import { sanitizeVendor, sanitizeVendorForAdmin } from "../utils/sanitize.util";
 import { VendorService } from "../service/vendor.service";
@@ -46,6 +46,8 @@ import { findUserByEmail } from "../service/user.service";
 import config from "../config/env.config";
 import { newTokenId } from "../service/token-revocation.service";
 import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
+import { assertResetCode } from "../utils/resetCode.utils";
+import { Vendor } from "../entities/vendor.entity";
 
 /**
  * Utility class for token management
@@ -223,7 +225,7 @@ export class VendorController {
             verificationCodeExpire,
         });
 
-        await sendVerificationEmail(
+        sendVerificationEmailInBackground(
             email,
             "Vendor Email Verification",
             verificationToken,
@@ -492,7 +494,7 @@ export class VendorController {
         }
 
         await this.vendorService.saveVendor(vendor);
-        await sendVerificationEmail(
+        sendVerificationEmailInBackground(
             vendor.email,
             "Vendor Email Verification",
             verificationToken,
@@ -521,13 +523,7 @@ export class VendorController {
         }
 
         const email = parsed.data.email.trim().toLowerCase();
-        const vendor = await this.vendorService.findVendorByEmail(email);
-        if (!vendor) {
-            throw new APIError(
-                404,
-                "vendor does not exist for provided mail.",
-            );
-        }
+        const vendor = await this.findVendorForReset(email);
 
         const token = TokenUtils.generateToken();
         const hashedToken = await TokenUtils.hashToken(token);
@@ -536,12 +532,45 @@ export class VendorController {
         vendor.resetTokenExpire = tokenExpire;
         await this.vendorService.saveVendor(vendor);
 
-        await sendVerificationEmail(vendor.email, "Reset Password", token);
+        sendVerificationEmailInBackground(vendor.email, "Reset Password", token);
 
         res.status(202).json({
             success: true,
-            message: "Password reset request sent",
+            message: "We've emailed you a 6-digit reset code.",
         });
+    }
+
+    /**
+     * An unknown address is named as such, as the customer flow does: vendor
+     * login already reveals whether an email is registered. A customer email
+     * gets pointed at the customer reset instead.
+     */
+    private async findVendorForReset(email: string): Promise<Vendor> {
+        const vendor = await this.vendorService.findVendorByEmail(email);
+        if (vendor) return vendor;
+        if (await findUserByEmail(email)) {
+            throw new APIError(
+                404,
+                "This email belongs to a customer account. Use the customer \"Forgot password?\" link instead.",
+                "CUSTOMER_ACCOUNT",
+            );
+        }
+        throw new APIError(
+            404,
+            "We couldn't find a vendor account with that email.",
+            "ACCOUNT_NOT_FOUND",
+        );
+    }
+
+    /** Checks an emailed reset code without spending it; see `assertResetCode`. */
+    async verifyResetCode(
+        req: Request<{}, {}, { email: string; token: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const vendor = await this.findVendorForReset(req.body.email.trim().toLowerCase());
+        await assertResetCode(vendor, req.body.token);
+        res.status(200).json({ success: true, message: "Code verified" });
     }
 
     async resetPassword(
@@ -562,23 +591,8 @@ export class VendorController {
 
         const { newPass, token } = parsed.data;
         const email = parsed.data.email.trim().toLowerCase();
-        const vendor = await this.vendorService.findVendorByEmail(email);
-        if (!vendor) {
-            throw new APIError(
-                404,
-                "vendor does not exist for provided mail.",
-            );
-        }
-        if (!vendor.resetToken || !vendor.resetTokenExpire) {
-            throw new GoneError("Reset token no longer valid");
-        }
-        if (vendor.resetTokenExpire < new Date()) {
-            throw new GoneError("Reset token expired");
-        }
-        // Only the bcrypt comparison: an equality check also accepted the
-        // stored hash itself as a valid code.
-        const isMatch = await bcrypt.compare(token, vendor.resetToken);
-        if (!isMatch) throw new BadRequestError("Invalid reset token");
+        const vendor = await this.findVendorForReset(email);
+        await assertResetCode(vendor, token);
 
         const hashedPassword = await bcrypt.hash(newPass, 10);
         vendor.password = hashedPassword;
@@ -853,7 +867,7 @@ export class VendorController {
             districtEntity,
         });
 
-        await sendVerificationEmail(
+        sendVerificationEmailInBackground(
             data.email,
             "Vendor Email Verification",
             verificationToken,

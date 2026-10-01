@@ -97,6 +97,15 @@ export const verifyTokenSchema = z.object({
 });
 
 /**
+ * Schema for checking a password-reset code before the new password is chosen.
+ * Shared by the customer and vendor reset flows.
+ */
+export const resetCodeSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    token: z.string().regex(/^\d{6}$/, 'Code must be 6 digits'),
+});
+
+/**
  * Schema for updating a staff member (admin-only).
  * Fields are optional but at least one must be provided.
  * If password is provided, confirmPassword must match and meet the same
