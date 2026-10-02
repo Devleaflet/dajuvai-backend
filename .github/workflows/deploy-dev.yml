@@ -1,0 +1,117 @@
+name: Deploy backend development
+
+permissions:
+  contents: read
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-backend-development
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      JWT_SECRET: ci-placeholder-secret-at-least-32-characters
+      JWT_REFRESH_SECRET: ci-another-placeholder-secret-at-least-32-characters
+      USER_EMAIL: ci@example.invalid
+      PASS_EMAIL: ci-placeholder
+    steps:
+      - name: Require development branch
+        run: test "$GITHUB_REF_NAME" = develop
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check:routes
+      - run: npm run test:unit
+
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: development
+    steps:
+      - name: Verify VPS configuration
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          SSH_FINGERPRINT: ${{ secrets.SERVER_SSH_FINGERPRINT }}
+        run: test -n "$DEPLOY_DIR" && test -n "$SSH_FINGERPRINT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Log in to registry
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | docker login registry.dajuvai.com -u "$REGISTRY_USERNAME" --password-stdin
+      - name: Keep the running image as :previous
+        # The rollback target. Only two tags per image, so the registry (on the
+        # VPS disk) stops growing with every deploy. Fails only on a first deploy.
+        run: docker buildx imagetools create -t registry.dajuvai.com/backend/dajuvai-backend-dev-v1:previous registry.dajuvai.com/backend/dajuvai-backend-dev-v1:latest || echo "No :latest yet"
+      - name: Build and push development image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          push: true
+          # Plain single-image manifests: the registry's garbage collector
+          # mishandles attestation indexes and can delete tagged layers.
+          provenance: false
+          tags: registry.dajuvai.com/backend/dajuvai-backend-dev-v1:latest
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          fingerprint: ${{ secrets.SERVER_SSH_FINGERPRINT }}
+          envs: DEPLOY_DIR
+          command_timeout: 20m
+          script: |
+            set -eu
+            cd "$DEPLOY_DIR"
+            for file in backend-dev.env; do
+              if [ ! -s "$file" ] || grep -q 'replace-with' "$file"; then
+                echo "Missing or unfinished $file"
+                exit 1
+              fi
+            done
+            docker compose config --quiet
+            docker compose pull dajuvai-backend-dev
+            docker compose up -d postgres-dev redis-dev
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T postgres-dev sh -c 'pg_isready -U "$POSTGRES_USER" -d "$POSTGRES_DB"'; then break; fi
+              if [ "$attempt" -eq 30 ]; then exit 1; fi
+              sleep 2
+            done
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T redis-dev sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping' | grep -qx PONG; then break; fi
+              if [ "$attempt" -eq 30 ]; then exit 1; fi
+              sleep 2
+            done
+            # Migrations alter tables that predate them, so an empty database
+            # cannot be migrated. Load the baseline first.
+            baseline=$(echo "SELECT to_regclass('public.migrations') IS NOT NULL" \
+              | docker compose exec -T postgres-dev sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -tA')
+            if [ "$baseline" != t ]; then
+              echo 'postgres-dev has no baseline schema; load it before deploying'
+              exit 1
+            fi
+            docker compose run --rm --no-deps dajuvai-backend-dev npm run migration:run
+            docker compose up -d --no-deps dajuvai-backend-dev
+            container=$(docker compose ps -q dajuvai-backend-dev)
+            for attempt in $(seq 1 30); do
+              state=$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null || echo starting)
+              if [ "$state" = healthy ]; then exit 0; fi
+              if [ "$state" = unhealthy ]; then
+                docker compose logs --tail 80 dajuvai-backend-dev
+                exit 1
+              fi
+              sleep 5
+            done
+            docker compose logs --tail 80 dajuvai-backend-dev
+            exit 1
