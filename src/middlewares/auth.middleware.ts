@@ -131,6 +131,38 @@ export const restrictToVendorOrAdmin = async (
   return next(new ForbiddenError("Not authorized: Admin or Vendor only"));
 };
 
+/** What a vendor may change on their own account; the rest is set at registration. */
+const VENDOR_SELF_EDITABLE = new Set(["profilePicture", "paymentOptions"]);
+
+/**
+ * Runs after `restrictToVendorOrAdmin` on the vendor update routes. Registered
+ * details (business name, phone, district, registration and tax numbers,
+ * documents) are fixed once a vendor signs up, so a vendor updating their own
+ * account may only send a profile picture and payment options. Admins keep
+ * full edit access.
+ */
+export const limitVendorSelfEdit = (
+  req: VendorAuthRequest & AuthRequest,
+  _res: Response,
+  next: NextFunction,
+) => {
+  if (!req.vendor || req.user?.role === UserRole.ADMIN) return next();
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const locked = Object.keys(body).filter((key) => !VENDOR_SELF_EDITABLE.has(key));
+  if (locked.length > 0) {
+    return next(
+      new ForbiddenError(
+        `Registered details cannot be changed: ${locked.join(", ")}. Contact support to update them.`,
+      ),
+    );
+  }
+
+  // Which payout types are allowed is the zod schema's job (eSewa, Khalti, NPX).
+
+  return next();
+};
+
 /**
  * Authenticates both vendors and users using JWT tokens.
  * Token can be in cookies (vendorToken or token) or Authorization header.

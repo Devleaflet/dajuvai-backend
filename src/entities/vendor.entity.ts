@@ -14,11 +14,11 @@ import { OrderItem } from "./orderItems.entity";
 import { District } from "./district.entity";
 import { VendorPaymentOption } from "./vendorPaymentOption";
 
+/** Payout methods; kept identical to the one in vendorPaymentOption.ts. */
 export enum PaymentOption {
     ESEWA = "ESEWA",
     KHALTI = "KHALTI",
-    NPS = "NPS",
-    BANK = "BANK",
+    NPX = "NPX",
 }
 
 @Entity()

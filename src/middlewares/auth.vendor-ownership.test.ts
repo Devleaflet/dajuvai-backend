@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { UserRole } from "../entities/user.entity";
-import { restrictToVendorOrAdmin } from "./auth.middleware";
+import { limitVendorSelfEdit, restrictToVendorOrAdmin } from "./auth.middleware";
 
 /**
  * A vendor token used to pass this guard for any `:id` in the path, so any
@@ -56,5 +56,37 @@ describe("restrictToVendorOrAdmin", () => {
     const error = await run({ params: { id: "8" } });
 
     expect((error as Error).message).toMatch(/Authentication required/);
+  });
+});
+
+describe("limitVendorSelfEdit", () => {
+  function check(req: Record<string, unknown>) {
+    const next = vi.fn();
+    limitVendorSelfEdit(req as any, {} as any, next as any);
+    return next.mock.calls[0]?.[0];
+  }
+
+  it("lets a vendor change their picture and payout methods", () => {
+    expect(
+      check({
+        vendor: { id: 7 },
+        body: {
+          profilePicture: "https://res.cloudinary.com/x/a.png",
+          paymentOptions: [{ paymentType: "ESEWA" }, { paymentType: "KHALTI" }, { paymentType: "NPX" }],
+        },
+      }),
+    ).toBeUndefined();
+  });
+
+  it("refuses a vendor changing a registered detail", () => {
+    const error = check({ vendor: { id: 7 }, body: { businessName: "New", profilePicture: null } });
+
+    expect((error as Error).message).toMatch(/businessName/);
+  });
+
+  it("leaves an admin free to change anything", () => {
+    expect(
+      check({ user: { id: 1, role: UserRole.ADMIN }, body: { businessName: "New", taxNumber: "1" } }),
+    ).toBeUndefined();
   });
 });

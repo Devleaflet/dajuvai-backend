@@ -39,3 +39,36 @@ export function canTransition(
 }
 
 export const ALL_ORDER_STATUSES: OrderStatus[] = Object.values(OrderStatus);
+
+/**
+ * Statuses where something went wrong for the customer. Only these carry a
+ * reason to the customer (email, in-app, push), and the reason is required;
+ * on every other status the reason and note stay internal to the timeline.
+ */
+export const CUSTOMER_REASON_STATUSES: ReadonlySet<OrderStatus> = new Set([
+    OrderStatus.DELAYED,
+    OrderStatus.CANCELLED,
+    OrderStatus.NOT_RECEIVED,
+    OrderStatus.RETURNED,
+]);
+
+/**
+ * Statuses worth an email. Every other change reaches people through the
+ * in-app feed and push only, which saves the mail quota. ORDER_PLACED is
+ * absent because checkout already sends its own confirmation.
+ */
+export const CUSTOMER_EMAIL_STATUSES: ReadonlySet<OrderStatus> = new Set([
+    ...CUSTOMER_REASON_STATUSES,
+    OrderStatus.DELIVERED,
+]);
+/** Vendors are emailed only when they must act: stop, hurry, or expect stock back. */
+export const VENDOR_EMAIL_STATUSES: ReadonlySet<OrderStatus> = CUSTOMER_REASON_STATUSES;
+
+/** The reason the customer should see for this status, or undefined if it is internal. */
+export function customerFacingReason(
+    status: OrderStatus,
+    reason?: string | null,
+): string | undefined {
+    const trimmed = reason?.trim();
+    return trimmed && CUSTOMER_REASON_STATUSES.has(status) ? trimmed : undefined;
+}

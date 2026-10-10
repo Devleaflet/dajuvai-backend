@@ -107,6 +107,7 @@ export class OrderController {
             vendorids,
             useremail,
             esewaRedirectUrl,
+            replayed,
         } = await this.orderService.createOrder(req.user.id, data);
 
         // Online-payment checkouts create a draft, not an order — the order
@@ -134,7 +135,10 @@ export class OrderController {
 
         // Online-payment orders are not sent to vendors until payment succeeds.
         // `OrderService.orderSuccess` owns their equivalent notification.
-        if (order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+        // A replayed retry already sent everything below the first time.
+        const firstTime = !replayed && order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY;
+
+        if (firstTime) {
             void this.notificationService
                 .notifyOrderPlaced(order)
                 .catch((error) => {
@@ -142,7 +146,7 @@ export class OrderController {
                 });
         }
 
-        if (order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY) {
+        if (firstTime) {
             void (async () => {
                 const shippingAddress = order.shippingAddress || null;
                 const userDistrict = shippingAddress?.district || null;

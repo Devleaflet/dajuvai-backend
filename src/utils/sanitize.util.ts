@@ -297,6 +297,25 @@ const buildOrderItemPriceBreakdown = (item: OrderItem) => {
     };
 };
 
+/**
+ * The address this order ships to. A customer has one Address row, which each
+ * checkout edits in place, so an older order's relation shows the newest
+ * address; the per-order snapshot taken at checkout is the truth where present.
+ */
+export const orderShippingAddress = (
+    order: Pick<Order, "shippingAddress" | "shippingAddressSnapshot">,
+): Address | null => {
+    const live = order.shippingAddress ?? null;
+    const snapshot = order.shippingAddressSnapshot as Partial<Address> | null;
+    if (!snapshot) return live;
+    const sameDistrict = live && live.districtId === snapshot.districtId;
+    return {
+        ...(live ?? {}),
+        ...snapshot,
+        districtRef: sameDistrict ? live.districtRef : null,
+    } as Address;
+};
+
 export const sanitizeOrderItem = (item: OrderItem): SanitizedOrderItem => {
     const priceBreakdown = buildOrderItemPriceBreakdown(item);
 
@@ -547,7 +566,7 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
-        shippingAddress: order.shippingAddress ?? null,
+        shippingAddress: orderShippingAddress(order),
         orderItems,
         priceBreakdown: {
             actualPrice: lineBreakdowns.reduce(
@@ -669,7 +688,7 @@ export const sanitizeOrderForVendor = (
         paymentMethod: order.paymentMethod,
         createdAt: order.createdAt,
         orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
-        shippingAddress: order.shippingAddress ?? null,
+        shippingAddress: orderShippingAddress(order),
         orderItems: vendorItems.map(sanitizeOrderItem),
         itemsSubtotal,
         /** What was taken off by cancelling lines, as a positive figure. */

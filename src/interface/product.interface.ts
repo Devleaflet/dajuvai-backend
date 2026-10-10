@@ -57,6 +57,8 @@ export interface IAdminProductQueryParams {
     filter?: "out_of_stock";
 
     vendorId?: string;
+    categoryId?: string;
+    subcategoryId?: string;
     search?: string;
 }
 

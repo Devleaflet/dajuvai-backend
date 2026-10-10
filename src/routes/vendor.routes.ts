@@ -7,6 +7,7 @@ import {
     isAdmin,
     isAdminOrStaff,
     isVendor,
+    limitVendorSelfEdit,
     restrictToVendorOrAdmin,
     vendorAuthMiddleware,
 } from "../middlewares/auth.middleware";
@@ -1962,6 +1963,7 @@ router.put(
     "/:id",
     combinedAuthMiddleware,
     restrictToVendorOrAdmin,
+    limitVendorSelfEdit,
     validateZod(updateVendorSchema),
     vendorController.updateVendor.bind(vendorController),
 );
@@ -2334,7 +2336,7 @@ router.delete(
  *                   properties:
  *                     paymentType:
  *                       type: string
- *                       enum: [ESEWA, KHALTI, NPS, BANK]
+ *                       enum: [ESEWA, KHALTI, NPX]
  *                       example: "ESEWA"
  *                     accountName:
  *                       type: string
@@ -2468,6 +2470,7 @@ router.put(
     "/v2/:id",
     combinedAuthMiddleware,
     restrictToVendorOrAdmin,
+    limitVendorSelfEdit,
     validateZod(updateVendorSchema2, "body"),
     vendorController.updateVendorV2.bind(vendorController),
 );

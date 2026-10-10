@@ -1,4 +1,5 @@
 import type { Address } from "../entities/address.entity";
+import { orderShippingAddress } from "./sanitize.util";
 import type { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 import type { Order } from "../entities/order.entity";
 import type { OrderItem } from "../entities/orderItems.entity";
@@ -139,7 +140,7 @@ export function sanitizeOrderForDelivery(order?: Order | null) {
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         orderedBy: sanitizeUserForDelivery((order as any).orderedBy),
-        shippingAddress: sanitizeAddressForDelivery((order as any).shippingAddress),
+        shippingAddress: sanitizeAddressForDelivery(orderShippingAddress(order)),
         orderItems: Array.isArray((order as any).orderItems)
             ? (order as any).orderItems.map((i: OrderItem) =>
                   sanitizeOrderItemForDelivery(i),

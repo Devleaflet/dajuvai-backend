@@ -1,11 +1,14 @@
 import { Repository } from "typeorm";
-import { promises as fsp } from "fs";
 import path from "path";
-import crypto from "crypto";
 import AppDataSource from "../config/db.config";
 import { CommissionDocument } from "../entities/commissionDocument.entity";
 import { NotFoundError } from "../errors";
+import { CloudinaryService } from "./image.service";
 
+/**
+ * Where documents uploaded before the move to Cloudinary still live. New
+ * uploads never write here: a container's disk does not survive a redeploy.
+ */
 const UPLOADS_DIR = path.join(
   __dirname,
   "..",
@@ -15,6 +18,7 @@ const UPLOADS_DIR = path.join(
 
 export class CommissionService {
   private commissionRepo: Repository<CommissionDocument>;
+  private cloudinaryService = new CloudinaryService();
 
   constructor() {
     this.commissionRepo = AppDataSource.getRepository(CommissionDocument);
@@ -28,19 +32,18 @@ export class CommissionService {
     dto: { title: string; file: Express.Multer.File },
     adminId: number,
   ): Promise<CommissionDocument> {
-    await fsp.mkdir(UPLOADS_DIR, { recursive: true });
-
-    const storedFileName = `${crypto.randomUUID()}.pdf`;
-    await fsp.writeFile(
-      path.join(UPLOADS_DIR, storedFileName),
-      dto.file.buffer,
+    // Uploaded before the current document is retired, so a failed upload
+    // leaves vendors with the old terms rather than none.
+    const uploaded = await this.cloudinaryService.uploadSingleImage(
+      dto.file,
+      "commission-documents",
     );
 
     await this.commissionRepo.update({ isActive: true }, { isActive: false });
 
     const document = this.commissionRepo.create({
       title: dto.title,
-      fileUrl: storedFileName,
+      fileUrl: uploaded.url,
       fileName: dto.file.originalname,
       isActive: true,
       uploadedById: adminId,
@@ -82,14 +85,19 @@ export class CommissionService {
     return document;
   }
 
-  /** Absolute path to the given document's file on disk. */
+  /** True when the file is held on Cloudinary rather than on local disk. */
+  isRemoteFile(document: CommissionDocument): boolean {
+    return /^https:\/\//.test(document.fileUrl);
+  }
+
+  /** Absolute path to a pre-Cloudinary document's file on disk. */
   getFilePath(document: CommissionDocument): string {
-    return path.join(UPLOADS_DIR, document.fileUrl);
+    return path.join(UPLOADS_DIR, path.basename(document.fileUrl));
   }
 
   /**
    * Soft-deletes the currently active commission document.
-   * Kept as history (isActive = false) — file stays on disk.
+   * Kept as history (isActive = false) — the file stays where it is.
    */
   async deleteDocument(): Promise<void> {
     const document = await this.commissionRepo.findOne({

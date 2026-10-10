@@ -14,6 +14,14 @@ import { deliverWithRetry } from "../utils/delivery-retry.utils";
 import { sendTransactionalEmail, sendOrderItemCancelledEmail } from "../utils/nodemailer.utils";
 import logger from "../utils/logger";
 
+/** How a status reads in a sentence; anything absent falls back to its name. */
+const STATUS_WORDS: Record<string, string> = {
+    ORDER_PLACED: "placed",
+    ARRIVED_AT_WAREHOUSE: "at our warehouse",
+    ASSIGNED_TO_RIDER: "out for delivery",
+    NOT_RECEIVED: "not delivered",
+};
+
 export class NotificationService {
     private notificationRepo = AppDataSource.getRepository(Notification);
     private vendorRepo = AppDataSource.getRepository(Vendor);
@@ -262,7 +270,8 @@ export class NotificationService {
         ]);
     }
 
-    async notifyOrderStatusUpdated(order: any): Promise<void> {
+    /** `reason` is the customer-facing one (delay, cancellation); internal notes never reach here. */
+    async notifyOrderStatusUpdated(order: any, reason?: string): Promise<void> {
         const notifications: Notification[] = [];
 
         let orderNumber = order?.orderNumber;
@@ -275,7 +284,9 @@ export class NotificationService {
         }
 
         const orderDisplayNumber = orderNumber || order.id;
-        const statusMessage = `Order #${orderDisplayNumber} status updated to ${order.status}`;
+        const statusLabel =
+            STATUS_WORDS[order.status] ?? String(order.status).replace(/_/g, " ").toLowerCase();
+        const statusMessage = `Order #${orderDisplayNumber} is now ${statusLabel}.${reason ? ` Reason: ${reason}` : ""}`;
 
         // Admin notification
         notifications.push(

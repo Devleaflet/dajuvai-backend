@@ -657,14 +657,21 @@ paymentRouter.post("/check-status", authMiddleware, async (req: AuthRequest, res
             res.status(502).json({ error: "Failed to check transaction status" });
             return;
         }
-        res.json(verdict.raw);
-
-        // Response is already sent — settlement failures here only log.
+        // Settle first, so the answer can say whether an order now exists: a
+        // gateway "Success" whose settlement failed (amount mismatch, stock
+        // gone) must not read as "your order is placed".
         if (draft) {
             await settleDraftFromGateway(draft, merchantTxnId, verdict).catch((error) =>
                 console.error("[CHECKOUT-DRAFT] Settlement after check-status failed:", error),
             );
         }
+        const settled =
+            order ??
+            (await orderDb.findOne({
+                where: { mTransactionId: merchantTxnId, orderedById: callerId },
+                select: { id: true, orderNumber: true },
+            }));
+        res.json({ ...verdict.raw, orderId: settled?.id ?? null, orderNumber: settled?.orderNumber ?? null });
     } catch (error: any) {
         if (!res.headersSent) {
             res.status(500).json({ error: "Failed to check transaction status" });

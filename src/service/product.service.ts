@@ -1,4 +1,4 @@
-import { Brackets, DataSource, Repository, In } from "typeorm";
+import { DataSource, Repository, In } from "typeorm";
 import { Product } from "../entities/product.entity";
 import { Subcategory } from "../entities/subcategory.entity";
 import { User, UserRole } from "../entities/user.entity";
@@ -37,6 +37,7 @@ import { buildCatalogTaxonomyFilter } from "../utils/catalog-query";
 import { buildCatalogDiscountPercentExpression } from "../utils/catalog-sort";
 import { ProductSearchIndexer } from "./product-search-indexer.service";
 import { buildCatalogSearchCondition } from "../search/catalog-search";
+import { buildAdminProductSearch } from "../search/admin-product-search";
 import { withAgeRestriction } from "./age-restriction.service";
 import { getManualBannerProductIds } from "../utils/bannerProductSelection";
 import { AuditActorType } from "../entities/auditLog.entity";
@@ -1642,38 +1643,22 @@ export class ProductService {
       idQuery.andWhere("product.vendorId = :vendorId", { vendorId });
     }
 
-    if (searchTerm) {
-      const wildcardSearch = `%${searchTerm}%`;
-      const prefixSearch = `${searchTerm}%`;
+    // Narrows a product picker to one shelf. Raw query strings, so anything
+    // that is not a positive integer is ignored rather than sent to Postgres.
+    const categoryId = Number(params.categoryId);
+    if (Number.isInteger(categoryId) && categoryId > 0) {
+      idQuery.andWhere("category.id = :categoryId", { categoryId });
+    }
+    const subcategoryId = Number(params.subcategoryId);
+    if (Number.isInteger(subcategoryId) && subcategoryId > 0) {
+      idQuery.andWhere("subcategory.id = :subcategoryId", { subcategoryId });
+    }
 
+    const adminSearch = searchTerm ? buildAdminProductSearch(searchTerm) : undefined;
+    if (adminSearch) {
       idQuery
-        .addSelect(
-          `MIN(CASE
-            WHEN product.name ILIKE :prefixSearch THEN 0
-            WHEN product.name ILIKE :search THEN 1
-            WHEN variants.sku ILIKE :search THEN 2
-            WHEN vendor.businessName ILIKE :search THEN 3
-            ELSE 4
-          END)`,
-          "search_rank",
-        )
-        .andWhere(
-          new Brackets((qb) => {
-            qb.where("CAST(product.id AS TEXT) ILIKE :search")
-              .orWhere("product.name ILIKE :search")
-              .orWhere("product.brand ILIKE :search")
-              .orWhere("product.description ILIKE :search")
-              .orWhere("product.keywords ILIKE :search")
-              .orWhere("vendor.businessName ILIKE :search")
-              .orWhere("subcategory.name ILIKE :search")
-              .orWhere("category.name ILIKE :search")
-              .orWhere("variants.sku ILIKE :search");
-          }),
-        )
-        .setParameters({
-          search: wildcardSearch,
-          prefixSearch,
-        });
+        .addSelect(`MIN(${adminSearch.rank})`, "search_rank")
+        .andWhere(adminSearch.where, adminSearch.parameters);
     }
 
     const totalRow = await idQuery
@@ -1698,7 +1683,7 @@ export class ProductService {
       hasOrderBy = true;
     };
 
-    if (searchTerm) {
+    if (adminSearch) {
       applyOrderBy("search_rank", "ASC");
     }
 

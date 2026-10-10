@@ -2,6 +2,7 @@
 import { z } from 'zod';
 import { OrderStatus } from '../../entities/order.entity';
 import { PaymentMethod } from '../../entities/order.entity';
+import { CUSTOMER_REASON_STATUSES } from '../../constants/orderStatus.constants';
 import { ItemFulfillmentStatus } from '../../entities/orderItems.entity';
 
 /**
@@ -118,19 +119,29 @@ export const mobileCheckoutEstimateSchema = z.object({
 /**
  * Schema for validating updates to order status.
  *
- * `reason` is now required — every admin/rider status change must be
- * attributable, not just optionally so. `note` stays optional for
- * additional free-text context.
+ * The change itself is attributed through the signed-in actor. `reason` is
+ * what the customer is told, so it is required exactly where they are told
+ * one (CUSTOMER_REASON_STATUSES) and optional elsewhere; `note` is internal.
  */
-export const updateOrderStatusSchema = z.object({
-    status: OrderStatusEnum,
-    // Optimistic-concurrency guard: if provided and it no longer matches the
-    // order's current status, the update is rejected with 409 instead of
-    // silently overwriting a change another admin/rider/webhook just made.
-    expectedCurrentStatus: OrderStatusEnum.optional(),
-    reason: z.string().min(1, "Reason is required").max(500),
-    note: z.string().max(1000).optional(),
-});
+export const updateOrderStatusSchema = z
+    .object({
+        status: OrderStatusEnum,
+        // Optimistic-concurrency guard: if provided and it no longer matches the
+        // order's current status, the update is rejected with 409 instead of
+        // silently overwriting a change another admin/rider/webhook just made.
+        expectedCurrentStatus: OrderStatusEnum.optional(),
+        reason: z.string().trim().max(500).optional(),
+        note: z.string().trim().max(1000).optional(),
+    })
+    .superRefine((data, ctx) => {
+        if (CUSTOMER_REASON_STATUSES.has(data.status) && !data.reason) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["reason"],
+                message: "Give the customer a reason for this status",
+            });
+        }
+    });
 
 /**
  * Schema for item-level fulfillment updates (multi-vendor partial

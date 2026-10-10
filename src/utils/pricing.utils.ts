@@ -112,7 +112,10 @@ export interface ResolveFinalPriceInput {
 }
 
 export const resolveFinalPrice = (input: ResolveFinalPriceInput): number => {
-    const persisted = Number(input.finalPrice);
+    // `Number(null)` and `Number("")` are 0: an unset column must fall through
+    // to the computed price, not charge nothing.
+    const raw = input.finalPrice;
+    const persisted = raw === null || raw === undefined || raw === "" ? NaN : Number(raw);
     if (Number.isFinite(persisted) && persisted >= 0) {
         return persisted;
     }

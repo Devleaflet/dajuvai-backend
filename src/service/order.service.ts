@@ -33,7 +33,10 @@ import { AuditActorType } from "../entities/auditLog.entity";
 import { auditService } from "./audit.service";
 import {
     canTransition,
+    CUSTOMER_EMAIL_STATUSES,
+    customerFacingReason,
     StatusActorRole,
+    VENDOR_EMAIL_STATUSES,
 } from "../constants/orderStatus.constants";
 import {
     InvalidOrderStatusTransitionError,
@@ -80,6 +83,7 @@ import { VendorService } from "./vendor.service";
 import { Vendor } from "../entities/vendor.entity";
 import config from "../config/env.config";
 import {
+    orderShippingAddress,
     sanitizeOrderFull,
     sanitizeOrderForList,
     type SanitizedOrderListRow,
@@ -1450,6 +1454,8 @@ export class OrderService {
         vendorids: any[];
         useremail: string;
         esewaRedirectUrl: { url: string } | undefined;
+        /** A retried checkout answered with the order it already made. */
+        replayed?: boolean;
     }> {
         try {
             const {
@@ -1464,10 +1470,12 @@ export class OrderService {
                 idempotencyKey,
             } = orderData;
 
-            // Idempotency: if key provided, check for existing order
+            // Idempotency: a retry resolves to this customer's own order for
+            // the key — never someone else's — and is flagged so the caller
+            // does not send the order-placed emails a second time.
             if (idempotencyKey) {
                 const existingOrder = await this.orderRepository.findOne({
-                    where: { idempotencyKey },
+                    where: { idempotencyKey, orderedById: userId },
                     relations: [
                         "orderItems",
                         "orderItems.product",
@@ -1482,6 +1490,7 @@ export class OrderService {
                         vendorids: [],
                         useremail: "",
                         esewaRedirectUrl: undefined,
+                        replayed: true,
                     };
                 }
             }
@@ -1871,7 +1880,7 @@ export class OrderService {
     private async buildAdminOrderEmailData(
         order: any,
     ): Promise<AdminOrderEmailData> {
-        const addr = order.shippingAddress || {};
+        const addr: any = orderShippingAddress(order) || {};
         const addrParts = [addr.localAddress, addr.city, addr.district].filter(
             Boolean,
         );
@@ -3661,6 +3670,30 @@ export class OrderService {
      * payment success, so every restock path must call this exactly once
      * per item.
      */
+    /** Takes the items' units back out of stock, all or none, under row locks. */
+    private async reserveOrderItemsStock(items: OrderItem[]): Promise<void> {
+        await AppDataSource.transaction(async (manager) => {
+            for (const item of items) {
+                const repo = (
+                    item.variantId ? manager.getRepository(Variant) : manager.getRepository(Product)
+                ) as Repository<Variant | Product>;
+                const row = await repo.findOne({
+                    where: { id: item.variantId ?? item.productId },
+                    lock: { mode: "pessimistic_write" },
+                });
+                if (!row) continue;
+                if ((row.stock ?? 0) < item.quantity) {
+                    throw new ConflictError(
+                        `Not enough stock to reopen this order: ${item.product?.name ?? `item ${item.id}`} has ${row.stock ?? 0} left, needs ${item.quantity}.`,
+                    );
+                }
+                row.stock -= item.quantity;
+                row.status = this.determineInventoryStatus(row.stock);
+                await repo.save(row);
+            }
+        });
+    }
+
     private async restockOrderItem(item: OrderItem): Promise<void> {
         if (item.variantId) {
             const variant = await this.variantRepository.findOne({
@@ -3868,7 +3901,7 @@ export class OrderService {
             actorRole: StatusActorRole;
             changedByUserId?: number;
             auditActorType?: AuditActorType;
-            reason: string;
+            reason?: string;
             note?: string;
             expectedCurrentStatus?: OrderStatus;
         },
@@ -3965,6 +3998,21 @@ export class OrderService {
             }
         }
 
+        // Leaving one of those states back into the pipeline (a NOT_RECEIVED
+        // order reset to the warehouse for another attempt, a cancellation
+        // undone) takes back the stock entering it returned — or refuses, so
+        // the same units are never both on the shelf and on their way out.
+        if (
+            terminalUnfulfilled.includes(previousStatus) &&
+            !terminalUnfulfilled.includes(targetStatus)
+        ) {
+            await this.reserveOrderItemsStock(
+                order.orderItems.filter(
+                    (item) => item.fulfillmentStatus !== ItemFulfillmentStatus.CANCELLED,
+                ),
+            );
+        }
+
         order.status = targetStatus;
         await this.orderRepository.save(order);
 
@@ -4016,7 +4064,13 @@ export class OrderService {
                 return undefined;
             }));
 
-        if (order.orderedBy?.email) {
+        // Only problem statuses tell the customer why; any other reason or
+        // note stays in the internal timeline recorded above.
+        const reasonForCustomer = customerFacingReason(targetStatus, options.reason);
+
+        // Routine progress reaches people by in-app feed and push only;
+        // email is kept for the statuses that matter (see the constants).
+        if (order.orderedBy?.email && CUSTOMER_EMAIL_STATUSES.has(targetStatus)) {
             statusSideEffects.push(async () => {
                 try {
                     await sendOrderStatusEmail(
@@ -4024,7 +4078,11 @@ export class OrderService {
                         order.orderNumber,
                         order.status,
                         undefined,
-                        { orderId: order.id, order: await emailDetails() },
+                        {
+                            orderId: order.id,
+                            order: await emailDetails(),
+                            reason: reasonForCustomer,
+                        },
                     );
                 } catch (error) {
                     console.error(
@@ -4035,9 +4093,9 @@ export class OrderService {
             });
         }
 
-        // ORDER_PLACED is covered by the order-placed email already sent at
-        // checkout — every other transition gets a vendor notification.
-        if (targetStatus !== OrderStatus.ORDER_PLACED) {
+        // Vendors get the new-order email at checkout and the feed/push for
+        // everything else; email only when they have to act.
+        if (VENDOR_EMAIL_STATUSES.has(targetStatus)) {
             const vendorEmails = [
                 ...new Set(
                     order.orderItems
@@ -4056,7 +4114,10 @@ export class OrderService {
                             order.status,
                             undefined,
                             // Each vendor sees only their own items.
-                            { vendor: details?.vendors.find((v) => v.email === email) },
+                            {
+                                vendor: details?.vendors.find((v) => v.email === email),
+                                reason: reasonForCustomer,
+                            },
                         ).catch((error) => {
                             console.error(
                                 "Failed to send vendor status email:",
@@ -4088,7 +4149,10 @@ export class OrderService {
 
         statusSideEffects.push(async () => {
             try {
-                await this.notificationService.notifyOrderStatusUpdated(order);
+                await this.notificationService.notifyOrderStatusUpdated(
+                    order,
+                    reasonForCustomer,
+                );
             } catch (error) {
                 console.error(
                     "Failed to send order status notification:",

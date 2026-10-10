@@ -9,55 +9,15 @@ import {
     PaymentMethod,
     DeliveryStatus,
 } from "../entities/order.entity";
-import {
-    OrderStatusChangedByRole,
-    OrderStatusHistory,
-} from "../entities/orderStatusHistory.entity";
-import { sendOrderStatusEmail } from "./nodemailer.utils";
-import { OrderItem } from "../entities/orderItems.entity";
-import { NotificationService } from "../service/notification.service";
 import { Vendor } from "../entities/vendor.entity";
 import { deviceTokenService } from "../service/deviceToken.service";
-import { Product } from "../entities/product.entity";
-import { Variant } from "../entities/variant.entity";
 import { VendorService } from "../service/vendor.service";
 import { UserDeletionService } from "../service/user-deletion.service";
 import { OrderService } from "../service/order.service";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
-const orderItemRepo = AppDataSource.getRepository(OrderItem);
-const orderStatusHistoryRepo = AppDataSource.getRepository(OrderStatusHistory);
 
-/**
- * Records an automatic status change the same way an admin's is recorded.
- *
- * These jobs used to move an order to CANCELLED and write nothing, so the
- * order's history simply stopped at whatever a human last did — leaving a
- * Cancelled order whose timeline says "Confirmed" and no explanation anywhere.
- * The actor enum already had SYSTEM for this.
- */
-const recordSystemStatusChange = async (
-    order: Order,
-    previousStatus: OrderStatus,
-    reason: string,
-): Promise<void> => {
-    try {
-        await orderStatusHistoryRepo.save(
-            orderStatusHistoryRepo.create({
-                orderId: order.id,
-                previousStatus,
-                newStatus: order.status,
-                changedByRole: OrderStatusChangedByRole.SYSTEM,
-                changedByUserId: null,
-                reason,
-            }),
-        );
-    } catch {
-        // The order is already cancelled; failing to write its history entry
-        // must not undo that or stop the rest of the batch.
-    }
-};
 const vendorRepo = AppDataSource.getRepository(Vendor);
 
 /**
@@ -122,163 +82,87 @@ export const tokenCleanUp = () => {
         }
     });
 };
+/** Payment methods settled online; COD stays UNPAID until delivery by design. */
+const ONLINE_PAYMENT_METHODS = [
+    PaymentMethod.ESEWA,
+    PaymentMethod.NPX,
+    PaymentMethod.KHALIT,
+    PaymentMethod.ONLINE_PAYMENT,
+];
+
 /**
- * Periodic cleanup of stale pending orders.
- * Runs every 2 hours on the hour (e.g., 12:00, 14:00, 16:00).
- *
- * Logic:
- * - Calculate threshold date as current time minus 24 hours.
- * - Find orders with status 'ORDER_PLACED' created before threshold date.
- * - For each such order:
- *    - Remove order entity from DB, deleting it permanently.
- *
- * Purpose:
- * - Remove old pending orders that may be abandoned or not processed.
- * - Keep order data clean and avoid clutter.
+ * Cancels one abandoned online-payment order through changeOrderStatus, so it
+ * gets the same restock, promo release, history, audit, customer/vendor
+ * emails (with the reason), feed, push and socket as an admin cancellation.
+ * `expectedCurrentStatus` makes it a no-op if a payment webhook moved the
+ * order in the meantime.
+ */
+const cancelUnpaidOrder = async (order: Order, reason: string): Promise<void> => {
+    try {
+        await new OrderService().changeOrderStatus(order.id, OrderStatus.CANCELLED, {
+            actorRole: "SYSTEM",
+            reason,
+            expectedCurrentStatus: order.status,
+        });
+        await orderDB.update(order.id, { deliveryStatus: DeliveryStatus.DELIVERY_FAILED });
+    } catch (error) {
+        console.error(`[CRON] Could not cancel unpaid order ${order.id}:`, error);
+    }
+};
+
+/**
+ * Every 2 hours: online-payment orders confirmed but still unpaid after 24
+ * hours are cancelled. COD orders are excluded — they are unpaid until the
+ * rider collects, and this job used to cancel any that sat in CONFIRMED for a
+ * day.
  */
 export const orderCleanUp = () => {
     cron.schedule("0 */2 * * *", async () => {
         try {
-            const thresholdDate = new Date();
-            thresholdDate.setHours(thresholdDate.getHours() - 24);
-
             const staleOrders = await orderDB.find({
                 where: {
                     status: OrderStatus.CONFIRMED,
                     paymentStatus: PaymentStatus.UNPAID,
-                    createdAt: LessThan(thresholdDate),
+                    paymentMethod: In(ONLINE_PAYMENT_METHODS),
+                    createdAt: LessThan(new Date(Date.now() - 24 * 60 * 60 * 1000)),
                 },
-                relations: ["orderItems"],
+                select: { id: true, status: true },
             });
 
-            if (staleOrders.length === 0) return;
-
-            const productRepo = AppDataSource.getRepository(Product);
-            const variantRepo = AppDataSource.getRepository(Variant);
-
             for (const order of staleOrders) {
-                // Restore stock for each order item
-                for (const item of order.orderItems) {
-                    if (item.variantId) {
-                        const variant = await variantRepo.findOne({
-                            where: { id: item.variantId },
-                        });
-                        if (variant) {
-                            variant.stock += item.quantity;
-                            await variantRepo.save(variant);
-                        }
-                    } else if (item.productId) {
-                        const product = await productRepo.findOne({
-                            where: { id: item.productId },
-                        });
-                        if (product && product.stock != null) {
-                            product.stock += item.quantity;
-                            await productRepo.save(product);
-                        }
-                    }
-                }
-
-                const previousStatus = order.status;
-                order.status = OrderStatus.CANCELLED;
-                order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
-                await orderDB.save(order);
-                await recordSystemStatusChange(
+                await cancelUnpaidOrder(
                     order,
-                    previousStatus,
                     "Confirmed but still unpaid after 24 hours, so the order was cancelled and its stock returned.",
                 );
             }
         } catch (err) {
-            // silent fail for cron
+            console.error("[CRON] orderCleanUp failed:", err);
         }
     });
 };
 
-// set order status to cancelled if the payment is dealyed formore than 15 minutes incase of esewa and nps
+// Every 5 minutes: eSewa/NPX orders still unpaid 15 minutes after placement are cancelled.
 export const startOrderCleanupJob = () => {
     cron.schedule("*/5 * * * *", async () => {
         try {
-            const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-
             const staleOrders = await orderDB.find({
                 where: {
                     paymentMethod: In([PaymentMethod.ESEWA, PaymentMethod.NPX]),
                     paymentStatus: PaymentStatus.UNPAID,
-                    createdAt: LessThan(fifteenMinutesAgo),
+                    createdAt: LessThan(new Date(Date.now() - 15 * 60 * 1000)),
                     status: OrderStatus.ORDER_PLACED,
                 },
-                relations: ["orderedBy", "orderItems", "orderItems.vendor"],
+                select: { id: true, status: true },
             });
 
-            if (!staleOrders.length) return;
-
-            const productRepo = AppDataSource.getRepository(Product);
-            const variantRepo = AppDataSource.getRepository(Variant);
-
             for (const order of staleOrders) {
-                // Restore stock before cancelling
-                for (const item of order.orderItems) {
-                    if (item.variantId) {
-                        const variant = await variantRepo.findOne({
-                            where: { id: item.variantId },
-                        });
-                        if (variant) {
-                            variant.stock += item.quantity;
-                            await variantRepo.save(variant);
-                        }
-                    } else if (item.productId) {
-                        const product = await productRepo.findOne({
-                            where: { id: item.productId },
-                        });
-                        if (product && product.stock != null) {
-                            product.stock += item.quantity;
-                            await productRepo.save(product);
-                        }
-                    }
-                }
-
-                const previousStatus = order.status;
-                order.status = OrderStatus.CANCELLED;
-                order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
-                await orderDB.save(order);
-                await recordSystemStatusChange(
+                await cancelUnpaidOrder(
                     order,
-                    previousStatus,
                     "Online payment was not completed within 15 minutes, so the order was cancelled and its stock returned.",
                 );
-
-                const userEmail = order.orderedBy?.email;
-                const orderItems = await orderItemRepo.find({
-                    where: { order: { id: order.id } },
-                    relations: ["vendor"],
-                });
-                const vendorEmails = orderItems
-                    .map((item) => item.vendor?.email)
-                    .filter(Boolean);
-
-                if (userEmail) {
-                    await sendOrderStatusEmail(
-                        userEmail,
-                        order.orderNumber,
-                        "Cancelled",
-                        `Order #${order.orderNumber} Cancelled - Payment Timeout`,
-                    );
-                }
-
-                for (const vendorEmail of vendorEmails) {
-                    await sendOrderStatusEmail(
-                        vendorEmail,
-                        order.orderNumber,
-                        "Cancelled",
-                        `Order #${order.orderNumber} Cancelled by System`,
-                    );
-                }
-
-                const notificationService = new NotificationService();
-                await notificationService.notifyOrderStatusUpdated(order);
             }
         } catch (error) {
-            // silent fail for cron
+            console.error("[CRON] startOrderCleanupJob failed:", error);
         }
     });
 };

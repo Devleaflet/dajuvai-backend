@@ -13,6 +13,7 @@ import {
     detailsTable,
     emailLayout,
     esc,
+    escLines,
     heading,
     itemsTable,
     money,
@@ -431,6 +432,8 @@ export const sendVendorOrderEmail = async (
 export interface OrderStatusEmailDetails {
     orderId?: number;
     order?: AdminOrderEmailData;
+    /** Why, for a delay or cancellation; omitted for routine statuses. */
+    reason?: string;
 }
 
 /**
@@ -467,10 +470,11 @@ const summaryFromAdminData = (vendors: AdminOrderEmailVendor[]) =>
         vendors.map((v) => ({ seller: v.name, items: Number(v.subtotal) || 0, shipping: Number(v.shippingFee) || 0 })),
     );
 
-const statusBlock = (meta: StatusMeta, status: string) =>
+const statusBlock = (meta: StatusMeta, status: string, reason?: string) =>
     `<p style="margin:0 0 16px;">${pill(meta.label, meta.tone)}</p>` +
     orderProgress(status.toUpperCase()) +
-    paragraph(meta.copy);
+    paragraph(meta.copy) +
+    (reason ? notice(escLines(reason), meta.tone, "Reason") : "");
 
 export const sendOrderStatusEmail = async (
     to: string,
@@ -499,7 +503,7 @@ export const sendOrderStatusEmail = async (
         eyebrow: `Order #${orderNumber}`,
         title: `Your order is ${meta.label.toLowerCase()}`,
         html: [
-            statusBlock(meta, status),
+            statusBlock(meta, status, details.reason),
             order
                 ? heading("Order details") +
                   detailsTable([
@@ -747,7 +751,7 @@ export const sendVendorOrderStatusEmail = async (
     orderNumber: string,
     status: string,
     subject?: string,
-    details: { vendor?: AdminOrderEmailVendor } = {},
+    details: { vendor?: AdminOrderEmailVendor; reason?: string } = {},
 ) => {
     const meta = getVendorOrderStatusEmailMeta(status);
     const vendor = details.vendor;
@@ -757,7 +761,7 @@ export const sendVendorOrderStatusEmail = async (
         eyebrow: `Order #${orderNumber}`,
         title: `Order #${orderNumber} is ${meta.label.toLowerCase()}`,
         html: [
-            statusBlock(meta, status),
+            statusBlock(meta, status, details.reason),
             vendor ? heading("Your items in this order") + orderItemsFromAdminData([vendor], { withShipping: false }) : "",
             button("Open your orders", appUrl("/vendor/orders")),
         ].join(""),

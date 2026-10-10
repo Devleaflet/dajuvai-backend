@@ -127,7 +127,7 @@ export const paymentOptionEnum = z.nativeEnum(PaymentOption);
 
 /**
  * Wallet payment details schema
- * Used for: ESEWA, KHALTI, IMEPAY, FONEPAY
+ * Used for: ESEWA, KHALTI
  */
 const walletDetailsSchema = z.object({
   walletNumber: z.string().length(10, "Wallet number must be 10 digits"),
@@ -135,7 +135,7 @@ const walletDetailsSchema = z.object({
 });
 
 /**
- * Bank payment details schema (BANK)
+ * Bank payment details schema (NPX pays out to this bank account)
  */
 const bankDetailsSchema = z.object({
   accountNumber: z.string().min(5, "Account number is required"),
@@ -145,9 +145,18 @@ const bankDetailsSchema = z.object({
 });
 
 /**
+ * BANK and NPS were folded into NPX; older clients (the React app, the mobile
+ * app) still send them, so they are read as NPX rather than rejected.
+ */
+const LEGACY_PAYOUT_TYPES: Record<string, PaymentOption> = {
+    BANK: PaymentOption.NPX,
+    NPS: PaymentOption.NPX,
+};
+
+/**
  * Vendor Payment Option Schema
  */
-export const vendorPaymentOptionSchema = z.discriminatedUnion("paymentType", [
+const payoutOptionUnion = z.discriminatedUnion("paymentType", [
   z.object({
     paymentType: z.literal(PaymentOption.ESEWA),
     details: walletDetailsSchema,
@@ -161,18 +170,20 @@ export const vendorPaymentOptionSchema = z.discriminatedUnion("paymentType", [
     isActive: z.boolean().optional(),
   }),
   z.object({
-    paymentType: z.literal(PaymentOption.BANK),
-    details: bankDetailsSchema,
-    qrCodeImage: z.string().url().optional().nullable(),
-    isActive: z.boolean().optional(),
-  }),
-  z.object({
-    paymentType: z.literal(PaymentOption.NPS),
+    paymentType: z.literal(PaymentOption.NPX),
     details: bankDetailsSchema,
     qrCodeImage: z.string().url().optional().nullable(),
     isActive: z.boolean().optional(),
   }),
 ]);
+
+export const vendorPaymentOptionSchema = z.preprocess(
+  (option) =>
+    option && typeof option === "object" && (option as any).paymentType in LEGACY_PAYOUT_TYPES
+      ? { ...option, paymentType: LEGACY_PAYOUT_TYPES[(option as any).paymentType] }
+      : option,
+  payoutOptionUnion,
+);
 
 /**
  * Vendor Signup Schema v2 (with payment options)

@@ -97,6 +97,23 @@ describe("email templates", () => {
         expect(html).toContain("/account/orders/9");
     });
 
+    it("tells the customer and vendor why an order was delayed or cancelled", async () => {
+        await mail.sendOrderStatusEmail("c@example.com", "DJV-1", "DELAYED", undefined, {
+            orderId: 9,
+            reason: `Courier strike ${EVIL}`,
+        });
+        expect(last().html).toContain("Reason");
+        expect(last().html).toContain("Courier strike &lt;script&gt;");
+
+        await mail.sendVendorOrderStatusEmail("v@example.com", "DJV-1", "CANCELLED", undefined, {
+            reason: "Customer asked to cancel",
+        });
+        expect(last().html).toContain("Customer asked to cancel");
+
+        await mail.sendOrderStatusEmail("c@example.com", "DJV-1", "DELIVERED", undefined, { orderId: 9 });
+        expect(last().html).not.toContain(">Reason<");
+    });
+
     it("sends the delivered notice to the address it is given", async () => {
         await mail.sendAdminOrderDeliveredEmail("ops@example.com", adminData);
         expect(last().to).toBe("ops@example.com");

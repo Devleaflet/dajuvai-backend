@@ -55,7 +55,7 @@ export interface IVendorOrderResponse {
 export interface IUpdateOrderStatusRequest {
     status: OrderStatus;
     expectedCurrentStatus?: OrderStatus;
-    reason: string;
+    reason?: string;
     note?: string;
 }
 

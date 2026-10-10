@@ -1400,7 +1400,6 @@ router.get(
  *             type: object
  *             required:
  *               - status
- *               - reason
  *             properties:
  *               status:
  *                 type: string
@@ -1412,15 +1411,14 @@ router.get(
  *                 description: Optimistic concurrency guard — rejects if order status has changed since client last fetched it
  *               reason:
  *                 type: string
- *                 minLength: 1
  *                 maxLength: 500
- *                 example: "Customer confirmed receipt of items"
- *                 description: Required reason for the status change
+ *                 example: "Courier is delayed by roadworks; new estimate is Friday"
+ *                 description: Shown to the customer. Required for DELAYED, CANCELLED, NOT_RECEIVED and RETURNED; ignored for the customer on every other status.
  *               note:
  *                 type: string
  *                 maxLength: 1000
  *                 example: "Called customer to verify delivery"
- *                 description: Optional additional context
+ *                 description: Internal note, kept in the status timeline only
  *     responses:
  *       200:
  *         description: Order status updated successfully

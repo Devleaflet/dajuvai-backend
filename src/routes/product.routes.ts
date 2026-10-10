@@ -410,6 +410,7 @@ productRouter.patch(
     "/:id/variant/:variantId/restore",
     combinedAuthMiddleware,
     isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
     productController.restoreVariant.bind(productController),
 );
 
@@ -466,6 +467,7 @@ productRouter.delete(
     "/:id/variant/:variantId",
     combinedAuthMiddleware,
     isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
     productController.archiveVariant.bind(productController),
 );
 
@@ -560,6 +562,12 @@ productRouter.post(
  *       - in: query
  *         name: search
  *         schema: { type: string }
+ *       - in: query
+ *         name: categoryId
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: subcategoryId
+ *         schema: { type: integer, minimum: 1 }
  *     responses:
  *       200:
  *         description: List of all products for admin

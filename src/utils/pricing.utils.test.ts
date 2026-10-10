@@ -24,3 +24,12 @@ describe("money rounding", () => {
         ).toBe(999.55);
     });
 });
+
+describe("resolveFinalPrice with an unset finalPrice", () => {
+    it("computes the price instead of charging nothing", async () => {
+        const { resolveFinalPrice } = await import("./pricing.utils");
+        expect(resolveFinalPrice({ finalPrice: null, basePrice: 500, discountAmount: 50 })).toBe(450);
+        expect(resolveFinalPrice({ finalPrice: "", basePrice: "500" })).toBe(500);
+        expect(resolveFinalPrice({ finalPrice: 0, basePrice: 500 })).toBe(0);
+    });
+});

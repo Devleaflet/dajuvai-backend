@@ -14,6 +14,7 @@ import { District } from "../entities/district.entity";
 import {
     IUpdateVendorPaymentOptionRequest,
     IUpdateVendorRequestV2,
+    vendorPaymentOptionSchema,
 } from "../utils/zod_validations/vendor.zod";
 import {
     PaymentOption,
@@ -546,12 +547,12 @@ export class VendorService {
             if (
                 data.accountNumber &&
                 (!data.paymentOptions ||
-                    !data.paymentOptions.some((p) => p.paymentType === "BANK"))
+                    !data.paymentOptions.some((p) => p.paymentType === PaymentOption.NPX))
             ) {
                 const bankOption = queryRunner.manager.create(
                     VendorPaymentOption,
                     {
-                        paymentType: PaymentOption.BANK,
+                        paymentType: PaymentOption.NPX,
                         details: {
                             accountNumber: data.accountNumber,
                             bankName: data.bankName,
@@ -748,7 +749,16 @@ export class VendorService {
         }
 
         if (updateData.details !== undefined) {
-            paymentOption.details = updateData.details;
+            // The route only checks `details` is an object; hold it to the
+            // shape this option's type needs (wallet or bank details).
+            const parsed = vendorPaymentOptionSchema.safeParse({
+                paymentType: paymentOption.paymentType,
+                details: updateData.details,
+            });
+            if (!parsed.success) {
+                throw new APIError(400, parsed.error.issues[0]?.message ?? "Invalid payment details");
+            }
+            paymentOption.details = parsed.data.details;
         }
 
         if (updateData.qrCodeImage !== undefined) {
