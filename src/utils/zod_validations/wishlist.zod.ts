@@ -24,6 +24,8 @@ export const removeFromWishlistSchema = z.object({
 export const moveToCartSchema = z.object({
     wishlistItemId: z.number().int().positive('Wishlist item ID must be a positive integer'),
     quantity: z.number().int().positive('Quantity must be a positive integer'),
+    /** The option chosen now, for an item saved without one. */
+    variantId: z.number().int().positive().optional(),
 });
 
 export const moveManyToCartSchema = z.object({

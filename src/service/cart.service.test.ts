@@ -32,8 +32,11 @@ const makeCartService = () => {
     };
     const cart = { id: 1, userId: 7, total: 0, items: [] as any[] };
     const cartItemRepository = {
-        create: vi.fn((data) => ({ id: 9, ...data })),
-        save: vi.fn(async (item) => item),
+        findOne: vi.fn(async () => null),
+        insert: vi.fn(async (data) => {
+            cart.items.push({ id: 9, product, ...data });
+        }),
+        update: vi.fn(async () => undefined),
     };
 
     const service = Object.create(CartService.prototype) as any;
@@ -46,6 +49,7 @@ const makeCartService = () => {
     service.cartRepository = {
         findOne: vi.fn(async () => cart),
         save: vi.fn(async (value) => value),
+        update: vi.fn(async () => undefined),
     };
     service.cartItemRepository = cartItemRepository;
 
@@ -66,7 +70,7 @@ describe("CartService.addToCart notification source", () => {
             source: "buy_now",
         });
 
-        expect(cartItemRepository.create).toHaveBeenCalledOnce();
+        expect(cartItemRepository.insert).toHaveBeenCalledOnce();
         expect(cart.items).toHaveLength(1);
         expect(notifyAddToCart).not.toHaveBeenCalled();
     });
@@ -101,7 +105,7 @@ describe("CartService.addToCart notification source", () => {
         await expect(service.addToCart(7, { productId: 123, quantity: 1 })).rejects.toMatchObject({
             status: 404,
         });
-        expect(cartItemRepository.save).not.toHaveBeenCalled();
+        expect(cartItemRepository.insert).not.toHaveBeenCalled();
     });
 });
 

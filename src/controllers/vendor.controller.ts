@@ -44,7 +44,8 @@ import {
 import { DistrictService } from "../service/district.service";
 import { findUserByEmail } from "../service/user.service";
 import config from "../config/env.config";
-import { newTokenId } from "../service/token-revocation.service";
+import { isIssuedBeforeCutoff, newTokenId } from "../service/token-revocation.service";
+import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
 import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
 import { assertResetCode } from "../utils/resetCode.utils";
 import { Vendor } from "../entities/vendor.entity";
@@ -339,12 +340,18 @@ export class VendorController {
             id: number;
             email: string;
             businessName: string;
+            iat?: number;
         };
 
         const vendor = await this.vendorService.findVendorByEmailLogin(
             decoded.email,
         );
         if (!vendor) throw new AuthError("Vendor not found");
+        // A password change or reset ends every session signed before it,
+        // refresh tokens included.
+        if (isIssuedBeforeCutoff(decoded.iat, vendor.tokensValidFrom)) {
+            throw new AuthError("Your password changed. Please log in again.");
+        }
 
         const newAccessToken = jwt.sign(
             {
@@ -571,6 +578,39 @@ export class VendorController {
         const vendor = await this.findVendorForReset(req.body.email.trim().toLowerCase());
         await assertResetCode(vendor, req.body.token);
         res.status(200).json({ success: true, message: "Code verified" });
+    }
+
+    /**
+     * First step of a signed-in password change: confirms the current password
+     * so the new one is only asked for once it is known to be right.
+     */
+    async verifyCurrentPassword(
+        req: VendorAuthRequest<{}, {}, { currentPassword: string }>,
+        res: Response,
+    ): Promise<void> {
+        await assertCurrentPassword(req.vendor!, req.body.currentPassword);
+        res.status(200).json({ success: true, message: "Password confirmed" });
+    }
+
+    /**
+     * Sets a new password for the signed-in vendor, proven by the current
+     * password or an emailed reset code. Every other session is signed out;
+     * this one gets fresh tokens so it stays signed in.
+     */
+    async changePassword(
+        req: VendorAuthRequest<{}, {}, { currentPassword?: string; token?: string; newPassword: string }>,
+        res: Response,
+    ): Promise<void> {
+        const vendor = req.vendor!;
+        await applyPasswordChange(vendor, req.body);
+        await this.vendorService.saveVendor(vendor);
+        const { token, refreshToken } = this.issueVendorSession(res, vendor);
+        res.status(200).json({
+            success: true,
+            message: "Password changed. Other devices have been signed out.",
+            token,
+            refreshToken,
+        });
     }
 
     async resetPassword(

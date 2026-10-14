@@ -98,18 +98,15 @@ process.on("uncaughtException", (error: Error) => {
   process.exit(1);
 });
 
+// A rejected promise nobody awaited (a fire-and-forget push, a cron tick) is
+// a bug to log, not a reason to drop every request in flight. Shutting down
+// here turned each one into an outage while the container restarted.
+// Synchronous throws above still exit: after one, process state is unknown.
 process.on("unhandledRejection", (reason: unknown) => {
-  logger.error("UNHANDLED REJECTION — shutting down", {
+  logger.error("UNHANDLED REJECTION", {
     reason: reason instanceof Error ? reason.message : String(reason),
     stack: reason instanceof Error ? reason.stack : undefined,
   });
-
-  console.log("UNHANDLED REJECTION — shutting down");
-  console.log(reason);
-
-  server.close(() => process.exit(1));
-  // Force exit if graceful close hangs
-  setTimeout(() => process.exit(1), 10_000).unref();
 });
 
 app.use(cors(corsOptions));

@@ -1,5 +1,5 @@
 import { hiddenProductIds } from "../search/catalog-visibility";
-import { Repository } from 'typeorm';
+import { IsNull, Repository } from 'typeorm';
 import { CartItem } from '../entities/cartItem.entity';
 import { Cart } from '../entities/cart.entity';
 import { Product } from '../entities/product.entity';
@@ -13,6 +13,15 @@ import { emitCartUpdate } from '../socket/socket';
 import { DealStatus } from '../entities/deal.entity';
 import { DiscountType } from '../entities/product.enum';
 import { withAgeRestriction } from './age-restriction.service';
+
+const CART_RELATIONS = [
+    'items',
+    'items.product',
+    'items.product.subcategory',
+    'items.product.subcategory.category',
+    'items.product.deal',
+    'items.variant',
+];
 
 /**
  * Service class for managing shopping cart operations.
@@ -122,12 +131,12 @@ export class CartService {
      *
      * @param userId {number} - ID of the user
      * @param data {ICartAddRequest} - Contains productId and quantity
-     * @returns {Promise<Cart>} - The updated cart
+     * @returns The updated cart, in the same shape as `getCart`
      * @throws {APIError} - On validation, stock, or DB errors
      * @access Customer
      */
 
-    async addToCart(userId: number, data: ICartAddRequest): Promise<Cart> {
+    async addToCart(userId: number, data: ICartAddRequest) {
         const { productId, quantity, variantId } = data;
 
         // A product whose vendor is no longer approved is off the shelf.
@@ -138,7 +147,7 @@ export class CartService {
         // Validate product
         const product = await this.productRepository.findOne({
             where: { id: productId },
-            relations: ['variants', 'deal'],
+            relations: ['deal'],
         });
         if (!product) throw new APIError(404, 'Product not found');
 
@@ -146,7 +155,7 @@ export class CartService {
         let name: string = product.name;
         let description: string = product.description || '';
         let image: string | null = product.productImages?.[0] ?? null;
-        let cartItem: CartItem;
+        let stock: number;
 
         // Handle variant product
         if (variantId) {
@@ -157,6 +166,7 @@ export class CartService {
             if (variant.status === 'OUT_OF_STOCK'  || variant.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${variant.stock} available for this variant`);
             }
+            stock = variant.stock;
 
             // Trust the variant's persisted finalPrice (deal-inclusive) over
             // recomputing from discount/discountType — a variant with an
@@ -182,6 +192,7 @@ export class CartService {
             if (product.stock < quantity) {
                 throw new APIError(400, `Cannot add ${quantity} items; only ${product.stock} available`);
             }
+            stock = product.stock;
 
             price = resolveFinalPrice({
                 finalPrice: product.finalPrice,
@@ -190,59 +201,55 @@ export class CartService {
             });
         }
 
-        // Get or create cart
-        let cart = await this.cartRepository.findOne({
-            where: { userId },
-            relations: ['items', 'items.product', 'items.product.subcategory', 'items.product.subcategory.category', 'items.product.deal', 'items.variant'],
+        const cart = await this.getOrCreateCart(userId);
+
+        // The existing line is looked up directly rather than out of a loaded
+        // cart, and its quantity moves in one guarded UPDATE: two quick adds can
+        // no longer read the same quantity and both write theirs back, and the
+        // stock ceiling is checked against the row as it is at write time.
+        const existing = await this.cartItemRepository.findOne({
+            where: {
+                cart: { id: cart.id },
+                product: { id: productId },
+                variantId: variantId ? variantId : IsNull(),
+            },
         });
 
-        if (!cart) {
-            cart = this.cartRepository.create({ userId, total: 0, items: [] });
-            cart = await this.cartRepository.save(cart);
-        }
-
-        // Check if product or variant already in cart
-        cartItem = cart.items.find(item =>
-            item.product.id === productId &&
-            (variantId ? item.variantId === variantId : !item.variantId)
-        );
-
-        if (cartItem) {
-            // Update quantity if already in cart
-            cartItem.quantity += quantity;
-            if (variantId) {
-                const variant = await this.variantRepository.findOne({ where: { id: variantId } });
-                if (variant && cartItem.quantity > variant.stock) {
-                    throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${variant.stock} available`);
-                }
-            } else if (cartItem.quantity > product.stock!) {
-                throw new APIError(400, `Cannot add ${cartItem.quantity} items; only ${product.stock} available`);
+        if (existing) {
+            const result = await this.cartItemRepository
+                .createQueryBuilder()
+                .update(CartItem)
+                .set({
+                    quantity: () => '"quantity" + :quantity',
+                    price,
+                    name,
+                    description,
+                    image,
+                })
+                .where('id = :id AND "quantity" + :quantity <= :stock', {
+                    id: existing.id,
+                    quantity,
+                    stock,
+                })
+                .execute();
+            if (!result.affected) {
+                throw new APIError(400, `Cannot add ${existing.quantity + quantity} items; only ${stock} available`);
             }
-            cartItem.price = price;
-            cartItem.name = name;
-            cartItem.description = description;
-            cartItem.image = image;
-            await this.cartItemRepository.save(cartItem);
         } else {
-            // Create new cart item
-            cartItem = this.cartItemRepository.create({
-                cart,
-                product,
+            await this.cartItemRepository.insert({
+                cart: { id: cart.id },
+                product: { id: productId },
                 quantity,
                 price,
                 name,
                 description,
                 image,
+                // Both columns: `variantId` is what lines are matched on,
+                // `variant_id` is the relation the cart is read through.
                 variantId: variantId || null,
-                variant: variantId ? await this.variantRepository.findOne({ where: { id: variantId } }) : undefined,
+                variant: variantId ? { id: variantId } : null,
             });
-            await this.cartItemRepository.save(cartItem);
-            cart.items.push(cartItem);
         }
-
-        // Update cart total
-        cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        const savedCart = await this.cartRepository.save(cart);
 
         // Push notification (fire-and-forget). Not for Buy Now: that path goes
         // straight to checkout and never shows a cart, so "added to cart" is a
@@ -251,7 +258,7 @@ export class CartService {
             new NotificationService().notifyAddToCart(userId, name).catch(() => {});
         }
 
-        return savedCart;
+        return this.getCart(userId);
     }
 
 
@@ -261,71 +268,63 @@ export class CartService {
      * - If `decreaseOnly` is true and quantity > 1, only decreases.
      * - If quantity == 1 or decreaseOnly is false, item is removed entirely.
      *
+     * Removal never depends on the product or variant still existing: a line
+     * whose variant was archived is exactly the one a shopper needs to delete.
+     *
      * @param userId {number} - ID of the user
      * @param data {ICartRemoveRequest} - Contains cartItemId and optional decreaseOnly flag
-     * @returns {Promise<Cart>} - Updated cart after modification
-     * @throws {APIError} - If cart/item not found
+     * @returns The updated cart, in the same shape as `getCart`
+     * @throws {APIError} - If the item is not in this user's cart
      * @access Customer
      */
-    async removeFromCart(userId: number, data: ICartRemoveRequest): Promise<Cart> {
-        let { cartItemId, decreaseOnly } = data;
+    async removeFromCart(userId: number, data: ICartRemoveRequest) {
+        const { cartItemId } = data;
+        const decreaseOnly = Boolean(data.decreaseOnly);
 
-        decreaseOnly = Boolean(decreaseOnly);
-
-        // Fetch cart with items and their product and variant relations
-        const cart = await this.cartRepository.findOne({
-            where: { userId },
-            relations: ['items', 'items.product', 'items.product.subcategory', 'items.product.subcategory.category', 'items.product.deal', 'items.variant'],
+        // Scoped to the caller's cart, so one shopper cannot touch another's line.
+        const cartItem = await this.cartItemRepository.findOne({
+            where: { id: cartItemId, cart: { userId } },
         });
-
-        if (!cart) throw new APIError(404, 'Cart not found');
-
-        // Find the cart item
-        const cartItem = cart.items.find(item => item.id === cartItemId);
         if (!cartItem) throw new APIError(404, 'Cart item not found');
 
-        // Validate stock for the associated product or variant
-        if (cartItem.variantId) {
-            const variant = await this.variantRepository.findOne({ where: { id: cartItem.variantId } });
-            if (!variant) throw new APIError(404, 'Associated variant not found');
-        } else {
-            const product = await this.productRepository.findOne({ where: { id: cartItem.product.id } });
-            if (!product) throw new APIError(404, 'Associated product not found');
-            if (product.hasVariants) throw new APIError(400, 'Cart item references a product that requires a variant');
-        }
+        const decreased = decreaseOnly
+            ? await this.cartItemRepository
+                  .createQueryBuilder()
+                  .update(CartItem)
+                  .set({ quantity: () => '"quantity" - 1' })
+                  .where('id = :id AND "quantity" > 1', { id: cartItemId })
+                  .execute()
+            : null;
 
-        // Handle decrease or remove
-        if (decreaseOnly && cartItem.quantity > 1) {
-            cartItem.quantity -= 1;
-            await this.cartItemRepository.save(cartItem);
-        } else {
+        if (!decreased?.affected) {
             await this.cartItemRepository.delete(cartItemId);
-            cart.items = cart.items.filter(item => item.id !== cartItemId);
         }
 
-        // Update cart total
-        cart.total = cart.items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
-        return await this.cartRepository.save(cart);
+        return this.getCart(userId);
     }
 
     /**
      * Retrieves the user's current cart.
      *
+     * One query: the product, variant, deal and category every line needs are
+     * joined in rather than fetched per line — per-line lookups ran in parallel
+     * and took a pool connection each, so one large cart could hold the whole
+     * pool. Lines come back oldest first, so a quantity change never moves one.
+     *
      * @param userId {number} - ID of the user
-     * @returns {Promise<Cart>} - The cart with items and related product/vendor info
-     * @throws {APIError} - If cart not found
+     * @returns The cart with items, live stock warnings and price breakdowns
      * @access Customer
      */
-    async getCart(userId: number): Promise<Cart> {
+    async getCart(userId: number) {
         const cart = await this.cartRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.product.deal', 'items.variant'],
+            relations: CART_RELATIONS,
+            order: { items: { id: 'ASC' } },
         });
 
         if (!cart) {
             // Create an empty cart if none exists
-            const newCart = this.cartRepository.create({ userId, total: 0, items: [] });
-            return await this.cartRepository.save(newCart);
+            return await this.getOrCreateCart(userId);
         }
 
         // A cart item's price is a snapshot taken at add-to-cart time — if the
@@ -336,83 +335,71 @@ export class CartService {
         // per item, re-resolve the current authoritative price at the same
         // time and self-heal the stored snapshot so the cart never drifts
         // from what checkout will actually charge.
-        const itemsToPersist: CartItem[] = [];
+        const priceChanges: { id: number; price: number }[] = [];
 
-        const cartItemsWithWarnings = await Promise.all(
-            cart.items.map(async (item) => {
-                let warningMessage: string | undefined;
-                let currentPrice = Number(item.price);
+        const cartItemsWithWarnings = cart.items.map((item) => {
+            let warningMessage: string | undefined;
+            let currentPrice = Number(item.price);
+            const product = item.product;
 
-                if (item.variantId) {
-                    // Check variant stock
-                    const variant = await this.variantRepository.findOne({ where: { id: item.variantId } });
-                    if (!variant) {
-                        warningMessage = 'Associated variant no longer exists';
-                    } else {
-                        item.variant = variant;
-                        if (variant.status === 'OUT_OF_STOCK') {
-                            warningMessage = 'Variant is not available';
-                        } else if (item.quantity > variant.stock) {
-                            warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
-                        }
-                        currentPrice = resolveFinalPrice({
-                            finalPrice: variant.finalPrice,
-                            basePrice: variant.basePrice,
-                            discountAmount: variant.discountAmount,
-                        });
-                    }
+            if (item.variantId) {
+                const variant = item.variant;
+                if (!variant) {
+                    warningMessage = 'Associated variant no longer exists';
                 } else {
-                    // Check product stock
-                    const product = await this.productRepository.findOne({ where: { id: item.product.id }, relations: ['subcategory', 'subcategory.category', 'deal'] });
-                    if (!product) {
-                        warningMessage = 'Associated product no longer exists';
-                    } else {
-                        item.product = product;
-                        if (product.hasVariants) {
-                            warningMessage = 'Product requires a variant but none is selected';
-                        } else if (product.status === 'OUT_OF_STOCK') {
-                            warningMessage = 'Product is not available';
-                        } else if (item.quantity > (product.stock ?? 0)) {
-                            warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
-                        }
-                        currentPrice = resolveFinalPrice({
-                            finalPrice: product.finalPrice,
-                            basePrice: product.basePrice,
-                            discountAmount: product.discountAmount,
-                        });
+                    if (variant.status === 'OUT_OF_STOCK') {
+                        warningMessage = 'Variant is not available';
+                    } else if (item.quantity > variant.stock) {
+                        warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
                     }
+                    currentPrice = resolveFinalPrice({
+                        finalPrice: variant.finalPrice,
+                        basePrice: variant.basePrice,
+                        discountAmount: variant.discountAmount,
+                    });
                 }
-
-                if (currentPrice !== Number(item.price)) {
-                    item.price = currentPrice;
-                    itemsToPersist.push(item);
+            } else if (!product) {
+                warningMessage = 'Associated product no longer exists';
+            } else {
+                if (product.hasVariants) {
+                    warningMessage = 'Product requires a variant but none is selected';
+                } else if (product.status === 'OUT_OF_STOCK') {
+                    warningMessage = 'Product is not available';
+                } else if (item.quantity > (product.stock ?? 0)) {
+                    warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
                 }
+                currentPrice = resolveFinalPrice({
+                    finalPrice: product.finalPrice,
+                    basePrice: product.basePrice,
+                    discountAmount: product.discountAmount,
+                });
+            }
 
-                return {
-                    ...item,
-                    product: item.product ? withAgeRestriction(item.product) : item.product,
-                    price: currentPrice,
-                    priceBreakdown: this.buildCartItemPriceBreakdown(
-                        item,
-                        currentPrice,
-                    ),
-                    warningMessage,
-                };
-            })
-        );
+            if (currentPrice !== Number(item.price)) {
+                priceChanges.push({ id: item.id, price: currentPrice });
+            }
+
+            return {
+                ...item,
+                product: product ? withAgeRestriction(product) : product,
+                price: currentPrice,
+                priceBreakdown: this.buildCartItemPriceBreakdown(item, currentPrice),
+                warningMessage,
+            };
+        });
 
         const total = cartItemsWithWarnings.reduce(
             (sum, item) => sum + item.price * item.quantity,
             0,
         );
 
-        if (itemsToPersist.length || total !== Number(cart.total)) {
-            await Promise.all([
-                itemsToPersist.length
-                    ? this.cartItemRepository.save(itemsToPersist)
-                    : Promise.resolve(),
-                this.cartRepository.update(cart.id, { total }),
-            ]);
+        // Sequential on purpose: these are rare self-heals, and running them in
+        // parallel would take a pool connection each.
+        for (const change of priceChanges) {
+            await this.cartItemRepository.update(change.id, { price: change.price });
+        }
+        if (total !== Number(cart.total)) {
+            await this.cartRepository.update(cart.id, { total });
         }
 
         return {
@@ -420,6 +407,12 @@ export class CartService {
             total,
             items: cartItemsWithWarnings,
         };
+    }
+
+    private async getOrCreateCart(userId: number): Promise<Cart> {
+        const cart = await this.cartRepository.findOne({ where: { userId } });
+        if (cart) return cart;
+        return this.cartRepository.save(this.cartRepository.create({ userId, total: 0, items: [] }));
     }
 
     /**
@@ -431,24 +424,14 @@ export class CartService {
      * @access Customer
      */
     async clearCart(userId: number): Promise<void> {
-        const cart = await this.cartRepository.findOne({
-            where: { userId },
-            relations: ['items'],
-        });
+        const cart = await this.cartRepository.findOne({ where: { userId } });
 
         if (!cart) throw new APIError(404, 'Cart not found');
 
-        // Delete all items from DB
-        if (cart.items.length > 0) {
-            const cartItemIds = cart.items.map(item => item.id);
-            await this.cartItemRepository.delete(cartItemIds);
-        }
-
-        // Reset cart metadata
+        await this.cartItemRepository.delete({ cart: { id: cart.id } });
+        await this.cartRepository.update(cart.id, { total: 0 });
         cart.total = 0;
         cart.items = [];
-
-        await this.cartRepository.save(cart);
 
         // Order-success paths (COD/eSewa/NPX) all clear the cart server-side
         // via this method but don't otherwise touch the socket — without this,

@@ -47,7 +47,11 @@ export class BannerService {
             // Was every five hours, which left a banner that had started or
             // ended labelled wrongly in the admin for up to five hours.
             cron.schedule("* * * * *", async () => {
-                await this.updateBannerStatuses();
+                try {
+                    await this.updateBannerStatuses();
+                } catch (error) {
+                    console.warn("Banner status refresh failed:", error);
+                }
             });
             cronScheduled = true;
         }

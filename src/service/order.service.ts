@@ -129,6 +129,9 @@ function promoClaimMessage(reason: PromoClaimReason): string {
     return "Promo code usage limit has been reached. Remove the promo code and try again.";
 }
 
+/** Stock rows an order sold out, to be cleared from carts after it commits. */
+type DepletedStock = { variantIds: number[]; productIds: number[] };
+
 export class OrderService {
     private orderRepository: Repository<Order>;
     private addressRepository: Repository<Address>;
@@ -415,6 +418,9 @@ export class OrderService {
                 "items.product.vendor.district",
                 "items.variant",
             ],
+            // Stable: unordered, Postgres returns rows as stored, and a quantity
+            // UPDATE moves the row — so each +/- at checkout reshuffled lines.
+            order: { items: { id: "ASC" } },
         });
 
         // If cart not found or cart has no items, throw an error indicating cart is empty
@@ -936,16 +942,17 @@ export class OrderService {
                     throw new APIError(500, "Failed to create order");
                 }
 
-                await this.updateStock(savedOrder.orderItems, manager);
+                const depleted = await this.updateStock(savedOrder.orderItems, manager);
 
                 lockedDraft.status = CheckoutDraftStatus.COMPLETED;
                 lockedDraft.orderId = savedOrder.id;
                 await draftRepo.save(lockedDraft);
 
-                return { alreadyCompleted: false, orderId: savedOrder.id };
+                return { alreadyCompleted: false, orderId: savedOrder.id, depleted };
             });
 
             orderId = result.orderId;
+            if ("depleted" in result) await this.removeDepletedFromCarts(result.depleted);
         } catch (error) {
             // The gateway already collected money — this is a reconciliation
             // case. Mark the draft cancelled, log loudly with the transaction
@@ -2535,6 +2542,11 @@ export class OrderService {
             return;
         }
 
+        // Same order as checkout's lockStockRows (products, then variants, by
+        // id). Locking variants first here let a cancellation and a checkout
+        // each hold a row the other needed.
+        await this.lockStockRows(orderItems, manager);
+
         const variantIds = [
             ...new Set(
                 orderItems
@@ -2665,7 +2677,8 @@ export class OrderService {
         }> = [],
         consumeCart?: { userId: number; cartItemIds: number[] },
     ): Promise<Order> {
-        return await AppDataSource.transaction(async (manager) => {
+        let depleted: DepletedStock | undefined;
+        const saved = await AppDataSource.transaction(async (manager) => {
             const orderRepo = manager.getRepository(Order);
             const vendorShippingRepo =
                 manager.getRepository(OrderVendorShipping);
@@ -2745,10 +2758,12 @@ export class OrderService {
                 throw new APIError(500, "Failed to create order");
             }
 
-            await this.updateStock(savedOrder.orderItems, manager);
+            depleted = await this.updateStock(savedOrder.orderItems, manager);
 
             return savedOrder;
         });
+        await this.removeDepletedFromCarts(depleted);
+        return saved;
     }
 
     /**
@@ -2798,13 +2813,17 @@ export class OrderService {
     private async updateStock(
         orderItems: any[],
         manager?: EntityManager,
-    ): Promise<void> {
+    ): Promise<DepletedStock> {
         if (!manager) {
-            await AppDataSource.transaction((txManager) =>
+            return AppDataSource.transaction((txManager) =>
                 this.updateStock(orderItems, txManager),
             );
-            return;
         }
+
+        // Same order as checkout's lockStockRows (products, then variants, by
+        // id). Locking variants first here let a cancellation and a checkout
+        // each hold a row the other needed.
+        await this.lockStockRows(orderItems, manager);
 
         const variantIds = [
             ...new Set(
@@ -2868,6 +2887,7 @@ export class OrderService {
             products.map((p) => [p.id, p]),
         );
 
+        const depleted: DepletedStock = { variantIds: [], productIds: [] };
         const variantsToSave = new Map<number, Variant>();
         const productsToSave = new Map<number, Product>();
 
@@ -2936,42 +2956,42 @@ export class OrderService {
             ]);
             await this.syncVariantParentProducts(savedVariants, manager);
 
-            const depletedVariantIds = [...variantsToSave.values()]
+            depleted.variantIds = [...variantsToSave.values()]
                 .filter((v) => v.stock <= 0)
                 .map((v) => v.id);
-
-            await Promise.allSettled(
-                depletedVariantIds.map((id) =>
-                    this.removeItemFromCarts(id, true),
-                ),
-            );
         }
 
         if (productsToSave.size) {
             await productRepo.save([...productsToSave.values()]);
 
-            const depletedProductIds = [...productsToSave.values()]
+            depleted.productIds = [...productsToSave.values()]
                 .filter((p) => p.stock <= 0)
                 .map((p) => p.id);
-
-            await Promise.allSettled(
-                depletedProductIds.map((id) =>
-                    this.removeItemFromCarts(id, false),
-                ),
-            );
         }
+
+        return depleted;
     }
 
-    private async removeItemFromCarts(
-        itemId: string | number,
-        isvariant: boolean,
-    ) {
+    /**
+     * Takes sold-out stock out of every shopper's cart. Called only after the
+     * order has committed: run inside the checkout transaction it deleted other
+     * shoppers' cart lines while their own checkouts held those rows and waited
+     * on this one's stock lock — a deadlock — and an error swallowed there left
+     * the transaction aborted, so its COMMIT silently rolled the order back.
+     * Best-effort: a line it misses is flagged by getCart's stock check.
+     */
+    private async removeDepletedFromCarts(depleted: DepletedStock | undefined): Promise<void> {
+        if (!depleted) return;
         const cartItemRepo = AppDataSource.getRepository(CartItem);
-
-        if (isvariant) {
-            await cartItemRepo.delete({ variantId: Number(itemId) });
-        } else {
-            await cartItemRepo.delete({ product: { id: Number(itemId) } });
+        try {
+            if (depleted.variantIds.length) {
+                await cartItemRepo.delete({ variantId: In(depleted.variantIds) });
+            }
+            if (depleted.productIds.length) {
+                await cartItemRepo.delete({ product: { id: In(depleted.productIds) } });
+            }
+        } catch (error) {
+            console.warn("Removing sold-out stock from carts failed:", error);
         }
     }
 
@@ -3695,25 +3715,21 @@ export class OrderService {
     }
 
     private async restockOrderItem(item: OrderItem): Promise<void> {
-        if (item.variantId) {
-            const variant = await this.variantRepository.findOne({
-                where: { id: item.variantId },
+        // Locked like reserveOrderItemsStock: an unlocked read-then-save lost
+        // units whenever a checkout decremented the same row in between.
+        await AppDataSource.transaction(async (manager) => {
+            const repo = (
+                item.variantId ? manager.getRepository(Variant) : manager.getRepository(Product)
+            ) as Repository<Variant | Product>;
+            const row = await repo.findOne({
+                where: { id: item.variantId ?? item.productId },
+                lock: { mode: "pessimistic_write" },
             });
-            if (variant) {
-                variant.stock += item.quantity;
-                variant.status = this.determineInventoryStatus(variant.stock);
-                await this.variantRepository.save(variant);
-            }
-        } else {
-            const product = await this.productRepository.findOne({
-                where: { id: item.productId },
-            });
-            if (product) {
-                product.stock += item.quantity;
-                product.status = this.determineInventoryStatus(product.stock);
-                await this.productRepository.save(product);
-            }
-        }
+            if (!row) return;
+            row.stock += item.quantity;
+            row.status = this.determineInventoryStatus(row.stock);
+            await repo.save(row);
+        });
     }
 
     /**

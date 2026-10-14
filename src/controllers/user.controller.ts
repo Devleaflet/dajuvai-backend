@@ -64,7 +64,9 @@ import {
     isVendor,
 } from "../middlewares/auth.middleware";
 import { AuthError } from "../errors/HttpErrors";
-import { newTokenId, revokeToken } from "../service/token-revocation.service";
+import { isIssuedBeforeCutoff, newTokenId, revokeToken } from "../service/token-revocation.service";
+import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
+import { issueUserSessionTokens } from "../service/oauth.service";
 import { TokenSubjectType } from "../entities/revokedToken.entity";
 
 import {
@@ -958,6 +960,7 @@ export class UserController {
                 id: number;
                 email: string;
                 role: string;
+                iat?: number;
             };
 
             const userRepo = AppDataSource.getRepository(User);
@@ -966,6 +969,18 @@ export class UserController {
                 res.status(401).json({
                     success: false,
                     message: "User not found",
+                });
+                return;
+            }
+
+            // A password change or reset ends every session signed before it.
+            // Without this a refresh token kept minting access tokens for a
+            // day after the password changed, which made the cutoff moot.
+            if (isIssuedBeforeCutoff(decoded.iat, user.tokensValidFrom)) {
+                res.status(401).json({
+                    success: false,
+                    errorCode: "SESSION_REVOKED",
+                    message: "Your password changed. Please log in again.",
                 });
                 return;
             }
@@ -1484,6 +1499,58 @@ export class UserController {
         res.status(202).json({
             success: true,
             message: "We've emailed you a 6-digit reset code.",
+        });
+    }
+
+    /**
+     * @method verifyCurrentPassword
+     * @route POST /auth/change-password/verify
+     * @description First step of a signed-in password change: confirms the
+     * current password so the new one is only asked for once it is known to be
+     * right. `changePassword` checks it again.
+     * @access Customer (password accounts only)
+     */
+    async verifyCurrentPassword(
+        req: AuthRequest<{}, {}, { currentPassword: string }>,
+        res: Response,
+    ): Promise<void> {
+        const user = req.user!;
+        this.assertPasswordAccount(user, "password");
+        await assertCurrentPassword(user, req.body.currentPassword);
+        res.status(200).json({ success: true, message: "Password confirmed" });
+    }
+
+    /**
+     * @method changePassword
+     * @route POST /auth/change-password
+     * @description Sets a new password for the signed-in account, proven by the
+     * current password or an emailed reset code. Every other session is signed
+     * out; this one gets fresh tokens so it stays signed in.
+     * @access Customer (password accounts only)
+     */
+    async changePassword(
+        req: AuthRequest<{}, {}, { currentPassword?: string; token?: string; newPassword: string }>,
+        res: Response,
+    ): Promise<void> {
+        const user = req.user!;
+        this.assertPasswordAccount(user, "password");
+        await applyPasswordChange(user, req.body);
+        await saveUser(user);
+
+        const { token, refreshToken } = issueUserSessionTokens(user);
+        const cookie = {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict" as const,
+        };
+        res.cookie("token", token, { ...cookie, maxAge: 15 * 60 * 1000 });
+        res.cookie("refreshToken", refreshToken, { ...cookie, maxAge: 24 * 60 * 60 * 1000 });
+
+        res.status(200).json({
+            success: true,
+            message: "Password changed. Other devices have been signed out.",
+            token,
+            refreshToken,
         });
     }
 

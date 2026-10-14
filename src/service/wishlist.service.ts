@@ -72,7 +72,7 @@ export class WishlistService {
     ): Promise<Wishlist> {
         const { productId, variantId } = data;
 
-        return await AppDataSource.transaction(async (manager) => {
+        await AppDataSource.transaction(async (manager) => {
             const productRepository = manager.getRepository(Product);
             const variantRepository = manager.getRepository(Variant);
             const wishlistRepository = manager.getRepository(Wishlist);
@@ -127,20 +127,22 @@ export class WishlistService {
                 return wishlist;
             }
 
-            // Create wishlist item and associate with wishlist and product
-            const wishlistItem = wishlistItemRepository.create({
-                wishlist,
-                wishlistId: wishlist.id,
-                product,
-                productId,
-                variant: variant || null,
-                variantId: variantId || null,
-            });
-            try {
-                await wishlistItemRepository.save(wishlistItem);
-            } catch (error: any) {
-                if (error?.code !== "23505") throw error;
-            }
+            // ON CONFLICT DO NOTHING rather than catching the unique violation:
+            // inside a transaction a caught error still aborts it, so the next
+            // query failed and a double-clicked heart answered 500.
+            await wishlistItemRepository
+                .createQueryBuilder()
+                .insert()
+                .values({
+                    wishlist,
+                    wishlistId: wishlist.id,
+                    product,
+                    productId,
+                    variant: variant || null,
+                    variantId: variantId || null,
+                })
+                .orIgnore()
+                .execute();
 
             // Reload wishlist to get updated items relation
             wishlist = await wishlistRepository.findOne({
@@ -168,6 +170,9 @@ export class WishlistService {
 
             return wishlist!;
         });
+        // Read after the commit, through the one reader every verb shares, so
+        // the answer has the same shape (options, newest first) as GET.
+        return (await this.getWishlist(userId))!;
     }
 
     /**
@@ -189,7 +194,7 @@ export class WishlistService {
             throw new APIError(400, "Valid Wishlist Item ID is required");
         }
 
-        return await AppDataSource.transaction(async (manager) => {
+        await AppDataSource.transaction(async (manager) => {
             const wishlistRepository = manager.getRepository(Wishlist);
             const wishlistItemRepository = manager.getRepository(WishlistItem);
 
@@ -222,6 +227,9 @@ export class WishlistService {
 
             return wishlist;
         });
+        // Read after the commit, through the one reader every verb shares, so
+        // the answer has the same shape (options, newest first) as GET.
+        return (await this.getWishlist(userId))!;
     }
 
     /**
@@ -243,8 +251,14 @@ export class WishlistService {
                 "items.product",
                 "items.product.subcategory",
                 "items.product.subcategory.category",
+                // A row saved without a variant needs the product's options to
+                // pick one when it moves to the cart.
+                "items.product.variants",
                 "items.variant",
             ],
+            // Newest first, and stable: without an order the rows came back in
+            // whatever order Postgres found them, and moved around on reload.
+            order: { items: { id: "DESC" } },
         });
 
         if (!wishlist) {
@@ -260,7 +274,12 @@ export class WishlistService {
         wishlist.items = wishlist.items.map((item) => ({
             ...item,
             product: item.product
-                ? withAgeRestriction(normalizeLegacyProductDiscount(item.product))
+                ? withAgeRestriction(
+                      normalizeLegacyProductDiscount({
+                          ...item.product,
+                          variants: (item.product.variants ?? []).map(normalizeLegacyVariantDiscount),
+                      }),
+                  )
                 : item.product,
             variant: item.variant
                 ? normalizeLegacyVariantDiscount(item.variant)
@@ -273,16 +292,20 @@ export class WishlistService {
     /**
      * Moves an item from the wishlist to the user's cart.
      * Adds the product to the cart and removes the item from the wishlist.
+     *
+     * A row saved without a variant (the heart on a listing card saves the
+     * product) takes the variant the shopper picks now, in `variantId`. A row
+     * saved against a variant moves that variant and nothing else.
      * @param userId - ID of the user
-     * @param data - Contains wishlistItemId and quantity
-     * @returns Promise<Wishlist> - Updated wishlist after removal
+     * @param data - Contains wishlistItemId, quantity and, for a product-level row, variantId
+     * @returns The updated wishlist, in the same shape as `getWishlist`
      * @throws APIError if wishlist, item, or product not found or stock is insufficient
      */
     async moveToCart(
         userId: number,
         data: IWishlistMoveToCartRequest,
     ): Promise<Wishlist> {
-        const { wishlistItemId, quantity } = data;
+        const { wishlistItemId, quantity, variantId } = data;
 
         // Fetch wishlist with items, including product & variant relations
         const wishlist = await this.wishlistRepository.findOne({
@@ -302,20 +325,21 @@ export class WishlistService {
             throw new APIError(404, "Wishlist item or product not found");
         }
 
-        // Add to cart, passing variantId if exists
+        if (wishlistItem.variantId && variantId && variantId !== wishlistItem.variantId) {
+            throw new APIError(400, "This saved item is a different option of the product");
+        }
+
+        // The cart validates the variant belongs to this product, its stock,
+        // and refuses a variant product without one.
         await this.cartService.addToCart(userId, {
             productId: wishlistItem.productId,
-            variantId: wishlistItem.variantId || undefined,
+            variantId: wishlistItem.variantId || variantId || undefined,
             quantity,
         });
 
-        // Remove from wishlist
-        wishlist.items = wishlist.items.filter(
-            (item) => item.id !== wishlistItemId,
-        );
         await this.wishlistItemRepository.delete(wishlistItemId);
 
-        return wishlist;
+        return (await this.getWishlist(userId)) ?? ({ items: [] } as unknown as Wishlist);
     }
 
     async moveManyToCart(

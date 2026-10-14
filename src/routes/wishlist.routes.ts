@@ -357,6 +357,10 @@ router.post('/move-to-cart/batch', authMiddleware, requireUserRole, validateZod(
  *                 minimum: 1
  *                 example: 2
  *                 description: Quantity to move to cart
+ *               variantId:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: For an item saved without a variant, the option chosen now. Must belong to the product; ignored-if-equal and refused-if-different for an item saved against a variant.
  *     responses:
  *       200:
  *         description: Wishlist item moved to cart successfully, returning updated wishlist

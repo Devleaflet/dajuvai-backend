@@ -193,6 +193,38 @@ export const resetPasswordSchema = z.object({
     path: ['confirmPass'],
 });
 
+/** Same rules signup enforces, so a changed password is never weaker than a new one. */
+const strongPassword = z.string()
+    .min(8, 'Password must be at least 8 characters long')
+    .max(100, 'Password must be at most 100 characters long')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number')
+    .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character');
+
+/** Checks the signed-in account's current password before a new one is asked for. */
+export const verifyCurrentPasswordSchema = z.object({
+    currentPassword: z.string().min(1, 'Enter your current password').max(100),
+});
+
+/**
+ * A signed-in password change, shared by customers and vendors. Proven by the
+ * current password or, for someone who forgot it, a code from forgot-password —
+ * exactly one of the two.
+ */
+export const changePasswordSchema = z.object({
+    currentPassword: z.string().min(1).max(100).optional(),
+    token: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
+    newPassword: strongPassword,
+    confirmPassword: z.string().min(1, 'Confirm your new password'),
+}).refine(data => Boolean(data.currentPassword) !== Boolean(data.token), {
+    message: 'Enter your current password',
+    path: ['currentPassword'],
+}).refine(data => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
+});
+
 /**
  * Schema for requesting email change.
  * Validates newEmail format.

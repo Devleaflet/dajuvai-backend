@@ -147,6 +147,16 @@ const AppDataSource = new DataSource({
     // added it).
     migrationsTransactionMode: "each",
     ssl: false,
+    // node-postgres pool. Its defaults (10 connections, wait forever for one)
+    // turned a single stuck transaction into an API that hung on every route.
+    extra: {
+        max: config.DB_POOL_MAX,
+        // A request that cannot get a connection fails instead of hanging.
+        connectionTimeoutMillis: 10_000,
+        // Postgres ends a transaction left open with no statement running —
+        // a leaked one would otherwise hold its row locks indefinitely.
+        idle_in_transaction_session_timeout: 60_000,
+    },
 });
 
 export default AppDataSource;

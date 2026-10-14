@@ -495,7 +495,14 @@ export class VendorService {
             this.vendorRepository.manager.connection.createQueryRunner();
 
         await queryRunner.connect();
-        await queryRunner.startTransaction();
+        try {
+            await queryRunner.startTransaction();
+        } catch (error) {
+            // The finally below only covers what follows; without this the
+            // connection would never return to the pool.
+            await queryRunner.release();
+            throw error;
+        }
 
         try {
             const existing = await queryRunner.manager.findOne(Vendor, {

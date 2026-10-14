@@ -23,6 +23,8 @@ import {
     verificationTokenSchema,
     verifyEmailChangeSchema,
     verifyTokenSchema,
+    changePasswordSchema,
+    verifyCurrentPasswordSchema,
 } from "../utils/zod_validations/user.zod";
 import { deleteUserDataByFacebookId, getFormattedStaffPermissions } from "../service/user.service";
 import { APIError } from "../utils/ApiError.utils";
@@ -100,6 +102,19 @@ export const verifyCodeLimiter = rateLimit({
     max: 10,
     keyGenerator: publicRateLimitKey as Options["keyGenerator"],
     message: "Too many verification attempts, please request a new code and try again later.",
+});
+
+/**
+ * Signed-in password changes. Keyed by account rather than client, so one
+ * account's current password cannot be guessed from many addresses, and one
+ * shared address (an office, the Next proxy) does not lock out its neighbours.
+ */
+export const changePasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    keyGenerator: ((req: { user?: { id?: number }; vendor?: { id?: number } }) =>
+        req.vendor ? `vendor:${req.vendor.id}` : `user:${req.user?.id}`) as unknown as Options["keyGenerator"],
+    message: "Too many attempts. Please wait 15 minutes and try again.",
 });
 
 /**
@@ -1816,6 +1831,120 @@ userRouter.post(
     verifyCodeLimiter,
     validateZod(resetCodeSchema),
     userController.verifyResetCode.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/change-password/verify:
+ *   post:
+ *     summary: Check the signed-in customer's current password
+ *     description: First step of a signed-in password change. Confirms the current password without changing anything, so the client asks for the new one only once the current one is known to be right. change-password checks it again. Rate limited to 10 attempts per 15 minutes per account.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Current password is correct
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Password confirmed
+ *       400:
+ *         description: Current password is incorrect (INVALID_CURRENT_PASSWORD), or the body failed validation
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Account signs in with Google or Facebook and has no password (SOCIAL_ACCOUNT)
+ *       429:
+ *         description: Too many attempts
+ */
+userRouter.post(
+    "/change-password/verify",
+    authMiddleware,
+    changePasswordLimiter,
+    validateZod(verifyCurrentPasswordSchema),
+    userController.verifyCurrentPassword.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/change-password:
+ *   post:
+ *     summary: Change the signed-in customer's password
+ *     description: Sets a new password, proven by either the current password or a six-digit code emailed by forgot-password (for someone who forgot the current one) — exactly one of the two. Every other session is signed out; the response carries fresh tokens so this one stays signed in. Rate limited to 10 attempts per 15 minutes per account.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPassword
+ *               - confirmPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               token:
+ *                 type: string
+ *                 pattern: "^[0-9]{6}$"
+ *               newPassword:
+ *                 type: string
+ *                 description: At least 8 characters with an uppercase letter, a lowercase letter, a number and a special character
+ *               confirmPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed; new session tokens issued
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 token:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Wrong current password or code, same password as before (PASSWORD_UNCHANGED), or validation failure
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Account signs in with Google or Facebook (SOCIAL_ACCOUNT)
+ *       410:
+ *         description: Emailed code expired or replaced
+ *       429:
+ *         description: Too many attempts
+ */
+userRouter.post(
+    "/change-password",
+    authMiddleware,
+    changePasswordLimiter,
+    validateZod(changePasswordSchema),
+    userController.changePassword.bind(userController),
 );
 
 /**

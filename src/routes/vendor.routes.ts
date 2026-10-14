@@ -27,8 +27,13 @@ import {
 import { validateZod } from "../middlewares/auth.middleware";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
-import { resetCodeSchema, verificationTokenSchema } from "../utils/zod_validations/user.zod";
-import { authRateLimiter, verifyCodeLimiter } from "./user.routes";
+import {
+    changePasswordSchema,
+    resetCodeSchema,
+    verificationTokenSchema,
+    verifyCurrentPasswordSchema,
+} from "../utils/zod_validations/user.zod";
+import { authRateLimiter, changePasswordLimiter, verifyCodeLimiter } from "./user.routes";
 import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 import { VendorProductsQuerySchema } from "../utils/zod_validations/product.zod";
 import { resolveSlugParam } from "../middlewares/slug.middleware";
@@ -1618,6 +1623,120 @@ router.post(
     authRateLimiter,
     validateZod(resetPasswordSchema),
     vendorController.resetPassword.bind(vendorController),
+);
+
+/**
+ * @swagger
+ * /api/vendors/change-password/verify:
+ *   post:
+ *     summary: Check the signed-in vendor's current password
+ *     description: First step of a signed-in password change. Confirms the current password without changing anything, so the client asks for the new one only once the current one is known to be right. change-password checks it again. Rate limited to 10 attempts per 15 minutes per account.
+ *     tags: [Vendors]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Current password is correct
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Password confirmed
+ *       400:
+ *         description: Current password is incorrect (INVALID_CURRENT_PASSWORD), or the body failed validation
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Account signs in with Google or Facebook and has no password (SOCIAL_ACCOUNT)
+ *       429:
+ *         description: Too many attempts
+ */
+router.post(
+    "/change-password/verify",
+    vendorAuthMiddleware,
+    changePasswordLimiter,
+    validateZod(verifyCurrentPasswordSchema),
+    vendorController.verifyCurrentPassword.bind(vendorController),
+);
+
+/**
+ * @swagger
+ * /api/vendors/change-password:
+ *   post:
+ *     summary: Change the signed-in vendor's password
+ *     description: Sets a new password, proven by either the current password or a six-digit code emailed by forgot-password (for someone who forgot the current one) — exactly one of the two. Every other session is signed out; the response carries fresh tokens so this one stays signed in. Rate limited to 10 attempts per 15 minutes per account.
+ *     tags: [Vendors]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPassword
+ *               - confirmPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               token:
+ *                 type: string
+ *                 pattern: "^[0-9]{6}$"
+ *               newPassword:
+ *                 type: string
+ *                 description: At least 8 characters with an uppercase letter, a lowercase letter, a number and a special character
+ *               confirmPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed; new session tokens issued
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 token:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Wrong current password or code, same password as before (PASSWORD_UNCHANGED), or validation failure
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Account signs in with Google or Facebook (SOCIAL_ACCOUNT)
+ *       410:
+ *         description: Emailed code expired or replaced
+ *       429:
+ *         description: Too many attempts
+ */
+router.post(
+    "/change-password",
+    vendorAuthMiddleware,
+    changePasswordLimiter,
+    validateZod(changePasswordSchema),
+    vendorController.changePassword.bind(vendorController),
 );
 
 /**

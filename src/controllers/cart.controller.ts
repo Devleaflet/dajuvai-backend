@@ -13,8 +13,8 @@ export class CartController {
 
     async addToCart(req: AuthRequest<{}, {}, ICartAddRequest>, res: Response, _next: NextFunction): Promise<void> {
         const userId = req.user?.id;
-        const { productId, quantity, variantId } = req.body;
-        const cart = await this.cartService.addToCart(userId, { productId, quantity, variantId });
+        const { productId, quantity, variantId, source } = req.body;
+        const cart = await this.cartService.addToCart(userId, { productId, quantity, variantId, source });
         emitCartUpdate(userId, cart);
         res.status(200).json({ success: true, data: cart });
     }

@@ -15,6 +15,7 @@ const config = {
   PORT: parseNumber(process.env.PORT, 4000),
   PAGE_LIMIT: parseNumber(process.env.PAGE_LIMIT, 20),
   DATABASE_URL: process.env.DATABASE_URL || "",
+  DB_POOL_MAX: parseNumber(process.env.DB_POOL_MAX, 20),
   JWT_SECRET: process.env.JWT_SECRET || "",
   JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET || "",
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID || "",
