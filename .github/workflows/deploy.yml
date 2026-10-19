@@ -82,7 +82,7 @@ jobs:
           script: |
             set -eu
             cd "$DEPLOY_DIR"
-            if ! grep -q 'backend/dajuvai-backend-prod-v1' docker-compose.yml; then
+            if ! grep -qE '^[[:space:]]*image:.*backend/dajuvai-backend-prod-v1' docker-compose.yml; then
               echo 'docker-compose.yml still uses the old backend image name; update it first'
               exit 1
             fi
