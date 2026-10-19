@@ -1,5 +1,6 @@
 import { LessThanOrEqual, IsNull } from "typeorm";
 import bcrypt from "bcryptjs";
+import { AUTH_MESSAGES, burnPasswordCheck, INVALID_CREDENTIALS } from "../utils/authPrivacy.utils";
 import { randomUUID } from "crypto";
 import AppDataSource from "../config/db.config";
 import { AuthProvider, User, UserRole } from "../entities/user.entity";
@@ -119,18 +120,21 @@ export class UserDeletionService {
         const user = await userRepository.findOne({
             where: { email: email.trim().toLowerCase() },
         });
-        if (!user || !user.deletionRequestedAt || user.deletionFinalizedAt) {
-            throw new APIError(401, "Invalid credentials");
+        // Same failure, in the same time, whatever the email or account type:
+        // see authPrivacy.utils. A Google/Facebook account reactivates by
+        // signing in with that provider, which the message already points to.
+        const invalid = () => new APIError(401, AUTH_MESSAGES.invalidCustomerLogin, INVALID_CREDENTIALS);
+        if (
+            !user ||
+            !user.deletionRequestedAt ||
+            user.deletionFinalizedAt ||
+            user.provider !== AuthProvider.LOCAL ||
+            !user.password
+        ) {
+            await burnPasswordCheck(password);
+            throw invalid();
         }
-        if (user.provider !== AuthProvider.LOCAL) {
-            throw new APIError(
-                403,
-                "This account was created with Google. Please log in using Google to reactivate it.",
-            );
-        }
-        if (!user.password || !(await bcrypt.compare(password, user.password))) {
-            throw new APIError(401, "Invalid credentials");
-        }
+        if (!(await bcrypt.compare(password, user.password))) throw invalid();
         if (!isUserDeletionGracePeriodActive(user.deletionRequestedAt)) {
             await this.finalizeUserDeletion(user.id);
             throw new APIError(410, "Account deletion grace period has expired");

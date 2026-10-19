@@ -62,7 +62,7 @@ export const vendorLoginSchema = z.object({
   password: z
     .string()
     .min(8, "Password must be at least 8 characters long")
-    .max(25, "Password must not exceed 25 characters"),
+    .max(100, "Password must not exceed 100 characters"),
 });
 
 export const vendorDeleteAccountSchema = z.object({

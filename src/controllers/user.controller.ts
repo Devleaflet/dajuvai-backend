@@ -56,8 +56,13 @@ import {
 import { APIError } from "../utils/ApiError.utils";
 import { AuthProvider, User, UserRole } from "../entities/user.entity";
 import {
-    createAuthAccountConflict,
-} from "../service/auth-account-conflict.policy";
+    AUTH_MESSAGES,
+    burnCodeIssue,
+    burnPasswordCheck,
+    INVALID_CODE,
+    INVALID_CREDENTIALS,
+    sendExistingAccountEmailInBackground,
+} from "../utils/authPrivacy.utils";
 import {
     AuthRequest,
     CombinedAuthRequest,
@@ -514,107 +519,60 @@ export class UserController {
             let existingUser =
                 await this.userDeletionService.findUserForSignup(loweredEmail);
 
-            if (
+            // Every outcome below answers with the same 201 and message, after the
+            // same password-hashing work, so signup cannot be used to learn who
+            // has an account (see `authPrivacy.utils`). What differs is only the
+            // email: a code for a new or still-unverified account, and a "you
+            // already have an account" note to the owner of a registered one.
+            const received = () =>
+                res.status(201).json({ success: true, message: AUTH_MESSAGES.customerSignupReceived });
+
+            const hashedPassword = await bcrypt.hash(password, 10);
+            const verificationToken = TokenUtils.generateToken();
+            const hashedToken = await TokenUtils.hashToken(verificationToken);
+            const expire = new Date(Date.now() + 15 * 60 * 1000);
+
+            const deletionPending =
                 existingUser?.deletionRequestedAt &&
                 !existingUser.deletionFinalizedAt &&
-                isUserDeletionGracePeriodActive(existingUser.deletionRequestedAt)
-            ) {
-                throw new APIError(
-                    409,
-                    `This account is scheduled for deletion on ${existingUser.deletionScheduledFor?.toISOString()}. Log in to reactivate it instead.`,
-                    "USER_DELETION_PENDING",
-                );
+                isUserDeletionGracePeriodActive(existingUser.deletionRequestedAt);
+            if (existingUser && (existingUser.isVerified || deletionPending)) {
+                sendExistingAccountEmailInBackground(loweredEmail, "customer", "customer");
+                received();
+                return;
             }
 
-            const existingAccount =
-                await this.vendorService.findVendorForSignup(loweredEmail);
-
-            if (existingAccount) {
-                const conflict = createAuthAccountConflict(
-                    "emailRegisteredAsVendor",
-                );
-                throw new APIError(
-                    conflict.status,
-                    conflict.message,
-                    conflict.errorCode,
-                );
+            if (await this.vendorService.findVendorForSignup(loweredEmail)) {
+                sendExistingAccountEmailInBackground(loweredEmail, "vendor", "customer");
+                received();
+                return;
             }
-
-            //  Prepare hashed password and verification token
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const verificationToken = TokenUtils.generateToken(); // raw token for email
-            const hashedToken = await TokenUtils.hashToken(verificationToken); // hashed version for DB
-            const expire = new Date(Date.now() + 15 * 60 * 1000); // token expires in 15 minutes
 
             if (existingUser) {
-                if (existingUser.isVerified) {
-                    // User already verified — reject signup
-                    const conflict = createAuthAccountConflict(
-                        "customerAccountExists",
-                    );
-                    throw new APIError(
-                        conflict.status,
-                        conflict.message,
-                        conflict.errorCode,
-                    );
-                }
-
-                // User exists but is not verified — update info and resend verification email
+                // Registered but never verified: take the new details and send a
+                // fresh code, as the first attempt would have.
                 existingUser.username = username;
                 existingUser.password = hashedPassword;
                 existingUser.verificationCode = hashedToken;
                 existingUser.verificationCodeExpire = expire;
-
-                // Save updated user and send verification email
                 await saveUser(existingUser);
-                sendVerificationEmailInBackground(
-                    email,
-                    "Email Verification Code",
-                    verificationToken,
-                );
-
-                res.status(200).json({
-                    success: true,
-                    message:
-                        "Verification code resent. Please check your email.",
+            } else {
+                // Unverified until the emailed code is entered: every client
+                // shows the code screen next, and login refuses an unverified
+                // account (sending it a fresh code). No session is issued.
+                await createUser({
+                    username,
+                    email: loweredEmail,
+                    password: hashedPassword,
+                    verificationCode: hashedToken,
+                    verificationCodeExpire: expire,
+                    role: UserRole.USER,
+                    isVerified: false,
                 });
-                return;
             }
 
-            // Create and save new user (first-time signup). Unverified until the
-            // emailed code is entered: every client shows the code screen next,
-            // and login refuses an unverified account (sending it a fresh code).
-            const user = await createUser({
-                username,
-                email: loweredEmail,
-                password: hashedPassword,
-                verificationCode: hashedToken,
-                verificationCodeExpire: expire,
-                role: UserRole.USER,
-                isVerified: false,
-            });
-
-            // In the background: see sendVerificationEmailInBackground. "Resend
-            // code" and signing in both issue a new code if this one is lost.
-            sendVerificationEmailInBackground(
-                email,
-                "Email Verification Code",
-                verificationToken,
-            );
-
-            // No session: an unverified account cannot sign in, so issuing a
-            // token here would be the one way around verification.
-            res.status(201).json({
-                success: true,
-                message:
-                    "Account created. Enter the code we emailed you to verify it.",
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    email: user.email,
-                    role: user.role,
-                },
-            });
+            sendVerificationEmailInBackground(loweredEmail, "Email Verification Code", verificationToken);
+            received();
         } catch (error) {
             console.log(error);
             //  Error handling with meaningful status
@@ -668,30 +626,18 @@ export class UserController {
 
             const user = await findUserByEmailLogin(loweredEmail);
 
-            if (!user) {
-                const vendor = await this.vendorService.findVendorForSignup(
-                    loweredEmail,
-                );
-                if (vendor) {
-                    const conflict = createAuthAccountConflict(
-                        "emailRegisteredAsVendor",
-                    );
-                    throw new APIError(
-                        conflict.status,
-                        conflict.message,
-                        conflict.errorCode,
-                    );
-                }
-                throw new APIError(404, "Customer account does not exist");
+            // Unknown email, a vendor's email, a Google/Facebook account and a
+            // wrong password all fail the same way, in the same time: see
+            // `authPrivacy.utils`. Account state (unverified, scheduled for
+            // deletion) is only described once the password is right.
+            const invalid = () => new APIError(401, AUTH_MESSAGES.invalidCustomerLogin, INVALID_CREDENTIALS);
+            if (!user || user.provider !== AuthProvider.LOCAL || !user.password) {
+                await burnPasswordCheck(password);
+                throw invalid();
             }
 
-            this.assertPasswordAccount(user, "log in");
-
-            // Compare password
             const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) {
-                throw new APIError(401, "Invalid credentials");
-            }
+            if (!isMatch) throw invalid();
 
             // After the password check, so only the owner learns the account is
             // unverified and only the owner can make it send email. Someone who
@@ -726,7 +672,7 @@ export class UserController {
                     user.deletionScheduledFor <= new Date()
                 ) {
                     await this.userDeletionService.finalizeUserDeletion(user.id);
-                    throw new APIError(404, "Customer account does not exist");
+                    throw invalid();
                 }
                 throw new APIError(
                     409,
@@ -1226,6 +1172,18 @@ export class UserController {
      * signing in with one nor resetting one means anything for them. Says which
      * provider to use instead of a generic refusal.
      */
+    /**
+     * The account a reset code belongs to. An unknown email or a social
+     * account (which is never sent a code) fails exactly like a wrong code, so
+     * the reset steps reveal nothing the request step hides.
+     */
+    private async findUserForReset(rawEmail: string): Promise<User> {
+        const user = await findUserByEmail(this.toLowerEmail(rawEmail));
+        if (user && user.provider === AuthProvider.LOCAL) return user;
+        await burnPasswordCheck(rawEmail);
+        throw new APIError(400, AUTH_MESSAGES.invalidCode, INVALID_CODE);
+    }
+
     private assertPasswordAccount(user: User, purpose: "log in" | "password"): void {
         if (user.provider === AuthProvider.LOCAL) return;
         const provider = user.provider === AuthProvider.FACEBOOK ? "Facebook" : "Google";
@@ -1311,28 +1269,20 @@ export class UserController {
 
             const loweredEmail = this.toLowerEmail(email);
 
-            // Attempt to find user by email
-            let user = await findUserByEmail(loweredEmail);
-            let vendor = null;
-            let isVendor = false;
-
-            // If no user found, attempt to find vendor by email
-            if (!user) {
-                vendor = await findVendorByEmail(loweredEmail);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor exists, respond with 404 Not Found
-                    throw new APIError(404, "User or vendor not found");
-                }
+            // The same 202 for every email — unknown, already verified, or
+            // waiting on a code — so the form cannot be used to learn who has an
+            // account. A code is only sent to an account that still needs one,
+            // and a per-account resend block is applied silently.
+            const entity = (await findUserByEmail(loweredEmail)) ?? (await findVendorByEmail(loweredEmail));
+            if (entity && !entity.isVerified) {
+                await this.issueVerificationCode(entity).catch((error) => {
+                    if (!(error instanceof APIError)) throw error;
+                });
+            } else {
+                await burnCodeIssue();
             }
 
-            await this.issueVerificationCode(isVendor ? vendor : user);
-
-            // Respond with HTTP 202 Accepted to indicate the token has been sent
-            res.status(202).json({
-                success: true,
-                message: "Verification token sent",
-            });
+            res.status(202).json({ success: true, message: AUTH_MESSAGES.verificationRequested });
         } catch (error) {
             // Handle known APIError with appropriate status and message
             if (error instanceof APIError) {
@@ -1381,43 +1331,23 @@ export class UserController {
             // Extract email and token from validated data
             const { email, token } = parsed.data;
 
-            // Attempt to find user by email
-            let user = await findUserByEmail(email);
-            let vendor = null;
-            let isVendor = false;
+            const loweredEmail = this.toLowerEmail(email);
+            const user = await findUserByEmail(loweredEmail);
+            const vendor = user ? null : await findVendorByEmail(loweredEmail);
+            const isVendor = !user;
+            const entity = user ?? vendor;
 
-            // If no user found, attempt to find vendor by email
-            if (!user) {
-                vendor = await findVendorByEmail(email);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor exists, token is no longer valid
-                    throw new APIError(410, "Token no longer valid");
-                }
-            }
-
-            // Reference the correct entity (user or vendor) for further validation
-            // const entity: Vendor | User = isVendor ? vendor : user;
-            const entity = isVendor ? vendor : user;
-
-            // Check if verification token and its expiration exist for the entity
-            if (!entity.verificationCode || !entity.verificationCodeExpire) {
-                throw new APIError(410, "Token no longer valid");
-            }
-
-            // Check if the token has expired
-            if (entity.verificationCodeExpire < new Date()) {
-                throw new APIError(410, "Token expired");
-            }
-
-            // Compare provided token with the hashed token stored in the database
-            const isMatch = await bcrypt.compare(
-                token,
-                entity.verificationCode,
+            // Unknown email, no pending code, expired code and wrong code all
+            // fail the same way, in the same time, so this cannot be used to
+            // learn who has an account or a pending verification.
+            const pending = Boolean(
+                entity?.verificationCode && entity.verificationCodeExpire && entity.verificationCodeExpire >= new Date(),
             );
+            const isMatch = pending
+                ? await bcrypt.compare(token, entity!.verificationCode!)
+                : (await burnPasswordCheck(token), false);
             if (!isMatch) {
-                // If token does not match, respond with 400 Bad Request
-                throw new APIError(400, "Invalid token");
+                throw new APIError(400, AUTH_MESSAGES.invalidCode, INVALID_CODE);
             }
 
             // Token is valid: reset verification-related fields and mark entity as verified
@@ -1451,6 +1381,7 @@ export class UserController {
                 res.status(error.status).json({
                     success: false,
                     message: error.message,
+                    errorCode: error.errorCode,
                 });
             } else {
                 // For unexpected errors, throw a generic 503 Service Unavailable error
@@ -1467,39 +1398,32 @@ export class UserController {
      * @route POST /auth/forgot-password
      * @description Emails a six-digit, 15-minute password reset code.
      *
-     * An unknown address is answered with a 404 saying so. Login and signup
-     * already reveal whether an email is registered, so hiding it here would
-     * protect nothing and only leave a shopper waiting on an email that will
-     * never come. Accounts that sign in with Google or Facebook have no
-     * password, and are told which provider to use instead.
+     * Every email gets the same 202 and message, so the form reveals nothing
+     * about who has an account (see `authPrivacy.utils`). Only an account with
+     * a password is sent a code; Google and Facebook accounts have none.
      * @access Public
      */
     async forgotPassword(
         req: Request<{}, {}, IVerificationTokenRequest>,
         res: Response,
     ): Promise<void> {
+        // The same 202 for every email — a customer's, a vendor's, a Google
+        // account's, an unknown one — so the form cannot be used to learn who
+        // has an account. A code is only issued to an account with a password.
         const email = this.toLowerEmail(req.body.email);
         const user = await findUserByEmail(email);
-        if (!user) {
-            throw new APIError(
-                404,
-                "We couldn't find an account with that email. Check it, or create a new account.",
-                "ACCOUNT_NOT_FOUND",
-            );
+
+        if (user && user.provider === AuthProvider.LOCAL) {
+            const token = TokenUtils.generateToken();
+            user.resetToken = await TokenUtils.hashToken(token);
+            user.resetTokenExpire = new Date(Date.now() + 15 * 60 * 1000);
+            await saveUser(user);
+            sendVerificationEmailInBackground(user.email, "Reset Password", token);
+        } else {
+            await burnCodeIssue();
         }
-        this.assertPasswordAccount(user, "password");
 
-        const token = TokenUtils.generateToken();
-        user.resetToken = await TokenUtils.hashToken(token);
-        user.resetTokenExpire = new Date(Date.now() + 15 * 60 * 1000);
-        await saveUser(user);
-
-        sendVerificationEmailInBackground(user.email, "Reset Password", token);
-
-        res.status(202).json({
-            success: true,
-            message: "We've emailed you a 6-digit reset code.",
-        });
+        res.status(202).json({ success: true, message: AUTH_MESSAGES.resetRequested });
     }
 
     /**
@@ -1566,11 +1490,7 @@ export class UserController {
         req: Request<{}, {}, { email: string; token: string }>,
         res: Response,
     ): Promise<void> {
-        const user = await findUserByEmail(this.toLowerEmail(req.body.email));
-        if (!user) {
-            throw new APIError(404, "We couldn't find an account with that email.", "ACCOUNT_NOT_FOUND");
-        }
-        this.assertPasswordAccount(user, "password");
+        const user = await this.findUserForReset(req.body.email);
         await assertResetCode(user, req.body.token);
 
         res.status(200).json({ success: true, message: "Code verified" });
@@ -1588,11 +1508,7 @@ export class UserController {
         res: Response,
     ): Promise<void> {
         const { newPass, token } = req.body;
-        const user = await findUserByEmail(this.toLowerEmail(req.body.email));
-        if (!user) {
-            throw new APIError(404, "We couldn't find an account with that email.", "ACCOUNT_NOT_FOUND");
-        }
-        this.assertPasswordAccount(user, "password");
+        const user = await this.findUserForReset(req.body.email);
         await assertResetCode(user, token);
 
         user.password = await bcrypt.hash(newPass, 10);
@@ -2057,25 +1973,21 @@ export class UserController {
         }
     }
 
+    /**
+     * Kept for the signup wizards that still call it, but it no longer answers
+     * the question: a public "is this email registered?" endpoint is account
+     * enumeration by definition. Signup itself now handles a registered email
+     * without revealing it (see `answerDuplicateSignup`), so the wizards lose
+     * nothing by always hearing "not registered".
+     */
     async checkEmailExists(
         req: Request<{}, {}, {}, { email: string }>,
         res: Response,
     ): Promise<void> {
         if (!req.query.email) {
-            res.status(400).json({ success: false, message: "Invalid Email" });
+            res.status(400).json({ success: false, message: "Enter a valid email address." });
             return;
         }
-        try {
-            const userExists = await findUserByEmail(req.query.email);
-            const vendorExists = userExists
-                ? null
-                : await this.vendorService.findVendorByEmail(req.query.email);
-            res.json({ success: true, exists: !!(userExists || vendorExists) });
-        } catch (error) {
-            res.status(503).json({
-                success: false,
-                message: "Email verification service temporarily unavailable",
-            });
-        }
+        res.json({ success: true, exists: false });
     }
 }

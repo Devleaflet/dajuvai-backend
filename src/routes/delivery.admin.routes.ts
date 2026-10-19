@@ -8,7 +8,15 @@ import { checkPermission } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 
 import { asyncHandler } from "../utils/asyncHandler.utils";
-import { assignRiderSchema, bulkAssignRiderSchema, createRiderSchema, resetRiderPasswordSchema } from "../utils/zod_validations/delivery.zod";
+import {
+    assignRiderSchema,
+    bulkAssignRiderSchema,
+    createRiderSchema,
+    deliveryAssignmentsQuerySchema,
+    deliveryOrdersQuerySchema,
+    failedDeliveriesQuerySchema,
+    resetRiderPasswordSchema,
+} from "../utils/zod_validations/delivery.zod";
 import { DeliveryAdminController } from "../controllers/delivery.admin.controller";
 
 const deliveryAdminRouter = Router();
@@ -339,10 +347,14 @@ deliveryAdminRouter.put(
  * @swagger
  * /api/admin/delivery/orders/at-warehouse:
  *   get:
- *     summary: Get all orders at warehouse (status = ARRIVED_AT_WAREHOUSE)
+ *     summary: List delivery orders (default ARRIVED_AT_WAREHOUSE)
  *     description: |
- *       Returns paginated orders whose status is ARRIVED_AT_WAREHOUSE for delivery management.
- *       Supports search by order number, customer name, vendor name, and sorting by newest/oldest.
+ *       Paginated orders for delivery management. Without `statuses` this is the
+ *       warehouse queue (ARRIVED_AT_WAREHOUSE). With `statuses`, any of those
+ *       statuses — limited to orders that reached delivery (at the warehouse,
+ *       with a rider, or with a delivery assignment / warehouse arrival on record).
+ *       Search matches order number or id, order phone, customer name, username,
+ *       email or phone, and vendor business name.
  *     tags:
  *       - Delivery Admin
  *     security:
@@ -368,6 +380,22 @@ deliveryAdminRouter.put(
  *           type: string
  *           enum: [newest, oldest]
  *           default: newest
+ *       - in: query
+ *         name: statuses
+ *         description: Comma-separated order statuses. Unknown values are refused with 400.
+ *         schema:
+ *           type: string
+ *           example: ARRIVED_AT_WAREHOUSE,ASSIGNED_TO_RIDER
+ *       - in: query
+ *         name: paymentMethod
+ *         schema:
+ *           type: string
+ *           enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
+ *       - in: query
+ *         name: riderId
+ *         description: Rider on the order's latest (uncleared) assignment.
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
  *         description: Orders fetched successfully
@@ -383,6 +411,7 @@ deliveryAdminRouter.put(
 deliveryAdminRouter.get(
     "/orders/at-warehouse",
     checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    validateZod(deliveryOrdersQuerySchema, "query"),
     asyncHandler(
         deliveryAdminController.getAtWarehouseOrders.bind(deliveryAdminController),
     ),
@@ -532,7 +561,7 @@ deliveryAdminRouter.post(
  *   get:
  *     summary: Get all delivery assignments (Admin only)
  *     description: |
- *       Returns paginated delivery assignments with `order` and `rider` relations.
+ *       Returns paginated delivery assignments with `order` (and its customer) and `rider`.
  *
  *       Legacy alias: `/api/delivery/admin/assignments`
  *     tags:
@@ -554,8 +583,30 @@ deliveryAdminRouter.post(
  *         schema:
  *           type: integer
  *           minimum: 1
+ *           maximum: 100
  *           default: 20
  *         example: 20
+ *       - in: query
+ *         name: search
+ *         description: Order number, rider name or phone, customer name/username/phone, failure reason.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: status
+ *         description: An assignment status, or `active` for assigned + picked up.
+ *         schema:
+ *           type: string
+ *           enum: [active, assigned, picked_up, delivered, failed, reassigned, none]
+ *       - in: query
+ *         name: riderId
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest]
+ *           default: newest
  *     responses:
  *       200:
  *         description: Assignments fetched successfully
@@ -595,9 +646,21 @@ deliveryAdminRouter.post(
  * /api/admin/delivery/orders/failed-deliveries:
  *   get:
  *     summary: List failed delivery assignments
- *     description: Requires Delivery view permission.
+ *     description: |
+ *       Assignments marked failed (or carrying a failure reason), those still
+ *       needing recovery first. `needsRecovery` is true while the order is
+ *       NOT_RECEIVED and nothing newer has been assigned. Requires Delivery view permission.
  *     tags: [Delivery Admin]
  *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+ *       - in: query
+ *         name: search
+ *         description: Order number, failure reason, rider name, customer name or phone.
+ *         schema: { type: string }
+ *       - { in: query, name: state, schema: { type: string, enum: [pending, resolved] } }
+ *       - { in: query, name: riderId, schema: { type: integer } }
  *     responses:
  *       200:
  *         description: Failed deliveries fetched successfully.
@@ -608,10 +671,12 @@ deliveryAdminRouter.post(
  *               properties:
  *                 success: { type: boolean, example: true }
  *                 data: { type: array, items: { $ref: '#/components/schemas/DeliveryAssignment' } }
+ *                 pagination: { type: object }
  */
 deliveryAdminRouter.get(
     "/assignments",
     checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    validateZod(deliveryAssignmentsQuerySchema, "query"),
     asyncHandler(deliveryAdminController.getAllAssignments.bind(deliveryAdminController)),
 );
 
@@ -684,8 +749,9 @@ deliveryAdminRouter.get(
  *   patch:
  *     summary: Reset order back to warehouse
  *     description: |
- *       Transitions the order deliveryStatus to `AT_WAREHOUSE` (if allowed) and marks
- *       the order status as `RETURNED`.
+ *       Clears the order's open assignment (a failed one is kept as the record),
+ *       frees the rider, and moves the order to ARRIVED_AT_WAREHOUSE. Only for
+ *       orders that are ASSIGNED_TO_RIDER, NOT_RECEIVED or already at the warehouse.
  *
  *       Legacy alias: `/api/delivery/admin/orders/{orderId}/reset-to-warehouse`
  *     tags:
@@ -723,7 +789,7 @@ deliveryAdminRouter.get(
  *                       type: string
  *                       example: "Order reset to warehouse"
  *       400:
- *         description: Invalid delivery status transition
+ *         description: Order is not with a rider or failed
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -744,6 +810,7 @@ deliveryAdminRouter.patch(
 deliveryAdminRouter.get(
     "/orders/failed-deliveries",
     checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    validateZod(failedDeliveriesQuerySchema, "query"),
     asyncHandler(
         deliveryAdminController.getFailedDeliveries.bind(deliveryAdminController),
     ),
@@ -757,6 +824,14 @@ deliveryAdminRouter.get(
  *     deprecated: true
  *     tags: [Delivery Admin]
  *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 100 } }
+ *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: sort, schema: { type: string, enum: [newest, oldest] } }
+ *       - { in: query, name: statuses, schema: { type: string } }
+ *       - { in: query, name: paymentMethod, schema: { type: string } }
+ *       - { in: query, name: riderId, schema: { type: integer } }
  *     responses:
  *       200:
  *         description: Orders fetched successfully.
@@ -791,6 +866,12 @@ deliveryAdminRouter.get(
  *     deprecated: true
  *     tags: [Delivery Admin]
  *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 100 } }
+ *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: state, schema: { type: string, enum: [pending, resolved] } }
+ *       - { in: query, name: riderId, schema: { type: integer } }
  *     responses:
  *       200:
  *         description: Failed deliveries fetched successfully.

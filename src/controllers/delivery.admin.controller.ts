@@ -3,7 +3,12 @@ import { AuthRequest } from "../middlewares/auth.middleware";
 import { AuditActorType } from "../entities/auditLog.entity";
 import { UserRole } from "../entities/user.entity";
 import { DeliveryAdminService } from "../service/delivery.admin.service";
-import { CreateRiderType } from "../utils/zod_validations/delivery.zod";
+import {
+    CreateRiderType,
+    DeliveryAssignmentsQuery,
+    DeliveryOrdersQuery,
+    FailedDeliveriesQuery,
+} from "../utils/zod_validations/delivery.zod";
 import { CloudinaryService } from "../service/image.service";
 
 export class DeliveryAdminController {
@@ -65,23 +70,10 @@ export class DeliveryAdminController {
 
     //  ALL ORDERS (AT_WAREHOUSE)
 
+    // The query was parsed and defaulted by `validateZod(…, "query")`.
     async getAtWarehouseOrders(req: AuthRequest<any, any, any, any>, res: Response) {
-        const page = Number(req.query.page as string) || 1;
-        const limit = Number(req.query.limit as string) || 20;
-        const search = (req.query.search as string) || undefined;
-        const sort = (req.query.sort as "newest" | "oldest") || "newest";
-        // Accept comma-separated statuses, e.g. ?statuses=ARRIVED_AT_WAREHOUSE,DELAYED
-        const statusesParam = req.query.statuses as string | undefined;
-        const statuses = statusesParam
-            ? (statusesParam.split(",").map((s) => s.trim()) as any[])
-            : undefined;
-
         const result = await this.deliveryAdminService.getAtWarehouseOrders(
-            page,
-            limit,
-            search,
-            sort,
-            statuses,
+            req.query as DeliveryOrdersQuery,
         );
 
         res.status(200).json({
@@ -118,12 +110,8 @@ export class DeliveryAdminController {
     }
 
     async getAllAssignments(req: AuthRequest<any, any, any, any>, res: Response) {
-        const page = Number(req.query.page as string) || 1;
-        const limit = Number(req.query.limit as string) || 20;
-
         const result = await this.deliveryAdminService.getAllAssignments(
-            page,
-            limit,
+            req.query as DeliveryAssignmentsQuery,
         );
         res.status(200).json({ success: true, ...result });
     }
@@ -151,8 +139,10 @@ export class DeliveryAdminController {
         res.status(200).json({ success: true, data: order });
     }
 
-    async getFailedDeliveries(_req: AuthRequest<any, any, any, any>, res: Response) {
-        const data = await this.deliveryAdminService.getFailedDeliveries();
-        res.json({ success: true, data });
+    async getFailedDeliveries(req: AuthRequest<any, any, any, any>, res: Response) {
+        const result = await this.deliveryAdminService.getFailedDeliveries(
+            req.query as FailedDeliveriesQuery,
+        );
+        res.json({ success: true, ...result });
     }
 }

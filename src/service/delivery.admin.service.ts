@@ -1,4 +1,4 @@
-import { Brackets, ILike, Repository } from "typeorm";
+import { Brackets, In, Repository } from "typeorm";
 import { Order, OrderStatus } from "../entities/order.entity";
 import { Rider } from "../entities/rider.entity";
 import {
@@ -10,7 +10,11 @@ import { APIError } from "../utils/ApiError.utils";
 import {
     AssignRiderType,
     CreateRiderType,
+    DeliveryAssignmentsQuery,
+    DeliveryOrdersQuery,
+    FailedDeliveriesQuery,
 } from "../utils/zod_validations/delivery.zod";
+import { ACTIVE_ASSIGNMENT_STATUSES, syncRiderAvailability } from "../utils/riderAvailability.utils";
 import bcrypt from "bcryptjs";
 import { User, UserRole } from "../entities/user.entity";
 import {
@@ -87,11 +91,38 @@ export class DeliveryAdminService {
         });
     }
 
+    /**
+     * Every rider with what they are carrying now and what they have delivered.
+     *
+     * `onDelivery` is answered from the open assignments rather than the stored
+     * flag, so the list is right even for a row the flag got wrong in the past.
+     */
     async getAllRiders() {
-        const riders = await this.riderRepository.find({
-            order: { createdAt: "DESC" },
-        });
-        return riders.map((r) => sanitizeRiderForDelivery(r));
+        const riders = await this.riderRepository
+            .createQueryBuilder("rider")
+            .loadRelationCountAndMap("rider.activeDeliveries", "rider.assignments", "active", (qb) =>
+                qb
+                    .where("active.assignmentStatus IN (:...activeStatuses)", {
+                        activeStatuses: ACTIVE_ASSIGNMENT_STATUSES,
+                    })
+                    // An open assignment on an order that has since left the
+                    // rider (cancelled from the orders page by older code) is
+                    // not something they are carrying.
+                    .andWhere(
+                        `EXISTS (SELECT 1 FROM "orders" o WHERE o.id = active."orderId" AND o.status = :withRider)`,
+                        { withRider: OrderStatus.ASSIGNED_TO_RIDER },
+                    ),
+            )
+            .loadRelationCountAndMap("rider.completedDeliveries", "rider.assignments", "done", (qb) =>
+                qb.where("done.assignmentStatus = :delivered", {
+                    delivered: AssignmentStatus.DELIVERED,
+                }),
+            )
+            .orderBy("rider.createdAt", "DESC")
+            .addOrderBy("rider.id", "DESC")
+            .getMany();
+
+        return riders.map((rider) => withRiderLoad(rider));
     }
 
     async getRiderById(riderId: number) {
@@ -101,16 +132,32 @@ export class DeliveryAdminService {
             // its order number. The order id alone is an internal handle and
             // means nothing to an administrator reading the list.
             relations: ["assignments", "assignments.order"],
+            order: { assignments: { id: "DESC" } },
         });
         if (!rider) throw new APIError(404, "rider not found");
+
+        const assignments: DeliveryAssignment[] = (rider as any).assignments ?? [];
         return {
-            ...sanitizeRiderForDelivery(rider),
+            ...withRiderLoad(rider, {
+                activeDeliveries: assignments.filter(
+                    (a) =>
+                        ACTIVE_ASSIGNMENT_STATUSES.includes(a.assignmentStatus) &&
+                        a.order?.status === OrderStatus.ASSIGNED_TO_RIDER,
+                ).length,
+                completedDeliveries: assignments.filter(
+                    (a) => a.assignmentStatus === AssignmentStatus.DELIVERED,
+                ).length,
+            }),
             // Only the two identifying fields of the order are exposed; the rest
             // of it is not this endpoint's to hand out.
-            assignments: ((rider as any).assignments ?? []).map((assignment: any) => ({
+            assignments: assignments.map((assignment: any) => ({
                 ...assignment,
                 order: assignment.order
-                    ? { id: assignment.order.id, orderNumber: assignment.order.orderNumber ?? null }
+                    ? {
+                          id: assignment.order.id,
+                          orderNumber: assignment.order.orderNumber ?? null,
+                          status: assignment.order.status ?? null,
+                      }
                     : null,
             })),
         };
@@ -145,66 +192,138 @@ export class DeliveryAdminService {
     //  ALL ORDERS (AT_WAREHOUSE)
 
     /**
-     * Returns paginated orders filtered by one or more statuses.
-     * When no statuses are provided, defaults to ARRIVED_AT_WAREHOUSE.
-     * Supports search by order number, customer name, or vendor name.
-     * Supports sort by createdAt asc/desc.
+     * Paginated delivery orders.
+     *
+     * With no statuses this is the warehouse queue (ARRIVED_AT_WAREHOUSE).
+     * Given statuses, it lists orders in any of them — but only orders that
+     * actually reached delivery: a CANCELLED order cancelled at checkout never
+     * saw the warehouse and does not belong in a delivery list.
+     *
+     * Two queries. The first filters and pages bare order ids — every filter is
+     * an EXISTS, so no to-many join can multiply rows, truncate an order's line
+     * items to the ones a vendor search matched, or force TypeORM's DISTINCT
+     * pagination. The second loads the page's relations by id.
      */
-    async getAtWarehouseOrders(
-        page: number = 1,
-        limit: number = 20,
-        search?: string,
-        sort: "newest" | "oldest" = "newest",
-        statuses?: OrderStatus[],
-    ) {
+    async getAtWarehouseOrders(query: DeliveryOrdersQuery) {
+        const { page, limit, sort } = query;
         const filterStatuses =
-            statuses && statuses.length > 0
-                ? statuses
+            query.statuses && query.statuses.length > 0
+                ? query.statuses
                 : [OrderStatus.ARRIVED_AT_WAREHOUSE];
+        const direction = sort === "oldest" ? "ASC" : "DESC";
 
-        const qb = this.orderRepository
+        const idQuery = this.orderRepository
             .createQueryBuilder("order")
-            .leftJoinAndSelect("order.orderedBy", "orderedBy")
-            .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
-            .leftJoinAndSelect("order.orderItems", "orderItems")
-            .leftJoinAndSelect("orderItems.product", "product")
-            .leftJoinAndSelect("orderItems.vendor", "vendor")
-            .leftJoinAndSelect("orderItems.variant", "variant")
-            // latest delivery assignment (for assigned rider info)
-            .leftJoinAndSelect("order.deliveryAssignments", "latestAssignment")
-            .leftJoinAndSelect("latestAssignment.rider", "rider")
+            .select(["order.id", "order.createdAt"])
             .where("order.status IN (:...filterStatuses)", { filterStatuses })
+            .andWhere(
+                new Brackets((reached) => {
+                    reached
+                        .where("order.status IN (:...inDelivery)", {
+                            inDelivery: [
+                                OrderStatus.ARRIVED_AT_WAREHOUSE,
+                                OrderStatus.ASSIGNED_TO_RIDER,
+                            ],
+                        })
+                        .orWhere(
+                            `EXISTS (SELECT 1 FROM "delivery_assignments" da WHERE da."orderId" = "order"."id")`,
+                        )
+                        .orWhere(
+                            `EXISTS (SELECT 1 FROM "order_status_histories" h WHERE h."orderId" = "order"."id" AND h."newStatus" = :warehouse)`,
+                            { warehouse: OrderStatus.ARRIVED_AT_WAREHOUSE },
+                        );
+                }),
+            )
             .withDeleted();
 
-        if (search && search.trim()) {
-            const term = `%${search.trim()}%`;
-            qb.andWhere(
-                new Brackets((qb2) => {
-                    qb2.where("order.orderNumber ILIKE :term", { term })
-                        .orWhere("orderedBy.username ILIKE :term", { term })
-                        .orWhere("orderedBy.fullName ILIKE :term", { term })
-                        .orWhere("vendor.businessName ILIKE :term", { term });
+        if (query.paymentMethod) {
+            idQuery.andWhere("order.paymentMethod = :paymentMethod", {
+                paymentMethod: query.paymentMethod,
+            });
+        }
+
+        if (query.riderId) {
+            // The rider on the order's latest assignment — who has it now, or
+            // had it last — not anyone who ever carried it.
+            idQuery.andWhere(
+                `EXISTS (
+                    SELECT 1 FROM "delivery_assignments" da
+                    WHERE da."orderId" = "order"."id" AND da."riderId" = :riderId
+                      AND da."assignmentStatus" NOT IN (:...cleared)
+                      AND NOT EXISTS (
+                          SELECT 1 FROM "delivery_assignments" newer
+                          WHERE newer."orderId" = da."orderId" AND newer.id > da.id
+                      )
+                )`,
+                {
+                    riderId: query.riderId,
+                    cleared: [AssignmentStatus.NONE, AssignmentStatus.REASSIGNED],
+                },
+            );
+        }
+
+        if (query.search) {
+            const term = likeTerm(query.search);
+            const exactId = /^\d{1,9}$/.test(query.search) ? Number(query.search) : null;
+            idQuery.andWhere(
+                new Brackets((match) => {
+                    match
+                        .where(`"order"."orderNumber" ILIKE :term`, { term })
+                        .orWhere(`"order"."phoneNumber" ILIKE :term`, { term })
+                        .orWhere(
+                            `EXISTS (
+                                SELECT 1 FROM "user" u WHERE u.id = "order"."orderedById"
+                                AND (u."fullName" ILIKE :term OR u."username" ILIKE :term
+                                     OR u."email" ILIKE :term OR u."phoneNumber" ILIKE :term)
+                            )`,
+                            { term },
+                        )
+                        .orWhere(
+                            `EXISTS (
+                                SELECT 1 FROM "order_items" oi
+                                JOIN "vendor" v ON v.id = oi."vendorId"
+                                WHERE oi."orderId" = "order"."id" AND v."businessName" ILIKE :term
+                            )`,
+                            { term },
+                        );
+                    if (exactId !== null) match.orWhere("order.id = :exactId", { exactId });
                 }),
             );
         }
 
-        qb.orderBy("order.createdAt", sort === "oldest" ? "ASC" : "DESC")
-          .addOrderBy("order.id", sort === "oldest" ? "ASC" : "DESC");
-
-        const [orders, total] = await qb
-            .skip((page - 1) * limit)
-            .take(limit)
+        const [rows, total] = await idQuery
+            .orderBy("order.createdAt", direction)
+            .addOrderBy("order.id", direction)
+            .offset((page - 1) * limit)
+            .limit(limit)
             .getManyAndCount();
 
-        const totalPages = Math.ceil(total / limit);
+        const ids = rows.map((row) => row.id);
+        const orders =
+            ids.length === 0
+                ? []
+                : await this.orderRepository
+                      .createQueryBuilder("order")
+                      .leftJoinAndSelect("order.orderedBy", "orderedBy")
+                      .leftJoinAndSelect("order.shippingAddress", "shippingAddress")
+                      .leftJoinAndSelect("order.orderItems", "orderItems")
+                      .leftJoinAndSelect("orderItems.product", "product")
+                      .leftJoinAndSelect("orderItems.vendor", "vendor")
+                      .leftJoinAndSelect("orderItems.variant", "variant")
+                      // The sanitizer picks the latest of these for the rider column.
+                      .leftJoinAndSelect("order.deliveryAssignments", "latestAssignment")
+                      .leftJoinAndSelect("latestAssignment.rider", "rider")
+                      .whereInIds(ids)
+                      .withDeleted()
+                      .getMany();
+
+        // The second query has no ORDER BY of its own; the page keeps the first's.
+        const position = new Map(ids.map((id, index) => [id, index]));
+        orders.sort((a, b) => position.get(a.id)! - position.get(b.id)!);
 
         return {
             orders: orders.map((o) => sanitizeOrderForDelivery(o)),
-            pagination: {
-                total,
-                currentPage: page,
-                totalPages,
-            },
+            pagination: paginationOf(total, page, limit),
         };
     }
 
@@ -226,46 +345,30 @@ export class DeliveryAdminService {
             );
         }
 
-        const existingAssignment = await this.assignmentRepository.findOne({
-            where: { orderId },
-            order: { createdAt: "DESC" },
-            relations: ["rider"],
-        });
-
         const savedAssignment = await AppDataSource.transaction(
             async (manager) => {
-                // If there's an existing assignment that is still active (not DELIVERED),
-                // close it out and free the previous rider.
-                if (
-                    existingAssignment &&
-                    ![
-                        AssignmentStatus.DELIVERED,
-                        AssignmentStatus.REASSIGNED
-                    ].includes(existingAssignment.assignmentStatus)
-                ) {
-                    existingAssignment.assignmentStatus =
-                        AssignmentStatus.REASSIGNED;
-                    // existingAssignment.failureReason = `Reassigned to rider ${newRider.fullName || `#${newRider.id}`}`;
-                    await manager.save(existingAssignment);
-
-                    if (existingAssignment.rider) {
-                        existingAssignment.rider.onDelivery = false;
-                        await manager.save(existingAssignment.rider);
-                    }
+                // Close out any assignment still open on this order. A failed or
+                // cleared one is left alone: it is already finished, and
+                // overwriting it would erase the failure from the record.
+                const open = await manager.find(DeliveryAssignment, {
+                    where: { orderId, assignmentStatus: In(ACTIVE_ASSIGNMENT_STATUSES) },
+                });
+                for (const assignment of open) {
+                    assignment.assignmentStatus = AssignmentStatus.REASSIGNED;
+                    await manager.save(assignment);
                 }
 
-                // Create new assignment for the new rider
                 const assignment = manager.create(DeliveryAssignment, {
                     orderId,
                     riderId: data.riderId,
                     assignmentStatus: AssignmentStatus.ASSIGNED,
                 });
-
                 const saved = await manager.save(assignment);
 
-                // Update new rider status
-                newRider.onDelivery = true;
-                await manager.save(newRider);
+                await syncRiderAvailability(manager, [
+                    data.riderId,
+                    ...open.map((previous) => previous.riderId),
+                ]);
 
                 return saved;
             },
@@ -319,24 +422,57 @@ export class DeliveryAdminService {
         return results;
     }
 
-    async getAllAssignments(page: number = 1, limit: number = 20) {
-        const [assignments, total] =
-            await this.assignmentRepository.findAndCount({
-                relations: ["order", "rider"],
-                order: { createdAt: "DESC" },
-                skip: (page - 1) * limit,
-                take: limit,
-            });
+    /** The delivery log, newest first, filtered and searched in the database. */
+    async getAllAssignments(query: DeliveryAssignmentsQuery) {
+        const { page, limit } = query;
+        const direction = query.sort === "oldest" ? "ASC" : "DESC";
 
-        const totalPages = Math.ceil(total / limit);
+        const qb = this.assignmentRepository
+            .createQueryBuilder("assignment")
+            .leftJoinAndSelect("assignment.order", "order")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
+            .leftJoinAndSelect("assignment.rider", "rider");
+
+        if (query.status === "active") {
+            qb.andWhere("assignment.assignmentStatus IN (:...active)", {
+                active: ACTIVE_ASSIGNMENT_STATUSES,
+            }).andWhere("order.status = :withRider", { withRider: OrderStatus.ASSIGNED_TO_RIDER });
+        } else if (query.status) {
+            qb.andWhere("assignment.assignmentStatus = :status", { status: query.status });
+        }
+
+        if (query.riderId) {
+            qb.andWhere("assignment.riderId = :riderId", { riderId: query.riderId });
+        }
+
+        if (query.search) {
+            const term = likeTerm(query.search);
+            qb.andWhere(
+                new Brackets((match) => {
+                    match
+                        .where("order.orderNumber ILIKE :term", { term })
+                        .orWhere("rider.fullName ILIKE :term", { term })
+                        .orWhere("rider.phoneNumber ILIKE :term", { term })
+                        .orWhere("orderedBy.fullName ILIKE :term", { term })
+                        .orWhere("orderedBy.username ILIKE :term", { term })
+                        .orWhere("orderedBy.phoneNumber ILIKE :term", { term })
+                        .orWhere("assignment.failureReason ILIKE :term", { term });
+                }),
+            );
+        }
+
+        // Every join here is many-to-one, so plain OFFSET/LIMIT pages rows
+        // exactly, without TypeORM's DISTINCT pagination query.
+        const [assignments, total] = await qb
+            .orderBy("assignment.createdAt", direction)
+            .addOrderBy("assignment.id", direction)
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .getManyAndCount();
 
         return {
             data: assignments.map((a) => sanitizeAssignmentForDelivery(a)),
-            pagination: {
-                total,
-                currentPage: page,
-                totalPages,
-            },
+            pagination: paginationOf(total, page, limit),
         };
     }
 
@@ -363,41 +499,47 @@ export class DeliveryAdminService {
         return sanitizeAssignmentForDelivery(assignment);
     }
 
-    // reset status to ARRIVED_AT_WAREHOUSE from failed
+    /**
+     * Takes an order back from its rider into the warehouse queue, ready for
+     * another rider.
+     *
+     * Only from the states where that means something — with a rider, or
+     * failed by one. From anywhere else (DELIVERED, CANCELLED…) it would quietly
+     * un-deliver or revive an order; the orders page is where such a change
+     * belongs, with its own reason.
+     *
+     * An open assignment is cleared. A failed one is kept as it is: it is the
+     * record of what went wrong, and the failed list reads it.
+     */
     async backToWarehouse(orderId: number, changedByUserId: number, auditActorType: AuditActorType) {
         const order = await this.findOrderById(orderId);
 
-        // Find existing active assignment (if any) and clear it so a new rider can be assigned
-        const existingAssignment = await this.assignmentRepository.findOne({
-            where: { orderId },
-            order: { createdAt: "DESC" },
-            relations: ["rider"],
-        });
-
-        if (
-            existingAssignment &&
-            existingAssignment.assignmentStatus !== AssignmentStatus.DELIVERED &&
-            existingAssignment.assignmentStatus !== AssignmentStatus.NONE
-        ) {
-            await AppDataSource.transaction(async (manager) => {
-                existingAssignment.assignmentStatus = AssignmentStatus.NONE;
-                await manager.save(existingAssignment);
-
-                if (existingAssignment.rider) {
-                    existingAssignment.rider.onDelivery = false;
-                    await manager.save(existingAssignment.rider);
-                }
-            });
+        if (!RECOVERABLE_STATUSES.includes(order.status)) {
+            throw new APIError(
+                400,
+                `Only orders with a rider or a failed delivery can be sent back to the warehouse. Current status: ${order.status}`,
+            );
         }
+
+        await AppDataSource.transaction(async (manager) => {
+            const open = await manager.find(DeliveryAssignment, {
+                where: { orderId, assignmentStatus: In(ACTIVE_ASSIGNMENT_STATUSES) },
+            });
+            for (const assignment of open) {
+                assignment.assignmentStatus = AssignmentStatus.NONE;
+                await manager.save(assignment);
+            }
+            await syncRiderAvailability(manager, open.map((assignment) => assignment.riderId));
+        });
 
         if (order.status !== OrderStatus.ARRIVED_AT_WAREHOUSE) {
             await this.orderService.changeOrderStatus(
                 orderId,
                 OrderStatus.ARRIVED_AT_WAREHOUSE,
                 {
-                actorRole: "ADMIN",
-                changedByUserId,
-                auditActorType,
+                    actorRole: "ADMIN",
+                    changedByUserId,
+                    auditActorType,
                     reason: "Order reset to warehouse for reassignment",
                 },
             );
@@ -408,15 +550,121 @@ export class DeliveryAdminService {
         return sanitizeOrderForDelivery(updated);
     }
 
-    async getFailedDeliveries(): Promise<DeliveryAssignment[]> {
-        return this.assignmentRepository
+    /**
+     * Deliveries a rider could not complete, with whether each still needs
+     * recovering.
+     *
+     * A failure is an assignment marked failed — or one that carries a failure
+     * reason, which is how failures look after older code overwrote their
+     * status on reassignment. It needs recovery while its order is still
+     * NOT_RECEIVED and nothing newer has been assigned; after that it is
+     * history, and sending it back again would be a no-op.
+     */
+    async getFailedDeliveries(query: FailedDeliveriesQuery) {
+        const { page, limit } = query;
+        const needsRecovery = `("order"."status" = :notReceived AND NOT EXISTS (
+            SELECT 1 FROM "delivery_assignments" newer
+            WHERE newer."orderId" = "assignment"."orderId" AND newer.id > "assignment"."id"
+        ))`;
+
+        const qb = this.assignmentRepository
             .createQueryBuilder("assignment")
             .leftJoinAndSelect("assignment.order", "order")
+            .leftJoinAndSelect("order.orderedBy", "orderedBy")
             .leftJoinAndSelect("assignment.rider", "rider")
-            .where("assignment.assignmentStatus = :status", {
-                status: AssignmentStatus.FAILED,
-            })
-            .orderBy("assignment.updatedAt", "DESC")
-            .getMany();
+            .where(
+                new Brackets((failed) => {
+                    failed
+                        .where("assignment.assignmentStatus = :failed", {
+                            failed: AssignmentStatus.FAILED,
+                        })
+                        .orWhere("assignment.failureReason IS NOT NULL");
+                }),
+            )
+            .setParameter("notReceived", OrderStatus.NOT_RECEIVED);
+
+        if (query.state === "pending") qb.andWhere(needsRecovery);
+        if (query.state === "resolved") qb.andWhere(`NOT ${needsRecovery}`);
+
+        if (query.riderId) {
+            qb.andWhere("assignment.riderId = :riderId", { riderId: query.riderId });
+        }
+
+        if (query.search) {
+            const term = likeTerm(query.search);
+            qb.andWhere(
+                new Brackets((match) => {
+                    match
+                        .where("order.orderNumber ILIKE :term", { term })
+                        .orWhere("assignment.failureReason ILIKE :term", { term })
+                        .orWhere("rider.fullName ILIKE :term", { term })
+                        .orWhere("orderedBy.fullName ILIKE :term", { term })
+                        .orWhere("orderedBy.phoneNumber ILIKE :term", { term });
+                }),
+            );
+        }
+
+        // Pending first: the top of the list is the work still to do.
+        const [rows, total] = await qb
+            .orderBy(`CASE WHEN ${needsRecovery} THEN 0 ELSE 1 END`, "ASC")
+            .addOrderBy("assignment.updatedAt", "DESC")
+            .addOrderBy("assignment.id", "DESC")
+            .offset((page - 1) * limit)
+            .limit(limit)
+            .getManyAndCount();
+
+        const latest = await this.latestAssignmentIds(rows.map((row) => row.orderId));
+
+        return {
+            data: rows.map((row) => ({
+                ...sanitizeAssignmentForDelivery(row),
+                needsRecovery:
+                    row.order?.status === OrderStatus.NOT_RECEIVED &&
+                    latest.get(row.orderId) === row.id,
+            })),
+            pagination: paginationOf(total, page, limit),
+        };
     }
+
+    private async latestAssignmentIds(orderIds: number[]): Promise<Map<number, number>> {
+        if (orderIds.length === 0) return new Map();
+        const rows: { orderId: number; id: number }[] = await this.assignmentRepository
+            .createQueryBuilder("assignment")
+            .select(`"assignment"."orderId"`, "orderId")
+            .addSelect(`MAX("assignment"."id")`, "id")
+            .where("assignment.orderId IN (:...orderIds)", { orderIds: [...new Set(orderIds)] })
+            .groupBy(`"assignment"."orderId"`)
+            .getRawMany();
+        return new Map(rows.map((row) => [Number(row.orderId), Number(row.id)]));
+    }
+}
+
+/** Order states the delivery page can send back to the warehouse. */
+const RECOVERABLE_STATUSES = [
+    OrderStatus.ARRIVED_AT_WAREHOUSE,
+    OrderStatus.ASSIGNED_TO_RIDER,
+    OrderStatus.NOT_RECEIVED,
+];
+
+/** A rider row with what they are carrying, `onDelivery` derived from it. */
+function withRiderLoad(
+    rider: Rider,
+    load: { activeDeliveries?: number; completedDeliveries?: number } = rider as any,
+) {
+    const activeDeliveries = Number(load.activeDeliveries ?? 0);
+    return {
+        ...sanitizeRiderForDelivery(rider),
+        onDelivery: activeDeliveries > 0,
+        activeDeliveries,
+        completedDeliveries: Number(load.completedDeliveries ?? 0),
+    };
+}
+
+/** A contains-match for ILIKE, with the user's own `%` and `_` taken literally. */
+export function likeTerm(search: string): string {
+    return `%${search.replace(/[\\%_]/g, "\\$&")}%`;
+}
+
+function paginationOf(total: number, page: number, limit: number) {
+    return { total, currentPage: page, totalPages: Math.ceil(total / limit) };
 }

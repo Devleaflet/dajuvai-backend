@@ -8,6 +8,7 @@ import {
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import { DeliveryFailedType } from "../utils/zod_validations/delivery.zod";
+import { syncRiderAvailability } from "../utils/riderAvailability.utils";
 import { DeliveryAdminService } from "./delivery.admin.service";
 import { sanitizeAssignmentForDelivery } from "../utils/deliveryResponseSanitizer.utils";
 import { OrderService } from "./order.service";
@@ -108,8 +109,8 @@ export class DeliveryRiderService {
 
                 const rider = await manager.findOne(Rider, { where: { id: riderId } });
                 if (rider) {
-                    rider.onDelivery = false;
-                    await manager.save(rider);
+                    // Still on delivery if they carry other orders.
+                    await syncRiderAvailability(manager, [rider.id]);
                     riderUserId = rider.userId ?? undefined;
                 }
 
@@ -162,8 +163,8 @@ export class DeliveryRiderService {
 
             const rider = await manager.findOne(Rider, { where: { id: riderId } });
             if (rider) {
-                rider.onDelivery = false;
-                await manager.save(rider);
+                // Still on delivery if they carry other orders.
+                await syncRiderAvailability(manager, [rider.id]);
                 riderUserId = rider.userId ?? undefined;
             }
 

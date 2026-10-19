@@ -1,6 +1,8 @@
 import { hiddenProductIds } from "../search/catalog-visibility";
 import { Brackets, EntityManager, In, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
+import { AssignmentStatus, DeliveryAssignment } from "../entities/deliveryAssignment.entity";
+import { ACTIVE_ASSIGNMENT_STATUSES, syncRiderAvailability } from "../utils/riderAvailability.utils";
 import { APIError } from "../errors/ApiError";
 import {
     IShippingAddressRequest,
@@ -599,8 +601,10 @@ export class OrderService {
                 orderData.promoCode,
                 merchandiseSubtotal,
                 shippingTotal,
-            );
-
+            );
+
+
+
         // The customer asked for a discount and is not getting it. Placing the
         // order anyway charges more than they agreed to at checkout; stop and
         // say why, so they can remove the code and decide.
@@ -4032,6 +4036,16 @@ export class OrderService {
         order.status = targetStatus;
         await this.orderRepository.save(order);
 
+        // Leaving the rider by any route but the rider's own — an admin
+        // cancelling, delivering or returning it from the orders page — used to
+        // leave the assignment open for ever: the rider still counted as
+        // carrying it, the delivery log saying "assigned" on a cancelled order.
+        // The rider flows and the delivery reset close theirs first, so this
+        // only finds the ones they did not.
+        if (previousStatus === OrderStatus.ASSIGNED_TO_RIDER) {
+            await this.closeOpenAssignments(order.id, targetStatus, options.reason);
+        }
+
         const changedByRole: OrderStatusChangedByRole =
             options.actorRole === "RIDER"
                 ? OrderStatusChangedByRole.RIDER
@@ -4188,6 +4202,35 @@ export class OrderService {
      * status didn't actually change. Every code path that mutates
      * Order.status (manual update, payment webhook, cancellation) must call
      * this instead of writing order_status_histories directly. */
+    private async closeOpenAssignments(
+        orderId: number,
+        targetStatus: OrderStatus,
+        reason?: string,
+    ): Promise<void> {
+        await AppDataSource.transaction(async (manager) => {
+            const open = await manager.find(DeliveryAssignment, {
+                where: { orderId, assignmentStatus: In(ACTIVE_ASSIGNMENT_STATUSES) },
+            });
+            if (open.length === 0) return;
+
+            for (const assignment of open) {
+                if (targetStatus === OrderStatus.DELIVERED) {
+                    assignment.assignmentStatus = AssignmentStatus.DELIVERED;
+                    assignment.deliveredAt ??= new Date();
+                } else if (targetStatus === OrderStatus.NOT_RECEIVED) {
+                    // Recorded as a failure so the delivery page offers recovery.
+                    assignment.assignmentStatus = AssignmentStatus.FAILED;
+                    assignment.failureReason ??= reason || "Marked not received by an administrator";
+                } else {
+                    assignment.assignmentStatus = AssignmentStatus.NONE;
+                }
+                await manager.save(assignment);
+            }
+
+            await syncRiderAvailability(manager, open.map((assignment) => assignment.riderId));
+        });
+    }
+
     private async recordStatusChange(
         orderId: number,
         previousStatus: OrderStatus | null,
@@ -4222,11 +4265,26 @@ export class OrderService {
     async getOrderStatusHistory(
         orderId: number,
     ): Promise<OrderStatusHistory[]> {
-        return this.orderStatusHistoryRepository.find({
+        const rows = await this.orderStatusHistoryRepository.find({
             where: { orderId },
             relations: ["changedBy"],
             order: { createdAt: "ASC" },
         });
+        // The relation loads the whole user row (password hash, reset and
+        // verification codes); vendors read this timeline, so send only who
+        // made the change.
+        return rows.map((h) => ({
+            ...h,
+            changedBy: h.changedBy
+                ? ({
+                      id: h.changedBy.id,
+                      fullName: h.changedBy.fullName,
+                      username: h.changedBy.username,
+                      email: h.changedBy.email,
+                      role: h.changedBy.role,
+                  } as User)
+                : null,
+        }));
     }
 
     /**

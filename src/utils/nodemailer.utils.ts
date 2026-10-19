@@ -27,7 +27,7 @@ import {
 } from "./emailLayout.utils";
 
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
-const transporter = nodemailer.createTransport({
+export const transporter = nodemailer.createTransport({
     service: "Gmail",
     // One kept-alive connection instead of a TLS handshake per email, and a
     // ceiling on each stage so an unreachable mail server fails in seconds.
@@ -42,7 +42,7 @@ const transporter = nodemailer.createTransport({
 });
 
 /** "DajuVai" as the sender name, so the inbox does not show a bare address. */
-const FROM = () => `"DajuVai" <${config.USER_EMAIL}>`;
+export const FROM = () => `"DajuVai" <${config.USER_EMAIL}>`;
 
 export const isEmailConfigured = (): boolean =>
     Boolean(config.USER_EMAIL && config.PASS_EMAIL);

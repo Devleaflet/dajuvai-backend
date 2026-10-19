@@ -23,13 +23,13 @@ describe("assertResetCode", () => {
         ).rejects.toMatchObject({ status: 400 });
     });
 
-    it("rejects an expired or spent code with 410", async () => {
+    it("rejects an expired or spent code exactly like a wrong one (400, no hint the account exists)", async () => {
         const hash = await bcrypt.hash("123456", 4);
         await expect(
             assertResetCode({ resetToken: hash, resetTokenExpire: new Date(Date.now() - 1) }, "123456"),
-        ).rejects.toMatchObject({ status: 410 });
+        ).rejects.toMatchObject({ status: 400, errorCode: "INVALID_CODE" });
         await expect(
             assertResetCode({ resetToken: null, resetTokenExpire: null }, "123456"),
-        ).rejects.toMatchObject({ status: 410 });
+        ).rejects.toMatchObject({ status: 400, errorCode: "INVALID_CODE" });
     });
 });

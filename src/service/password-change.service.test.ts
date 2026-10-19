@@ -44,7 +44,7 @@ describe("applyPasswordChange", () => {
         expect(acc.resetToken).toBeNull();
         await expect(
             applyPasswordChange(acc, { token: "123456", newPassword: "Other@Pass3" }),
-        ).rejects.toMatchObject({ status: 410 });
+        ).rejects.toMatchObject({ status: 400, errorCode: "INVALID_CODE" });
     });
 });
 

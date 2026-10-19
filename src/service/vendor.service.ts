@@ -1,5 +1,6 @@
 import { In, IsNull, LessThanOrEqual, MoreThan, Repository } from "typeorm";
 import bcrypt from "bcryptjs";
+import { AUTH_MESSAGES, burnPasswordCheck, INVALID_CREDENTIALS } from "../utils/authPrivacy.utils";
 import { randomUUID } from "crypto";
 import { Vendor } from "../entities/vendor.entity";
 import AppDataSource from "../config/db.config";
@@ -333,12 +334,13 @@ export class VendorService {
 
     async reactivateVendor(email: string, password: string): Promise<Vendor> {
         const vendor = await this.findVendorByEmail(email.trim().toLowerCase());
-        if (!vendor || !vendor.deletionRequestedAt || vendor.deletionFinalizedAt) {
-            throw new APIError(401, "Invalid credentials");
+        // Same failure, in the same time, whatever the email: see authPrivacy.utils.
+        const invalid = () => new APIError(401, AUTH_MESSAGES.invalidVendorLogin, INVALID_CREDENTIALS);
+        if (!vendor || !vendor.password || !vendor.deletionRequestedAt || vendor.deletionFinalizedAt) {
+            await burnPasswordCheck(password);
+            throw invalid();
         }
-        if (!(await bcrypt.compare(password, vendor.password))) {
-            throw new APIError(401, "Invalid credentials");
-        }
+        if (!(await bcrypt.compare(password, vendor.password))) throw invalid();
         if (!isVendorDeletionGracePeriodActive(vendor.deletionRequestedAt)) {
             await this.finalizeVendorDeletion(vendor.id);
             throw new APIError(410, "Account deletion grace period has expired");
@@ -346,7 +348,7 @@ export class VendorService {
 
         await this.vendorRepository.manager.transaction(async (manager) => {
             const currentVendor = await manager.findOne(Vendor, { where: { id: vendor.id } });
-            if (!currentVendor) throw new APIError(401, "Invalid credentials");
+            if (!currentVendor) throw new APIError(401, AUTH_MESSAGES.invalidVendorLogin, INVALID_CREDENTIALS);
 
             currentVendor.isApproved = currentVendor.deletionPreviousApproval ?? true;
             currentVendor.deletionRequestedAt = null;

@@ -47,6 +47,14 @@ import config from "../config/env.config";
 import { isIssuedBeforeCutoff, newTokenId } from "../service/token-revocation.service";
 import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
 import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
+import {
+    AUTH_MESSAGES,
+    burnCodeIssue,
+    burnPasswordCheck,
+    INVALID_CODE,
+    INVALID_CREDENTIALS,
+    sendExistingAccountEmailInBackground,
+} from "../utils/authPrivacy.utils";
 import { assertResetCode } from "../utils/resetCode.utils";
 import { Vendor } from "../entities/vendor.entity";
 
@@ -183,6 +191,15 @@ export class VendorController {
             await this.vendorService.findVendorForSignup(email);
         const existingUser = await findUserByEmail(email);
 
+        // Only the admin route runs authMiddleware. The public route answers a
+        // registered email exactly like a new application and emails the
+        // owner instead, so it cannot be used to learn who has an account.
+        const isAdmin = Boolean((req as unknown as AuthRequest).user);
+        if (!isAdmin && (existingUser || existingVendor)) {
+            await this.answerDuplicateSignup(res, email, password, existingVendor ? "vendor" : "customer");
+            return;
+        }
+
         if (existingUser) {
             const conflict = createAuthAccountConflict(
                 "emailRegisteredAsCustomer",
@@ -232,6 +249,11 @@ export class VendorController {
             verificationToken,
         );
 
+        if (!isAdmin) {
+            res.status(201).json({ success: true, message: AUTH_MESSAGES.vendorSignupReceived });
+            return;
+        }
+
         const token = jwt.sign(
             {
                 id: vendor.id,
@@ -273,29 +295,23 @@ export class VendorController {
         }
 
         const { email, password } = parsed.data;
+        // Unknown email, a customer's email and a wrong password all fail the
+        // same way, in the same time: see `authPrivacy.utils`. Account state
+        // (approval, deletion) is only described once the password is right.
+        const invalid = () => new APIError(401, AUTH_MESSAGES.invalidVendorLogin, INVALID_CREDENTIALS);
         const vendor = await this.vendorService.findVendorByEmailLogin(email);
-        if (!vendor) {
-            const customer = await findUserByEmail(email);
-            if (customer) {
-                const conflict = createAuthAccountConflict(
-                    "emailRegisteredAsCustomer",
-                );
-                throw new APIError(
-                    conflict.status,
-                    conflict.message,
-                    conflict.errorCode,
-                );
-            }
-            throw new AuthError("Vendor account does not exist");
+        if (!vendor?.password) {
+            await burnPasswordCheck(password);
+            throw invalid();
         }
 
         const isMatch = await bcrypt.compare(password, vendor.password);
-        if (!isMatch) throw new AuthError("Invalid credentials");
+        if (!isMatch) throw invalid();
 
         if (vendor.deletionRequestedAt && !vendor.deletionFinalizedAt) {
             if (vendor.deletionScheduledFor && vendor.deletionScheduledFor <= new Date()) {
                 await this.vendorService.finalizeVendorDeletion(vendor.id);
-                throw new AuthError("Vendor does not exist");
+                throw invalid();
             }
             throw new APIError(
                 409,
@@ -529,44 +545,34 @@ export class VendorController {
             );
         }
 
+        // The same 202 for every email — a vendor's, a customer's, an unknown
+        // one — so the form cannot be used to learn who has an account. A code
+        // is only issued, and only emailed, to an existing vendor.
         const email = parsed.data.email.trim().toLowerCase();
-        const vendor = await this.findVendorForReset(email);
+        const vendor = await this.vendorService.findVendorByEmail(email);
 
-        const token = TokenUtils.generateToken();
-        const hashedToken = await TokenUtils.hashToken(token);
-        const tokenExpire = new Date(Date.now() + 15 * 60 * 1000);
-        vendor.resetToken = hashedToken;
-        vendor.resetTokenExpire = tokenExpire;
-        await this.vendorService.saveVendor(vendor);
+        if (vendor) {
+            const token = TokenUtils.generateToken();
+            vendor.resetToken = await TokenUtils.hashToken(token);
+            vendor.resetTokenExpire = new Date(Date.now() + 15 * 60 * 1000);
+            await this.vendorService.saveVendor(vendor);
+            sendVerificationEmailInBackground(vendor.email, "Reset Password", token);
+        } else {
+            await burnCodeIssue();
+        }
 
-        sendVerificationEmailInBackground(vendor.email, "Reset Password", token);
-
-        res.status(202).json({
-            success: true,
-            message: "We've emailed you a 6-digit reset code.",
-        });
+        res.status(202).json({ success: true, message: AUTH_MESSAGES.resetRequested });
     }
 
     /**
-     * An unknown address is named as such, as the customer flow does: vendor
-     * login already reveals whether an email is registered. A customer email
-     * gets pointed at the customer reset instead.
+     * The vendor a reset code belongs to. An unknown email fails exactly like a
+     * wrong code, so the reset steps reveal nothing the request step hides.
      */
     private async findVendorForReset(email: string): Promise<Vendor> {
         const vendor = await this.vendorService.findVendorByEmail(email);
         if (vendor) return vendor;
-        if (await findUserByEmail(email)) {
-            throw new APIError(
-                404,
-                "This email belongs to a customer account. Use the customer \"Forgot password?\" link instead.",
-                "CUSTOMER_ACCOUNT",
-            );
-        }
-        throw new APIError(
-            404,
-            "We couldn't find a vendor account with that email.",
-            "ACCOUNT_NOT_FOUND",
-        );
+        await burnPasswordCheck(email);
+        throw new APIError(400, AUTH_MESSAGES.invalidCode, INVALID_CODE);
     }
 
     /** Checks an emailed reset code without spending it; see `assertResetCode`. */
@@ -838,6 +844,23 @@ export class VendorController {
         res.status(200).json({ success: true, msg: "Vendor deleted" });
     }
 
+    /**
+     * The public answer to a signup whose email is already registered: the same
+     * 201 and message as a new application, after the same password-hashing
+     * work, with an email to the address's owner explaining how to get in.
+     */
+    private async answerDuplicateSignup(
+        res: Response,
+        email: string,
+        password: string,
+        existing: "customer" | "vendor",
+    ): Promise<void> {
+        await bcrypt.hash(password, 10);
+        await burnCodeIssue();
+        sendExistingAccountEmailInBackground(email.trim().toLowerCase(), existing, "vendor");
+        res.status(201).json({ success: true, message: AUTH_MESSAGES.vendorSignupReceived });
+    }
+
     async vendorSignupV2(
         req: VendorAuthRequest<{}, {}, IVendorSignupRequestV2>,
         res: Response,
@@ -861,30 +884,11 @@ export class VendorController {
         );
         const existingUser = await findUserByEmail(data.email);
 
-        if (existingUser) {
-            const conflict = createAuthAccountConflict(
-                "emailRegisteredAsCustomer",
-            );
-            throw new APIError(
-                conflict.status,
-                conflict.message,
-                conflict.errorCode,
-            );
-        }
-        if (existingVendor?.deletionRequestedAt && !existingVendor.deletionFinalizedAt) {
-            const conflict = createAuthAccountConflict(
-                "vendorDeletionPending",
-                existingVendor.deletionScheduledFor,
-            );
-            throw new APIError(conflict.status, conflict.message, conflict.errorCode);
-        }
-        if (existingVendor) {
-            const conflict = createAuthAccountConflict("vendorAccountExists");
-            throw new APIError(
-                conflict.status,
-                conflict.message,
-                conflict.errorCode,
-            );
+        // A registered email gets the same answer as a new application, and
+        // its owner gets an email instead — see `answerDuplicateSignup`.
+        if (existingUser || existingVendor) {
+            await this.answerDuplicateSignup(res, data.email, data.password, existingVendor ? "vendor" : "customer");
+            return;
         }
 
         const districtEntity = await this.districtService.findDistrictByName(
@@ -913,29 +917,9 @@ export class VendorController {
             verificationToken,
         );
 
-        const token = jwt.sign(
-            {
-                id: vendor.id,
-                email: vendor.email,
-                businessName: vendor.businessName,
-            },
-            this.jwtSecret,
-            { expiresIn: "2h" },
-        );
-
-        res.cookie("vendorToken", token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 2 * 60 * 60 * 1000,
-        });
-
-        res.status(201).json({
-            success: true,
-            message:
-                "Your account has been successfully registered. Our admin team will review your application within 5 business days",
-            token,
-        });
+        // No session: the vendor cannot sign in until an admin approves the
+        // application, and a duplicate email (above) gets this same answer.
+        res.status(201).json({ success: true, message: AUTH_MESSAGES.vendorSignupReceived });
     }
 
     async updateVendorV2(

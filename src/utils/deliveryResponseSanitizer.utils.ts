@@ -146,7 +146,13 @@ export function sanitizeOrderForDelivery(order?: Order | null) {
                   sanitizeOrderItemForDelivery(i),
               )
             : [],
-        assignedRider: latestAssignment?.rider ? sanitizeRiderForDelivery(latestAssignment.rider) : null,
+        // A cleared or superseded assignment means the order was taken back
+        // from its rider, so naming that rider would say they still have it.
+        assignedRider:
+            latestAssignment?.rider &&
+            !["none", "reassigned"].includes(latestAssignment.assignmentStatus)
+                ? sanitizeRiderForDelivery(latestAssignment.rider)
+                : null,
         assignmentStatus: latestAssignment?.assignmentStatus ?? null,
     };
 }
