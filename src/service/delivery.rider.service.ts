@@ -8,19 +8,23 @@ import {
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import { DeliveryFailedType } from "../utils/zod_validations/delivery.zod";
+import { syncRiderAvailability } from "../utils/riderAvailability.utils";
 import { DeliveryAdminService } from "./delivery.admin.service";
 import { sanitizeAssignmentForDelivery } from "../utils/deliveryResponseSanitizer.utils";
+import { OrderService } from "./order.service";
 
 export class DeliveryRiderService {
     private orderRepository: Repository<Order>;
     private assignmentRepository: Repository<DeliveryAssignment>;
     private adminService: DeliveryAdminService;
+    private orderService: OrderService;
 
     constructor() {
         this.orderRepository = AppDataSource.getRepository(Order);
         this.assignmentRepository =
             AppDataSource.getRepository(DeliveryAssignment);
         this.adminService = new DeliveryAdminService();
+        this.orderService = new OrderService();
     }
 
     async getRiderAssignments(riderId: number) {
@@ -60,10 +64,6 @@ export class DeliveryRiderService {
         }
 
         return await AppDataSource.transaction(async (manager) => {
-            this.adminService.validateAndTransition(order, DeliveryStatus.OUT_FOR_DELIVERY);
-            order.status = OrderStatus.SHIPPED;
-            await manager.save(order);
-
             assignment.assignmentStatus = AssignmentStatus.PICKED_UP;
             assignment.pickedUpAt = new Date();
             await manager.save(assignment);
@@ -99,23 +99,34 @@ export class DeliveryRiderService {
             );
         }
 
-        return await AppDataSource.transaction(async (manager) => {
-            this.adminService.validateAndTransition(order, DeliveryStatus.DELIVERED);
-            order.status = OrderStatus.DELIVERED;
-            await manager.save(order);
+        let riderUserId: number | undefined;
 
-            assignment.assignmentStatus = AssignmentStatus.DELIVERED;
-            assignment.deliveredAt = new Date();
-            await manager.save(assignment);
+        const updatedAssignment = await AppDataSource.transaction(
+            async (manager) => {
+                assignment.assignmentStatus = AssignmentStatus.DELIVERED;
+                assignment.deliveredAt = new Date();
+                await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
-            if (rider) {
-                rider.onDelivery = false;
-                await manager.save(rider);
-            }
+                const rider = await manager.findOne(Rider, { where: { id: riderId } });
+                if (rider) {
+                    // Still on delivery if they carry other orders.
+                    await syncRiderAvailability(manager, [rider.id]);
+                    riderUserId = rider.userId ?? undefined;
+                }
 
-            return assignment;
+                return assignment;
+            },
+        );
+
+        // changedByUserId foreign-keys to the `user` table — riderId here is
+        // Rider.id, not User.id, so the linked user id must be used instead.
+        await this.orderService.changeOrderStatus(orderId, OrderStatus.DELIVERED, {
+            actorRole: "RIDER",
+            changedByUserId: riderUserId,
+            reason: "Delivered by rider",
         });
+
+        return updatedAssignment;
     }
 
     async markDeliveryFailed(
@@ -143,21 +154,33 @@ export class DeliveryRiderService {
             );
         }
 
-        return await AppDataSource.transaction(async (manager) => {
-            this.adminService.validateAndTransition(order, DeliveryStatus.DELIVERY_FAILED);
-            await manager.save(order);
+        let riderUserId: number | undefined;
 
+        const updatedAssignment = await AppDataSource.transaction(async (manager) => {
             assignment.assignmentStatus = AssignmentStatus.FAILED;
             assignment.failureReason = data.failedReason;
             await manager.save(assignment);
 
             const rider = await manager.findOne(Rider, { where: { id: riderId } });
             if (rider) {
-                rider.onDelivery = false;
-                await manager.save(rider);
+                // Still on delivery if they carry other orders.
+                await syncRiderAvailability(manager, [rider.id]);
+                riderUserId = rider.userId ?? undefined;
             }
 
             return assignment;
         });
+
+        await this.orderService.changeOrderStatus(
+            orderId,
+            OrderStatus.NOT_RECEIVED,
+            {
+                actorRole: "RIDER",
+                changedByUserId: riderUserId,
+                reason: data.failedReason,
+            },
+        );
+
+        return updatedAssignment;
     }
 }

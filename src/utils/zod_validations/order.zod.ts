@@ -1,5 +1,9 @@
 
 import { z } from 'zod';
+import { OrderStatus } from '../../entities/order.entity';
+import { PaymentMethod } from '../../entities/order.entity';
+import { CUSTOMER_REASON_STATUSES } from '../../constants/orderStatus.constants';
+import { ItemFulfillmentStatus } from '../../entities/orderItems.entity';
 
 /**
  * Enum schema for Nepal provinces used in shipping addresses.
@@ -16,20 +20,19 @@ const ProvinceEnum = z.enum([
 
 
 /**
- * Enum schema representing allowed order statuses.
+ * Order-status schema. Derived directly from the OrderStatus DB enum
+ * (entities/order.entity.ts) instead of a hand-duplicated list — this was
+ * exactly the bug: this list used to be a stale subset of the real enum
+ * (missing PROCESSING/SHIPPED/DELAYED/RETURNED), so legitimate status
+ * updates failed Zod validation before ever reaching the service layer.
  */
-const OrderStatusEnum = z.enum([
-    'PENDING',
-    'CONFIRMED',
-    'CANCELLED',
-    'DELIVERED'
-]);
+const OrderStatusEnum = z.nativeEnum(OrderStatus);
 
 
 /**
  * Enum schema for supported payment methods.
  */
-const PaymentMethodEnum = z.enum(['ONLINE_PAYMENT', 'CASH_ON_DELIVERY', "KHALTI", "ESEWA", "NPX"]);
+const PaymentMethodEnum = z.nativeEnum(PaymentMethod);
 
 /**
  * Shipping address validation schema.
@@ -63,23 +66,110 @@ export const shippingAddressSchema = z.object({
 export const createOrderSchema = z.object({
     shippingAddress: shippingAddressSchema,
     paymentMethod: PaymentMethodEnum,
-    phoneNumber: z.string()
-        .min(10, "Phone number must be 10 digits").max(10, "Phone number must be 10 digits"),
+    // Digits, not merely ten characters: "98AB345678" is the right length and
+    // is not a phone number, and it reached the order record unchallenged.
+    phoneNumber: z
+        .string()
+        .regex(/^\d{10}$/, "Phone number must be 10 digits"),
     promoCode: z.string().optional(),
     fullName: z.string().optional(),
     isBuyNow: z.boolean().optional(),
     productId: z.number().int().optional(),
     variantId: z.number().optional(),
-    quantity: z.number().int().positive().optional().default(1), 
+    quantity: z.number().int().positive().optional().default(1),
+    ageRestrictedAcknowledged: z.boolean().optional().default(false),
+    /** Carried through to the order so the charge shown at checkout is stored. */
+    serviceCharge: z.number().nonnegative().optional(),
+    /** Which instrument the gateway reported, for reconciliation. */
+    instrumentName: z.string().trim().min(1).optional(),
+    /** Lets a retried checkout resolve to the same order rather than a second. */
+    idempotencyKey: z.string().trim().min(1).optional(),
+}).superRefine((values, context) => {
+    // Buy Now skips the cart, so the product is the only thing saying what is
+    // being bought. Without it the order is created with nothing in it.
+    if (values.isBuyNow && values.productId === undefined) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "productId is required for a Buy Now order",
+            path: ["productId"],
+        });
+    }
+});
+
+export const mobileCheckoutEstimateSchema = z.object({
+    shippingAddress: shippingAddressSchema,
+    promoCode: z.string().trim().max(80).optional(),
+    isBuyNow: z.boolean().optional(),
+    productId: z.number().int().positive().optional(),
+    variantId: z.number().int().positive().optional(),
+    quantity: z.number().int().positive().optional(),
+}).superRefine((values, context) => {
+    // Same reasoning as above: an estimate for a Buy Now with no product is an
+    // estimate of nothing.
+    if (values.isBuyNow && values.productId === undefined) {
+        context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: "productId is required for a Buy Now estimate",
+            path: ["productId"],
+        });
+    }
 });
 
 
 /**
  * Schema for validating updates to order status.
- * 
- * Requires:
- * - status: must be a valid OrderStatusEnum value.
+ *
+ * The change itself is attributed through the signed-in actor. `reason` is
+ * what the customer is told, so it is required exactly where they are told
+ * one (CUSTOMER_REASON_STATUSES) and optional elsewhere; `note` is internal.
  */
-export const updateOrderStatusSchema = z.object({
-    status: OrderStatusEnum,
-});
+export const updateOrderStatusSchema = z
+    .object({
+        status: OrderStatusEnum,
+        // Optimistic-concurrency guard: if provided and it no longer matches the
+        // order's current status, the update is rejected with 409 instead of
+        // silently overwriting a change another admin/rider/webhook just made.
+        expectedCurrentStatus: OrderStatusEnum.optional(),
+        reason: z.string().trim().max(500).optional(),
+        note: z.string().trim().max(1000).optional(),
+    })
+    .superRefine((data, ctx) => {
+        if (CUSTOMER_REASON_STATUSES.has(data.status) && !data.reason) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["reason"],
+                message: "Give the customer a reason for this status",
+            });
+        }
+    });
+
+/**
+ * Schema for item-level fulfillment updates (multi-vendor partial
+ * availability). CANCELLED requires a meaningful, non-blank cancellation
+ * remark (spec §5) — null, empty and whitespace-only values are rejected.
+ * CONFIRMED needs no remark.
+ */
+export const updateOrderItemFulfillmentSchema = z
+    .object({
+        status: z.nativeEnum(ItemFulfillmentStatus),
+        cancellationRemark: z
+            .string()
+            .trim()
+            .max(1000, "Cancellation remark must not exceed 1000 characters")
+            .optional()
+            .nullable(),
+    })
+    .superRefine((data, ctx) => {
+        if (
+            data.status === ItemFulfillmentStatus.CANCELLED &&
+            (!data.cancellationRemark ||
+                data.cancellationRemark.trim().length === 0)
+        ) {
+            ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["cancellationRemark"],
+                message:
+                    "Cancellation remark is required when cancelling an item",
+            });
+        }
+    });

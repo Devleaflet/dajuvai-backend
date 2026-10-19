@@ -1,0 +1,14 @@
+node_modules
+.git
+.github
+docker-compose*.yaml
+docker-compose*.yml
+.env
+.env.*
+*.log
+coverage
+dist
+docs
+*firebase-adminsdk*.json
+*serviceAccount*.json
+firebase-service-account.json

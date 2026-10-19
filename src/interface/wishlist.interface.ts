@@ -10,4 +10,10 @@ export interface IWishlistRemoveRequest {
 export interface IWishlistMoveToCartRequest {
     wishlistItemId: number;
     quantity: number;
+    /** The option chosen now, for an item saved without one. */
+    variantId?: number;
+}
+
+export interface IWishlistMoveManyToCartRequest {
+    items: IWishlistMoveToCartRequest[];
 }

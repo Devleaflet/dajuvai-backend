@@ -1,50 +1,147 @@
 import { Router, Request, Response, NextFunction } from "express";
-import rateLimit from "express-rate-limit";
+import rateLimit, { Options } from "express-rate-limit";
 import passport from "passport";
 import { UserController } from "../controllers/user.controller";
 import {
-  authMiddleware,
-  isAccountOwner,
-  isAdmin,
-  isAdminOrStaff,
-  validateZod,
+    authMiddleware,
+    isAccountOwner,
+    isAdmin,
+    isAdminOrStaff,
+    validateZod,
 } from "../middlewares/auth.middleware";
 import {
-  adminResetPasswordSchema,
-  changeEmailSchema,
-  loginSchema,
-  resetPasswordSchema,
-  signupSchema,
-  updateStaffSchema,
-  verificationTokenSchema,
-  verifyEmailChangeSchema,
-  verifyTokenSchema,
+    adminResetPasswordSchema,
+    changeEmailSchema,
+    loginSchema,
+    resetCodeSchema,
+    resetPasswordSchema,
+    signupSchema,
+    staffSignupSchema,
+    updateStaffSchema,
+    userDeleteAccountSchema,
+    userReactivateSchema,
+    verificationTokenSchema,
+    verifyEmailChangeSchema,
+    verifyTokenSchema,
+    changePasswordSchema,
+    verifyCurrentPasswordSchema,
 } from "../utils/zod_validations/user.zod";
-import { deleteUserDataByFacebookId } from "../service/user.service";
+import { deleteUserDataByFacebookId, getFormattedStaffPermissions } from "../service/user.service";
 import { APIError } from "../utils/ApiError.utils";
-import { UserRole } from "../entities/user.entity";
+import { AuthProvider, UserRole } from "../entities/user.entity";
+import {
+    issueUserSessionTokens,
+    oauthCallbackUrl,
+    OAuthProvider,
+} from "../service/oauth.service";
 import config from "../config/env.config";
-import jwt from "jsonwebtoken";
+import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 
 const userRouter = Router();
 const userController = new UserController();
 
 const frontendUrl = config.FRONTEND_URL;
 
+/**
+ * Ends a web social sign-in, for Google and Facebook alike: the browser goes
+ * to `<frontend>/auth/<provider>/callback` with either `?error=<code>` (a
+ * fixed set, see `OAUTH_ERROR_CODES`) or the same token pair password login
+ * issues. One handler so the two providers cannot drift.
+ */
+const oauthCallback =
+    (provider: OAuthProvider) => (req: Request, res: Response, next: NextFunction) => {
+        const fail = (code: string) => res.redirect(oauthCallbackUrl(frontendUrl, provider, { error: code }));
+
+        // The user pressed Cancel on the provider's consent screen.
+        if (req.query.error === "access_denied") return fail("access_denied");
+
+        passport.authenticate(provider, { session: false }, (err: any, result: any, info: any) => {
+            if (err || (result && !result.user)) {
+                console.error(`${provider} OAuth callback error:`, err ?? "no user");
+                return fail("server_error");
+            }
+            if (!result) return fail(info?.message || "authentication_error");
+
+            const { token, refreshToken } = issueUserSessionTokens(result.user);
+            const cookie = {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "none" as const,
+            };
+            res.cookie("token", token, { ...cookie, maxAge: 15 * 60 * 1000 });
+            res.cookie("refreshToken", refreshToken, { ...cookie, maxAge: 24 * 60 * 60 * 1000 });
+            res.redirect(oauthCallbackUrl(frontendUrl, provider, { token, refreshToken }));
+        })(req, res, next);
+    };
+
 // Rate limiter for sensitive endpoints
-const authRateLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // Limit each IP to 5 requests per window
-  message: "Too many requests, please try again later.",
+export const authRateLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 5, // Limit each client to 5 requests per window
+    // Keyed on the real client behind the Next proxy, not the proxy itself —
+    // otherwise every shopper shares one allowance.
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    message: "Too many requests, please try again later.",
+});
+
+/**
+ * `POST /api/auth/verify` — a six-digit code, valid for fifteen minutes.
+ * Without a limiter (and `verifyToken` keeps no attempt counter) the whole
+ * million-code space is guessable inside one token's lifetime.
+ *
+ * Ten per fifteen minutes: a person mistypes a code once or twice, and may
+ * legitimately try the old code before noticing a resend arrived, so five
+ * would bite honest users. Ten caps a guesser at roughly the token's whole
+ * lifetime for ten of a million codes — a 0.001% chance per window.
+ *
+ * Keyed by `publicRateLimitKey`, not `req.ip`: the Next console proxies
+ * every public call, so the default key would be one bucket for everyone.
+ */
+export const verifyCodeLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    message: "Too many verification attempts, please request a new code and try again later.",
+});
+
+/**
+ * Signed-in password changes. Keyed by account rather than client, so one
+ * account's current password cannot be guessed from many addresses, and one
+ * shared address (an office, the Next proxy) does not lock out its neighbours.
+ */
+export const changePasswordLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 10,
+    keyGenerator: ((req: { user?: { id?: number }; vendor?: { id?: number } }) =>
+        req.vendor ? `vendor:${req.vendor.id}` : `user:${req.user?.id}`) as unknown as Options["keyGenerator"],
+    message: "Too many attempts. Please wait 15 minutes and try again.",
+});
+
+/**
+ * `GET /api/auth/user/check-email` — answers `{ exists }` for any address,
+ * which is an account-enumeration oracle if it is free to call.
+ *
+ * Twenty per fifteen minutes. The signup wizard fires it once per attempt
+ * (on leaving step 2) and it is advisory, so twenty is far more than any
+ * real registration needs, while eighty lookups an hour makes sweeping a
+ * list of addresses slow enough to be worthless. Same keying as above.
+ */
+export const emailLookupLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 20,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    message: "Too many email checks, please try again later.",
 });
 
 /**
  * @swagger
  * /api/auth/admin/signup:
  *   post:
- *     summary: Register a new admin user
- *     description: Creates a new admin account with a secure hashed password and sets a JWT cookie.
+ *     summary: Register a new admin user (admin-only)
+ *     description: An existing admin creates another admin account, verified immediately. The caller's own session is unchanged; no token is issued for the new account.
  *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -95,12 +192,6 @@ const authRateLimiter = rateLimit({
  *                     email:
  *                       type: string
  *                       example: admin@example.com
- *                     role:
- *                       type: string
- *                       example: ADMIN
- *                 token:
- *                   type: string
- *                   example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
  *       400:
  *         description: Validation error (e.g., invalid email, password mismatch)
  *         content:
@@ -137,10 +228,16 @@ const authRateLimiter = rateLimit({
  *                 message:
  *                   type: string
  *                   example: "Registration service temporarily unavailable"
+ *       401:
+ *         description: No valid token
+ *       403:
+ *         description: Caller is not an admin
  */
 userRouter.post(
-  "/admin/signup",
-  userController.adminSignup.bind(userController),
+    "/admin/signup",
+    authMiddleware,
+    isAdmin,
+    userController.adminSignup.bind(userController),
 );
 
 /**
@@ -158,14 +255,14 @@ userRouter.post(
  *           schema:
  *             type: object
  *             required:
- *               - username
  *               - email
  *               - password
- *               - confirmPassword
+ *               - phoneNumber
+ *               - permissions
  *             properties:
- *               username:
+ *               fullName:
  *                 type: string
- *                 example: staff_user
+ *                 example: Sita Sharma
  *               email:
  *                 type: string
  *                 format: email
@@ -175,11 +272,21 @@ userRouter.post(
  *                 format: password
  *                 minLength: 8
  *                 example: Password123!@#
- *               confirmPassword:
+ *               phoneNumber:
  *                 type: string
- *                 format: password
- *                 minLength: 8
- *                 example: Password123!@#
+ *                 minLength: 10
+ *                 maxLength: 10
+ *                 example: "9800000000"
+ *               permissions:
+ *                 type: object
+ *                 description: >
+ *                   Per-module access level. Modules: order, delivery, catalog, promo,
+ *                   deal, vendor, banner, arrangement, customer, category, product, audit.
+ *                   Levels: 1 = view, 2 = create/edit, 3 = delete.
+ *                 additionalProperties:
+ *                   type: integer
+ *                   enum: [1, 2, 3]
+ *                 example: { order: 2, customer: 1 }
  *     responses:
  *       201:
  *         description: Staff user registered successfully
@@ -252,11 +359,11 @@ userRouter.post(
  *                   example: Registration service temporarily unavailable
  */
 userRouter.post(
-  "/signup/staff",
-  authMiddleware,
-  isAdmin,
-  validateZod(signupSchema),
-  userController.staffSignup.bind(userController),
+    "/signup/staff",
+    authMiddleware,
+    isAdmin,
+    validateZod(staffSignupSchema),
+    userController.staffSignup.bind(userController),
 );
 
 /**
@@ -365,10 +472,10 @@ userRouter.post(
  *         description: Internal server error
  */
 userRouter.get(
-  "/staff",
-  authMiddleware,
-  isAdmin,
-  userController.getAllStaff.bind(userController),
+    "/staff",
+    authMiddleware,
+    isAdmin,
+    userController.getAllStaff.bind(userController),
 );
 
 /**
@@ -423,10 +530,53 @@ userRouter.get(
  *         description: Internal server error
  */
 userRouter.delete(
-  "/staff/:id",
-  authMiddleware,
-  isAdmin,
-  userController.deleteStaff.bind(userController),
+    "/staff/:id",
+    authMiddleware,
+    isAdmin,
+    userController.deleteStaff.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/staff/{id}/permissions:
+ *   get:
+ *     summary: Get staff permission map
+ *     description: Returns configured module permission levels for one staff account. Admin authentication required.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         description: Staff user ID
+ *         schema:
+ *           type: integer
+ *           minimum: 1
+ *           example: 24
+ *     responses:
+ *       200:
+ *         description: Permission map keyed by module name
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: object
+ *                   additionalProperties:
+ *                     type: integer
+ *                   example: { PRODUCT: 2, ORDER: 1, VENDOR: 0 }
+ *       404:
+ *         description: Staff account does not exist
+ */
+userRouter.get(
+    "/staff/:id/permissions",
+    authMiddleware,
+    isAdmin,
+    userController.getStaffPermissions.bind(userController),
 );
 
 /**
@@ -453,12 +603,35 @@ userRouter.delete(
  *           schema:
  *             type: object
  *             properties:
- *               data:
- *                 type: object
- *                 description: Fields to update for the staff user
- *                 example:
- *                   username: "newStaffName"
- *                   email: "newstaff@example.com"
+ *               username:
+ *                 type: string
+ *                 minLength: 3
+ *                 description: Username (at least 3 characters)
+ *                 example: "newStaffName"
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: Staff email address
+ *                 example: "newstaff@example.com"
+ *               fullName:
+ *                 type: string
+ *                 description: Full name of the staff member
+ *                 example: "John Doe"
+ *               phoneNumber:
+ *                 type: string
+ *                 pattern: "^[0-9]{7,15}$"
+ *                 description: Phone number (7-15 digits)
+ *                 example: "9812345678"
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: New password (min 8 characters, must contain uppercase, lowercase, number, and special character)
+ *                 example: "NewPass123!@#"
+ *               confirmPassword:
+ *                 type: string
+ *                 format: password
+ *                 description: Confirm new password (must match password if provided)
  *     responses:
  *       200:
  *         description: Staff updated successfully
@@ -518,11 +691,11 @@ userRouter.delete(
  *                   example: "Internal server error"
  */
 userRouter.put(
-  "/staff/:id",
-  authMiddleware,
-  isAdmin,
-  validateZod(updateStaffSchema),
-  userController.updateStaff.bind(userController),
+    "/staff/:id",
+    authMiddleware,
+    isAdmin,
+    validateZod(updateStaffSchema),
+    userController.updateStaff.bind(userController),
 );
 
 /**
@@ -539,17 +712,23 @@ userRouter.put(
  *           schema:
  *             type: object
  *             required:
- *               - username
+ *               - email
  *               - password
  *             properties:
- *               username:
+ *               email:
  *                 type: string
- *                 example: admin_user
+ *                 format: email
+ *                 example: admin@example.com
  *               password:
  *                 type: string
  *                 format: password
  *                 example: StrongPassword123
  *     responses:
+ *       400:
+ *         description: Email and password are required
+ *         content:
+ *           application/json:
+ *             example: { success: false, errorCode: "VALIDATION_ERROR", message: "email and password are required" }
  *       200:
  *         description: Admin logged in successfully
  *         content:
@@ -643,49 +822,73 @@ userRouter.post("/admin/login", userController.adminLogin.bind(userController));
  *     summary: Get all users
  *     description: Retrieves a list of all users. Admin access only.
  *     tags: [Users]
- *     security:
- *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: A list of users
  *         content:
  *           application/json:
  *             schema:
- *               type: array
- *               items:
- *                 type: object
- *                 properties:
- *                   id:
- *                     type: number
- *                     description: User ID
- *                   username:
- *                     type: string
- *                     description: Username
- *                   email:
- *                     type: string
- *                     description: User email
- *                   role:
- *                     type: string
- *                     enum: [admin, user, customer]
- *                     description: User role
- *                   isVerified:
- *                     type: boolean
- *                     description: Email verification status
- *                   createdAt:
- *                     type: string
- *                     format: date-time
- *                     description: Account creation date
- *                   updatedAt:
- *                     type: string
- *                     format: date-time
- *                     description: Account last update date
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: number
+ *                         description: User ID
+ *                       username:
+ *                         type: string
+ *                         description: Username
+ *                       email:
+ *                         type: string
+ *                         description: User email
+ *                       role:
+ *                         type: string
+ *                         enum: [admin, user, customer]
+ *                         description: User role
+ *                       isVerified:
+ *                         type: boolean
+ *                         description: Email verification status
+ *                       provider:
+ *                         type: string
+ *                         enum: [local, google, facebook]
+ *                         description: Login provider
+ *                       deletionStatus:
+ *                         type: string
+ *                         enum: [ACTIVE, PENDING_DELETION, DELETED]
+ *                         description: Current account deletion status
+ *                       deletionScheduledFor:
+ *                         type: string
+ *                         format: date-time
+ *                         nullable: true
+ *                         description: Deletion deadline when status is PENDING_DELETION
+ *                       createdAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Account creation date
+ *                       updatedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         description: Account last update date
  *       401:
  *         description: Unauthorized - Invalid or missing token
  *       403:
  *         description: Forbidden - Not an admin
  */
-userRouter.get("/users", userController.getUsers.bind(userController));
-//authMiddleware, isAdminOrStaff,
+// Guarded: this returns every user with their name, email and phone number.
+// The middleware was commented out, leaving the whole customer list readable
+// by anyone who could reach the server.
+userRouter.get(
+    "/users",
+    authMiddleware,
+    isAdminOrStaff,
+    userController.getUsers.bind(userController),
+);
 
 /**
  * @swagger
@@ -704,6 +907,7 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *               - username
  *               - email
  *               - password
+ *               - confirmPassword
  *             properties:
  *               username:
  *                 type: string
@@ -715,11 +919,11 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *               password:
  *                 type: string
  *                 format: password
- *                 description: User password (min 8 characters)
- *               role:
+ *                 description: User password (min 8 characters, must contain uppercase, lowercase, number, and special character)
+ *               confirmPassword:
  *                 type: string
- *                 enum: [admin, user, customer]
- *                 description: User role (optional)
+ *                 format: password
+ *                 description: Confirm password (must match password)
  *           example:
  *             username: "johndoe"
  *             email: "admin@gmail.com"
@@ -733,28 +937,62 @@ userRouter.get("/users", userController.getUsers.bind(userController));
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 user:
+ *                   type: object
+ *                   required: [id, username, email, role]
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     username:
+ *                       type: string
+ *                       example: "johndoe"
+ *                     email:
+ *                       type: string
+ *                       format: email
+ *                       example: "admin@gmail.com"
+ *                     role:
+ *                       type: string
+ *                       example: "user"
+ *                 token:
+ *                   type: string
+ *                   description: Short-lived access JWT; also set in an HTTP-only cookie.
+ *             example:
+ *               success: true
+ *               user:
+ *                 id: 1
+ *                 username: "johndoe"
+ *                 email: "admin@gmail.com"
+ *                 role: "user"
+ *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.example"
+ *       200:
+ *         description: Existing unverified account updated and verification code resent
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, message]
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 message:
  *                   type: string
- *                   example: User registered successfully. Please verify your email.
- *                 userId:
- *                   type: number
- *                   description: ID of the newly created user
- *                 username:
- *                   type: string
- *                   description: Username of the newly created user
- *             example:
- *               message: "User registered successfully. Please verify your email."
- *               userId: 1
- *               username: "johndoe"
+ *                   example: Verification code resent. Please check your email.
  *       400:
  *         description: Invalid input data
  *       409:
  *         description: Email or username already in use
+ *       503:
+ *         description: Registration service temporarily unavailable
  */
 userRouter.post(
-  "/signup",
-  validateZod(signupSchema),
-  userController.signup.bind(userController),
+    "/signup",
+    validateZod(signupSchema),
+    userController.signup.bind(userController),
 );
 
 /**
@@ -780,7 +1018,7 @@ userRouter.post(
  *           example:
  *             email: "admin@gmail.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Verification email sent successfully
  *         content:
  *           application/json:
@@ -798,12 +1036,14 @@ userRouter.post(
  *         description: User not found
  *       429:
  *         description: Too many requests, please try again later
+ *       503:
+ *         description: Verification service temporarily unavailable
  */
 userRouter.post(
-  "/verify/resend",
-  authRateLimiter,
-  validateZod(verificationTokenSchema),
-  userController.sendVerificationToken.bind(userController),
+    "/verify/resend",
+    authRateLimiter,
+    validateZod(verificationTokenSchema),
+    userController.sendVerificationToken.bind(userController),
 );
 
 /**
@@ -852,11 +1092,14 @@ userRouter.post(
  *         description: Token not found
  *       410:
  *         description: Token expired
+ *       429:
+ *         description: Too many verification attempts (10 per 15 minutes per client)
  */
 userRouter.post(
-  "/verify",
-  validateZod(verifyTokenSchema),
-  userController.verifyToken.bind(userController),
+    "/verify",
+    verifyCodeLimiter,
+    validateZod(verifyTokenSchema),
+    userController.verifyToken.bind(userController),
 );
 
 /**
@@ -864,7 +1107,7 @@ userRouter.post(
  * /api/auth/login:
  *   post:
  *     summary: User login
- *     description: Authenticates a user and returns a JWT token
+ *     description: Authenticates a local user and returns access/refresh JWTs. Both tokens are also written to HTTP-only cookies.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -894,46 +1137,53 @@ userRouter.post(
  *           application/json:
  *             schema:
  *               type: object
+ *               required: [success, token, refreshToken, data]
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 token:
  *                   type: string
- *                   description: JWT authentication token
- *                 user:
+ *                   description: 15-minute access JWT
+ *                 refreshToken:
+ *                   type: string
+ *                   description: 1-day refresh JWT
+ *                 data:
  *                   type: object
  *                   properties:
- *                     id:
- *                       type: number
- *                       description: User ID
- *                     username:
- *                       type: string
- *                       description: Username
+ *                     userId:
+ *                       type: integer
+ *                       example: 1
  *                     email:
  *                       type: string
- *                       description: User email
+ *                       format: email
+ *                       example: "admin@gmail.com"
  *                     role:
  *                       type: string
- *                       enum: [admin, user, customer]
- *                       description: User role
- *                     isVerified:
- *                       type: boolean
- *                       description: Email verification status
+ *                       example: "user"
  *             example:
- *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
- *               user:
- *                 id: 1
- *                 username: "johndoe"
+ *               success: true
+ *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access"
+ *               refreshToken: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.refresh"
+ *               data:
+ *                 userId: 1
  *                 email: "admin@gmail.com"
  *                 role: "user"
- *                 isVerified: true
  *       400:
- *         description: Invalid credentials
+ *         description: Request validation failed
+ *       403:
+ *         description: Account uses an external provider or email is not verified
+ *       404:
+ *         description: User does not exist
  *       401:
- *         description: Email not verified
+ *         description: Invalid credentials
+ *       503:
+ *         description: Authentication service temporarily unavailable
  */
 userRouter.post(
-  "/login",
-  validateZod(loginSchema),
-  userController.login.bind(userController),
+    "/login",
+    validateZod(loginSchema),
+    userController.login.bind(userController),
 );
 
 /**
@@ -963,8 +1213,8 @@ userRouter.post(
  *         description: Internal server error
  */
 userRouter.post(
-  "/refresh-token",
-  userController.refreshToken.bind(userController),
+    "/refresh-token",
+    userController.refreshToken.bind(userController),
 );
 
 /**
@@ -991,7 +1241,65 @@ userRouter.post(
  *       500:
  *         description: Internal server error
  */
-userRouter.post("/logout", userController.logout.bind(userController));
+/**
+ * `authMiddleware` first: logout has to know *which* token it is revoking, and
+ * that is the one the middleware decoded. `optionalAuth` is not used because a
+ * caller with no token has nothing to revoke — the route below tolerates that
+ * and still clears the cookies.
+ */
+userRouter.post(
+    "/logout",
+    authMiddleware,
+    userController.logout.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/me/cancel-deletion:
+ *   post:
+ *     summary: Cancel a scheduled account deletion
+ *     description: >
+ *       Stops a deletion that is still inside its 30-day grace period, for the
+ *       signed-in account. This is one of the few routes an account in that
+ *       state may reach — see `DELETION_GRACE_ALLOWLIST` in the auth
+ *       middleware.
+ *     tags:
+ *       - Auth
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: Deletion cancelled, or the account was not scheduled for one
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Account deletion cancelled. Your account stays active."
+ *       401:
+ *         description: Not authenticated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No token provided. Please log in."
+ */
+userRouter.post(
+    "/me/cancel-deletion",
+    authMiddleware,
+    userController.cancelAccountDeletion.bind(userController),
+);
 
 /**
  * @swagger
@@ -1005,8 +1313,8 @@ userRouter.post("/logout", userController.logout.bind(userController));
  *         description: Redirects to Google authentication page
  */
 userRouter.get(
-  "/google",
-  passport.authenticate("google", { scope: ["email", "profile"] }),
+    "/google",
+    passport.authenticate("google", { scope: ["email", "profile"] }),
 );
 
 /**
@@ -1061,8 +1369,8 @@ userRouter.get(
  *         description: Invalid or expired Google token
  */
 userRouter.post(
-  "/google/mobile",
-  userController.googleMobileLogin.bind(userController),
+    "/google/mobile",
+    userController.googleMobileLogin.bind(userController),
 );
 
 /**
@@ -1070,100 +1378,18 @@ userRouter.post(
  * /api/auth/google/callback:
  *   get:
  *     summary: Google OAuth callback handler
- *     description: Handles the callback from Google OAuth. Sets a JWT cookie and redirects to the frontend.
+ *     description: >
+ *       Handles the callback from Google OAuth. Redirects to
+ *       `<FRONTEND_URL>/auth/google/callback?token=…&refreshToken=…` on success (the same
+ *       15-minute access / 1-day refresh pair as password login), or `?error=<code>` where
+ *       code is one of access_denied, email_registered_manually, google_email_required,
+ *       invalid_state, server_error, authentication_error.
  *     tags: [Authentication]
  *     responses:
  *       302:
  *         description: Redirects to frontend with token on success, or with error on failure
  */
-userRouter.get(
-  "/google/callback",
-
-  (req: any, res: Response, next: any) => {
-    passport.authenticate(
-      "google",
-      { session: false },
-      (err: any, authResult: any, info: any) => {
-        if (err) {
-          console.error("Google OAuth callback error:", err);
-          return res.redirect(
-            `${frontendUrl}/auth/google/callback?error=server_error`,
-          );
-        }
-        if (!authResult) {
-          return res.redirect(
-            `${frontendUrl}/auth/google/callback?error=${info?.message || "authentication_error"}`,
-          );
-        }
-        req.user = authResult;
-        next();
-      },
-    )(req, res, next);
-  },
-
-  async (req: any, res: Response) => {
-    try {
-      const { user } = req.user;
-
-      if (!user) {
-        console.error("Google OAuth failed - no user");
-
-        return res.redirect(
-          `${frontendUrl}/auth/google/callback?error=authentication_error`,
-        );
-      }
-
-      const token = jwt.sign(
-        {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-        },
-        config.JWT_SECRET,
-        {
-          expiresIn: "15m",
-        },
-      );
-
-      const refreshToken = jwt.sign(
-        {
-          id: user.id,
-          email: user.email,
-          role: user.role,
-        },
-        config.JWT_REFRESH_SECRET,
-        {
-          expiresIn: "1d",
-        },
-      );
-
-      res.cookie("token", token, {
-        httpOnly: true,
-        secure: config.NODE_ENV === "production",
-        sameSite: "none",
-        maxAge: 15 * 60 * 1000,
-      });
-
-      res.cookie("refreshToken", refreshToken, {
-        httpOnly: true,
-        secure: config.NODE_ENV === "production",
-        sameSite: "none",
-        maxAge: 24 * 60 * 60 * 1000,
-      });
-
-      // Redirect to frontend callback with token and refreshToken
-      res.redirect(
-        `${frontendUrl}/auth/google/callback?token=${token}&refreshToken=${refreshToken}`,
-      );
-    } catch (error) {
-      console.error("Google OAuth callback error:", error);
-
-      res.redirect(
-        `${frontendUrl}/auth/google/callback?error=authentication_error`,
-      );
-    }
-  },
-);
+userRouter.get("/google/callback", oauthCallback(AuthProvider.GOOGLE));
 
 /**
  * @swagger
@@ -1227,35 +1453,41 @@ userRouter.get(
  *                 message:
  *                   type: string
  *                   example: Internal server error
- *     securityDefinitions:
- *       bearerAuth:
- *         type: http
- *         scheme: bearer
- *         bearerFormat: JWT
- *         description: JWT token stored in an httpOnly cookie, extracted by the cookieExtractor function
  */
 userRouter.get(
-  "/me",
-  passport.authenticate("jwt", { session: false }),
-  async (req: any, res: Response) => {
-    try {
-      const user = req.user;
+    "/me",
+    passport.authenticate("jwt", { session: false }),
+    async (req: any, res: Response) => {
+        try {
+            const user = req.user;
 
-      res.status(200).json({
-        success: true,
-        data: {
-          userId: user.id,
-          email: user.email,
-          role: user.role || UserRole.USER,
-        },
-      });
-    } catch (error) {
-      console.error("Error in /me endpoint:", error);
-      res
-        .status(500)
-        .json({ success: false, message: "Internal server error" });
-    }
-  },
+            let permissions: Record<string, string> | undefined = undefined;
+            if (user && user.role === UserRole.STAFF) {
+                permissions = await getFormattedStaffPermissions(user.id);
+            }
+
+            res.status(200).json({
+                success: true,
+                data: {
+                    userId: user.id,
+                    email: user.email,
+                    role: user.role || UserRole.USER,
+                    username: user.username,
+                    // The console shows this beside the account name. The column
+                    // already exists and other endpoints return it; this one
+                    // omitted it, so an admin had no picture anywhere.
+                    profilePicture: user.profilePicture || null,
+                    ...(permissions ? { permissions } : {}),
+                },
+            });
+        } catch (error) {
+            console.error("Error in /me endpoint:", error);
+            res.status(500).json({
+                success: false,
+                message: "Internal server error",
+            });
+        }
+    },
 );
 
 /**
@@ -1345,30 +1577,34 @@ userRouter.get(
  *                   example: Internal server error
  */
 userRouter.post(
-  "/facebook/data-deletion",
-  async (req: Request, res: Response) => {
-    try {
-      const { user_id } = req.body;
-      const deleteUser = await deleteUserDataByFacebookId(user_id);
-      res.status(200).json({
-        success: true,
-        msg: "User deleted succesfully",
-        data: deleteUser,
-      });
-    } catch (error) {
-      if (error instanceof APIError) {
-        res.status(error.status).json({
-          success: false,
-          msg: error.message,
-        });
-      } else {
-        res.status(500).json({
-          success: false,
-          msg: "Internal server error",
-        });
-      }
-    }
-  },
+    "/facebook/data-deletion",
+    async (req: Request, res: Response) => {
+        try {
+            const { user_id } = req.body;
+            if (typeof user_id !== "string" || !user_id.trim()) {
+                res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "user_id is required" });
+                return;
+            }
+            const deleteUser = await deleteUserDataByFacebookId(user_id);
+            res.status(200).json({
+                success: true,
+                msg: "User deleted succesfully",
+                data: deleteUser,
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({
+                    success: false,
+                    msg: error.message,
+                });
+            } else {
+                res.status(500).json({
+                    success: false,
+                    msg: "Internal server error",
+                });
+            }
+        }
+    },
 );
 
 /**
@@ -1383,8 +1619,8 @@ userRouter.post(
  *         description: Redirects to Facebook authentication page
  */
 userRouter.get(
-  "/facebook",
-  passport.authenticate("facebook", { scope: ["email", "public_profile"] }),
+    "/facebook",
+    passport.authenticate("facebook", { scope: ["email", "public_profile"] }),
 );
 
 /**
@@ -1392,43 +1628,37 @@ userRouter.get(
  * /api/auth/facebook/callback:
  *   get:
  *     summary: Facebook OAuth callback
- *     description: Callback endpoint for Facebook OAuth authentication
+ *     description: >
+ *       Callback endpoint for Facebook OAuth. Redirects to
+ *       `<FRONTEND_URL>/auth/facebook/callback?token=…&refreshToken=…` on success, or
+ *       `?error=<code>` where code is one of access_denied, email_registered_manually,
+ *       facebook_email_required, invalid_state, server_error, authentication_error.
  *     tags: [Authentication]
  *     parameters:
  *       - in: query
  *         name: code
- *         required: true
+ *         required: false
  *         schema:
  *           type: string
- *         description: Authorization code from Facebook
+ *         description: Authorization code from Facebook (absent when the user cancels)
+ *       - in: query
+ *         name: state
+ *         required: false
+ *         schema:
+ *           type: string
+ *         description: OAuth state nonce, checked against the oauth_state cookie
  *     responses:
  *       302:
- *         description: Redirects to frontend with JWT token
+ *         description: Redirects to frontend with tokens on success, or with error on failure
  */
-userRouter.get(
-  "/facebook/callback",
-  passport.authenticate("facebook", {
-    session: false,
-    failureRedirect: "/api/auth/login?error=facebook_auth_failed",
-  }),
-  (req: any, res: Response) => {
-    const { user, token } = req.user;
-    res.cookie("token", token, {
-      httpOnly: true,
-      secure: config.NODE_ENV === "production",
-      maxAge: 2 * 60 * 60 * 1000,
-      sameSite: "none",
-    });
-    res.redirect(`${frontendUrl}/google-auth-callback`);
-  },
-);
+userRouter.get("/facebook/callback", oauthCallback(AuthProvider.FACEBOOK));
 
 /**
  * @swagger
  * /api/auth/forgot-password:
  *   post:
  *     summary: Request password reset
- *     description: Sends a password reset token to the user's email
+ *     description: Generates a reset token, stores it for 15 minutes, and emails it to the user. Google-authenticated users cannot use this flow. Rate limited to 5 requests per 15 minutes per IP. No authentication required.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -1446,30 +1676,36 @@ userRouter.get(
  *           example:
  *             email: "admin@gmail.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Password reset email sent successfully
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
  *                 message:
  *                   type: string
- *                   example: Password reset email sent successfully
+ *                   example: Password reset request sent
  *             example:
- *               message: "Password reset email sent successfully"
+ *               success: true
+ *               message: "Password reset request sent"
  *       400:
  *         description: Invalid email
  *       404:
  *         description: User not found
  *       429:
  *         description: Too many requests, please try again later
+ *       503:
+ *         description: Password reset service temporarily unavailable
  */
 userRouter.post(
-  "/forgot-password",
-  authRateLimiter,
-  validateZod(verificationTokenSchema),
-  userController.forgotPassword.bind(userController),
+    "/forgot-password",
+    authRateLimiter,
+    validateZod(verificationTokenSchema),
+    userController.forgotPassword.bind(userController),
 );
 
 /**
@@ -1477,7 +1713,7 @@ userRouter.post(
  * /api/auth/reset-password:
  *   post:
  *     summary: Reset password with token
- *     description: Resets the user's password using a valid reset token
+ *     description: Resets user password using token emailed by forgot-password. Token expires after 15 minutes, is single-use, and Google-authenticated users cannot use this flow. Rate limited to 5 requests per 15 minutes per IP. No authentication required.
  *     tags: [Authentication]
  *     requestBody:
  *       required: true
@@ -1486,22 +1722,30 @@ userRouter.post(
  *           schema:
  *             type: object
  *             required:
+ *               - email
  *               - newPass
  *               - confirmPass
  *               - token
  *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 description: User email address
  *               newPass:
  *                 type: string
  *                 format: password
- *                 description: New password (min 8 characters)
+ *                 minLength: 8
+ *                 description: New password (minimum 8 characters)
  *               confirmPass:
  *                 type: string
  *                 format: password
- *                 description: Confirm new password
+ *                 minLength: 1
+ *                 description: Confirm password; must match newPass
  *               token:
  *                 type: string
  *                 description: Password reset token
  *           example:
+ *             email: "user@example.com"
  *             newPass: "newPassword123!@#"
  *             confirmPass: "newPassword123!@#"
  *             token: "123456"
@@ -1515,31 +1759,263 @@ userRouter.post(
  *               properties:
  *                 message:
  *                   type: string
- *                   example: Password reset successful
+ *                   example: Password reset successfully
  *             example:
- *               message: "Password reset successful"
+ *               message: "Password reset successfully"
  *       400:
  *         description: Invalid token, password, or passwords do not match
  *       404:
- *         description: Token not found
+ *         description: User does not exist for submitted email
  *       410:
- *         description: Token expired
+ *         description: Reset token missing or expired. Response uses standard ApiError envelope.
  *       429:
  *         description: Too many requests, please try again later
  */
 userRouter.post(
-  "/reset-password",
-  authRateLimiter,
-  validateZod(resetPasswordSchema),
-  userController.resetPassword.bind(userController),
+    "/reset-password",
+    authRateLimiter,
+    validateZod(resetPasswordSchema),
+    userController.resetPassword.bind(userController),
 );
 
+/**
+ * @swagger
+ * /api/auth/reset-password/verify:
+ *   post:
+ *     summary: Check a password reset code
+ *     description: Confirms the six-digit code emailed by forgot-password is correct and unexpired, without using it up, so the client can ask for the new password only after the code is known to be right. reset-password re-checks the code. Rate limited to 10 attempts per 15 minutes per client. No authentication required.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - token
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *               token:
+ *                 type: string
+ *                 pattern: "^[0-9]{6}$"
+ *           example:
+ *             email: "user@example.com"
+ *             token: "123456"
+ *     responses:
+ *       200:
+ *         description: Code is valid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Code verified
+ *       400:
+ *         description: Code is incorrect, or the body failed validation
+ *       404:
+ *         description: No account for submitted email
+ *       410:
+ *         description: Code expired, already used, or replaced by a newer one
+ *       429:
+ *         description: Too many attempts
+ */
+userRouter.post(
+    "/reset-password/verify",
+    verifyCodeLimiter,
+    validateZod(resetCodeSchema),
+    userController.verifyResetCode.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/change-password/verify:
+ *   post:
+ *     summary: Check the signed-in customer's current password
+ *     description: First step of a signed-in password change. Confirms the current password without changing anything, so the client asks for the new one only once the current one is known to be right. change-password checks it again. Rate limited to 10 attempts per 15 minutes per account.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - currentPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Current password is correct
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                   example: Password confirmed
+ *       400:
+ *         description: Current password is incorrect (INVALID_CURRENT_PASSWORD), or the body failed validation
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Account signs in with Google or Facebook and has no password (SOCIAL_ACCOUNT)
+ *       429:
+ *         description: Too many attempts
+ */
+userRouter.post(
+    "/change-password/verify",
+    authMiddleware,
+    changePasswordLimiter,
+    validateZod(verifyCurrentPasswordSchema),
+    userController.verifyCurrentPassword.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/change-password:
+ *   post:
+ *     summary: Change the signed-in customer's password
+ *     description: Sets a new password, proven by either the current password or a six-digit code emailed by forgot-password (for someone who forgot the current one) — exactly one of the two. Every other session is signed out; the response carries fresh tokens so this one stays signed in. Rate limited to 10 attempts per 15 minutes per account.
+ *     tags: [Authentication]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPassword
+ *               - confirmPassword
+ *             properties:
+ *               currentPassword:
+ *                 type: string
+ *               token:
+ *                 type: string
+ *                 pattern: "^[0-9]{6}$"
+ *               newPassword:
+ *                 type: string
+ *                 description: At least 8 characters with an uppercase letter, a lowercase letter, a number and a special character
+ *               confirmPassword:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Password changed; new session tokens issued
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                 message:
+ *                   type: string
+ *                 token:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Wrong current password or code, same password as before (PASSWORD_UNCHANGED), or validation failure
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Account signs in with Google or Facebook (SOCIAL_ACCOUNT)
+ *       410:
+ *         description: Emailed code expired or replaced
+ *       429:
+ *         description: Too many attempts
+ */
+userRouter.post(
+    "/change-password",
+    authMiddleware,
+    changePasswordLimiter,
+    validateZod(changePasswordSchema),
+    userController.changePassword.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/admin/vendors/{vendorId}/change-vendor-password:
+ *   put:
+ *     summary: Admin change vendor password
+ *     description: Allows an admin to forcibly reset a vendor's password. Only accessible by admin users.
+ *     tags: [Admin]
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: vendorId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the vendor whose password should be changed
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - newPass
+ *               - confirmPass
+ *             properties:
+ *               newPass:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: New password for the vendor account (must contain uppercase, number, and symbol)
+ *                 example: "AdminResetPass123!"
+ *               confirmPass:
+ *                 type: string
+ *                 format: password
+ *                 minLength: 8
+ *                 description: Confirm new password
+ *                 example: "AdminResetPass123!"
+ *     responses:
+ *       200:
+ *         description: Vendor password changed successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Vendor password updated successfully"
+ *       400:
+ *         description: Invalid input or validation error
+ *       401:
+ *         description: Unauthorized - Not authenticated
+ *       403:
+ *         description: Forbidden - Not an admin
+ *       404:
+ *         description: Vendor not found
+ *       500:
+ *         description: Internal server error
+ */
 userRouter.put(
-  "/admin/vendors/:vendorId/change-vendor-password",
-  authMiddleware,
-  isAdmin,
-  validateZod(adminResetPasswordSchema, "body"),
-  userController.adminChangeVendorPassword.bind(userController),
+    "/admin/vendors/:vendorId/change-vendor-password",
+    authMiddleware,
+    isAdmin,
+    validateZod(adminResetPasswordSchema, "body"),
+    userController.adminChangeVendorPassword.bind(userController),
 );
 
 /**
@@ -1606,7 +2082,14 @@ userRouter.put(
  *       404:
  *         description: User not found
  */
-userRouter.get("/users/:id", userController.getUserById.bind(userController));
+// Guarded like the PUT on the same path: this returns a full user record, so
+// it is the account's owner's to read. It was reachable by anyone.
+userRouter.get(
+    "/users/:id",
+    authMiddleware,
+    isAccountOwner,
+    userController.getUserById.bind(userController),
+);
 
 /**
  * @swagger
@@ -1685,10 +2168,10 @@ userRouter.get("/users/:id", userController.getUserById.bind(userController));
  *         description: User not found
  */
 userRouter.put(
-  "/users/:id",
-  authMiddleware,
-  isAccountOwner,
-  userController.updateUser.bind(userController),
+    "/users/:id",
+    authMiddleware,
+    isAccountOwner,
+    userController.updateUser.bind(userController),
 );
 
 /**
@@ -1716,7 +2199,7 @@ userRouter.put(
  *           example:
  *             newEmail: "john.new@example.com"
  *     responses:
- *       200:
+ *       202:
  *         description: Email change verification sent
  *         content:
  *           application/json:
@@ -1734,12 +2217,14 @@ userRouter.put(
  *         description: Unauthorized - Invalid or missing token
  *       409:
  *         description: Email already in use
+ *       503:
+ *         description: Email change service temporarily unavailable
  */
 userRouter.patch(
-  "/change-email",
-  authMiddleware,
-  validateZod(changeEmailSchema),
-  userController.updateEmail.bind(userController),
+    "/change-email",
+    authMiddleware,
+    validateZod(changeEmailSchema),
+    userController.updateEmail.bind(userController),
 );
 
 /**
@@ -1804,14 +2289,216 @@ userRouter.patch(
  *         description: Token expired
  */
 userRouter.post(
-  "/verify-email",
-  authMiddleware,
-  validateZod(verifyEmailChangeSchema),
-  userController.verifyEmailChange.bind(userController),
+    "/verify-email",
+    authMiddleware,
+    validateZod(verifyEmailChangeSchema),
+    userController.verifyEmailChange.bind(userController),
 );
 
-userRouter.delete("/:id", userController.deleteUserHandler);
-// isAdminOrStaff,
+/**
+ * @swagger
+ * /api/auth/{id}:
+ *   delete:
+ *     summary: Delete a user account
+ *     description: Permanently deletes a user account by ID. Admin/Staff only.
+ *     tags:
+ *       - User
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the user to delete
+ *     responses:
+ *       200:
+ *         description: User deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "User deleted successfully"
+ *       400:
+ *         description: Invalid user ID
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid user ID"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin or Staff access required
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
+/**
+ * @swagger
+ * /api/auth/me:
+ *   delete:
+ *     summary: Request self-deletion of the authenticated customer account
+ *     description: >
+ *       Schedules the account for deletion after a 30-day grace period.
+ *       Email/password accounts must re-enter their password; Google OAuth
+ *       accounts are confirmed by the active session (no password field).
+ *       During the grace period the account can be reactivated by logging in.
+ *     tags: [User]
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - confirmation
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 format: password
+ *                 description: Required for email/password accounts; omit for Google accounts.
+ *               confirmation:
+ *                 type: string
+ *                 enum: [DELETE]
+ *                 example: DELETE
+ *     responses:
+ *       202:
+ *         description: Deletion scheduled
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Account scheduled for deletion. You can reactivate it before the deadline by logging in."
+ *                 deletionScheduledFor:
+ *                   type: string
+ *                   format: date-time
+ *       400:
+ *         description: Validation failed or wrong password
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 errorCode:
+ *                   type: string
+ *                   example: INVALID_CURRENT_PASSWORD
+ *                 message:
+ *                   type: string
+ *                   example: "Current password is incorrect"
+ *       401:
+ *         description: Unauthorized
+ *       404:
+ *         description: User not found
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.delete(
+    "/me",
+    authMiddleware,
+    validateZod(userDeleteAccountSchema),
+    userController.requestAccountDeletion.bind(userController),
+);
+
+/**
+ * @swagger
+ * /api/auth/reactivate:
+ *   post:
+ *     summary: Reactivate an email/password account scheduled for deletion
+ *     description: >
+ *       Restores an account that requested deletion but is still inside the
+ *       30-day grace period, and issues a fresh session. Google accounts
+ *       reactivate automatically by signing in with Google.
+ *     tags: [User]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - email
+ *               - password
+ *             properties:
+ *               email:
+ *                 type: string
+ *                 format: email
+ *                 example: john@example.com
+ *               password:
+ *                 type: string
+ *                 format: password
+ *     responses:
+ *       200:
+ *         description: Account reactivated
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Account reactivated successfully"
+ *                 token:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Validation failed (missing/invalid email or password)
+ *       401:
+ *         description: Invalid credentials
+ *       403:
+ *         description: OAuth account must reactivate via Google sign-in
+ *       410:
+ *         description: Grace period expired
+ *       500:
+ *         description: Internal server error
+ */
+userRouter.post(
+    "/reactivate",
+    authRateLimiter,
+    validateZod(userReactivateSchema),
+    userController.reactivateAccount.bind(userController),
+);
+
+userRouter.delete(
+    "/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    userController.deleteUserHandler,
+);
 
 /**
  * @swagger
@@ -1859,6 +2546,8 @@ userRouter.delete("/:id", userController.deleteUserHandler);
  *                 message:
  *                   type: string
  *                   example: Invalid Email
+ *       429:
+ *         description: Too many email checks (20 per 15 minutes per client)
  *       503:
  *         description: Email verification service temporarily unavailable
  *         content:
@@ -1874,8 +2563,9 @@ userRouter.delete("/:id", userController.deleteUserHandler);
  *                   example: Email verification service temporarily unavailable
  */
 userRouter.get(
-  "/user/check-email",
-  userController.checkEmailExists.bind(userController),
+    "/user/check-email",
+    emailLookupLimiter,
+    userController.checkEmailExists.bind(userController),
 );
 
 export default userRouter;

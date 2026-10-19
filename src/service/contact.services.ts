@@ -2,7 +2,6 @@ import { Repository } from 'typeorm';
 import { Contact } from '../entities/contact.entity';
 import AppDataSource from '../config/db.config';
 import { ContactInput } from '../utils/zod_validations/contact.zod';
-import { APIError } from '../utils/ApiError.utils';
 import { sendContactEmail } from '../utils/nodemailer.utils';
 import { IAdminContactQueryParams } from '../interface/contact.interface';
 /**
@@ -31,7 +30,7 @@ export class ContactService {
      * 
      * @param dto {ContactInput} - Validated contact form input (name, email, subject, message)
      * @returns {Promise<Contact>} - The created contact record
-     * @throws {APIError} - If email sending fails
+     * Email failure is logged; the saved message is still returned.
      * @access Public
      */
     async createContact(dto: ContactInput): Promise<Contact> {
@@ -41,7 +40,10 @@ export class ContactService {
         try {
             await sendContactEmail(dto); // Send email notification to admin
         } catch (error) {
-            throw new APIError(500, "Failed to send contact email");
+            // The message is saved and visible to admins; reporting a failure
+            // here only makes the visitor send it again.
+            console.error("Contact message saved, but the notification email failed:", error);
+            return savedContact;
         }
 
         return savedContact;

@@ -1,19 +1,43 @@
-import { Request, Response, NextFunction } from 'express';
-import { OrderService } from '../service/order.service';
-import { AuthRequest, CombinedAuthRequest, VendorAuthRequest } from '../middlewares/auth.middleware';
-import { IOrderCreateRequest, IShippingAddressRequest, IUpdateOrderStatusRequest } from '../interface/order.interface';
-import { BadRequestError, AuthError, ForbiddenError, NotFoundError } from '../errors';
-import { UserRole } from '../entities/user.entity';
-import { findUserByEmail, findUserById } from '../service/user.service';
-import { sendCustomerOrderEmail, sendVendorOrderEmail } from '../utils/nodemailer.utils';
-import { VendorService } from '../service/vendor.service';
-import { PaymentService } from '../service/payment.service';
-import { PaymentMethod } from '../entities/order.entity';
-import AppDataSource from '../config/db.config';
-import { Vendor } from '../entities/vendor.entity';
-import { In, Repository } from 'typeorm';
-import { NotificationService } from '../service/notification.service';
-
+import { Request, Response, NextFunction } from "express";
+import { OrderService } from "../service/order.service";
+import {
+    AuthRequest,
+    CombinedAuthRequest,
+    VendorAuthRequest,
+} from "../middlewares/auth.middleware";
+import {
+    IOrderCreateRequest,
+    IShippingAddressRequest,
+    IUpdateOrderStatusRequest,
+    IUpdateOrderItemFulfillmentRequest,
+} from "../interface/order.interface";
+import {
+    BadRequestError,
+    AuthError,
+    ForbiddenError,
+    NotFoundError,
+} from "../errors";
+import { UserRole } from "../entities/user.entity";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { findUserByEmail, findUserById } from "../service/user.service";
+import {
+    sendCustomerOrderEmail,
+    sendVendorOrderEmail,
+} from "../utils/nodemailer.utils";
+import { VendorService } from "../service/vendor.service";
+import { PaymentService } from "../service/payment.service";
+import { Order, PaymentMethod } from "../entities/order.entity";
+import AppDataSource from "../config/db.config";
+import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
+import { Vendor } from "../entities/vendor.entity";
+import { In, Repository } from "typeorm";
+import { NotificationService } from "../service/notification.service";
+import { getAgeRestrictionSummary } from "../service/age-restriction.service";
+import { Product } from "../entities/product.entity";
+import {
+    sanitizeOrderFull,
+    sanitizeOrderForVendor,
+} from "../utils/sanitize.util";
 
 /**
  * @class OrderController
@@ -34,12 +58,41 @@ export class OrderController {
         this.notificationService = new NotificationService();
     }
 
+    private buildOrderSummary(order: Order) {
+        const toNumber = (value: unknown) => {
+            const numeric = Number(value ?? 0);
+            return Number.isFinite(numeric) ? numeric : 0;
+        };
+        const sanitized = sanitizeOrderFull(order);
+
+        return {
+            orderId: order.id,
+            orderNumber: order.orderNumber,
+            paymentMethod: order.paymentMethod,
+            paymentStatus: order.paymentStatus,
+            subtotal: toNumber(order.merchandiseSubtotal),
+            shippingTotal: toNumber(order.shippingFee),
+            discountTotal: toNumber(order.discountTotal),
+            taxTotal: toNumber(order.taxTotal),
+            grandTotal: toNumber(order.totalPrice),
+            itemCount: (order.orderItems || []).reduce(
+                (sum, item) => sum + toNumber(item.quantity),
+                0,
+            ),
+            priceBreakdown: sanitized.priceBreakdown,
+        };
+    }
+
     /**
      * @desc Create a new order for authenticated user
      * @route POST /orders
      * @access Authenticated User
      */
-    async createOrder(req: AuthRequest<{}, {}, IOrderCreateRequest>, res: Response, _next: NextFunction): Promise<void> {
+    async createOrder(
+        req: AuthRequest<{}, {}, IOrderCreateRequest>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         if (!req.user) throw new AuthError("User not authenticated");
 
         const userId = req.user.id;
@@ -48,27 +101,77 @@ export class OrderController {
 
         const data = req.body;
 
-        const { order, redirectUrl, vendorids, useremail, esewaRedirectUrl } =
-            await this.orderService.createOrder(req.user.id, data);
+        const {
+            order,
+            draft,
+            vendorids,
+            useremail,
+            esewaRedirectUrl,
+            replayed,
+        } = await this.orderService.createOrder(req.user.id, data);
 
-        await this.notificationService.notifyOrderPlaced(order);
-
-        if (order.paymentMethod == PaymentMethod.CASH_ON_DELIVERY) {
-            const shippingAddress = order.shippingAddress || null;
-            const userDistrict = shippingAddress?.district || null;
-
-            const vendorIds = order.orderItems.map((item) => item.vendorId);
-            const uniqueVendorIds = [...new Set(vendorIds)];
-
-            const vendors = await this.vendorRepository.find({
-                where: { id: In(uniqueVendorIds) },
-                relations: ["district"],
+        // Online-payment checkouts create a draft, not an order — the order
+        // materializes only after the gateway confirms success. 200 (not 201)
+        // matches the "payment pending" convention used for eSewa redirects.
+        if (draft) {
+            res.status(200).json({
+                success: true,
+                draft: true,
+                data: {
+                    id: draft.id,
+                    draftId: draft.id,
+                    orderNumber: draft.orderNumber,
+                    totalPrice: draft.totals?.totalPrice,
+                    paymentMethod: draft.paymentMethod,
+                },
+                esewaRedirectUrl,
             });
+            return;
+        }
 
-            await sendCustomerOrderEmail(
-                useremail,
-                order.id,
-                order.orderItems.map((item) => {
+        if (!order) throw new BadRequestError("Order creation failed");
+
+        const orderSummary = this.buildOrderSummary(order);
+
+        // Online-payment orders are not sent to vendors until payment succeeds.
+        // `OrderService.orderSuccess` owns their equivalent notification.
+        // A replayed retry already sent everything below the first time.
+        const firstTime = !replayed && order.paymentMethod === PaymentMethod.CASH_ON_DELIVERY;
+
+        if (firstTime) {
+            void this.notificationService
+                .notifyOrderPlaced(order)
+                .catch((error) => {
+                    console.log("Failed to send order placed notification:", error);
+                });
+        }
+
+        if (firstTime) {
+            void (async () => {
+                const shippingAddress = order.shippingAddress || null;
+                const userDistrict = shippingAddress?.district || null;
+
+                const vendorIds = order.orderItems.map((item) => item.vendorId);
+                const uniqueVendorIds = [...new Set(vendorIds)];
+
+                const vendors = await this.vendorRepository.find({
+                    where: { id: In(uniqueVendorIds) },
+                    relations: ["district"],
+                });
+
+                const orderProductIds = order.orderItems.map(
+                    (item) => item.productId,
+                );
+                const ageCheckProducts = await AppDataSource.getRepository(
+                    Product,
+                ).find({
+                    where: { id: In(orderProductIds) },
+                    relations: ["subcategory", "subcategory.category"],
+                });
+                const codAgeSummary =
+                    getAgeRestrictionSummary(ageCheckProducts);
+
+                const customerEmailItems = order.orderItems.map((item) => {
                     const vendor = vendors.find((v) => v.id === item.vendorId);
                     return {
                         name: item?.product?.name,
@@ -76,52 +179,129 @@ export class OrderController {
                         quantity: item.quantity,
                         price: item.price,
                         variantAttributes: item.variant?.attributes || null,
+                        vendorId: item.vendorId,
+                        vendorName: vendor?.businessName || null,
                         vendorDistrict: vendor?.district?.name || null,
                     };
-                }),
-                userDistrict
-            );
+                });
 
-            const orderItems = order.orderItems;
+                // wrap in try catch so that if email fails, order wont fail
+                try {
+                    await sendCustomerOrderEmail(
+                        useremail,
+                        order.orderNumber,
+                        order.totalPrice,
+                        order.shippingFee,
+                        customerEmailItems,
+                        userDistrict,
+                        undefined,
+                        order.discountTotal,
+                        order.appliedPromoCode,
+                        {
+                            required: codAgeSummary.containsRestrictedItems,
+                            minimumAge: codAgeSummary.minimumRequiredAge,
+                        },
+                        null,
+                        // Each seller's own shipping, shown in their block.
+                        await AppDataSource.getRepository(OrderVendorShipping).findBy({ orderId: order.id }),
+                    );
+                } catch (error) {
+                    console.log("Failed to send customer order email:", error);
+                }
 
-            for (const vendorId of vendorids) {
-                const itemsForVendor = orderItems
-                    .filter((item) => item.vendorId === vendorId)
-                    .map((item) => ({
-                        name: item?.product?.name,
-                        sku: item.variant?.sku || null,
-                        quantity: item.quantity,
-                        price: item.price,
-                        variantAttributes: item.variant?.attributes || null,
-                    }));
+                try {
+                    await this.orderService.sendAdminOrderPlacedEmail(order.id);
+                } catch (error) {
+                    console.error("Failed to send admin order placed email:", error);
+                }
 
-                if (itemsForVendor.length === 0) continue;
+                const orderItems = order.orderItems;
 
-                const vendor = await this.vendorService.findVendorById(vendorId);
+                for (const vendorId of uniqueVendorIds) {
+                    const itemsForVendor = orderItems
+                        .filter((item) => item.vendorId === vendorId)
+                        .map((item) => ({
+                            name: item?.product?.name,
+                            sku: item.variant?.sku || null,
+                            quantity: item.quantity,
+                            price: item.price,
+                            variantAttributes: item.variant?.attributes || null,
+                        }));
 
-                await sendVendorOrderEmail(
-                    vendor.email,
-                    order.paymentMethod,
-                    order.id,
-                    itemsForVendor,
-                    {
-                        name: userexists.fullName,
-                        phone: userexists.phoneNumber,
-                        email: userexists.email,
-                        city: shippingAddress?.city || null,
-                        district: shippingAddress?.district || null,
-                        localAddress: shippingAddress?.localAddress || null,
-                        landmark: shippingAddress?.landmark || null,
+                    if (itemsForVendor.length === 0) continue;
+
+                    const vendor = vendors.find((v) => v.id === vendorId);
+                    if (!vendor) continue;
+
+                    try {
+                        await sendVendorOrderEmail(
+                            vendor.email,
+                            order.paymentMethod,
+                            order.orderNumber,
+                            itemsForVendor,
+                            {
+                                name: data.fullName || userexists.fullName,
+                                phone:
+                                    data.phoneNumber || userexists.phoneNumber,
+                                email: userexists.email,
+                                city: shippingAddress?.city || null,
+                                district: shippingAddress?.district || null,
+                                localAddress:
+                                    shippingAddress?.localAddress || null,
+                                landmark: shippingAddress?.landmark || null,
+                            },
+                        );
+                    } catch (error) {
+                        console.log(
+                            "Failed to send email to vendor, vendor id: ",
+                            vendorId,
+                            error,
+                        );
                     }
-                );
-            }
+                }
+            })().catch((error) => {
+                console.log("Failed to send COD order emails:", error);
+            });
         }
 
         if (esewaRedirectUrl) {
-            res.status(200).json({ success: true, data: order, esewaRedirectUrl });
+            res.status(200).json({
+                success: true,
+                data: order,
+                orderSummary,
+                ...orderSummary,
+                esewaRedirectUrl,
+            });
         } else {
-            res.status(201).json({ success: true, data: order });
+            res.status(201).json({
+                success: true,
+                data: order,
+                orderSummary,
+                ...orderSummary,
+            });
         }
+    }
+
+    /**
+     * @desc Preview checkout totals (merchandise subtotal, per-vendor shipping
+     * breakdown, discount, grand total) without placing an order. Read-only —
+     * the frontend must render these numbers instead of recomputing shipping
+     * itself.
+     * @route POST /orders/estimate
+     * @access Authenticated User
+     */
+    async estimateCheckout(
+        req: AuthRequest<{}, {}, IOrderCreateRequest>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.user) throw new AuthError("User not authenticated");
+
+        const estimate = await this.orderService.estimateCheckout(
+            req.user.id,
+            req.body,
+        );
+        res.status(200).json({ success: true, data: estimate });
     }
 
     /**
@@ -129,12 +309,27 @@ export class OrderController {
      * @route GET /orders/payment/success?orderId=&transactionId=
      * @access Authenticated User
      */
-    async handlePaymentSuccess(req: AuthRequest<{}, {}, {}, { orderId: string, transactionId: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async handlePaymentSuccess(
+        req: AuthRequest<
+            {},
+            {},
+            {},
+            { orderId: string; transactionId: string }
+        >,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const { orderId, transactionId } = req.query;
 
-        if (!orderId || !transactionId) throw new BadRequestError('Missing orderId or transactionId');
+        if (!orderId || !transactionId)
+            throw new BadRequestError("Missing orderId or transactionId");
 
-        const order = await this.orderService.verifyPayment(parseInt(orderId, 10), transactionId, req.query);
+        const order = await this.orderService.verifyPayment(
+            req.user.id,
+            parseInt(orderId, 10),
+            transactionId,
+            req.query,
+        );
         res.status(200).json({ success: true, data: order });
     }
 
@@ -143,13 +338,17 @@ export class OrderController {
      * @route GET /orders/payment/cancel?orderId=
      * @access Authenticated User
      */
-    async handlePaymentCancel(req: AuthRequest<{}, {}, {}, { orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async handlePaymentCancel(
+        req: AuthRequest<{}, {}, {}, { orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const { orderId } = req.query;
 
-        if (!orderId) throw new BadRequestError('Missing orderId');
+        if (!orderId) throw new BadRequestError("Missing orderId");
 
-        await this.orderService.handlePaymentCancel(parseInt(orderId, 10));
-        res.status(200).json({ success: false, message: 'Payment cancelled' });
+        await this.orderService.handlePaymentCancel(req.user.id, parseInt(orderId, 10));
+        res.status(200).json({ success: false, message: "Payment cancelled" });
     }
 
     /**
@@ -157,7 +356,11 @@ export class OrderController {
      * @route GET /orders/customer
      * @access Authenticated User
      */
-    async getCustomerOrders(_req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
+    async getCustomerOrders(
+        _req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const orders = await this.orderService.getCustomerOrders();
         res.status(200).json({ success: true, data: orders });
     }
@@ -167,40 +370,63 @@ export class OrderController {
      * @route GET /orders/customer/:orderId
      * @access Admin, Customer who owns order, or Vendor owning products in order
      */
-    async getCustomerOrderDetails(req: CombinedAuthRequest<{ orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async getCustomerOrderDetails(
+        req: CombinedAuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const user = req.user;
-        if (!user) throw new AuthError('User not authenticated');
+        if (!user) throw new AuthError("User not authenticated");
 
         const orderId = parseInt(req.params.orderId, 10);
-        if (isNaN(orderId)) throw new BadRequestError('Invalid order ID');
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
 
         const order = await this.orderService.getCustomerOrderDetails(orderId);
 
-        if (user.role === UserRole.ADMIN || order.orderedById === user.id) {
-            res.status(200).json({ success: true, data: order });
+        if (user.role === UserRole.ADMIN || user.role === UserRole.STAFF || order.orderedById === user.id) {
+            res.status(200).json({
+                success: true,
+                data: sanitizeOrderFull(order),
+            });
             return;
         }
 
         if (req.vendor) {
             const vendorId = req.vendor.id;
             const hasProductFromVendor = order.orderItems.some(
-                (item) => item.product.vendor.id === vendorId
+                (item) => item.vendorId === vendorId,
             );
 
             if (hasProductFromVendor) {
-                res.status(200).json({ success: true, data: order });
+                // Vendor-scoped: never leak another vendor's items, shipping
+                // fee, or the order's grand total to this vendor.
+                res.status(200).json({
+                    success: true,
+                    data: sanitizeOrderForVendor(order, vendorId),
+                });
                 return;
             }
         }
 
-        throw new ForbiddenError('You do not have access to this order');
+        throw new ForbiddenError("You do not have access to this order");
     }
 
-    async getOrderById(req: Request<{ id: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async getOrderById(
+        req: AuthRequest<{ id: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const id = Number(req.params.id);
+        if (!Number.isInteger(id) || id <= 0) throw new NotFoundError("Order");
 
         const order = await this.orderService.getOrderById(id);
-        if (!order) throw new NotFoundError("Order");
+        // The customer's name, phone and address are on this record: only
+        // its owner or the back office may read it. 404, not 403, so order
+        // ids cannot be probed for existence.
+        const isBackOffice = req.user.role === UserRole.ADMIN || req.user.role === UserRole.STAFF;
+        if (!order || (!isBackOffice && order.orderedBy?.id !== req.user.id)) {
+            throw new NotFoundError("Order");
+        }
 
         res.status(200).json({ success: true, data: order });
     }
@@ -210,14 +436,22 @@ export class OrderController {
      * @route PUT /orders/:orderId/shipping-address
      * @access Authenticated User
      */
-    async updateShippingAddress(req: AuthRequest<{ orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
-        if (!req.user) throw new AuthError('User not authenticated');
+    async updateShippingAddress(
+        req: AuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.user) throw new AuthError("User not authenticated");
 
         const orderId = parseInt(req.params.orderId, 10);
-        if (isNaN(orderId)) throw new BadRequestError('Invalid order ID');
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
 
         const addressdata = req.body as IShippingAddressRequest;
-        const updatedOrder = await this.orderService.updateShippingAddress(req.user.id, orderId, addressdata);
+        const updatedOrder = await this.orderService.updateShippingAddress(
+            req.user.id,
+            orderId,
+            addressdata,
+        );
         res.status(200).json({ success: true, data: updatedOrder });
     }
 
@@ -226,9 +460,30 @@ export class OrderController {
      * @route GET /orders
      * @access Admin or authorized
      */
-    async getAllOrders(_req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
-        const orders = await this.orderService.getAllOrders();
-        res.status(200).json({ success: true, data: orders });
+    async getAllOrders(
+        req: AuthRequest<{}, {}, {}, Record<string, string>>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const q = req.query;
+        const result = await this.orderService.getAllOrders({
+            page: q.page ? Number(q.page) : undefined,
+            limit: q.limit ? Number(q.limit) : undefined,
+            search: q.search,
+            status: q.status as any,
+            paymentStatus: q.paymentStatus as any,
+            vendorId: q.vendorId ? Number(q.vendorId) : undefined,
+            startDate: q.startDate,
+            endDate: q.endDate,
+            minPrice: q.minPrice ? Number(q.minPrice) : undefined,
+            maxPrice: q.maxPrice ? Number(q.maxPrice) : undefined,
+            sort: q.sort as any,
+        });
+        res.status(200).json({
+            success: true,
+            data: result.items,
+            pagination: result.pagination,
+        });
     }
 
     /**
@@ -236,9 +491,13 @@ export class OrderController {
      * @route GET /orders/:orderId
      * @access Authenticated User
      */
-    async getOrderDetails(req: AuthRequest<{ orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async getOrderDetails(
+        req: AuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const orderId = parseInt(req.params.orderId, 10);
-        if (isNaN(orderId)) throw new BadRequestError('Invalid order ID');
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
 
         const order = await this.orderService.getOrderDetails(orderId);
         res.status(200).json({ success: true, data: order });
@@ -249,16 +508,113 @@ export class OrderController {
      * @route PATCH /orders/:orderId/status
      * @access Admin or authorized user
      */
-    async updateOrderStatus(req: AuthRequest<{ orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async updateOrderStatus(
+        req: AuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const orderId = parseInt(req.params.orderId, 10);
-        if (isNaN(orderId)) throw new BadRequestError('Invalid order ID');
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+        if (!req.user) throw new AuthError("User not authenticated");
 
-        const { status } = req.body as IUpdateOrderStatusRequest;
-        const updatedOrder = await this.orderService.updateOrderStatus(orderId, status);
+        const { status, expectedCurrentStatus, reason, note } =
+            req.body as IUpdateOrderStatusRequest;
 
-        await this.notificationService.notifyOrderStatusUpdated(updatedOrder);
+        const updatedOrder = await this.orderService.changeOrderStatus(
+            orderId,
+            status,
+            {
+                actorRole: "ADMIN",
+                changedByUserId: req.user.id,
+                auditActorType:
+                    req.user.role === UserRole.STAFF
+                        ? AuditActorType.STAFF
+                        : AuditActorType.ADMIN,
+                reason,
+                note,
+                expectedCurrentStatus,
+            },
+        );
 
         res.status(200).json({ success: true, data: updatedOrder });
+    }
+
+    /**
+     * @desc Confirm or cancel a single order item (multi-vendor partial
+     *       availability). Cancellations require a remark; the backend
+     *       re-validates everything the frontend enforced.
+     * @route PUT /order/admin/:orderId/items/:itemId/fulfillment
+     * @access Admin/Staff only
+     */
+    async updateOrderItemFulfillment(
+        req: AuthRequest<{ orderId: string; itemId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const orderId = parseInt(req.params.orderId, 10);
+        const itemId = parseInt(req.params.itemId, 10);
+        if (isNaN(orderId) || isNaN(itemId)) {
+            throw new BadRequestError("Invalid order or item ID");
+        }
+        if (!req.user) throw new AuthError("User not authenticated");
+
+        const { status, cancellationRemark } =
+            req.body as IUpdateOrderItemFulfillmentRequest;
+
+        const updatedOrder = await this.orderService.updateOrderItemFulfillment(
+            orderId,
+            itemId,
+            status,
+            {
+                changedByUserId: req.user.id,
+                auditActorType:
+                    req.user.role === UserRole.STAFF
+                        ? AuditActorType.STAFF
+                        : AuditActorType.ADMIN,
+                cancellationRemark,
+            },
+        );
+
+        res.status(200).json({ success: true, data: updatedOrder });
+    }
+
+    /**
+     * @desc Get the status-change timeline for an order
+     * @route GET /orders/admin/:orderId/status-history
+     * @access Admin or authorized users
+     */
+    async getOrderStatusHistory(
+        req: AuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const orderId = parseInt(req.params.orderId, 10);
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+
+        const history = await this.orderService.getOrderStatusHistory(orderId);
+        res.status(200).json({ success: true, data: history });
+    }
+
+    /**
+     * @desc Get the status-change timeline for an order, scoped to a vendor
+     * @route GET /order/vendor/:orderId/status-history
+     * @access Vendor
+     */
+    async getVendorOrderStatusHistory(
+        req: VendorAuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
+
+        const orderId = parseInt(req.params.orderId, 10);
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
+
+        const history = await this.orderService.getOrderStatusHistoryForVendor(
+            req.vendor.id,
+            orderId,
+        );
+        res.status(200).json({ success: true, data: history });
     }
 
     /**
@@ -266,25 +622,36 @@ export class OrderController {
      * @route GET /orders/search?orderId=
      * @access Authenticated User
      */
-    async searchOrdersById(req: AuthRequest<{}, {}, {}, { orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
+    async searchOrdersById(
+        req: AuthRequest<{}, {}, {}, { orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const orderIdRaw = req.query.orderId;
 
-        if (!orderIdRaw) throw new BadRequestError('Order ID is required');
+        if (!orderIdRaw) throw new BadRequestError("Order ID is required");
 
         const orderId = parseInt(orderIdRaw, 10);
-        if (isNaN(orderId) || orderId <= 0) throw new BadRequestError('Invalid order ID - must be a positive number');
+        if (isNaN(orderId) || orderId <= 0)
+            throw new BadRequestError(
+                "Invalid order ID - must be a positive number",
+            );
 
         const order = await this.orderService.searchOrdersById(orderId);
-        if (!order) throw new NotFoundError('Order');
+        if (!order) throw new NotFoundError("Order");
 
         res.status(200).json({ success: true, data: order });
     }
 
-    async trackOrderById(req: AuthRequest<{}, {}, {}, { orderId: string, email: string }>, res: Response, _next: NextFunction): Promise<void> {
-        const orderId = Number(req.query.orderId);
+    async trackOrderById(
+        req: AuthRequest<{}, {}, {}, { orderId: string; email: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const orderId = req.query.orderId;
         const email = req.query.email;
 
-        if (!orderId) throw new BadRequestError("Order id is required");
+        if (!orderId) throw new BadRequestError("Order Number is required");
 
         const userExists = await findUserByEmail(email);
         if (!userExists) throw new NotFoundError("User");
@@ -299,11 +666,52 @@ export class OrderController {
      * @route GET /vendor/orders
      * @access Vendor
      */
-    async getVendorOrders(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
-        if (!req.vendor) throw new AuthError('Vendor not authenticated');
+    async getVendorOrders(
+        req: VendorAuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
 
-        const orders = await this.orderService.getVendorOrders(req.vendor.id);
-        res.status(200).json({ success: true, data: orders });
+        const q = req.query as Record<string, string>;
+        const result = await this.orderService.getVendorOrders(req.vendor.id, {
+            page: q.page ? Number(q.page) : undefined,
+            limit: q.limit ? Number(q.limit) : undefined,
+            status: q.status,
+            sort: q.sort as any,
+            search: q.search,
+        });
+        res.status(200).json({
+            success: true,
+            data: result.items,
+            pagination: result.pagination,
+        });
+    }
+
+    /**
+     * @desc Export every order matching the current filters (no pagination)
+     *       for CSV/Excel — the frontend export buttons previously only
+     *       had access to whatever page was on screen.
+     * @route GET /vendor/orders/export
+     * @access Vendor
+     */
+    async exportVendorOrders(
+        req: VendorAuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
+
+        const q = req.query as Record<string, string>;
+        const items = await this.orderService.getAllVendorOrdersForExport(
+            req.vendor.id,
+            {
+                status: q.status,
+                sort: q.sort as any,
+                search: q.search,
+            },
+        );
+        res.status(200).json({ success: true, data: items });
     }
 
     /**
@@ -311,13 +719,20 @@ export class OrderController {
      * @route GET /vendor/orders/:orderId
      * @access Vendor
      */
-    async getVendorOrderDetails(req: VendorAuthRequest<{ orderId: string }>, res: Response, _next: NextFunction): Promise<void> {
-        if (!req.vendor) throw new AuthError('Vendor not authenticated');
+    async getVendorOrderDetails(
+        req: VendorAuthRequest<{ orderId: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        if (!req.vendor) throw new AuthError("Vendor not authenticated");
 
         const orderId = parseInt(req.params.orderId, 10);
-        if (isNaN(orderId)) throw new BadRequestError('Invalid order ID');
+        if (isNaN(orderId)) throw new BadRequestError("Invalid order ID");
 
-        const order = await this.orderService.getVendorOrderDetails(req.vendor.id, orderId);
+        const order = await this.orderService.getVendorOrderDetails(
+            req.vendor.id,
+            orderId,
+        );
         res.status(200).json({ success: true, data: order });
     }
 
@@ -326,22 +741,37 @@ export class OrderController {
      * @route GET /orders/customer/history
      * @access Authenticated User
      */
-    async getCustomerOrderHistory(req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
+    async getCustomerOrderHistory(
+        req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const user = req.user?.id;
-        if (!user) throw new AuthError('User not authenticated');
+        if (!user) throw new AuthError("User not authenticated");
 
         const orders = await this.orderService.getOrderHistoryForCustomer(user);
         res.status(200).json({ success: true, data: orders });
     }
 
-    async getOrderDetailByMerchantTransactionId(req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
-        const { mTransactionId } = req.body as { mTransactionId: string };
+    async getOrderDetailByMerchantTransactionId(
+        req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const { mTransactionId, returnedFromGateway } = req.body as {
+            mTransactionId: string;
+            returnedFromGateway?: boolean;
+        };
 
-        if (!mTransactionId || typeof mTransactionId !== 'string') {
+        if (!mTransactionId || typeof mTransactionId !== "string") {
             throw new BadRequestError("Invalid or missing MerchantTxnId");
         }
 
-        const orders = await this.orderService.getOrderDetailByMerchantTransactionId(mTransactionId);
+        const orders =
+            await this.orderService.getOrderDetailByMerchantTransactionId(
+                mTransactionId,
+                { returnedFromGateway: returnedFromGateway === true },
+            );
         if (!orders) throw new NotFoundError("Order");
 
         const userId = orders.orderedById;
@@ -352,35 +782,125 @@ export class OrderController {
         res.status(200).json({ success: true, data: orders });
     }
 
-    async deleteOrder(_req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
+    async deleteOrder(
+        _req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         await this.orderService.deleteOrder();
-        res.status(200).json({ success: true, msg: "Order deleted successfully" });
+        res.status(200).json({
+            success: true,
+            msg: "Order deleted successfully",
+        });
     }
 
-    async esewaPaymentSuccess(req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
-        const { token, orderId } = req.body as { token: string, orderId: number };
-        const order = await this.orderService.esewaSuccess(token, orderId);
-        if (order.success) {
-            res.status(200).json({ success: true, msg: "Payment successful" });
+    async esewaPaymentSuccess(
+        req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const { token, orderId, draftId } = req.body as {
+            token: string;
+            orderId?: number;
+            draftId?: number;
+        };
+        if (typeof token !== "string" || !token) {
+            throw new BadRequestError("token is required");
+        }
+        if (
+            orderId !== undefined &&
+            orderId !== null &&
+            !Number.isInteger(Number(orderId))
+        ) {
+            throw new BadRequestError("orderId must be an integer");
+        }
+        if (
+            draftId !== undefined &&
+            draftId !== null &&
+            !Number.isInteger(Number(draftId))
+        ) {
+            throw new BadRequestError("draftId must be an integer");
+        }
+        const result = await this.orderService.esewaSuccess(
+            req.user.id,
+            token,
+            orderId !== undefined && orderId !== null
+                ? Number(orderId)
+                : undefined,
+            draftId !== undefined && draftId !== null
+                ? Number(draftId)
+                : undefined,
+        );
+        if (result.success) {
+            res.status(200).json({
+                success: true,
+                msg: "Payment successful",
+                data: {
+                    orderId: result.orderId,
+                    orderNumber: result.orderNumber,
+                },
+            });
             return;
         }
         throw new BadRequestError("Payment failed");
     }
 
-    async esewaPaymentFailed(req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
-        const { orderId } = req.body as { orderId: number };
-        const order = await this.orderService.esewaFailed(orderId);
-        if (order.success) {
+    async esewaPaymentFailed(
+        req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        const { orderId, draftId } = req.body as {
+            orderId?: number;
+            draftId?: number;
+        };
+        if (
+            orderId !== undefined &&
+            orderId !== null &&
+            !Number.isInteger(Number(orderId))
+        ) {
+            throw new BadRequestError("orderId must be an integer");
+        }
+        if (
+            draftId !== undefined &&
+            draftId !== null &&
+            !Number.isInteger(Number(draftId))
+        ) {
+            throw new BadRequestError("draftId must be an integer");
+        }
+        if (
+            (orderId === undefined || orderId === null) &&
+            (draftId === undefined || draftId === null)
+        ) {
+            throw new BadRequestError("orderId or draftId is required");
+        }
+        const result = await this.orderService.esewaFailed(
+            req.user.id,
+            orderId !== undefined && orderId !== null
+                ? Number(orderId)
+                : undefined,
+            draftId !== undefined && draftId !== null
+                ? Number(draftId)
+                : undefined,
+        );
+        if (result.success) {
             res.status(200).json({ success: true, msg: "Payment failed" });
             return;
         }
         throw new BadRequestError("Payment not found");
     }
 
-    async checkAvailablePromocode(req: AuthRequest, res: Response, _next: NextFunction): Promise<void> {
+    async checkAvailablePromocode(
+        req: AuthRequest,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
         const { promoCode } = req.body as { promoCode: string };
         const userId = req.user?.id;
-        const promo = await this.orderService.checkAvailablePromocode(promoCode, userId);
+        const promo = await this.orderService.checkAvailablePromocode(
+            promoCode,
+            userId,
+        );
         if (promo) {
             res.status(200).json({ success: true, data: promo });
             return;

@@ -10,11 +10,15 @@ import {
 } from 'typeorm';
 import { Vendor } from './vendor.entity';
 
+/**
+ * How the admin pays a vendor out. NPX pays into a bank account, so it carries
+ * bank details; eSewa and Khalti carry a wallet number. BANK and NPS were
+ * folded into NPX (migration 1787800000000).
+ */
 export enum PaymentOption {
     ESEWA = 'ESEWA',
     KHALTI = 'KHALTI',
-    BANK = 'BANK',
-    NPS = "NPS"
+    NPX = 'NPX',
 }
 
 @Entity()
@@ -30,13 +34,13 @@ export class VendorPaymentOption {
     paymentType: PaymentOption;
 
     /**
-     * For WALLET (ESEWA, KHALTI, IMEPAY):
+     * For WALLET (ESEWA, KHALTI):
      * {
      *   walletNumber: string,
      *   accountName?: string
      * }
      *
-     * For BANK (BANK):
+     * For NPX (bank payout):
      * {
      *   accountNumber: string,
      *   bankName: string,

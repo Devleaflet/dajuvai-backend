@@ -1,8 +1,10 @@
 
 import { Router } from "express";
 import { authMiddleware, isAdminOrStaff, validateZod } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { PromoController } from "../controllers/promo.controller";
-import { createPromoSchema, deletePromoSchema, editPromoSchema } from "../utils/zod_validations/promo.zod";
+import { createPromoSchema, editPromoSchema, promoIdParamSchema } from "../utils/zod_validations/promo.zod";
 
 const promoRouter = Router();
 
@@ -19,8 +21,6 @@ const promoController = new PromoController();
  *       User must have admin or staff privileges.
  *     tags:
  *       - Promo Code
- *     security:
- *       - BearerAuth: []
  *     responses:
  *       200:
  *         description: Successfully retrieved promo codes.
@@ -86,7 +86,13 @@ const promoController = new PromoController();
  *                   type: string
  *                   example: Internal server error
  */
-promoRouter.get("/", promoController.getPromoCode.bind(promoController));
+promoRouter.get(
+  "/",
+  authMiddleware,
+  isAdminOrStaff,
+  checkPermission(ModuleName.PROMO, PermissionLevel.VIEW),
+  promoController.getPromoCode.bind(promoController),
+);
 
 
 /**
@@ -114,12 +120,22 @@ promoRouter.get("/", promoController.getPromoCode.bind(promoController));
  *             properties:
  *               promoCode:
  *                 type: string
+ *                 minLength: 1
  *                 example: SUMMER2025
  *               discountPercentage:
- *                 type: integer
+ *                 type: number
  *                 minimum: 1
  *                 maximum: 100
  *                 example: 15
+ *               applyOn:
+ *                 type: string
+ *                 enum: [LINE_TOTAL, SHIPPING]
+ *                 description: Where the discount applies
+ *                 example: LINE_TOTAL
+ *               isValid:
+ *                 type: boolean
+ *                 description: Whether the promo code is valid
+ *                 example: true
  *     responses:
  *       201:
  *         description: Promo code created successfully.
@@ -187,7 +203,7 @@ promoRouter.get("/", promoController.getPromoCode.bind(promoController));
  *                   type: string
  *                   example: Internal Server Error
  */
-promoRouter.post("/", authMiddleware, isAdminOrStaff, validateZod(createPromoSchema, "body"), promoController.createPromo.bind(promoController));
+promoRouter.post("/", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.CREATE_EDIT), validateZod(createPromoSchema, "body"), promoController.createPromo.bind(promoController));
 
 /**
  * @swagger
@@ -290,7 +306,7 @@ promoRouter.post("/", authMiddleware, isAdminOrStaff, validateZod(createPromoSch
  *                   type: string
  *                   example: Internal Server Error
  */
-promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePromoSchema, "params"), promoController.deletePromo.bind(promoController));
+promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.DELETE), validateZod(promoIdParamSchema, "params"), promoController.deletePromo.bind(promoController));
 
 
 /**
@@ -320,6 +336,7 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePro
  *             properties:
  *               promoCode:
  *                 type: string
+ *                 minLength: 1
  *                 example: "NEWYEAR25"
  *               discountPercentage:
  *                 type: number
@@ -341,12 +358,12 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePro
  *             schema:
  *               type: object
  *               properties:
- *                 sucess:
+ *                 success:
  *                   type: boolean
  *                   example: true
  *                 msg:
  *                   type: string
- *                   example: Promo code update succesfully
+ *                   example: Promo code updated successfully
  *                 data:
  *                   type: object
  *                   properties:
@@ -374,6 +391,6 @@ promoRouter.delete("/:id", authMiddleware, isAdminOrStaff, validateZod(deletePro
  *       404:
  *         description: Promo code not found
  */
-promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
+promoRouter.patch("/:id", authMiddleware, isAdminOrStaff, checkPermission(ModuleName.PROMO, PermissionLevel.CREATE_EDIT), validateZod(promoIdParamSchema, "params"), validateZod(editPromoSchema, "body"), promoController.updatePromo.bind(promoController));
 
 export default promoRouter;

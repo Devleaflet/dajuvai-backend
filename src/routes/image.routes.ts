@@ -1,17 +1,55 @@
 import { Router } from "express";
-import { uploadMiddleware } from "../config/multer.config";
-import { ImageService } from "../service/image.service";
+import type { RequestHandler } from "express";
+import rateLimit, { Options } from "express-rate-limit";
+import { singleUploadMiddleware } from "../config/multer.config";
 import { ImageController } from "../controllers/image.controller";
+import { combinedAuthMiddleware } from "../middlewares/auth.middleware";
+import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 
 const imageRouter = Router();
-const imageController = new ImageController()
+const imageController = new ImageController();
+
+/**
+ * Uploads require an authenticated user or vendor (spec OPT-7 / BUG-5).
+ * Sole exception: `folder=vendor` — vendor signup uploads registration
+ * documents before any account/token exists, so that folder stays public
+ * while every other folder rejects unauthenticated callers.
+ */
+const uploadAuthMiddleware: RequestHandler = (req, res, next) => {
+    void combinedAuthMiddleware(req as any, res, (err?: unknown) => {
+        if (!err) return next();
+        if (String(req.query.folder ?? "") === "vendor") return next();
+        next(err);
+    });
+};
+
+/**
+ * Anonymous uploads only. A registration supplies at most ten documents
+ * (five tax, five citizenship), so forty per window is one full registration
+ * plus three retries — a vendor who re-picks the wrong file, or whose phone
+ * drops the connection mid-wizard, must not be locked out of signing up.
+ * Twenty was one retry with no margin. An authenticated upload is
+ * attributable to an account and is not throttled alongside it.
+ *
+ * `publicRateLimitKey`, not the default `req.ip`: this endpoint is reached
+ * through the Next console's proxy, whose address is the same on every
+ * request, so the default key would make forty uploads per fifteen minutes a
+ * platform-wide total.
+ */
+export const anonymousUploadLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 40,
+    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    message: "Too many uploads from this address, please try again later.",
+    skip: (req) => Boolean((req as any).user || (req as any).vendor),
+});
 
 /**
  * @swagger
  * /api/image:
  *   post:
- *     summary: Upload a single image to Cloudinary
- *     description: Uploads a single image file to Cloudinary and returns its secure URL and publicId. The target folder can be specified in query params.
+ *     summary: Upload a single file to Cloudinary
+ *     description: Uploads one image or supported document to Cloudinary and returns its secure URL, publicId, and resource type. The folder is required and validated before upload.
  *     tags:
  *       - Image
  *     parameters:
@@ -19,7 +57,7 @@ const imageController = new ImageController()
  *         name: folder
  *         schema:
  *           type: string
- *           example: products
+ *           example: banners
  *         required: true
  *         description: The folder in Cloudinary where the image will be stored.
  *     requestBody:
@@ -28,11 +66,13 @@ const imageController = new ImageController()
  *         multipart/form-data:
  *           schema:
  *             type: object
+ *             required:
+ *               - image
  *             properties:
- *               file:
+ *               image:
  *                 type: string
  *                 format: binary
- *                 description: The image file to upload
+ *                 description: The image or supported document to upload
  *     responses:
  *       200:
  *         description: Image uploaded successfully
@@ -58,11 +98,11 @@ const imageController = new ImageController()
  *                 success:
  *                   type: boolean
  *                   example: false
- *                 msg:
+ *                 message:
  *                   type: string
- *                   example: No file found
- *       500:
- *         description: Image upload failed on server or Cloudinary side
+ *                   example: No file uploaded
+ *       502:
+ *         description: Cloudinary upload failed
  *         content:
  *           application/json:
  *             schema:
@@ -71,10 +111,37 @@ const imageController = new ImageController()
  *                 success:
  *                   type: boolean
  *                   example: false
- *                 msg:
+ *                 errorCode:
  *                   type: string
- *                   example: Error uploading image
+ *                   example: UPLOAD_STORAGE_ERROR
+ *                 message:
+ *                   type: string
+ *                   example: File storage upload failed
+ *       429:
+ *         description: Too many requests, please try again later
+ *       503:
+ *         description: Cloudinary is not configured
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 errorCode:
+ *                   type: string
+ *                   example: UPLOAD_SERVICE_UNAVAILABLE
+ *                 message:
+ *                   type: string
+ *                   example: File upload service is not configured
  */
-imageRouter.post("/", uploadMiddleware, imageController.uplaodSingle.bind(imageController))
+imageRouter.post(
+  "/",
+  uploadAuthMiddleware,
+  anonymousUploadLimiter,
+  singleUploadMiddleware,
+  imageController.uploadSingle.bind(imageController),
+);
 
 export default imageRouter;

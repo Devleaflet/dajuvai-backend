@@ -1,4 +1,4 @@
-import { Column, Entity, JoinColumn, JoinTable, ManyToMany, ManyToOne, PrimaryGeneratedColumn } from "typeorm";
+import { Column, Entity, JoinColumn, JoinTable, ManyToMany, ManyToOne, PrimaryGeneratedColumn, Index } from "typeorm";
 import { Product } from "./product.entity";
 import { ProductSource } from "./banner.entity";
 import { Category } from "./category.entity";
@@ -10,6 +10,11 @@ import { Deal } from "./deal.entity";
 export class HomePageSection {
     @PrimaryGeneratedColumn()
     id: number;
+
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_homepage_section_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
 
     @Column({ unique: true })
     title: string; // examples: best of oils, best of <product>

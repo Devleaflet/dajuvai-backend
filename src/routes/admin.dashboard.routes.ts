@@ -2,10 +2,13 @@
 
 import { Router } from "express";
 import { authMiddleware, isAdmin, isAdminOrStaff } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { AdminDashboardController } from "../controllers/admin.dashboard.controller";
 const adminDashboardController = new AdminDashboardController();
 
 const adminDashboardRouter = Router();
+adminDashboardRouter.use(authMiddleware, isAdminOrStaff);
 
 /**
  * @swagger
@@ -52,6 +55,16 @@ const adminDashboardRouter = Router();
  *                       type: integer
  *                       description: Total number of products listed
  *                       example: 220
+ *                     totalDeliveredRevenue:
+ *                       type: number
+ *                       format: float
+ *                       description: Paid revenue from delivered orders, including shipping.
+ *                       example: 11200.50
+ *                     totalShippingRevenue:
+ *                       type: number
+ *                       format: float
+ *                       description: Shipping fees from paid orders.
+ *                       example: 875.00
  *       401:
  *         description: Unauthorized - No token or invalid token
  *         content:
@@ -104,7 +117,7 @@ adminDashboardRouter.get("/stats", adminDashboardController.getDashboardStats.bi
  *   get:
  *     summary: Get daily revenue chart data for admin dashboard
  *     description: |
- *       Returns daily revenue (**totalPrice + shippingFee**) for the last N days.  
+ *       Returns paid daily revenue (**totalPrice + shippingFee**) for the last N days.  
  *       If no orders exist on a particular day, that day will still be included in the response with `0` revenue.
  *     tags: [Admin Dashboard]
  *     security:
@@ -139,8 +152,30 @@ adminDashboardRouter.get("/stats", adminDashboardController.getDashboardStats.bi
  *                     example: 12345.67
  *       401:
  *         description: Unauthorized - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error when fetching revenue data
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bind(adminDashboardController));
 
@@ -154,7 +189,7 @@ adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bi
  *       Fetch total sales amount grouped by vendors.  
  *       - Supports optional date range filters (`startDate`, `endDate`).  
  *       - Supports pagination via `page`.  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -237,8 +272,30 @@ adminDashboardRouter.get("/revenue", adminDashboardController.getRevenueChart.bi
  *                   example: "Valid section ID is required"
  *       401:
  *         description: Unauthorized (missing or invalid token)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       403:
  *         description: Forbidden (only admin or staff can access this route)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -268,7 +325,7 @@ adminDashboardRouter.get("/vendors-sales-amount", adminDashboardController.getVe
  *       Fetch products ranked by total sales amount (quantity × price).  
  *       - Supports optional date range filters (`startDate`, `endDate`).  
  *       - Supports pagination via `page`.  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -351,8 +408,30 @@ adminDashboardRouter.get("/vendors-sales-amount", adminDashboardController.getVe
  *                   example: "Invalid query parameters"
  *       401:
  *         description: Unauthorized (missing or invalid token)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       403:
  *         description: Forbidden (only admin or staff can access this route)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -379,8 +458,8 @@ adminDashboardRouter.get("/top-products", adminDashboardController.getTopProduct
  *     summary: Get today's total sales
  *     description: |
  *       Fetch the total sales amount for the current day.  
- *       - Only includes orders with status `DELIVERED` or `CONFIRMED`.  
- *       - The sales amount is the sum of `totalPrice` from orders placed today.  
+ *       - Only includes paid orders with status `DELIVERED` or `CONFIRMED`.  
+ *       - The sales amount is the sum of `totalPrice + shippingFee` from paid orders placed today.  
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -403,6 +482,22 @@ adminDashboardRouter.get("/top-products", adminDashboardController.getTopProduct
  *                       type: number
  *                       format: float
  *                       example: 4520.50
+ *                     hourlySales:
+ *                       type: array
+ *                       description: 24 hourly paid-sales buckets for the current day, including zero-value hours.
+ *                       minItems: 24
+ *                       maxItems: 24
+ *                       items:
+ *                         type: object
+ *                         required: [label, value]
+ *                         properties:
+ *                           label:
+ *                             type: string
+ *                             example: "14:00"
+ *                           value:
+ *                             type: number
+ *                             format: float
+ *                             example: 1250.00
  *       401:
  *         description: Unauthorized (missing or invalid token)
  *       403:
@@ -432,7 +527,7 @@ adminDashboardRouter.get("/todays-sales", adminDashboardController.getTodaysSale
  *  /api/admin/dashboard/analytics/revenue-by-category:
  *   get:
  *     summary: Get revenue by category
- *     description: Returns total revenue grouped by category and subcategory. Only orders with paymentStatus "PAID" are included. Optional date filtering is supported.
+ *     description: Returns realized revenue grouped by category. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional date filtering is supported.
  *     tags:
  *       - Revenue
  *     parameters:
@@ -469,12 +564,10 @@ adminDashboardRouter.get("/todays-sales", adminDashboardController.getTodaysSale
  *                       category:
  *                         type: string
  *                         example: "Women's Fashion"
- *                       subcategory:
- *                         type: string
- *                         example: "Women's Sunglasses"
  *                       revenue:
- *                         type: string
- *                         example: "900.00"
+ *                         type: number
+ *                         format: float
+ *                         example: 900.00
  *       400:
  *         description: Invalid request parameters
  *         content:
@@ -509,8 +602,8 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  * @swagger
  *  /api/admin/dashboard/analytics/revenue-by-sub-category:
  *   get:
- *     summary: Get revenue by category
- *     description: Returns total revenue grouped by subcategory . Only orders with paymentStatus "PAID" are included. Optional date filtering is supported.
+ *     summary: Get revenue by subcategory
+ *     description: Returns realized revenue grouped by subcategory. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional date filtering is supported.
  *     tags:
  *       - Revenue
  *     parameters:
@@ -530,7 +623,7 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  *         description: End date for filtering orders (ISO 8601 format, e.g., 2025-09-30T23:59:59Z)
  *     responses:
  *       200:
- *         description: Revenue by category fetched successfully
+ *         description: Revenue by subcategory fetched successfully
  *         content:
  *           application/json:
  *             schema:
@@ -544,15 +637,13 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  *                   items:
  *                     type: object
  *                     properties:
- *                       category:
- *                         type: string
- *                         example: "Women's Fashion"
  *                       subcategory:
  *                         type: string
  *                         example: "Women's Sunglasses"
  *                       revenue:
- *                         type: string
- *                         example: "900.00"
+ *                         type: number
+ *                         format: float
+ *                         example: 900.00
  *       400:
  *         description: Invalid request parameters
  *         content:
@@ -581,7 +672,6 @@ adminDashboardRouter.get("/analytics/revenue-by-category", adminDashboardControl
  *                   example: "Something went wrong"
  */
 adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardController.getRevenueBySubCategory.bind(adminDashboardController));
-//authMiddleware, isAdmin, 
 
 
 /**
@@ -589,7 +679,7 @@ adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardCon
  * /api/admin/dashboard/analytics/vendor/revenue:
  *   get:
  *     summary: Get revenue breakdown by vendor
- *     description: Returns total revenue grouped by vendor. Only includes orders with paymentStatus PAID. Supports optional date range filtering.
+ *     description: Returns realized revenue grouped by vendor. Only PAID orders with status CONFIRMED or DELIVERED are included. Supports optional date range filtering.
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -633,11 +723,33 @@ adminDashboardRouter.get("/analytics/revenue-by-sub-category", adminDashboardCon
  *                         example: "Best Traders"
  *                       revenue:
  *                         type: number
- *                         example: 45000.00
+ *                       example: 45000.00
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 adminDashboardRouter.get("/analytics/vendor/revenue", adminDashboardController.getRevenueByVendor.bind(adminDashboardController))
 
@@ -685,8 +797,30 @@ adminDashboardRouter.get("/analytics/vendor/revenue", adminDashboardController.g
  *                       example: 12500.00
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 adminDashboardRouter.get("/analytics/shipping/revenue", adminDashboardController.getTotalShippingRevenue.bind(adminDashboardController))
 
@@ -738,6 +872,17 @@ adminDashboardRouter.get("/analytics/shipping/revenue", adminDashboardController
  *                       example: "up"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -759,7 +904,7 @@ adminDashboardRouter.get("/gross-revenue-trend", adminDashboardController.getGro
  * /api/admin/dashboard/orders-today-count:
  *   get:
  *     summary: Get the count of orders placed today
- *     description: Returns the number of orders created on the current date (DATE(createdAt) = CURRENT_DATE).
+ *     description: Returns the number of orders placed on the current date (DATE(createdAt) = CURRENT_DATE).
  *     tags:
  *       - Admin Dashboard
  *     security:
@@ -784,6 +929,17 @@ adminDashboardRouter.get("/gross-revenue-trend", adminDashboardController.getGro
  *                       example: 14
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -837,6 +993,17 @@ adminDashboardRouter.get("/orders-today-count", adminDashboardController.getOrde
  *                       example: 3
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
  *         content:
@@ -851,7 +1018,7 @@ adminDashboardRouter.get("/orders-today-count", adminDashboardController.getOrde
  *                   type: string
  *                   example: "Error fetching needs-action data"
  */
-adminDashboardRouter.get("/needs-action", adminDashboardController.getNeedsAction.bind(adminDashboardController));
+adminDashboardRouter.get("/needs-action", checkPermission(ModuleName.ORDER, PermissionLevel.VIEW), adminDashboardController.getNeedsAction.bind(adminDashboardController));
 
 export default adminDashboardRouter;
 

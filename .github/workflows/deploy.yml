@@ -1,41 +1,118 @@
-name: Pipeline for prod(backend)
+name: Deploy backend production
+
+permissions:
+  contents: read
 
 on:
   workflow_dispatch:
+    inputs:
+      run_migrations:
+        description: "Run pending production database migrations before replacing the API (back up the database first)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-backend-production
+  cancel-in-progress: false
 
 jobs:
-  build:
+  verify:
     runs-on: ubuntu-latest
-
+    # Existing token/email tests need configured values; these never leave CI.
+    env:
+      JWT_SECRET: ci-placeholder-secret-at-least-32-characters
+      JWT_REFRESH_SECRET: ci-another-placeholder-secret-at-least-32-characters
+      USER_EMAIL: ci@example.invalid
+      PASS_EMAIL: ci-placeholder
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v2
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v2
+      - name: Require production branch
+        run: test "$GITHUB_REF_NAME" = master
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
         with:
-          node-version: "16"
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run check:routes
+      - run: npm run test:unit
 
-      - name: Build Docker image
-        run: docker build -t dajubhai-backend-prod-v1 .
-
-      - name: Tag the image
-        run: docker tag dajubhai-backend-prod-v1 registry.dajuvai.com/backend/dajubhai-backend-prod-v1:latest
-
-      - name: Log in to Docker registry
-        run: echo "${{ secrets.REGISTRY_PASSWORD }}" |  docker login registry.dajuvai.com -u "${{ secrets.REGISTRY_USERNAME }}" --password-stdin
-
-      - name: Push Docker image to our server
-        run: docker push registry.dajuvai.com/backend/dajubhai-backend-prod-v1:latest
-
-      - name: Deploy to Server via SSH
-        uses: appleboy/ssh-action@v1.0.3
+  deploy:
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Verify VPS configuration
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          PROD_BACKEND_SERVICE: ${{ vars.PROD_BACKEND_SERVICE }}
+          SSH_FINGERPRINT: ${{ secrets.SERVER_SSH_FINGERPRINT }}
+        run: test -n "$DEPLOY_DIR" && test -n "$PROD_BACKEND_SERVICE" && test -n "$SSH_FINGERPRINT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+      - name: Log in to registry
+        env:
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: printf '%s' "$REGISTRY_PASSWORD" | docker login registry.dajuvai.com -u "$REGISTRY_USERNAME" --password-stdin
+      - name: Keep the running image as :previous
+        # The rollback target. Only two tags per image, so the registry (on the
+        # VPS disk) stops growing with every deploy. Fails only on a first deploy.
+        run: docker buildx imagetools create -t registry.dajuvai.com/backend/dajuvai-backend-prod-v1:previous registry.dajuvai.com/backend/dajuvai-backend-prod-v1:latest || echo "No :latest yet"
+      - name: Build and push production image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8
+        with:
+          context: .
+          push: true
+          # Plain single-image manifests: the registry's garbage collector
+          # mishandles attestation indexes and can delete tagged layers.
+          provenance: false
+          tags: registry.dajuvai.com/backend/dajuvai-backend-prod-v1:latest
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@029f5b4aeeeb58fdfe1410a5d17f967dacf36262
+        env:
+          DEPLOY_DIR: ${{ vars.DEPLOY_DIR }}
+          PROD_BACKEND_SERVICE: ${{ vars.PROD_BACKEND_SERVICE }}
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
+          fingerprint: ${{ secrets.SERVER_SSH_FINGERPRINT }}
+          envs: DEPLOY_DIR,PROD_BACKEND_SERVICE
+          command_timeout: 20m
           script: |
-            cd ~/dajubhai-compose
-
-            docker compose up -d dajubhai-backend-prod
-
+            set -eu
+            cd "$DEPLOY_DIR"
+            if ! grep -qE '^[[:space:]]*image:.*backend/dajuvai-backend-prod-v1' docker-compose.yml; then
+              echo 'docker-compose.yml still uses the old backend image name; update it first'
+              exit 1
+            fi
+            for key in REDIS_PASSWORD TRUSTED_PROXY_SECRET NPX_MERCHANT_ID NPX_SECRET_KEY; do
+              if ! grep -qE "^$key=." .be.env; then
+                echo ".be.env has no $key; add it first"
+                exit 1
+              fi
+            done
+            docker compose config --quiet
+            docker compose up -d redis-prod
+            for attempt in $(seq 1 30); do
+              if docker compose exec -T redis-prod sh -c 'REDISCLI_AUTH="$REDIS_PASSWORD" redis-cli ping' | grep -qx PONG; then break; fi
+              if [ "$attempt" -eq 30 ]; then exit 1; fi
+              sleep 2
+            done
+            docker compose pull "$PROD_BACKEND_SERVICE"
+            if [ "${{ inputs.run_migrations }}" = "true" ]; then
+              docker compose run --rm --no-deps "$PROD_BACKEND_SERVICE" npm run migration:run
+            fi
+            docker compose up -d --no-deps "$PROD_BACKEND_SERVICE"
+            container=$(docker compose ps -q "$PROD_BACKEND_SERVICE")
+            for attempt in $(seq 1 30); do
+              state=$(docker inspect -f '{{.State.Health.Status}}' "$container" 2>/dev/null || echo starting)
+              if [ "$state" = healthy ]; then exit 0; fi
+              if [ "$state" = unhealthy ]; then
+                docker compose logs --tail 80 "$PROD_BACKEND_SERVICE"
+                exit 1
+              fi
+              sleep 5
+            done
+            docker compose logs --tail 80 "$PROD_BACKEND_SERVICE"
+            exit 1

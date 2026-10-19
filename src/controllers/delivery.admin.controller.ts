@@ -1,20 +1,28 @@
-import { Request, Response } from "express";
+import { Response } from "express";
+import { AuthRequest } from "../middlewares/auth.middleware";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { UserRole } from "../entities/user.entity";
 import { DeliveryAdminService } from "../service/delivery.admin.service";
-import { CreateRiderType } from "../utils/zod_validations/delivery.zod";
-import { ImageDeletionResult, ImageDeletionService } from "../service/image.delete.service";
+import {
+    CreateRiderType,
+    DeliveryAssignmentsQuery,
+    DeliveryOrdersQuery,
+    FailedDeliveriesQuery,
+} from "../utils/zod_validations/delivery.zod";
+import { CloudinaryService } from "../service/image.service";
 
 export class DeliveryAdminController {
     private deliveryAdminService: DeliveryAdminService;
-    private imageDeletionService: ImageDeletionService;
+    private cloudinaryService: CloudinaryService;
 
     constructor() {
         this.deliveryAdminService = new DeliveryAdminService();
-        this.imageDeletionService = new ImageDeletionService();
+        this.cloudinaryService = new CloudinaryService();
     }
 
     //  RIDER MANAGEMENT
 
-    async createRider(req: Request<{}, {}, CreateRiderType>, res: Response) {
+    async createRider(req: AuthRequest<{}, {}, CreateRiderType>, res: Response) {
         try {
             const rider = await this.deliveryAdminService.createRider(req.body);
 
@@ -23,10 +31,9 @@ export class DeliveryAdminController {
                 data: rider,
             });
         } catch (error) {
-            // Cleanup uploaded doc on failure, then forward the real error to the global handler.
             if (req.body.documentUrl) {
                 try {
-                    await this.imageDeletionService.deleteSingleImage(
+                    await this.cloudinaryService.deleteByUrl(
                         req.body.documentUrl,
                     );
                 } catch (cleanupErr) {
@@ -38,19 +45,19 @@ export class DeliveryAdminController {
         }
     }
 
-    async getAllRiders(req: Request, res: Response) {
+    async getAllRiders(_req: AuthRequest<any, any, any, any>, res: Response) {
         const riders = await this.deliveryAdminService.getAllRiders();
         res.status(200).json({ success: true, data: riders });
     }
 
-    async getRiderById(req: Request<{ riderId: string }>, res: Response) {
+    async getRiderById(req: AuthRequest<{ riderId: string }, any, any, any>, res: Response) {
         const riderId = Number(req.params.riderId);
 
         const rider = await this.deliveryAdminService.getRiderById(riderId);
         res.status(200).json({ success: true, data: rider });
     }
 
-    async resetRiderPassword(req: Request<{ riderId: string }>, res: Response) {
+    async resetRiderPassword(req: AuthRequest<{ riderId: string }, any, any, any>, res: Response) {
         const riderId = Number(req.params.riderId);
 
         const { message } = await this.deliveryAdminService.resetRiderPassword(
@@ -61,59 +68,14 @@ export class DeliveryAdminController {
         res.status(200).json({ success: true, message });
     }
 
-    //  ORDER PROCESSING
+    //  ALL ORDERS (AT_WAREHOUSE)
 
-    async getProcessingOrders(req: Request, res: Response) {
-        const orders = await this.deliveryAdminService.getProcessingOrders();
-
-        return res.status(200).json({ success: true, data: orders });
-    }
-
-    async getProcessingOrderById(
-        req: Request<{ orderId: string }>,
-        res: Response,
-    ) {
-        const orderId = Number(req.params.orderId);
-
-        const order = await this.deliveryAdminService.getProcessingOrderById(
-            orderId,
+    // The query was parsed and defaulted by `validateZod(…, "query")`.
+    async getAtWarehouseOrders(req: AuthRequest<any, any, any, any>, res: Response) {
+        const result = await this.deliveryAdminService.getAtWarehouseOrders(
+            req.query as DeliveryOrdersQuery,
         );
 
-        return res.status(200).json({ success: true, data: order });
-    }
-
-    async markAtWarehouse(req: Request<{ orderId: string }>, res: Response) {
-        const orderId = Number(req.params.orderId);
-
-        const order = await this.deliveryAdminService.markAtWarehouse(orderId);
-        res.status(200).json({ success: true, data: order });
-    }
-
-    async collectOrderItems(
-        req: Request<{ orderItemId: string }>,
-        res: Response,
-    ) {
-        const orderItemId = Number(req.params.orderItemId);
-
-        const orderItem = await this.deliveryAdminService.collectOrderItems(
-            orderItemId,
-        );
-
-        res.status(201).json({
-            success: true,
-            data: orderItem,
-            message: "Order Item Collected",
-        });
-    }
-
-    async getWarehouseOrderQueue(req: Request, res: Response) {
-        const page = Number(req.query.page as string) || 1;
-        const limit = Number(req.query.limit as string) || 20;
-
-        const result = await this.deliveryAdminService.getWarehouseOrderQueue(
-            page,
-            limit,
-        );
         res.status(200).json({
             success: true,
             data: result.orders,
@@ -123,29 +85,39 @@ export class DeliveryAdminController {
 
     //  ASSIGNMENTS
 
-    async assignRider(req: Request<{ orderId: string }>, res: Response) {
+    async assignRider(req: AuthRequest<{ orderId: string }, any, any, any>, res: Response) {
         const orderId = Number(req.params.orderId);
 
         const assignment = await this.deliveryAdminService.assignRider(
             orderId,
-            req.body,
+            req.body, req.user!.id, req.user!.role === UserRole.STAFF ? AuditActorType.STAFF : AuditActorType.ADMIN,
         );
         res.status(200).json({ success: true, data: assignment });
     }
 
-    async getAllAssignments(req: Request, res: Response) {
-        const page = Number(req.query.page as string) || 1;
-        const limit = Number(req.query.limit as string) || 20;
+    async bulkAssignRider(req: AuthRequest<any, any, any, any>, res: Response) {
+        const { orderIds, riderId } = req.body;
 
+        const results = await this.deliveryAdminService.bulkAssignRider(
+            orderIds,
+            riderId, req.user!.id, req.user!.role === UserRole.STAFF ? AuditActorType.STAFF : AuditActorType.ADMIN,
+        );
+
+        res.status(200).json({
+            success: true,
+            data: results,
+        });
+    }
+
+    async getAllAssignments(req: AuthRequest<any, any, any, any>, res: Response) {
         const result = await this.deliveryAdminService.getAllAssignments(
-            page,
-            limit,
+            req.query as DeliveryAssignmentsQuery,
         );
         res.status(200).json({ success: true, ...result });
     }
 
     async findOrderAssignment(
-        req: Request<{ orderId: string }>,
+        req: AuthRequest<{ orderId: string }, any, any, any>,
         res: Response,
     ) {
         const orderId = Number(req.params.orderId);
@@ -158,12 +130,19 @@ export class DeliveryAdminController {
     }
 
     async resetToWarehouse(
-        req: Request<{ orderId: string }>,
+        req: AuthRequest<{ orderId: string }, any, any, any>,
         res: Response,
     ): Promise<void> {
         const orderId = Number(req.params.orderId);
 
-        const order = await this.deliveryAdminService.backToWarehouse(orderId);
+        const order = await this.deliveryAdminService.backToWarehouse(orderId, req.user!.id, req.user!.role === UserRole.STAFF ? AuditActorType.STAFF : AuditActorType.ADMIN);
         res.status(200).json({ success: true, data: order });
+    }
+
+    async getFailedDeliveries(req: AuthRequest<any, any, any, any>, res: Response) {
+        const result = await this.deliveryAdminService.getFailedDeliveries(
+            req.query as FailedDeliveriesQuery,
+        );
+        res.json({ success: true, ...result });
     }
 }

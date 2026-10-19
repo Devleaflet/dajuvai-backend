@@ -1,7 +1,8 @@
 
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToOne, JoinColumn, OneToMany } from 'typeorm';
+import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToOne, ManyToOne, JoinColumn, OneToMany } from 'typeorm';
 import { User } from './user.entity';
 import { Order } from './order.entity';
+import { District } from './district.entity';
 
 export enum Province {
     Koshi = 'Koshi',
@@ -23,6 +24,13 @@ export class Address {
 
     @Column({ nullable: true })
     district: string;
+
+    @ManyToOne(() => District, (district) => district.addresses, { nullable: true, eager: true })
+    @JoinColumn({ name: 'districtId' })
+    districtRef: District | null;
+
+    @Column({ nullable: true })
+    districtId: number | null;
 
     @Column()
     city: string;

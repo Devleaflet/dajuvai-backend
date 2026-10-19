@@ -2,6 +2,7 @@ import { DataSource } from "typeorm";
 import { Product } from "../entities/product.entity";
 import { Variant } from "../entities/variant.entity";
 import { ProductService } from "../service/product.service";
+import { DiscountType } from "../entities/product.enum";
 
 export async function updateAllProductPrices(dataSource: DataSource) {
     const productRepo = dataSource.getRepository(Product);
@@ -21,8 +22,8 @@ export async function updateAllProductPrices(dataSource: DataSource) {
         if (!product.hasVariants && product.basePrice) {
             const priceAfterDiscount = productService.calculateFinalPrice(
                 Number(product.basePrice),
-                product.discount,
-                product.discountType
+                product.discountAmount,
+                DiscountType.FLAT
             );
 
             const finalPrice = productService.applyDealPrice(
@@ -37,8 +38,8 @@ export async function updateAllProductPrices(dataSource: DataSource) {
             for (const variant of product.variants) {
                 const variantFinalPrice = productService.calculateFinalPrice(
                     Number(variant.basePrice),
-                    variant.discount,
-                    variant.discountType
+                    variant.discountAmount,
+                    DiscountType.FLAT
                 );
 
                 variant.finalPrice = variantFinalPrice;

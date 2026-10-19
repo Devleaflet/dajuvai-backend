@@ -4,6 +4,10 @@ import { OrderItem } from "../entities/orderItems.entity";
 import { Wishlist } from "../entities/wishlist.entity";
 import { Product } from "../entities/product.entity";
 import AppDataSource from "../config/db.config";
+import {
+    normalizeLegacyProductDiscount,
+    normalizeLegacyVariantDiscount,
+} from "../utils/pricing.utils";
 
 export class ProductRecommendService {
     private cartRepo: Repository<Cart>;
@@ -90,7 +94,7 @@ export class ProductRecommendService {
         const productsBySubcategory = new Map<number, Product[]>();
         const allProducts = await this.productRepo.find({
             where: { subcategoryId: In(sortedSubcategoryIds) },
-            relations: ["subcategory", "brand", "variants"],
+            relations: ["subcategory", "variants"],
         });
 
         for (const product of allProducts) {
@@ -120,6 +124,11 @@ export class ProductRecommendService {
             }
         }
 
-        return recommendations;
+        return recommendations.map((p) => ({
+            ...normalizeLegacyProductDiscount(p),
+            variants: (p.variants ?? []).map((v) =>
+                normalizeLegacyVariantDiscount(v),
+            ),
+        })) as Product[];
     }
 }

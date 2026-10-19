@@ -15,6 +15,7 @@ import {
 import { OrderItem } from "../entities/orderItems.entity";
 import bcrypt from "bcryptjs";
 import { User, UserRole } from "../entities/user.entity";
+import { OrderService } from "./order.service";
 
 export class DeliveryService {
     private orderRepository: Repository<Order>;
@@ -22,6 +23,7 @@ export class DeliveryService {
     private assignmentRepository: Repository<DeliveryAssignment>;
     private orderItemRepository: Repository<OrderItem>;
     private userRepository: Repository<User>;
+    private orderService: OrderService;
 
     // to verify status change
     private readonly ALLOWED_STATUS_TRANSITIONS: Record<
@@ -48,6 +50,7 @@ export class DeliveryService {
             AppDataSource.getRepository(DeliveryAssignment);
         this.orderItemRepository = AppDataSource.getRepository(OrderItem);
         this.userRepository = AppDataSource.getRepository(User);
+        this.orderService = new OrderService();
     }
 
     private validateAndTransition(order: Order, target: DeliveryStatus): void {
@@ -169,6 +172,7 @@ export class DeliveryService {
                 "orderItems.variant",
                 "orderItems.vendor",
             ],
+            withDeleted: true,
         });
 
         if (!order) {
@@ -211,7 +215,7 @@ export class DeliveryService {
             select: ["collectedAtWarehouse"],
         });
 
-        const ready = allOrderItems.every(item => item.collectedAtWarehouse);
+        const ready = allOrderItems.every((item) => item.collectedAtWarehouse);
 
         if (ready) {
             const order = await this.orderRepository.findOne({
@@ -222,7 +226,10 @@ export class DeliveryService {
                 throw new APIError(404, "Order not found for this order item");
             }
 
-            this.validateAndTransition(order, DeliveryStatus.READY_FOR_DELIVERY);
+            this.validateAndTransition(
+                order,
+                DeliveryStatus.READY_FOR_DELIVERY,
+            );
             await this.orderRepository.save(order);
         }
     }
@@ -240,6 +247,7 @@ export class DeliveryService {
             order: { updatedAt: "ASC" },
             skip: (page - 1) * limit,
             take: limit,
+            withDeleted: true,
         });
 
         const totalPages = Math.ceil(total / limit);
@@ -264,13 +272,10 @@ export class DeliveryService {
         });
         if (!rider) throw new APIError(404, "rider not found");
 
-        if (
-            order.deliveryStatus !== DeliveryStatus.READY_FOR_DELIVERY &&
-            order.deliveryStatus !== DeliveryStatus.AT_WAREHOUSE
-        ) {
+        if (order.status !== OrderStatus.ARRIVED_AT_WAREHOUSE) {
             throw new APIError(
                 400,
-                "Order is not ready for delivery assignment",
+                `Only orders at warehouse (status: ARRIVED_AT_WAREHOUSE) can be assigned a rider. Current status: ${order.status}`,
             );
         }
 
@@ -388,14 +393,15 @@ export class DeliveryService {
 
         return await AppDataSource.transaction(async (manager) => {
             this.validateAndTransition(order, DeliveryStatus.OUT_FOR_DELIVERY);
-            order.status = OrderStatus.SHIPPED;
             await manager.save(order);
 
             assignment.assignmentStatus = AssignmentStatus.PICKED_UP;
             assignment.pickedUpAt = new Date();
             await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
+            const rider = await manager.findOne(Rider, {
+                where: { id: riderId },
+            });
             if (rider) {
                 rider.onDelivery = true;
                 await manager.save(rider);
@@ -426,23 +432,37 @@ export class DeliveryService {
             );
         }
 
-        return await AppDataSource.transaction(async (manager) => {
-            this.validateAndTransition(order, DeliveryStatus.DELIVERED);
-            order.status = OrderStatus.DELIVERED;
-            await manager.save(order);
+        const updatedAssignment = await AppDataSource.transaction(
+            async (manager) => {
+                this.validateAndTransition(order, DeliveryStatus.DELIVERED);
+                await manager.save(order);
 
-            assignment.assignmentStatus = AssignmentStatus.DELIVERED;
-            assignment.deliveredAt = new Date();
-            await manager.save(assignment);
+                assignment.assignmentStatus = AssignmentStatus.DELIVERED;
+                assignment.deliveredAt = new Date();
+                await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
-            if (rider) {
-                rider.onDelivery = false;
-                await manager.save(rider);
-            }
+                const rider = await manager.findOne(Rider, {
+                    where: { id: riderId },
+                });
+                if (rider) {
+                    rider.onDelivery = false;
+                    await manager.save(rider);
+                }
 
-            return assignment;
-        });
+                return assignment;
+            },
+        );
+
+        await this.orderService.changeOrderStatus(
+            orderId,
+            OrderStatus.DELIVERED,
+            {
+                actorRole: "RIDER",
+                reason: "Delivered by rider",
+            },
+        );
+
+        return updatedAssignment;
     }
 
     async markDeliveryFailed(
@@ -478,7 +498,9 @@ export class DeliveryService {
             assignment.failureReason = data.failedReason;
             await manager.save(assignment);
 
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
+            const rider = await manager.findOne(Rider, {
+                where: { id: riderId },
+            });
             if (rider) {
                 rider.onDelivery = false;
                 await manager.save(rider);

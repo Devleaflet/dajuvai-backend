@@ -12,13 +12,19 @@ import {
 import { User } from "./user.entity";
 import { Address } from "./address.entity";
 import { OrderItem } from "./orderItems.entity";
+import { OrderVendorShipping } from "./orderVendorShipping.entity";
+import { PromoType } from "./promo.entity";
+import { DeliveryAssignment } from "./deliveryAssignment.entity";
 
 export enum OrderStatus {
+    ORDER_PLACED = "ORDER_PLACED",
     CONFIRMED = "CONFIRMED",
-    PENDING = "PENDING",
+    PROCESSING = "PROCESSING",
+    ARRIVED_AT_WAREHOUSE = "ARRIVED_AT_WAREHOUSE",
     DELAYED = "DELAYED",
-    SHIPPED = "SHIPPED",
+    ASSIGNED_TO_RIDER = "ASSIGNED_TO_RIDER",
     DELIVERED = "DELIVERED",
+    NOT_RECEIVED = "NOT_RECEIVED",
     CANCELLED = "CANCELLED",
     RETURNED = "RETURNED",
 }
@@ -51,9 +57,17 @@ export enum DeliveryStatus {
 @Index(["orderedById", "status"])
 @Index(["paymentStatus"])
 @Index(["createdAt"])
+@Index(["orderNumber"], { unique: true })
+@Index(["idempotencyKey"], { unique: true })
 export class Order {
     @PrimaryGeneratedColumn()
     id: number;
+
+    @Column({ unique: true })
+    orderNumber: string;
+
+    @Column({ nullable: true })
+    idempotencyKey?: string;
 
     @ManyToOne(() => User, (user) => user.orders, { onDelete: "CASCADE" })
     @JoinColumn({ name: "orderedById" })
@@ -67,6 +81,24 @@ export class Order {
 
     @Column("decimal", { precision: 8, scale: 2 })
     shippingFee: number;
+
+    @Column("decimal", { precision: 10, scale: 2, nullable: true })
+    merchandiseSubtotal: number;
+
+    @Column("decimal", { precision: 10, scale: 2, default: 0 })
+    discountTotal: number;
+
+    @Column("decimal", { precision: 8, scale: 2, default: 0 })
+    taxTotal: number;
+
+    // Immutable copy of the shipping address at order time (province/district/
+    // city/localAddress/landmark/districtId) so a later edit to the user's
+    // saved address can never change a historical order's shipping calc.
+    @Column({ type: "jsonb", nullable: true })
+    shippingAddressSnapshot: Record<string, unknown> | null;
+
+    @OneToMany(() => OrderVendorShipping, (vs) => vs.order, { cascade: true })
+    vendorShippings: OrderVendorShipping[];
 
     @Column({ nullable: true })
     isBuyNow?: boolean;
@@ -87,7 +119,7 @@ export class Order {
     @Column({
         type: "enum",
         enum: OrderStatus,
-        default: OrderStatus.CONFIRMED,
+        default: OrderStatus.ORDER_PLACED,
     })
     status: OrderStatus;
 
@@ -98,6 +130,9 @@ export class Order {
     @Column({ nullable: true })
     appliedPromoCode: string;
 
+    @Column({ type: "varchar", length: 32, nullable: true })
+    promoApplyOn?: PromoType | null;
+
     @Column({ nullable: true })
     phoneNumber: string;
 
@@ -106,6 +141,9 @@ export class Order {
 
     @OneToMany(() => OrderItem, (item) => item.order, { cascade: true })
     orderItems: OrderItem[];
+
+    @OneToMany(() => DeliveryAssignment, (da) => da.order)
+    deliveryAssignments: DeliveryAssignment[];
 
     @Column("decimal", { precision: 8, scale: 2, default: 0 })
     serviceCharge: number;

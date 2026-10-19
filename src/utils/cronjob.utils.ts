@@ -2,22 +2,28 @@ import cron from "node-cron";
 import { User } from "../entities/user.entity";
 import { In, LessThan, Not } from "typeorm";
 import AppDataSource from "../config/db.config";
-import { OrderStatus, Order, PaymentStatus, PaymentMethod, DeliveryStatus } from '../entities/order.entity';
-import { sendOrderStatusEmail } from "./nodemailer.utils";
-import { OrderItem } from "../entities/orderItems.entity";
-import { NotificationService } from "../service/notification.service";
+import {
+    OrderStatus,
+    Order,
+    PaymentStatus,
+    PaymentMethod,
+    DeliveryStatus,
+} from "../entities/order.entity";
 import { Vendor } from "../entities/vendor.entity";
+import { deviceTokenService } from "../service/deviceToken.service";
+import { VendorService } from "../service/vendor.service";
+import { UserDeletionService } from "../service/user-deletion.service";
+import { OrderService } from "../service/order.service";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
-const orderItemRepo = AppDataSource.getRepository(OrderItem);
-const vendorRepo = AppDataSource.getRepository(Vendor);
 
+const vendorRepo = AppDataSource.getRepository(Vendor);
 
 /**
  * Periodic cleanup of expired user verification tokens.
  * Runs every 2 minutes.
- * 
+ *
  * Logic:
  * - Find users with verificationCodeExpire date in the past AND
  *   who currently have a verificationCode set (not null).
@@ -25,13 +31,14 @@ const vendorRepo = AppDataSource.getRepository(Vendor);
  *    - Reset verificationCode, verificationCodeExpire,
  *      resendBlockUntil, resendCount fields to null.
  *    - Save user entity back to DB to persist these changes.
- * 
+ *
  * Purpose:
  * - Prevent stale verification codes from lingering indefinitely.
  * - Reset resend limits and blocks so user can try verification again later.
  */
 export const tokenCleanUp = () => {
-    cron.schedule("*/2 * * * *", async () => { // every 2 minutes
+    cron.schedule("*/2 * * * *", async () => {
+        // every 2 minutes
         try {
             // Only select known columns to avoid missing column issues
             const expiredUsers = await userDB.find({
@@ -48,12 +55,12 @@ export const tokenCleanUp = () => {
                     "verificationCode",
                     "verificationCodeExpire",
                     "resendCount",
-                    "resendBlockUntil"
+                    "resendBlockUntil",
                 ],
                 where: {
                     verificationCodeExpire: LessThan(new Date()),
-                    verificationCode: Not(null)
-                }
+                    verificationCode: Not(null),
+                },
             });
 
             if (expiredUsers.length > 0) {
@@ -65,182 +72,159 @@ export const tokenCleanUp = () => {
                         user.resendCount = null;
 
                         await userDB.save(user);
-                        console.log(`Token cleared for user ${user.id} ✅`);
                     } catch (err) {
-                        console.error(`Failed to update user ${user.id}:`, err);
+                        // silent fail for cron
                     }
                 }
             }
-            console.log("Cron job completed for token cleanup");
         } catch (err) {
-            console.error("❌ Error in cron job:", err);
+            // silent fail for cron
         }
     });
 };
+/** Payment methods settled online; COD stays UNPAID until delivery by design. */
+const ONLINE_PAYMENT_METHODS = [
+    PaymentMethod.ESEWA,
+    PaymentMethod.NPX,
+    PaymentMethod.KHALIT,
+    PaymentMethod.ONLINE_PAYMENT,
+];
+
 /**
- * Periodic cleanup of stale pending orders.
- * Runs every 2 hours on the hour (e.g., 12:00, 14:00, 16:00).
- * 
- * Logic:
- * - Calculate threshold date as current time minus 24 hours.
- * - Find orders with status 'PENDING' created before threshold date.
- * - For each such order:
- *    - Remove order entity from DB, deleting it permanently.
- * 
- * Purpose:
-* - Remove old pending orders that may be abandoned or not processed.
- * - Keep order data clean and avoid clutter.
+ * Cancels one abandoned online-payment order through changeOrderStatus, so it
+ * gets the same restock, promo release, history, audit, customer/vendor
+ * emails (with the reason), feed, push and socket as an admin cancellation.
+ * `expectedCurrentStatus` makes it a no-op if a payment webhook moved the
+ * order in the meantime.
+ */
+const cancelUnpaidOrder = async (order: Order, reason: string): Promise<void> => {
+    try {
+        await new OrderService().changeOrderStatus(order.id, OrderStatus.CANCELLED, {
+            actorRole: "SYSTEM",
+            reason,
+            expectedCurrentStatus: order.status,
+        });
+        await orderDB.update(order.id, { deliveryStatus: DeliveryStatus.DELIVERY_FAILED });
+    } catch (error) {
+        console.error(`[CRON] Could not cancel unpaid order ${order.id}:`, error);
+    }
+};
+
+/**
+ * Every 2 hours: online-payment orders confirmed but still unpaid after 24
+ * hours are cancelled. COD orders are excluded — they are unpaid until the
+ * rider collects, and this job used to cancel any that sat in CONFIRMED for a
+ * day.
  */
 export const orderCleanUp = () => {
-    cron.schedule("0 */2 * * *", async () => { // runs every 2 hours at minute 0
+    cron.schedule("0 */2 * * *", async () => {
         try {
-            const thresholdDate = new Date();
-            thresholdDate.setHours(thresholdDate.getHours() - 24); // 24 hours ago
-
-            // Find all PENDING orders created more than 24 hours ago
-            const pendingOrders = await orderDB.find({
+            const staleOrders = await orderDB.find({
                 where: {
                     status: OrderStatus.CONFIRMED,
                     paymentStatus: PaymentStatus.UNPAID,
-                    createdAt: LessThan(thresholdDate),
+                    paymentMethod: In(ONLINE_PAYMENT_METHODS),
+                    createdAt: LessThan(new Date(Date.now() - 24 * 60 * 60 * 1000)),
                 },
-                relations: ['orderItems'], // Include related order items if needed for cascade
+                select: { id: true, status: true },
             });
 
-            if (pendingOrders.length > 0) {
-                for (const order of pendingOrders) {
-                    // Delete order from DB
-                    await orderDB.remove(order);
-                    console.log(`Order ${order.id} deleted 🗑️✅`);
-                }
-                console.log(`Deleted ${pendingOrders.length} pending orders`);
-            } else {
-                console.log("No pending orders to delete");
+            for (const order of staleOrders) {
+                await cancelUnpaidOrder(
+                    order,
+                    "Confirmed but still unpaid after 24 hours, so the order was cancelled and its stock returned.",
+                );
             }
         } catch (err) {
-            // Log any error that occurs during the order cleanup cron job
-            console.error("❌ Error in order cleanup cron job:", err);
+            console.error("[CRON] orderCleanUp failed:", err);
         }
     });
 };
 
-// set order status to cancelled if the payment is dealyed formore than 15 minutes incase of esewa and nps 
+// Every 5 minutes: eSewa/NPX orders still unpaid 15 minutes after placement are cancelled.
 export const startOrderCleanupJob = () => {
     cron.schedule("*/5 * * * *", async () => {
-        console.log("⏰ [CRON] Checking for unpaid online orders...");
-
         try {
-            const fifteenMinutesAgo = new Date(Date.now() - 15 * 60 * 1000);
-            console.log(
-                `🕒 [CRON] Cancelling orders created before: ${fifteenMinutesAgo.toISOString()}`
-            );
-
             const staleOrders = await orderDB.find({
                 where: {
                     paymentMethod: In([PaymentMethod.ESEWA, PaymentMethod.NPX]),
                     paymentStatus: PaymentStatus.UNPAID,
-                    createdAt: LessThan(fifteenMinutesAgo),
-                    status: OrderStatus.PENDING,
+                    createdAt: LessThan(new Date(Date.now() - 15 * 60 * 1000)),
+                    status: OrderStatus.ORDER_PLACED,
                 },
-                relations: ["orderedBy", "orderItems", "orderItems.vendor"],
+                select: { id: true, status: true },
             });
 
-            console.log("------Stale orders-----------")
-            console.log(staleOrders)
-
-            if (!staleOrders.length) {
-                console.log("✅ [CRON] No stale unpaid orders found.");
-                return;
-            }
-
-            console.log(`⚠️ [CRON] Found ${staleOrders.length} unpaid orders to cancel.`);
-
             for (const order of staleOrders) {
-                console.log(`🚨 [ORDER] Processing Order ID: ${order.id} ...`);
-
-                order.status = OrderStatus.CANCELLED;
-                order.deliveryStatus = DeliveryStatus.DELIVERY_FAILED;
-                await orderDB.save(order);
-                console.log(`🛑 [ORDER] Order #${order.id} status set to CANCELLED.`);
-
-                const userEmail = order.orderedBy?.email;
-                const userName = order.orderedBy?.username || "Customer";
-
-                // Fetch vendors
-                const orderItems = await orderItemRepo.find({
-                    where: { order: { id: order.id } },
-                    relations: ["vendor"],
-                });
-
-                const vendorEmails = orderItems
-                    .map((item) => item.vendor?.email)
-                    .filter(Boolean);
-
-                // Send email to user
-                if (userEmail) {
-                    console.log(`📧 [EMAIL] Sending cancellation email to user: ${userEmail}`);
-                    await sendOrderStatusEmail(
-                        userEmail,
-                        order.id,
-                        "Cancelled",
-                        `Order #${order.id} Cancelled - Payment Timeout`
-                    );
-                    console.log(`✅ [EMAIL] Sent to user: ${userEmail}`);
-                } else {
-                    console.log(`⚠️ [EMAIL] No user email found for Order #${order.id}`);
-                }
-
-                // Send emails to vendors
-                if (vendorEmails.length) {
-                    console.log(
-                        `📧 [EMAIL] Sending vendor notification to ${vendorEmails.length} vendor(s).`
-                    );
-                    for (const vendorEmail of vendorEmails) {
-                        await sendOrderStatusEmail(
-                            vendorEmail,
-                            order.id,
-                            "Cancelled",
-                            `Order #${order.id} Cancelled by System`
-                        );
-                        console.log(`✅ [EMAIL] Sent to vendor: ${vendorEmail}`);
-                    }
-                } else {
-                    console.log(`⚠️ [EMAIL] No vendor email(s) found for Order #${order.id}`);
-                }
-
-                // Send notification (in-app or push)
-                console.log(`🔔 [NOTIFY] Sending cancellation notification for Order #${order.id}`);
-                const notificationService = new NotificationService();
-                await notificationService.notifyOrderStatusUpdated(order);
-                console.log(`✅ [NOTIFY] Notification sent for Order #${order.id}`);
-
-                console.log(`🚫 [CRON] Finished cancelling Order #${order.id}`);
+                await cancelUnpaidOrder(
+                    order,
+                    "Online payment was not completed within 15 minutes, so the order was cancelled and its stock returned.",
+                );
             }
-
-            console.log("🎯 [CRON] Cleanup cycle completed successfully.\n");
         } catch (error) {
-            console.error("❌ [CRON ERROR] Failed during order cleanup:", error);
+            console.error("[CRON] startOrderCleanupJob failed:", error);
         }
     });
 };
 
-
-
 // un verified vendor  clean up
 export const removeUnverifiedVendors = () => {
-    // run every 12 hrs 
     cron.schedule("0 0,12 * * *", async () => {
         try {
-            const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
-            const result = await vendorRepo.delete({
+            const twentyFourHoursAgo = new Date(
+                Date.now() - 24 * 60 * 60 * 1000,
+            );
+            await vendorRepo.delete({
                 isVerified: false,
                 createdAt: LessThan(twentyFourHoursAgo),
             });
-
-            console.log(`Removed ${result.affected} unverified vendors.`);
-            
         } catch (error) {
-            console.log(error)
+            // silent fail for cron
         }
-    })
-}
+    });
+};
+
+export const finalizeVendorAccountDeletions = () => {
+    cron.schedule("0 * * * *", async () => {
+        try {
+            await new VendorService().finalizeExpiredVendorDeletions();
+        } catch (error) {
+            // silent fail for cron; next hourly run retries safely
+        }
+    });
+};
+
+// Finalizes customer accounts whose 30-day deletion grace period elapsed.
+// Mirrors finalizeVendorAccountDeletions; safe to retry every hour.
+export const finalizeUserAccountDeletions = () => {
+    cron.schedule("0 * * * *", async () => {
+        try {
+            await new UserDeletionService().finalizeExpiredUserDeletions();
+        } catch (error) {
+            // silent fail for cron; next hourly run retries safely
+        }
+    });
+};
+
+// Expires online-payment checkout drafts whose TTL elapsed without a gateway
+// verdict. Drafts never reserve stock or claim promos, so expiring them is a
+// pure status flip — safe to retry every 10 minutes.
+export const expireStaleCheckoutDraftsJob = () => {
+    cron.schedule("*/10 * * * *", async () => {
+        try {
+            await new OrderService().expireStaleCheckoutDrafts();
+        } catch (error) {
+            // silent fail for cron; next run retries safely
+        }
+    });
+};
+
+export const staleDeviceTokenCleanUp = () => {
+    cron.schedule("0 2 * * *", async () => {
+        try {
+            await deviceTokenService.cleanupStaleTokens();
+        } catch (error) {
+            // silent fail for cron
+        }
+    });
+};

@@ -2,11 +2,94 @@ import { Router } from "express";
 import { ProductController } from "../controllers/product.controller";
 import AppDataSource from "../config/db.config";
 import { uploadMiddleware } from "../config/multer.config";
-import { authMiddleware, combinedAuthMiddleware, isAdminOrStaff, isAdminOrVendor } from "../middlewares/auth.middleware";
+import {
+    authMiddleware,
+    combinedAuthMiddleware,
+    isAccountOwner,
+    isAccountOwnerOrAdmin,
+    isAdmin,
+    isAdminOrStaff,
+    isAdminOrVendor,
+    isVendor,
+    isVendorAccountOwnerOrAdminOrStaff,
+    requireAdminStaffOrVendor,
+    restrictToVendorOrAdmin,
+    vendorAuthMiddleware,
+} from "../middlewares/auth.middleware";
+import {
+    checkPermission,
+    checkPermissionUnlessVendor,
+} from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const productRouter = Router();
 const productController = new ProductController(AppDataSource);
+
+/**
+ * @swagger
+ * /api/product/archived:
+ *   get:
+ *     summary: Get archived (soft-deleted) products
+ *     description: Retrieves a list of products that have been soft-deleted/archived. Requires vendor or admin authentication.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     responses:
+ *       200:
+ *         description: List of archived products retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 15
+ *                       name:
+ *                         type: string
+ *                         example: "Discontinued Widget"
+ *                       basePrice:
+ *                         type: number
+ *                         format: float
+ *                         example: 29.99
+ *                       status:
+ *                         type: string
+ *                         example: "DISCONTINUED"
+ *                       deletedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-06-10T12:00:00Z"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/Error'
+ *       403:
+ *         description: Forbidden - Not a vendor or admin
+ *       500:
+ *         description: Internal server error
+ */
+// /api/product/archived — must be registered before GET /:id below,
+// otherwise Express would match "archived" as an :id value and route there.
+productRouter.get(
+    "/archived",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.VIEW),
+    productController.getArchivedProducts.bind(productController),
+);
 
 /**
  * @swagger
@@ -20,8 +103,8 @@ const productController = new ProductController(AppDataSource);
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the product
+ *           type: string
+ *         description: The product id, or its URL slug
  *     responses:
  *       200:
  *         description: Product retrieved successfully
@@ -42,9 +125,15 @@ const productController = new ProductController(AppDataSource);
  *                     name:
  *                       type: string
  *                       example: "Organic Honey"
+ *                     brand:
+ *                       type: string
+ *                       example: "Dabur"
  *                     description:
  *                       type: string
  *                       example: "Raw and organic honey collected from forest bees."
+ *                     keywords:
+ *                       type: string
+ *                       example: "honey,food,health,organic"
  *                     basePrice:
  *                       type: number
  *                       format: float
@@ -58,7 +147,7 @@ const productController = new ProductController(AppDataSource);
  *                       example: 10.0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
+ *                       enum: [NONE, PERCENTAGE, FLAT]
  *                       example: PERCENTAGE
  *                     size:
  *                       type: array
@@ -89,10 +178,6 @@ const productController = new ProductController(AppDataSource);
  *                     vendorId:
  *                       type: integer
  *                       example: 3
- *                     brand_id:
- *                       type: integer
- *                       nullable: true
- *                       example: 2
  *                     dealId:
  *                       type: integer
  *                       nullable: true
@@ -132,7 +217,12 @@ const productController = new ProductController(AppDataSource);
  *                   type: string
  *                   example: Internal server error
  */
-productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.getProductDetailById.bind(productController))
+productRouter.get(
+    "/:id",
+    resolveSlugParam("products"),
+    responseCache({ ttlSeconds: 60 }),
+    productController.getProductDetailById.bind(productController),
+);
 
 /**
  * @swagger
@@ -142,7 +232,7 @@ productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.g
  *     tags:
  *       - Products
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -153,6 +243,9 @@ productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.g
  *     responses:
  *       200:
  *         description: Product deleted successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Product deleted successfully" }
  *       401:
  *         description: Unauthorized
  *       403:
@@ -163,7 +256,220 @@ productRouter.get("/:id", responseCache({ ttlSeconds: 60 }), productController.g
  *         description: Internal server error
  */
 // /api/product/:id
-productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productController.deleteProductById.bind(productController));
+productRouter.delete(
+    "/:id",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
+    productController.deleteProductById.bind(productController),
+);
+
+/**
+ * @swagger
+ * /api/product/{id}/restore:
+ *   patch:
+ *     summary: Restore an archived (soft-deleted) product
+ *     description: Restores a product that was previously soft-deleted/archived, making it active again. Requires vendor or admin authentication.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the archived product to restore
+ *     responses:
+ *       200:
+ *         description: Product restored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product restored successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 15
+ *                     name:
+ *                       type: string
+ *                       example: "Restored Widget"
+ *                     status:
+ *                       type: string
+ *                       example: "AVAILABLE"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *       403:
+ *         description: Forbidden - Not a vendor or admin
+ *       404:
+ *         description: Product not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Product not found"
+ *       500:
+ *         description: Internal server error
+ */
+// /api/product/:id/restore — restores an archived (soft-deleted) product.
+productRouter.patch(
+    "/:id/restore",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
+    productController.restoreProductById.bind(productController),
+);
+
+/**
+ * @swagger
+ * /api/product/{id}/variant/{variantId}/restore:
+ *   patch:
+ *     summary: Restore a single archived variant
+ *     description: Restores a specific variant that was previously soft-deleted/archived under a product. Requires vendor or admin authentication.
+ *     tags:
+ *       - Products
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the parent product
+ *       - in: path
+ *         name: variantId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the archived variant to restore
+ *     responses:
+ *       200:
+ *         description: Variant restored successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Variant restored successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 60
+ *                     sku:
+ *                       type: string
+ *                       example: "SKU-GRAY"
+ *                     status:
+ *                       type: string
+ *                       example: "AVAILABLE"
+ *       401:
+ *         description: Unauthorized - Missing or invalid token
+ *       403:
+ *         description: Forbidden - Not a vendor or admin
+ *       404:
+ *         description: Product or variant not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Variant not found"
+ *       500:
+ *         description: Internal server error
+ */
+// /api/product/:id/variant/:variantId/restore — restores a single archived variant.
+productRouter.patch(
+    "/:id/variant/:variantId/restore",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
+    productController.restoreVariant.bind(productController),
+);
+
+/**
+ * @swagger
+ * /api/product/{id}/variant/{variantId}:
+ *   delete:
+ *     summary: Archive a single variant
+ *     description: Soft-deletes one variant of a product, leaving the product and its other variants active. Refuses when the product is itself archived, or when this is the product's last remaining variant. Requires vendor or admin authentication.
+ *     tags:
+ *       - Product
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: id
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the product the variant belongs to
+ *       - in: path
+ *         name: variantId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the variant to archive
+ *     responses:
+ *       200:
+ *         description: Variant archived successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 msg:
+ *                   type: string
+ *                   example: Variant archived successfully
+ *       400:
+ *         description: Product already archived, or this is its last variant
+ *       401:
+ *         description: Not authenticated
+ *       403:
+ *         description: Not permitted to archive variants of this product
+ *       404:
+ *         description: Product or variant not found
+ *       500:
+ *         description: Internal server error
+ */
+// /api/product/:id/variant/:variantId — archives a single variant.
+productRouter.delete(
+    "/:id/variant/:variantId",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
+    productController.archiveVariant.bind(productController),
+);
 
 /**
  * @swagger
@@ -229,8 +535,13 @@ productRouter.delete("/:id", combinedAuthMiddleware, isAdminOrVendor, productCon
  *                   type: string
  *                   example: Image upload failed
  */
-productRouter.post("/image/upload", uploadMiddleware, productController.uplaodImage.bind(productController))
-
+productRouter.post(
+    "/image/upload",
+    combinedAuthMiddleware,
+    isAdminOrVendor,
+    uploadMiddleware,
+    productController.uplaodImage.bind(productController),
+);
 
 /**
  * @swagger
@@ -241,9 +552,33 @@ productRouter.post("/image/upload", uploadMiddleware, productController.uplaodIm
  *       - Products
  *     security:
  *       - cookieAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: page
+ *         schema: { type: integer, minimum: 1, default: 1 }
+ *       - in: query
+ *         name: limit
+ *         schema: { type: integer, minimum: 1, default: 10 }
+ *       - in: query
+ *         name: search
+ *         schema: { type: string }
+ *       - in: query
+ *         name: categoryId
+ *         schema: { type: integer, minimum: 1 }
+ *       - in: query
+ *         name: subcategoryId
+ *         schema: { type: integer, minimum: 1 }
  *     responses:
  *       200:
  *         description: List of all products for admin
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data:
+ *                 products: []
+ *                 total: 0
+ *                 pagination: { page: 1, limit: 10, totalItems: 0, totalPages: 0, hasNextPage: false, hasPreviousPage: false }
  *       401:
  *         description: Unauthorized
  *       403:
@@ -252,13 +587,17 @@ productRouter.post("/image/upload", uploadMiddleware, productController.uplaodIm
  *         description: Internal server error
  */
 // /api/product/admin/products
-productRouter.get("/admin/products", authMiddleware, isAdminOrStaff, productController.getAdminProducts.bind(productController))
+productRouter.get(
+    "/admin/products",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.PRODUCT, PermissionLevel.VIEW),
+    productController.getAdminProducts.bind(productController),
+);
 
 export default productRouter;
 
-
-
-// product schema 
+// product schema
 /**
  * @swagger
  * components:
@@ -294,10 +633,29 @@ export default productRouter;
  *         sku:
  *           type: string
  *           example: "SKU12345"
+ *         basePrice:
+ *           type: number
+ *           format: float
+ *           example: 499.99
  *         price:
  *           type: number
  *           format: float
  *           example: 499.99
+ *         discountAmount:
+ *           type: number
+ *           format: float
+ *           example: 10.0
+ *         discountPercent:
+ *           type: number
+ *           format: float
+ *           example: 10.0
+ *         discountType:
+ *           type: string
+ *           enum:
+ *             - NONE
+ *             - PERCENTAGE
+ *             - FLAT
+ *           example: "NONE"
  *         stock:
  *           type: integer
  *           example: 50
@@ -318,9 +676,7 @@ export default productRouter;
  *             $ref: "#/components/schemas/Image"
  *       required:
  *         - sku
- *         - price
  *         - stock
- *         - status
  *
  *     Product:
  *       type: object
@@ -332,9 +688,15 @@ export default productRouter;
  *         name:
  *           type: string
  *           example: "iPhone 15 Pro"
+ *         brand:
+ *           type: string
+ *           example: "Apple"
  *         description:
  *           type: string
  *           example: "The latest Apple iPhone with A17 chip."
+ *         keywords:
+ *           type: string
+ *           example: "apple,smartphone,flagship"
  *         basePrice:
  *           type: number
  *           format: float
@@ -347,9 +709,10 @@ export default productRouter;
  *         discountType:
  *           type: string
  *           enum:
+ *             - NONE
  *             - PERCENTAGE
  *             - FLAT
- *           example: "PERCENTAGE"
+ *           example: "NONE"
  *         status:
  *           type: string
  *           enum:
@@ -380,9 +743,6 @@ export default productRouter;
  *         bannerId:
  *           type: integer
  *           example: 3
- *         brandId:
- *           type: integer
- *           example: 7
  *         created_at:
  *           type: string
  *           format: date-time

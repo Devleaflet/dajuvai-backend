@@ -17,8 +17,20 @@ export class VendorDashboardController {
 
     async vendorSalesReport(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
         const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
-        const report = await this.dashboardService.getTotalSales(7, startDate, endDate);
+        const report = await this.dashboardService.getTotalSales(req.vendor.id, startDate, endDate);
         res.status(200).json(report);
+    }
+
+    async vendorSalesTrend(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
+        const requestedDays = Number((req.query as { days?: string }).days);
+        const days = Number.isFinite(requestedDays) ? Math.min(Math.max(Math.trunc(requestedDays), 1), 180) : 10;
+        const endDate = new Date();
+        endDate.setHours(23, 59, 59, 999);
+        const startDate = new Date(endDate);
+        startDate.setDate(startDate.getDate() - days + 1);
+        startDate.setHours(0, 0, 0, 0);
+        const data = await this.dashboardService.getSalesTrend(req.vendor.id, startDate, endDate);
+        res.status(200).json({ vendorId: req.vendor.id, days, data });
     }
 
     async getLowStockProducts(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {

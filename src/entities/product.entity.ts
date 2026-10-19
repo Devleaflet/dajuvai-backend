@@ -1,99 +1,164 @@
-import { Column, Entity, ManyToOne, OneToMany, PrimaryGeneratedColumn, JoinColumn, CreateDateColumn, UpdateDateColumn } from "typeorm";
+import {
+  Column,
+  DeleteDateColumn,
+  Entity,
+  ManyToOne,
+  OneToMany,
+  PrimaryGeneratedColumn,
+  JoinColumn,
+  CreateDateColumn,
+  UpdateDateColumn,
+    Index,
+} from "typeorm";
 import { Subcategory } from "./subcategory.entity";
 import { Vendor } from "./vendor.entity";
 import { Deal } from "./deal.entity";
 import { Banner } from "./banner.entity";
 import { DiscountType, InventoryStatus } from "./product.enum";
 import { OrderItem } from "./orderItems.entity";
-import { Brand } from "./brand.entity";
+// import { Brand } from "./brand.entity";
 import { Review } from "./reviews.entity";
 import { Variant } from "./variant.entity";
 
-@Entity('products')
+@Entity("products")
 export class Product {
-    @PrimaryGeneratedColumn()
-    id: number;
+  @PrimaryGeneratedColumn()
+  id: number;
 
-    @Column()
-    name: string;
+  /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+  @Index("UQ_products_slug", { unique: true })
+  @Column({ type: "varchar", length: 128 })
+  slug: string;
 
-    @Column({ nullable: true })
-    description?: string;
+  @Column()
+  name: string;
 
-    // Only used if hasVariants = false
-    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
-    basePrice?: number;
+  @Column({ nullable: true })
+  brand?: string;
 
-    @Column({ type: 'decimal', precision: 8, scale: 2, nullable: true })
-    finalPrice?: number;
+  @Column({ nullable: true })
+  description?: string;
 
-    @Column({ type: 'decimal', precision: 5, scale: 2, default: 0 })
-    discount: number;
+  @Column({ type: "text", nullable: true })
+  keywords?: string;
 
-    @Column({ type: 'enum', enum: DiscountType, default: DiscountType.NONE })
-    discountType: DiscountType;
+  @Column({ name: "normalized_name", type: "text", default: "" })
+  normalizedName: string;
 
-    @Column({ type: 'enum', enum: InventoryStatus, default: InventoryStatus.AVAILABLE, nullable: true })
-    status?: InventoryStatus;
+  @Column({ name: "search_text", type: "text", default: "" })
+  searchText: string;
 
-    @Column({ nullable: true })
-    stock?: number;
+  // Maintained by PostgreSQL trigger for full-text catalog search.
+  // Hidden from normal entity reads; search queries select it explicitly.
+  @Column({
+    name: "search_vector",
+    type: "tsvector",
+    default: "''::tsvector",
+    select: false,
+  })
+  searchVector: string;
 
-    @ManyToOne(() => Subcategory, { onDelete: "SET NULL" })
-    @JoinColumn({ name: "subcategoryId" })
-    subcategory: Subcategory;
+  // Only used if hasVariants = false
+  @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
+  basePrice?: number;
 
-    @Column({ nullable: true })
-    subcategoryId: number;
+  @Column({ type: "decimal", precision: 8, scale: 2, nullable: true })
+  finalPrice?: number;
 
-    @ManyToOne(() => Vendor, { onDelete: "CASCADE" })
-    @JoinColumn({ name: "vendorId" })
-    vendor: Vendor;
+  @Column({ type: "decimal", precision: 8, scale: 2, default: 0 })
+  discount: number;
 
-    @Column()
-    vendorId: number;
+  @Column({ type: "decimal", precision: 8, scale: 2, default: 0 })
+  discountAmount: number;
 
-    @ManyToOne(() => Deal, { nullable: true, onDelete: "SET NULL" })
-    @JoinColumn({ name: "dealId" })
-    deal?: Deal;
+  @Column({ type: "decimal", precision: 5, scale: 2, default: 0 })
+  discountPercent: number;
 
-    @Column({ nullable: true })
-    dealId?: number;
+  @Column({ type: "enum", enum: DiscountType, default: DiscountType.NONE })
+  discountType: DiscountType;
 
-    @ManyToOne(() => Banner, { nullable: true, onDelete: "SET NULL" })
-    @JoinColumn({ name: "bannerId" })
-    banner?: Banner;
+  @Column({
+    type: "enum",
+    enum: InventoryStatus,
+    default: InventoryStatus.AVAILABLE,
+    nullable: true,
+  })
+  status?: InventoryStatus;
 
-    @Column({ nullable: true })
-    bannerId?: number;
+  @Column({ nullable: true })
+  stock?: number;
 
-    @Column({ type: 'text', array: true, nullable: true })
-    productImages?: string[];
+  @Column({ type: "integer", default: 0 })
+  stockReserved: number;
 
-    @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
-    orderItems: OrderItem[];
+  @ManyToOne(() => Subcategory, { onDelete: "SET NULL" })
+  @JoinColumn({ name: "subcategoryId" })
+  subcategory: Subcategory;
 
-    @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
-    brand: Brand;
+  @Column({ nullable: true })
+  subcategoryId: number;
 
-    @Column({ nullable: true })
-    brandId?: number;
+  @ManyToOne(() => Vendor, { onDelete: "CASCADE" })
+  @JoinColumn({ name: "vendorId" })
+  vendor: Vendor;
 
-    @Column({ type: 'boolean', default: false })
-    hasVariants: boolean;
+  @Column()
+  vendorId: number;
 
-    @OneToMany(() => Variant, (variant) => variant.product, { cascade: true })
-    variants: Variant[];
+  @ManyToOne(() => Deal, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "dealId" })
+  deal?: Deal;
 
-    @OneToMany(() => Review, (review) => review.product, { cascade: true })
-    reviews: Review[];
+  @Column({ nullable: true })
+  dealId?: number;
 
-    @CreateDateColumn({ name: 'created_at' })
-    createdAt: Date;
+  @ManyToOne(() => Banner, { nullable: true, onDelete: "SET NULL" })
+  @JoinColumn({ name: "bannerId" })
+  banner?: Banner;
 
+  @Column({ nullable: true })
+  bannerId?: number;
 
-    @UpdateDateColumn({ name: 'updated_at' })
-    updatedAt: Date;
+  @Column({ type: "text", array: true, nullable: true })
+  productImages?: string[];
 
+  @OneToMany(() => OrderItem, (orderItem) => orderItem.product)
+  orderItems: OrderItem[];
+
+  // @ManyToOne(() => Brand, (brand) => brand.products, { onDelete: "SET NULL" })
+  // brand: Brand;
+
+  // @Column({ nullable: true })
+  // brandId?: number;
+
+  @Column({ type: "boolean", default: false })
+  hasVariants: boolean;
+
+  // orphanedRowAction: 'soft-delete' — when a variant is dropped from this
+  // product's collection (e.g. hasVariants toggled off, or a variant removed
+  // during edit), TypeORM archives it (sets deletedAt) instead of nullifying
+  // its NOT NULL product_id, which order history still needs intact.
+  @OneToMany(() => Variant, (variant) => variant.product, {
+    cascade: true,
+    orphanedRowAction: "soft-delete",
+  })
+  variants: Variant[];
+
+  @OneToMany(() => Review, (review) => review.product, { cascade: true })
+  reviews: Review[];
+
+  @CreateDateColumn({ name: "created_at" })
+  createdAt: Date;
+
+  @UpdateDateColumn({ name: "updated_at" })
+  updatedAt: Date;
+
+  // Deleting a product with order history must never cascade-delete its
+  // order_items (which would destroy those orders' records), so deletion
+  // archives the product instead of removing the row.
+  @DeleteDateColumn({ name: "deleted_at" })
+  deletedAt?: Date;
+
+  @Column({ type: "timestamp", nullable: true })
+  vendorDeletionArchivedAt?: Date | null;
 }
-

@@ -1,13 +1,27 @@
-import { Repository } from 'typeorm';
-import { Wishlist } from '../entities/wishlist.entity';
-import { WishlistItem } from '../entities/wishlistItem.entity';
-import { Product } from '../entities/product.entity';
-import AppDataSource from '../config/db.config';
-import { APIError } from '../utils/ApiError.utils';
-import { IWishlistAddRequest, IWishlistRemoveRequest, IWishlistMoveToCartRequest } from '../interface/wishlist.interface';
-import { CartService } from './cart.service';
-import { Variant } from '../entities/variant.entity';
-import { NotificationService } from './notification.service';
+import { Repository } from "typeorm";
+import { Cart } from "../entities/cart.entity";
+import { CartItem } from "../entities/cartItem.entity";
+import { Wishlist } from "../entities/wishlist.entity";
+import { WishlistItem } from "../entities/wishlistItem.entity";
+import { Product } from "../entities/product.entity";
+import AppDataSource from "../config/db.config";
+import { APIError } from "../utils/ApiError.utils";
+import {
+    IWishlistAddRequest,
+    IWishlistRemoveRequest,
+    IWishlistMoveManyToCartRequest,
+    IWishlistMoveToCartRequest,
+} from "../interface/wishlist.interface";
+import { CartService } from "./cart.service";
+import { Variant } from "../entities/variant.entity";
+import { NotificationService } from "./notification.service";
+import { resolveFinalPrice } from "../utils/pricing.utils";
+import {
+    normalizeLegacyProductDiscount,
+    normalizeLegacyVariantDiscount,
+} from "../utils/pricing.utils";
+import { withAgeRestriction } from "./age-restriction.service";
+
 
 /**
  * Service for managing wishlist-related operations such as
@@ -44,7 +58,6 @@ export class WishlistService {
         this.cartService = new CartService();
     }
 
-
     /**
      * Adds a product to the user's wishlist.
      * Uses a transaction to ensure consistency.
@@ -53,41 +66,46 @@ export class WishlistService {
      * @returns Promise<Wishlist> - The updated wishlist including the new item
      * @throws APIError if the product doesn't exist or is already in the wishlist
      */
-    async addToWishlist(userId: number, data: IWishlistAddRequest): Promise<Wishlist> {
+    async addToWishlist(
+        userId: number,
+        data: IWishlistAddRequest,
+    ): Promise<Wishlist> {
         const { productId, variantId } = data;
 
-        return await AppDataSource.transaction(async (manager) => {
+        await AppDataSource.transaction(async (manager) => {
             const productRepository = manager.getRepository(Product);
             const variantRepository = manager.getRepository(Variant);
             const wishlistRepository = manager.getRepository(Wishlist);
             const wishlistItemRepository = manager.getRepository(WishlistItem);
 
             // Verify product exists before adding
-            const product = await productRepository.findOne({ where: { id: productId } });
+            const product = await productRepository.findOne({
+                where: { id: productId },
+            });
             if (!product) {
-                throw new APIError(404, 'Product not found');
+                throw new APIError(404, "Product not found");
             }
 
             // if variant provided
-            let variant: Variant;
+            let variant: Variant | null = null;
 
             if (variantId) {
                 variant = await variantRepository.findOne({
                     where: {
-                        id: variantId.toString(), productId: productId.toString()
-                    }
-                })
+                        id: variantId,
+                        productId,
+                    },
+                });
 
                 if (!variant) {
-                    throw new APIError(404, "Variant not found")
+                    throw new APIError(404, "Variant not found");
                 }
             }
-
 
             // Find existing wishlist or create a new one if none exists
             let wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
             if (!wishlist) {
@@ -99,35 +117,63 @@ export class WishlistService {
             }
 
             // Check if product is already in wishlist to prevent duplicates
-            const exists = wishlist.items.some((item) => item.productId === productId && item.variantId === (variantId || null));
-            if (exists) {
-                throw new APIError(400, 'Product already in wishlist');
+            const existingItem = wishlist.items.find(
+                (item) =>
+                    item.productId === productId &&
+                    item.variantId === (variantId || null),
+            );
+
+            if (existingItem) {
+                return wishlist;
             }
 
-            // Create wishlist item and associate with wishlist and product
-            const wishlistItem = wishlistItemRepository.create({
-                wishlist,
-                product,
-                productId,
-                variant: variant || null,
-                variantId: variantId || null
-            });
-            await wishlistItemRepository.save(wishlistItem);
+            // ON CONFLICT DO NOTHING rather than catching the unique violation:
+            // inside a transaction a caught error still aborts it, so the next
+            // query failed and a double-clicked heart answered 500.
+            await wishlistItemRepository
+                .createQueryBuilder()
+                .insert()
+                .values({
+                    wishlist,
+                    wishlistId: wishlist.id,
+                    product,
+                    productId,
+                    variant: variant || null,
+                    variantId: variantId || null,
+                })
+                .orIgnore()
+                .execute();
 
             // Reload wishlist to get updated items relation
             wishlist = await wishlistRepository.findOne({
                 where: { id: wishlist.id },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
 
+            // Normalize legacy discount fields on the freshly loaded items
+            if (wishlist) {
+                wishlist.items = wishlist.items.map((item) => ({
+                    ...item,
+                    product: item.product
+                        ? normalizeLegacyProductDiscount(item.product)
+                        : item.product,
+                    variant: item.variant
+                        ? normalizeLegacyVariantDiscount(item.variant)
+                        : item.variant,
+                }));
+            }
+
             // Push notification (fire-and-forget)
-            new NotificationService().notifyAddToWishlist(userId, product.name).catch(() => {});
+            new NotificationService()
+                .notifyAddToWishlist(userId, product.name)
+                .catch(() => {});
 
             return wishlist!;
         });
+        // Read after the commit, through the one reader every verb shares, so
+        // the answer has the same shape (options, newest first) as GET.
+        return (await this.getWishlist(userId))!;
     }
-
-
 
     /**
      * Removes a wishlist item from the user's wishlist.
@@ -139,82 +185,106 @@ export class WishlistService {
      */
     async removeFromWishlist(
         userId: number,
-        data: IWishlistRemoveRequest
+        data: IWishlistRemoveRequest,
     ): Promise<Wishlist> {
         const { wishlistItemId } = data;
 
         // Validate wishlistItemId
         if (!wishlistItemId || isNaN(wishlistItemId) || wishlistItemId <= 0) {
-            throw new APIError(400, 'Valid Wishlist Item ID is required');
+            throw new APIError(400, "Valid Wishlist Item ID is required");
         }
 
-        return await AppDataSource.transaction(async (manager) => {
+        await AppDataSource.transaction(async (manager) => {
             const wishlistRepository = manager.getRepository(Wishlist);
             const wishlistItemRepository = manager.getRepository(WishlistItem);
 
             // Fetch wishlist with items for user, including product & variant
             const wishlist = await wishlistRepository.findOne({
                 where: { userId },
-                relations: ['items', 'items.product', 'items.variant'],
+                relations: ["items", "items.product", "items.variant"],
             });
             if (!wishlist) {
-                throw new APIError(404, 'Wishlist not found');
+                throw new APIError(404, "Wishlist item not found");
             }
 
             // Find the item to remove
-            const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
+            const wishlistItem = wishlist.items.find(
+                (item) => item.id === wishlistItemId,
+            );
             if (!wishlistItem) {
-                throw new APIError(404, 'Wishlist item not found');
+                // Not in this customer's wishlist: say so, rather than a 200
+                // that reads as "removed" when nothing happened.
+                throw new APIError(404, "Wishlist item not found");
             }
 
             // Delete the item
             await wishlistItemRepository.delete(wishlistItemId);
 
             // Remove it from the local array
-            wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
-
-
-            wishlist.items = wishlist.items.filter((item) => {
-                if (!item.product) return false;
-                if (item.variant) return item.variant.stock > 0;
-                return item.product.stock && item.product.stock > 0;
-            });
+            wishlist.items = wishlist.items.filter(
+                (item) => item.id !== wishlistItemId,
+            );
 
             return wishlist;
         });
+        // Read after the commit, through the one reader every verb shares, so
+        // the answer has the same shape (options, newest first) as GET.
+        return (await this.getWishlist(userId))!;
     }
-
 
     /**
      * Retrieves the wishlist for a given user including product details.
-     * Filters out items whose products are deleted or out of stock.
+     * Out-of-stock items are kept (the frontend shows an "Out of stock"
+     * badge and disables move-to-cart for them) — only items whose product
+     * no longer resolves at all are dropped. In practice this is now rare:
+     * archiving a product removes its wishlist rows immediately
+     * (ProductService.removeFromCartsAndWishlists), so this filter mainly
+     * guards against any pre-existing orphaned rows.
      * @param userId - ID of the user
      * @returns Promise<Wishlist | null> - Wishlist or null if none found
      */
     async getWishlist(userId: number): Promise<Wishlist | null> {
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: [
+                "items",
+                "items.product",
+                "items.product.subcategory",
+                "items.product.subcategory.category",
+                // A row saved without a variant needs the product's options to
+                // pick one when it moves to the cart.
+                "items.product.variants",
+                "items.variant",
+            ],
+            // Newest first, and stable: without an order the rows came back in
+            // whatever order Postgres found them, and moved around on reload.
+            order: { items: { id: "DESC" } },
         });
 
         if (!wishlist) {
             return null;
         }
 
-        // Filter out wishlist items where product is missing or stock is zero
+        // Keep wishlist entries visible even when products become unavailable.
         wishlist.items = wishlist.items.filter((item) => {
-            // Keep if product exists
-            if (!item.product) return false;
-
-            // If product has variants, check variant stock
-            if (item.variant) {
-                return item.variant.stock > 0;
-            }
-
-            // If product has no variants, check product stock
-            return item.product.stock && item.product.stock > 0;
+            return Boolean(item.product);
         });
 
+        // Normalize legacy discount fields on embedded product/variant objects
+        wishlist.items = wishlist.items.map((item) => ({
+            ...item,
+            product: item.product
+                ? withAgeRestriction(
+                      normalizeLegacyProductDiscount({
+                          ...item.product,
+                          variants: (item.product.variants ?? []).map(normalizeLegacyVariantDiscount),
+                      }),
+                  )
+                : item.product,
+            variant: item.variant
+                ? normalizeLegacyVariantDiscount(item.variant)
+                : item.variant,
+        }));
 
         return wishlist;
     }
@@ -222,52 +292,301 @@ export class WishlistService {
     /**
      * Moves an item from the wishlist to the user's cart.
      * Adds the product to the cart and removes the item from the wishlist.
+     *
+     * A row saved without a variant (the heart on a listing card saves the
+     * product) takes the variant the shopper picks now, in `variantId`. A row
+     * saved against a variant moves that variant and nothing else.
      * @param userId - ID of the user
-     * @param data - Contains wishlistItemId and quantity
-     * @returns Promise<Wishlist> - Updated wishlist after removal
+     * @param data - Contains wishlistItemId, quantity and, for a product-level row, variantId
+     * @returns The updated wishlist, in the same shape as `getWishlist`
      * @throws APIError if wishlist, item, or product not found or stock is insufficient
      */
     async moveToCart(
         userId: number,
-        data: IWishlistMoveToCartRequest
+        data: IWishlistMoveToCartRequest,
     ): Promise<Wishlist> {
-        const { wishlistItemId, quantity } = data;
+        const { wishlistItemId, quantity, variantId } = data;
 
         // Fetch wishlist with items, including product & variant relations
         const wishlist = await this.wishlistRepository.findOne({
             where: { userId },
-            relations: ['items', 'items.product', 'items.variant'],
+            relations: ["items", "items.product", "items.variant"],
         });
 
         if (!wishlist) {
-            throw new APIError(404, 'Wishlist not found');
+            throw new APIError(404, "Wishlist not found");
         }
 
         // Find the wishlist item
-        const wishlistItem = wishlist.items.find((item) => item.id === wishlistItemId);
+        const wishlistItem = wishlist.items.find(
+            (item) => item.id === wishlistItemId,
+        );
         if (!wishlistItem || !wishlistItem.product) {
-            throw new APIError(404, 'Wishlist item or product not found');
+            throw new APIError(404, "Wishlist item or product not found");
         }
 
-        // Add to cart, passing variantId if exists
+        if (wishlistItem.variantId && variantId && variantId !== wishlistItem.variantId) {
+            throw new APIError(400, "This saved item is a different option of the product");
+        }
+
+        // The cart validates the variant belongs to this product, its stock,
+        // and refuses a variant product without one.
         await this.cartService.addToCart(userId, {
             productId: wishlistItem.productId,
-            variantId: wishlistItem.variantId || undefined,
+            variantId: wishlistItem.variantId || variantId || undefined,
             quantity,
         });
 
-        // Remove from wishlist
-        wishlist.items = wishlist.items.filter((item) => item.id !== wishlistItemId);
         await this.wishlistItemRepository.delete(wishlistItemId);
 
-        // Optional: filter out items with no stock
-        wishlist.items = wishlist.items.filter((item) => {
-            if (!item.product) return false;
-            if (item.variant) return item.variant.stock > 0;
-            return item.product.stock && item.product.stock > 0;
-        });
-
-        return wishlist;
+        return (await this.getWishlist(userId)) ?? ({ items: [] } as unknown as Wishlist);
     }
 
+    async moveManyToCart(
+        userId: number,
+        data: IWishlistMoveManyToCartRequest,
+    ): Promise<{
+        wishlist: Wishlist;
+        movedItemIds: number[];
+        failedItems: { wishlistItemId: number; message: string }[];
+    }> {
+        const requestedItems = data.items;
+
+        return await AppDataSource.transaction(async (manager) => {
+            const wishlistRepository = manager.getRepository(Wishlist);
+            const wishlistItemRepository = manager.getRepository(WishlistItem);
+            const cartRepository = manager.getRepository(Cart);
+            const cartItemRepository = manager.getRepository(CartItem);
+
+            const wishlist = await wishlistRepository.findOne({
+                where: { userId },
+                relations: ["items", "items.product", "items.variant"],
+            });
+
+            if (!wishlist) {
+                throw new APIError(404, "Wishlist not found");
+            }
+
+            // Map for O(1) wishlist item lookup instead of scanning the array per request item
+            const wishlistItemsById = new Map(
+                wishlist.items.map((item) => [Number(item.id), item]),
+            );
+            const movedItemIds: number[] = [];
+            const failedItems: { wishlistItemId: number; message: string }[] =
+                [];
+
+            let cart = await cartRepository.findOne({
+                where: { userId },
+                relations: ["items", "items.product", "items.variant"],
+            });
+
+            if (!cart) {
+                cart = await cartRepository.save(
+                    cartRepository.create({ userId, total: 0, items: [] }),
+                );
+            }
+
+            // find if users cart already has that product by creating map
+            // previously we use to scan the array for each item
+            const existingCartItemsByKey = new Map<string, CartItem>();
+            for (const item of cart.items) {
+                const key = `${item.product.id}:${item.variantId ?? "null"}`;
+                existingCartItemsByKey.set(key, item);
+            }
+
+            // only keep track of items that are being added or updated
+            const itemsToInsert: CartItem[] = [];
+            const itemsToUpdate: CartItem[] = [];
+
+            // running total for the cart
+            let runningTotal = cart.items.reduce(
+                (sum, item) => sum + Number(item.price) * item.quantity,
+                0,
+            );
+
+            for (const requestItem of requestedItems) {
+                const wishlistItemId = Number(requestItem.wishlistItemId);
+                const wishlistItem = wishlistItemsById.get(wishlistItemId);
+
+                if (!wishlistItem || !wishlistItem.product) {
+                    failedItems.push({
+                        wishlistItemId,
+                        message: "Wishlist item or product not found",
+                    });
+                    continue;
+                }
+
+                try {
+                    const product = wishlistItem.product;
+                    const variantId = wishlistItem.variantId || null;
+                    const key = `${wishlistItem.productId}:${variantId ?? "null"}`;
+                    const existingCartItem = existingCartItemsByKey.get(key);
+
+                    const requestedQuantity = Number(requestItem.quantity);
+                    const previousQuantity = existingCartItem?.quantity || 0;
+                    const previousLineTotal = existingCartItem
+                        ? Number(existingCartItem.price) * previousQuantity
+                        : 0;
+                    const nextQuantity = previousQuantity + requestedQuantity;
+
+                    let price: number;
+                    let name = product.name;
+                    let image: string | null =
+                        product.productImages?.[0] ?? null;
+
+                    if (variantId) {
+                        const variant = wishlistItem.variant;
+                        if (!variant) {
+                            throw new APIError(404, "Variant not found");
+                        }
+                        if (
+                            variant.status === "OUT_OF_STOCK" ||
+                            variant.stock < nextQuantity
+                        ) {
+                            throw new APIError(
+                                400,
+                                `Cannot add ${nextQuantity} items; only ${variant.stock} available for this variant`,
+                            );
+                        }
+                        price = resolveFinalPrice({
+                            finalPrice: variant.finalPrice,
+                            basePrice: variant.basePrice,
+                            discountAmount: variant.discountAmount,
+                        });
+                        if (variant.attributes?.name)
+                            name = `${product.name} - ${variant.attributes.name}`;
+                        if (variant.variantImages?.length)
+                            image = variant.variantImages[0];
+
+                        if (existingCartItem) {
+                            existingCartItem.quantity = nextQuantity;
+                            existingCartItem.price = price;
+                            existingCartItem.name = name;
+                            existingCartItem.description =
+                                product.description || "";
+                            existingCartItem.image = image;
+                            itemsToUpdate.push(existingCartItem);
+                        } else {
+                            const newItem = cartItemRepository.create({
+                                cart,
+                                product,
+                                quantity: requestedQuantity,
+                                price,
+                                name,
+                                description: product.description || "",
+                                image,
+                                variant,
+                                variantId,
+                            });
+                            itemsToInsert.push(newItem);
+                            // second wishlist item resolving to the same product+variant
+                            // in this same request updates instead of double-inserting
+                            existingCartItemsByKey.set(key, newItem);
+                        }
+                    } else {
+                        if (product.hasVariants) {
+                            throw new APIError(
+                                400,
+                                "Please select a variant before proceeding.",
+                            );
+                        }
+                        if (!product.basePrice || product.stock === undefined) {
+                            throw new APIError(
+                                400,
+                                "Product must have basePrice and stock",
+                            );
+                        }
+                        if (product.stock < nextQuantity) {
+                            throw new APIError(
+                                400,
+                                `Cannot add ${nextQuantity} items; only ${product.stock} available`,
+                            );
+                        }
+                        price = resolveFinalPrice({
+                            finalPrice: product.finalPrice,
+                            basePrice: product.basePrice,
+                            discountAmount: product.discountAmount,
+                        });
+
+                        if (existingCartItem) {
+                            existingCartItem.quantity = nextQuantity;
+                            existingCartItem.price = price;
+                            existingCartItem.name = name;
+                            existingCartItem.description =
+                                product.description || "";
+                            existingCartItem.image = image;
+                            itemsToUpdate.push(existingCartItem);
+                        } else {
+                            const newItem = cartItemRepository.create({
+                                cart,
+                                product,
+                                quantity: requestedQuantity,
+                                price,
+                                name,
+                                description: product.description || "",
+                                image,
+                                variantId: null,
+                            });
+                            itemsToInsert.push(newItem);
+                            existingCartItemsByKey.set(key, newItem);
+                        }
+                    }
+
+                    // running total for the cart
+                    runningTotal =
+                        runningTotal - previousLineTotal + price * nextQuantity;
+                    movedItemIds.push(wishlistItemId);
+                } catch (error: any) {
+                    failedItems.push({
+                        wishlistItemId,
+                        message:
+                            error?.message || "Could not move item to cart",
+                    });
+                }
+            }
+
+            if (movedItemIds.length > 0) {
+                // Bulk INSERT for new cart items
+                if (itemsToInsert.length > 0) {
+                    await cartItemRepository.insert(itemsToInsert);
+                }
+                // .save() for updates is ok here since these are pre-existing rows
+                // with known IDs TypeORM issues UPDATEs, not existence checks.
+                if (itemsToUpdate.length > 0) {
+                    await cartItemRepository.save(itemsToUpdate);
+                }
+
+                // Targeted UPDATE on total column - does not touch cart.items
+                await cartRepository.update(cart.id, { total: runningTotal });
+
+                await wishlistItemRepository.delete(movedItemIds);
+            }
+
+            const updatedWishlist = await wishlistRepository.findOne({
+                where: { userId },
+                relations: ["items", "items.product", "items.variant"],
+            });
+
+            // Normalize legacy discount fields on items before returning
+            if (updatedWishlist) {
+                updatedWishlist.items = updatedWishlist.items.map((item) => ({
+                    ...item,
+                    product: item.product
+                        ? normalizeLegacyProductDiscount(item.product)
+                        : item.product,
+                    variant: item.variant
+                        ? normalizeLegacyVariantDiscount(item.variant)
+                        : item.variant,
+                }));
+            }
+
+            return {
+                wishlist:
+                    updatedWishlist ||
+                    wishlistRepository.create({ userId, items: [] }),
+                movedItemIds,
+                failedItems,
+            };
+        });
+    }
 }

@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { authMiddleware, canDeleteReview, canReviewProduct, validateZod } from '../middlewares/auth.middleware';
 import { createReviewSchema, updateReviewSchema } from '../utils/zod_validations/review.zod';
 import { ReviewController } from '../controllers/reviews.controller';
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const reviewController = new ReviewController();
@@ -36,10 +37,12 @@ const reviewController = new ReviewController();
  *                 format: float
  *                 minimum: 1.0
  *                 maximum: 5.0
+ *                 multipleOf: 0.1
  *                 example: 4.5
  *                 description: Rating must be between 1.0 and 5.0 (one decimal place)
  *               comment:
  *                 type: string
+ *                 minLength: 1
  *                 maxLength: 500
  *                 example: "Great product, highly recommend!"
  *     responses:
@@ -91,9 +94,9 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  *       - in: path
  *         name: productId
  *         schema:
- *           type: integer
+ *           type: string
  *         required: true
- *         description: ID of the product to get reviews for
+ *         description: The product id, or its URL slug
  *     responses:
  *       200:
  *         description: List of reviews and average rating retrieved successfully
@@ -177,7 +180,7 @@ router.post('/', authMiddleware, validateZod(createReviewSchema), canReviewProdu
  *       500:
  *         description: Internal server error
  */
-router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewController));
+router.get('/:productId', resolveSlugParam("products", "productId"), reviewController.getReviewsByProductId.bind(reviewController));
 
 /**
  * @swagger
@@ -187,7 +190,7 @@ router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewCont
  *     description: Allows an authenticated user to update their own review's rating or comment.
  *     tags: [Reviews]
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -202,6 +205,11 @@ router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewCont
  *           schema:
  *             type: object
  *             properties:
+ *               productId:
+ *                 type: integer
+ *                 minimum: 1
+ *                 description: Product whose review is being updated
+ *                 example: 42
  *               rating:
  *                 type: number
  *                 format: float
@@ -215,6 +223,9 @@ router.get('/:productId', reviewController.getReviewsByProductId.bind(reviewCont
  *     responses:
  *       200:
  *         description: Review updated successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Review updated successfully", data: { id: 7, rating: 4, comment: "Updated: Still a great product!" } }
  *       400:
  *         description: Validation error
  *       401:
@@ -236,7 +247,7 @@ router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), re
  *     description: Allows an authenticated user (or admin) to delete a review. Only the review owner or admin can delete.
  *     tags: [Reviews]
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     parameters:
  *       - in: path
  *         name: id
@@ -247,6 +258,9 @@ router.patch("/:id", authMiddleware, validateZod(updateReviewSchema, "body"), re
  *     responses:
  *       200:
  *         description: Review deleted successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, msg: "Review deleted successfully" }
  *       401:
  *         description: Unauthorized
  *       403:

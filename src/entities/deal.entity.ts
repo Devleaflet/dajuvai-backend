@@ -1,4 +1,4 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, OneToMany, PrimaryGeneratedColumn, UpdateDateColumn, Index } from "typeorm";
 import { User } from "./user.entity";
 import { Product } from "./product.entity";
 
@@ -11,6 +11,11 @@ export enum DealStatus {
 export class Deal {
     @PrimaryGeneratedColumn()
     id: number;
+
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_deals_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
 
     @Column()
     name: string;

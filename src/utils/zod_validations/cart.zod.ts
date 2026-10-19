@@ -7,7 +7,14 @@ export const addToCartSchema = z.object({
     // Quantity must be a positive integer
     quantity: z.number().int().positive('Quantity must be a positive integer'),
 
-    variantId: z.number().int().optional()
+    variantId: z.number().int().optional(),
+
+    /**
+     * How the item got here. "buy_now" goes straight to checkout and never
+     * shows a cart, so telling the customer their item was added to one is
+     * both wrong and a push they did not ask for.
+     */
+    source: z.enum(["add_to_cart", "buy_now"]).optional(),
 });
 
 export const removeFromCartSchema = z.object({

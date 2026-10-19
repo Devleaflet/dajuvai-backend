@@ -1,4 +1,5 @@
 import type { Address } from "../entities/address.entity";
+import { orderShippingAddress } from "./sanitize.util";
 import type { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 import type { Order } from "../entities/order.entity";
 import type { OrderItem } from "../entities/orderItems.entity";
@@ -72,7 +73,8 @@ export function sanitizeProductForDelivery(product?: Product | null) {
         productImages: product.productImages ?? [],
         finalPrice: product.finalPrice ?? null,
         basePrice: product.basePrice ?? null,
-        discount: product.discount ?? null,
+        discountAmount: product.discountAmount ?? null,
+        discountPercent: product.discountPercent ?? null,
         discountType: product.discountType ?? null,
         hasVariants: product.hasVariants,
         status: product.status ?? null,
@@ -111,8 +113,19 @@ export function sanitizeOrderItemForDelivery(item?: OrderItem | null) {
 
 export function sanitizeOrderForDelivery(order?: Order | null) {
     if (!order) return null;
+    const assignments = (order as any).deliveryAssignments;
+    const latestAssignment = Array.isArray(assignments) && assignments.length > 0
+        ? assignments.reduce((latest: any, current: any) => {
+              if (!latest) return current;
+              const latestId = latest.id ?? 0;
+              const currentId = current.id ?? 0;
+              return currentId >= latestId ? current : latest;
+          }, null)
+        : (order as any).latestAssignment ?? null;
+
     return {
         id: order.id,
+        orderNumber: order.orderNumber,
         orderedById: order.orderedById,
         totalPrice: order.totalPrice,
         shippingFee: order.shippingFee,
@@ -121,19 +134,26 @@ export function sanitizeOrderForDelivery(order?: Order | null) {
         paymentStatus: order.paymentStatus,
         paymentMethod: order.paymentMethod,
         status: order.status,
-        deliveryStatus: order.deliveryStatus,
         appliedPromoCode: (order as any).appliedPromoCode ?? null,
         phoneNumber: (order as any).phoneNumber ?? null,
         instrumentName: (order as any).instrumentName ?? null,
         createdAt: order.createdAt,
         updatedAt: order.updatedAt,
         orderedBy: sanitizeUserForDelivery((order as any).orderedBy),
-        shippingAddress: sanitizeAddressForDelivery((order as any).shippingAddress),
+        shippingAddress: sanitizeAddressForDelivery(orderShippingAddress(order)),
         orderItems: Array.isArray((order as any).orderItems)
             ? (order as any).orderItems.map((i: OrderItem) =>
                   sanitizeOrderItemForDelivery(i),
               )
             : [],
+        // A cleared or superseded assignment means the order was taken back
+        // from its rider, so naming that rider would say they still have it.
+        assignedRider:
+            latestAssignment?.rider &&
+            !["none", "reassigned"].includes(latestAssignment.assignmentStatus)
+                ? sanitizeRiderForDelivery(latestAssignment.rider)
+                : null,
+        assignmentStatus: latestAssignment?.assignmentStatus ?? null,
     };
 }
 

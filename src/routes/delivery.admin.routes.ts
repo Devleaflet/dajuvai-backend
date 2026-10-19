@@ -1,13 +1,22 @@
 import { Router } from "express";
 import {
     authMiddleware,
-    isAdmin,
     isAdminOrStaff,
     validateZod,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 
 import { asyncHandler } from "../utils/asyncHandler.utils";
-import { assignRiderSchema, createRiderSchema, resetRiderPasswordSchema } from "../utils/zod_validations/delivery.zod";
+import {
+    assignRiderSchema,
+    bulkAssignRiderSchema,
+    createRiderSchema,
+    deliveryAssignmentsQuerySchema,
+    deliveryOrdersQuerySchema,
+    failedDeliveriesQuerySchema,
+    resetRiderPasswordSchema,
+} from "../utils/zod_validations/delivery.zod";
 import { DeliveryAdminController } from "../controllers/delivery.admin.controller";
 
 const deliveryAdminRouter = Router();
@@ -158,7 +167,7 @@ deliveryAdminRouter.use(authMiddleware, isAdminOrStaff);
  */
 deliveryAdminRouter.post(
     "/riders",
-    isAdmin,
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(createRiderSchema),
     asyncHandler(deliveryAdminController.createRider.bind(deliveryAdminController)),
 );
@@ -190,7 +199,7 @@ deliveryAdminRouter.post(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
+ *                     $ref: '#/components/schemas/DeliveryRider'
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -200,6 +209,7 @@ deliveryAdminRouter.post(
  */
 deliveryAdminRouter.get(
     "/riders",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(deliveryAdminController.getAllRiders.bind(deliveryAdminController)),
 );
 
@@ -234,6 +244,19 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 12
+ *                     fullName:
+ *                       type: string
+ *                       example: "Sita Sharma"
+ *                     email:
+ *                       type: string
+ *                       example: "rider1@dajuvai.com"
+ *                     onDelivery:
+ *                       type: boolean
+ *                       example: false
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -245,6 +268,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.get(
     "/riders/:riderId",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(deliveryAdminController.getRiderById.bind(deliveryAdminController)),
 );
 
@@ -310,213 +334,27 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.put(
     "/riders/:riderId/reset-password",
-    isAdmin,
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(resetRiderPasswordSchema),
     asyncHandler(
         deliveryAdminController.resetRiderPassword.bind(deliveryAdminController),
     ),
 );
 
-//  ORDER PROCESSING
+//  ALL ORDERS (AT_WAREHOUSE)
 
 /**
  * @swagger
- * /api/admin/delivery/orders/processing:
+ * /api/admin/delivery/orders/at-warehouse:
  *   get:
- *     summary: Get processing orders (deliveryStatus = ORDER_PROCESSING)
+ *     summary: List delivery orders (default ARRIVED_AT_WAREHOUSE)
  *     description: |
- *       Legacy alias: `/api/delivery/admin/orders/processing`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: Processing orders fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.get(
-    "/orders/processing",
-    asyncHandler(
-        deliveryAdminController.getProcessingOrders.bind(deliveryAdminController),
-    ),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/orders/{orderId}/processing:
- *   get:
- *     summary: Get a processing order by ID
- *     description: |
- *       Legacy alias: `/api/delivery/admin/orders/{orderId}/processing`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: integer
- *         example: 101
- *     responses:
- *       200:
- *         description: Order fetched successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       404:
- *         description: Order not found
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.get(
-    "/orders/:orderId/processing",
-    asyncHandler(
-        deliveryAdminController.getProcessingOrderById.bind(deliveryAdminController),
-    ),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/orders/{orderId}/returned-warehouse:
- *   patch:
- *     summary: Mark order at warehouse (deliveryStatus -> AT_WAREHOUSE)
- *     description: |
- *       Transitions an order from `ORDER_PROCESSING` to `AT_WAREHOUSE` (if allowed).
- *
- *       Legacy alias: `/api/delivery/admin/orders/{orderId}/returned-warehouse`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderId
- *         required: true
- *         schema:
- *           type: integer
- *         example: 101
- *     responses:
- *       200:
- *         description: Order status updated successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *       400:
- *         description: Invalid delivery status transition
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       404:
- *         description: Order not found
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.patch(
-    "/orders/:orderId/returned-warehouse",
-    asyncHandler(deliveryAdminController.markAtWarehouse.bind(deliveryAdminController)),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/orders/orderItems/{orderItemId}/collect-items:
- *   put:
- *     summary: Mark an order item as collected at warehouse
- *     description: |
- *       Sets `collectedAtWarehouse = true` for the order item. If all items of the
- *       order are collected, the order deliveryStatus transitions to `READY_FOR_DELIVERY`.
- *
- *       Legacy alias: `/api/delivery/admin/orders/orderItems/{orderItemId}/collect-items`
- *     tags:
- *       - Delivery Admin
- *     security:
- *       - bearerAuth: []
- *     parameters:
- *       - in: path
- *         name: orderItemId
- *         required: true
- *         schema:
- *           type: integer
- *         example: 555
- *     responses:
- *       201:
- *         description: Order item collected successfully
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                 message:
- *                   type: string
- *                   example: "Order Item Collected"
- *       400:
- *         description: Invalid request
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       404:
- *         description: Order item not found
- *       500:
- *         description: Internal server error
- */
-deliveryAdminRouter.put(
-    "/orders/orderItems/:orderItemId/collect-items",
-    asyncHandler(deliveryAdminController.collectOrderItems.bind(deliveryAdminController)),
-);
-
-/**
- * @swagger
- * /api/admin/delivery/warehouse-order-queue:
- *   get:
- *     summary: Get warehouse order queue (deliveryStatus = READY_FOR_DELIVERY)
- *     description: |
- *       Returns orders ready to be assigned to a rider, in FIFO order (oldest updated first).
- *
- *       Legacy alias: `/api/delivery/admin/warehouse-order-queue`
+ *       Paginated orders for delivery management. Without `statuses` this is the
+ *       warehouse queue (ARRIVED_AT_WAREHOUSE). With `statuses`, any of those
+ *       statuses — limited to orders that reached delivery (at the warehouse,
+ *       with a rider, or with a delivery assignment / warehouse arrival on record).
+ *       Search matches order number or id, order phone, customer name, username,
+ *       email or phone, and vendor business name.
  *     tags:
  *       - Delivery Admin
  *     security:
@@ -524,59 +362,109 @@ deliveryAdminRouter.put(
  *     parameters:
  *       - in: query
  *         name: page
- *         required: false
  *         schema:
  *           type: integer
- *           minimum: 1
  *           default: 1
- *         example: 1
  *       - in: query
  *         name: limit
- *         required: false
  *         schema:
  *           type: integer
- *           minimum: 1
  *           default: 20
- *         example: 20
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest]
+ *           default: newest
+ *       - in: query
+ *         name: statuses
+ *         description: Comma-separated order statuses. Unknown values are refused with 400.
+ *         schema:
+ *           type: string
+ *           example: ARRIVED_AT_WAREHOUSE,ASSIGNED_TO_RIDER
+ *       - in: query
+ *         name: paymentMethod
+ *         schema:
+ *           type: string
+ *           enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
+ *       - in: query
+ *         name: riderId
+ *         description: Rider on the order's latest (uncleared) assignment.
+ *         schema:
+ *           type: integer
  *     responses:
  *       200:
- *         description: Warehouse queue fetched successfully
+ *         description: Orders fetched successfully
  *         content:
  *           application/json:
  *             schema:
  *               type: object
  *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
+ *                 success: { type: boolean, example: true }
+ *                 data: { type: array, items: { type: object } }
+ *                 pagination: { type: object }
+ */
+deliveryAdminRouter.get(
+    "/orders/at-warehouse",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    validateZod(deliveryOrdersQuerySchema, "query"),
+    asyncHandler(
+        deliveryAdminController.getAtWarehouseOrders.bind(deliveryAdminController),
+    ),
+);
+
+/**
+ * @swagger
+ * /api/admin/delivery/orders/bulk-assign:
+ *   post:
+ *     summary: Bulk assign a rider to multiple orders
+ *     tags:
+ *       - Delivery Admin
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - orderIds
+ *               - riderId
+ *             properties:
+ *               orderIds:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *               riderId:
+ *                 type: integer
+ *     responses:
+ *       200:
+ *         description: Bulk assignment completed
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
  *                 data:
  *                   type: array
  *                   items:
  *                     type: object
- *                 pagination:
- *                   type: object
- *                   properties:
- *                     total:
- *                       type: integer
- *                       example: 120
- *                     currentPage:
- *                       type: integer
- *                       example: 1
- *                     totalPages:
- *                       type: integer
- *                       example: 6
- *       401:
- *         description: Unauthorized (missing/invalid token)
- *       403:
- *         description: Forbidden (requires Admin or Staff)
- *       500:
- *         description: Internal server error
+ *                     properties:
+ *                       orderId: { type: integer }
+ *                       success: { type: boolean }
+ *                       error: { type: string, nullable: true }
  */
-deliveryAdminRouter.get(
-    "/warehouse-order-queue",
-    asyncHandler(
-        deliveryAdminController.getWarehouseOrderQueue.bind(deliveryAdminController),
-    ),
+deliveryAdminRouter.post(
+    "/orders/bulk-assign",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
+    validateZod(bulkAssignRiderSchema),
+    asyncHandler(deliveryAdminController.bulkAssignRider.bind(deliveryAdminController)),
 );
 
 //  ASSIGNMENTS
@@ -662,6 +550,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.post(
     "/orders/:orderId/assign-rider",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     validateZod(assignRiderSchema),
     asyncHandler(deliveryAdminController.assignRider.bind(deliveryAdminController)),
 );
@@ -672,7 +561,7 @@ deliveryAdminRouter.post(
  *   get:
  *     summary: Get all delivery assignments (Admin only)
  *     description: |
- *       Returns paginated delivery assignments with `order` and `rider` relations.
+ *       Returns paginated delivery assignments with `order` (and its customer) and `rider`.
  *
  *       Legacy alias: `/api/delivery/admin/assignments`
  *     tags:
@@ -694,8 +583,30 @@ deliveryAdminRouter.post(
  *         schema:
  *           type: integer
  *           minimum: 1
+ *           maximum: 100
  *           default: 20
  *         example: 20
+ *       - in: query
+ *         name: search
+ *         description: Order number, rider name or phone, customer name/username/phone, failure reason.
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: status
+ *         description: An assignment status, or `active` for assigned + picked up.
+ *         schema:
+ *           type: string
+ *           enum: [active, assigned, picked_up, delivered, failed, reassigned, none]
+ *       - in: query
+ *         name: riderId
+ *         schema:
+ *           type: integer
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *           enum: [newest, oldest]
+ *           default: newest
  *     responses:
  *       200:
  *         description: Assignments fetched successfully
@@ -710,7 +621,7 @@ deliveryAdminRouter.post(
  *                 data:
  *                   type: array
  *                   items:
- *                     type: object
+ *                     $ref: '#/components/schemas/DeliveryAssignment'
  *                 pagination:
  *                   type: object
  *                   properties:
@@ -730,9 +641,42 @@ deliveryAdminRouter.post(
  *       500:
  *         description: Internal server error
  */
+/**
+ * @swagger
+ * /api/admin/delivery/orders/failed-deliveries:
+ *   get:
+ *     summary: List failed delivery assignments
+ *     description: |
+ *       Assignments marked failed (or carrying a failure reason), those still
+ *       needing recovery first. `needsRecovery` is true while the order is
+ *       NOT_RECEIVED and nothing newer has been assigned. Requires Delivery view permission.
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, minimum: 1, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, minimum: 1, maximum: 100, default: 100 } }
+ *       - in: query
+ *         name: search
+ *         description: Order number, failure reason, rider name, customer name or phone.
+ *         schema: { type: string }
+ *       - { in: query, name: state, schema: { type: string, enum: [pending, resolved] } }
+ *       - { in: query, name: riderId, schema: { type: integer } }
+ *     responses:
+ *       200:
+ *         description: Failed deliveries fetched successfully.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { type: array, items: { $ref: '#/components/schemas/DeliveryAssignment' } }
+ *                 pagination: { type: object }
+ */
 deliveryAdminRouter.get(
     "/assignments",
-    isAdmin,
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    validateZod(deliveryAssignmentsQuerySchema, "query"),
     asyncHandler(deliveryAdminController.getAllAssignments.bind(deliveryAdminController)),
 );
 
@@ -769,6 +713,19 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 9001
+ *                     orderId:
+ *                       type: integer
+ *                       example: 101
+ *                     riderId:
+ *                       type: integer
+ *                       example: 12
+ *                     assignmentStatus:
+ *                       type: string
+ *                       example: "assigned"
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -780,6 +737,7 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.get(
     "/orders/:orderId/assignment",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
     asyncHandler(
         deliveryAdminController.findOrderAssignment.bind(deliveryAdminController),
     ),
@@ -791,8 +749,9 @@ deliveryAdminRouter.get(
  *   patch:
  *     summary: Reset order back to warehouse
  *     description: |
- *       Transitions the order deliveryStatus to `AT_WAREHOUSE` (if allowed) and marks
- *       the order status as `RETURNED`.
+ *       Clears the order's open assignment (a failed one is kept as the record),
+ *       frees the rider, and moves the order to ARRIVED_AT_WAREHOUSE. Only for
+ *       orders that are ASSIGNED_TO_RIDER, NOT_RECEIVED or already at the warehouse.
  *
  *       Legacy alias: `/api/delivery/admin/orders/{orderId}/reset-to-warehouse`
  *     tags:
@@ -819,8 +778,18 @@ deliveryAdminRouter.get(
  *                   example: true
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 101
+ *                     deliveryStatus:
+ *                       type: string
+ *                       example: "AT_WAREHOUSE"
+ *                     message:
+ *                       type: string
+ *                       example: "Order reset to warehouse"
  *       400:
- *         description: Invalid delivery status transition
+ *         description: Order is not with a rider or failed
  *       401:
  *         description: Unauthorized (missing/invalid token)
  *       403:
@@ -832,9 +801,83 @@ deliveryAdminRouter.get(
  */
 deliveryAdminRouter.patch(
     "/orders/:orderId/reset-to-warehouse",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.CREATE_EDIT),
     asyncHandler(
         deliveryAdminController.resetToWarehouse.bind(deliveryAdminController),
     ),
 );
+
+deliveryAdminRouter.get(
+    "/orders/failed-deliveries",
+    checkPermission(ModuleName.DELIVERY, PermissionLevel.VIEW),
+    validateZod(failedDeliveriesQuerySchema, "query"),
+    asyncHandler(
+        deliveryAdminController.getFailedDeliveries.bind(deliveryAdminController),
+    ),
+);
+
+/**
+ * @swagger
+ * /api/delivery/admin/orders/at-warehouse:
+ *   get:
+ *     summary: Legacy alias for warehouse delivery orders
+ *     deprecated: true
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, default: 20, maximum: 100 } }
+ *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: sort, schema: { type: string, enum: [newest, oldest] } }
+ *       - { in: query, name: statuses, schema: { type: string } }
+ *       - { in: query, name: paymentMethod, schema: { type: string } }
+ *       - { in: query, name: riderId, schema: { type: integer } }
+ *     responses:
+ *       200:
+ *         description: Orders fetched successfully.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ * /api/delivery/admin/orders/bulk-assign:
+ *   post:
+ *     summary: Legacy alias for bulk rider assignment
+ *     deprecated: true
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [orderIds, riderId]
+ *             properties:
+ *               orderIds: { type: array, items: { type: integer } }
+ *               riderId: { type: integer }
+ *     responses:
+ *       200:
+ *         description: Bulk assignment completed.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ * /api/delivery/admin/orders/failed-deliveries:
+ *   get:
+ *     summary: Legacy alias for failed delivery assignments
+ *     deprecated: true
+ *     tags: [Delivery Admin]
+ *     security: [{ bearerAuth: [] }]
+ *     parameters:
+ *       - { in: query, name: page, schema: { type: integer, default: 1 } }
+ *       - { in: query, name: limit, schema: { type: integer, default: 100, maximum: 100 } }
+ *       - { in: query, name: search, schema: { type: string } }
+ *       - { in: query, name: state, schema: { type: string, enum: [pending, resolved] } }
+ *       - { in: query, name: riderId, schema: { type: integer } }
+ *     responses:
+ *       200:
+ *         description: Failed deliveries fetched successfully.
+ *         content:
+ *           application/json:
+ *             schema: { type: object }
+ */
 
 export default deliveryAdminRouter;

@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "axios": "^1.11.0",
+    "bullmq": "^5.81.5",
     "cors": "^2.8.5",
     "crypto": "^1.0.1",
     "firebase-admin": "^13.7.0",
@@ -33,6 +34,7 @@
     "@types/passport-facebook": "^3.0.3",
     "@types/passport-google-oauth20": "^2.0.16",
     "@types/passport-jwt": "^4.0.1",
+    "@types/supertest": "^7.2.1",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "@typescript-eslint/eslint-plugin": "^8.30.1",
@@ -61,17 +63,26 @@
     "pg": "^8.14.1",
     "prettier": "^3.5.3",
     "rate-limiter-flexible": "^7.0.0",
+    "supertest": "^7.2.2",
     "ts-node": "^10.9.2",
     "typeorm": "^0.3.22",
     "typescript": "^5.8.3",
+    "vitest": "^4.1.10",
     "zod": "^3.24.3"
   },
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "npm run check:routes",
+    "test:unit": "vitest run",
+    "backfill:product-search": "ts-node src/scripts/backfill-product-search.ts",
+    "backfill:legacy-pricing": "ts-node src/scripts/backfill-legacy-pricing.ts",
+    "check:routes": "ts-node src/scripts/routeInventory.ts",
+    "validate:swagger": "ts-node src/scripts/validate-swagger.ts",
+    "check:slugs": "ts-node src/scripts/check-slugs.ts",
     "dev": "ts-node src/index.ts",
     "start": "nodemon src/index.ts",
     "typeorm": "ts-node ./node_modules/typeorm/cli.js --dataSource src/data-source.ts",
     "migration:generate": "npm run typeorm -- migration:generate",
+    "migration:create": "npm run typeorm -- migration:create src/migrations",
     "migration:run": "npm run typeorm -- migration:run",
     "migration:revert": "npm run typeorm -- migration:revert"
   },

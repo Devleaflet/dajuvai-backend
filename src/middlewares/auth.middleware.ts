@@ -5,10 +5,14 @@ import jwt, {
 } from "jsonwebtoken";
 import { User, UserRole } from "../entities/user.entity";
 import AppDataSource from "../config/db.config";
-import { ZodError, ZodSchema } from "zod";
+import {
+  isIssuedBeforeCutoff,
+  isTokenRevoked,
+} from "../service/token-revocation.service";
 import { Vendor } from "../entities/vendor.entity";
 import { Product } from "../entities/product.entity";
 import { OrderItem } from "../entities/orderItems.entity";
+import { OrderStatus } from "../entities/order.entity";
 import { Review } from "../entities/reviews.entity";
 import config from "../config/env.config";
 import { Rider } from "../entities/rider.entity";
@@ -19,7 +23,6 @@ import {
   ForbiddenError,
   NotFoundError,
   TokenExpiredError,
-  ValidationError,
 } from "../errors";
 
 /**
@@ -29,6 +32,14 @@ import {
 export interface AuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}>
   extends Request<P, ResBody, ReqBody, ReqQuery> {
   user?: User;
+  /**
+   * The claims of the token this request arrived with.
+   *
+   * Carried so a handler can revoke *the token it was called with* — logout
+   * needs the `jti`, and nothing else in the request can tell it apart from
+   * any other session the same account holds.
+   */
+  auth?: { jti?: string; iat?: number; exp?: number };
 }
 
 /**
@@ -79,8 +90,13 @@ const riderDB = AppDataSource.getRepository(Rider);
 
 /**
  * Authorizes access to vendors and admins only.
+ *
+ * Every route using this guard addresses one vendor row by id, so a vendor is
+ * let through only for their own record. Without that comparison any vendor
+ * token could edit any other vendor, payout details included.
+ *
  * @route Middleware
- * @access Vendor | Admin
+ * @access Vendor (self) | Admin
  */
 export const restrictToVendorOrAdmin = async (
   req: VendorAuthRequest & AuthRequest,
@@ -94,26 +110,74 @@ export const restrictToVendorOrAdmin = async (
     return next(new AuthError("Authentication required"));
   }
 
-  if (user?.role === UserRole.ADMIN || vendor) {
+  if (user?.role === UserRole.ADMIN) {
+    return next();
+  }
+
+  if (vendor) {
+    // `:vendorId` on the payment-option route, `:id` on the two update routes.
+    const params = (req.params ?? {}) as { vendorId?: string; id?: string };
+    const targetId = Number(params.vendorId ?? params.id);
+
+    if (!Number.isInteger(targetId) || targetId !== vendor.id) {
+      return next(
+        new ForbiddenError("Not authorized: vendors may only change their own account"),
+      );
+    }
+
     return next();
   }
 
   return next(new ForbiddenError("Not authorized: Admin or Vendor only"));
 };
 
+/** What a vendor may change on their own account; the rest is set at registration. */
+const VENDOR_SELF_EDITABLE = new Set(["profilePicture", "paymentOptions"]);
+
+/**
+ * Runs after `restrictToVendorOrAdmin` on the vendor update routes. Registered
+ * details (business name, phone, district, registration and tax numbers,
+ * documents) are fixed once a vendor signs up, so a vendor updating their own
+ * account may only send a profile picture and payment options. Admins keep
+ * full edit access.
+ */
+export const limitVendorSelfEdit = (
+  req: VendorAuthRequest & AuthRequest,
+  _res: Response,
+  next: NextFunction,
+) => {
+  if (!req.vendor || req.user?.role === UserRole.ADMIN) return next();
+
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const locked = Object.keys(body).filter((key) => !VENDOR_SELF_EDITABLE.has(key));
+  if (locked.length > 0) {
+    return next(
+      new ForbiddenError(
+        `Registered details cannot be changed: ${locked.join(", ")}. Contact support to update them.`,
+      ),
+    );
+  }
+
+  // Which payout types are allowed is the zod schema's job (eSewa, Khalti, NPX).
+
+  return next();
+};
+
 /**
  * Authenticates both vendors and users using JWT tokens.
  * Token can be in cookies (vendorToken or token) or Authorization header.
  * @route Middleware
- * @access Admin | Vendor
+ * @access Admin | Staff | Vendor | User
  */
 export const combinedAuthMiddleware = async (
   req: CombinedAuthRequest,
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const token =
-    req.cookies.vendorToken || req.headers.authorization?.split(" ")[1];
+  const bearerToken = req.headers.authorization?.startsWith("Bearer ")
+    ? req.headers.authorization.split(" ")[1]
+    : undefined;
+  const token = bearerToken || req.cookies.vendorToken || req.cookies.token;
 
   if (!token) {
     return next(new AuthError("Authentication token is missing"));
@@ -128,17 +192,30 @@ export const combinedAuthMiddleware = async (
       [key: string]: any;
     };
 
+    const accountId = Number(decoded.id);
+    if (!Number.isInteger(accountId) || accountId <= 0) {
+      return next(new AuthError("Invalid token: missing account id"));
+    }
+
+    // One door, two subject types — both get the same revocation rules.
+    if (await isTokenRevoked(decoded.jti as string | undefined)) {
+      return next(new AuthError("This session has been signed out. Please log in again."));
+    }
+
     if (decoded.businessName) {
-      const vendor = await vendorDB.findOneBy({ id: decoded.id });
+      const vendor = await vendorDB.findOneBy({ id: accountId });
       if (!vendor) {
         return next(new AuthError("Invalid token: vendor not found"));
+      }
+      if (isIssuedBeforeCutoff(decoded.iat as number | undefined, vendor.tokensValidFrom)) {
+        return next(new AuthError("Your password changed. Please log in again."));
       }
       req.vendor = vendor;
       return next();
     }
 
     if (decoded.role) {
-      const user = await userDB.findOneBy({ id: decoded.id });
+      const user = await userDB.findOneBy({ id: accountId });
       if (!user) {
         return next(new AuthError("Invalid token: user not found"));
       }
@@ -180,7 +257,10 @@ export const vendorAuthMiddleware = async (
   next: NextFunction,
 ): Promise<void> => {
   const vendorToken =
-    req.cookies.vendorToken || req.headers.authorization?.split(" ")[1];
+    // The token the client sent explicitly wins over an ambient cookie, as in
+    // combinedAuthMiddleware: a leftover cookie from another session must not
+    // decide who this request is.
+    req.headers.authorization?.split(" ")[1] || req.cookies.vendorToken;
 
   if (!vendorToken) {
     return next(new AuthError("Authentication token is missing"));
@@ -198,9 +278,21 @@ export const vendorAuthMiddleware = async (
       return next(new AuthError("Invalid token: not a vendor session"));
     }
 
+    const vendorClaims = decoded as { jti?: string; iat?: number };
+
+    // Revocation applies to vendors too: a vendor logout and a vendor password
+    // reset must end the session they were issued for.
+    if (await isTokenRevoked(vendorClaims.jti)) {
+      return next(new AuthError("This session has been signed out. Please log in again."));
+    }
+
     const vendor = await vendorDB.findOneBy({ id: decoded.id });
     if (!vendor) {
       return next(new AuthError("Vendor not found"));
+    }
+
+    if (isIssuedBeforeCutoff(vendorClaims.iat, vendor.tokensValidFrom)) {
+      return next(new AuthError("Your password changed. Please log in again."));
     }
     req.vendor = vendor;
     return next();
@@ -217,6 +309,33 @@ export const vendorAuthMiddleware = async (
   }
 };
 
+
+/**
+ * Routes an account inside its deletion grace period may still reach.
+ *
+ * Deliberately a short, explicit list rather than a flag a route can set:
+ * "which endpoints survive deletion" is a security decision, and it belongs in
+ * one place that can be read in ten seconds. Matched against the mounted path,
+ * so `/api/auth/me/cancel-deletion` and `/api/auth/logout` are reachable while
+ * everything else is refused.
+ */
+const DELETION_GRACE_ALLOWLIST: ReadonlyArray<{ method: string; path: RegExp }> = [
+  // Get out of the grace period.
+  { method: "POST", path: /^\/me\/cancel-deletion$/ },
+  // Read your own account, so the screen offering that button can render.
+  { method: "GET", path: /^\/me$/ },
+  // Leave cleanly.
+  { method: "POST", path: /^\/logout$/ },
+];
+
+function allowsPendingDeletion(req: Request): boolean {
+  // `req.path` is relative to the router this middleware runs in, which is what
+  // the patterns above are written against.
+  return DELETION_GRACE_ALLOWLIST.some(
+    (entry) => entry.method === req.method && entry.path.test(req.path),
+  );
+}
+
 /**
  * Authenticates a user (admin or customer) by verifying the JWT token.
  * Attaches user to `req.user` if valid.
@@ -228,7 +347,8 @@ export const authMiddleware = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  const token = req.cookies.token || req.headers.authorization?.split(" ")[1];
+  // Explicit bearer first, then the cookie — see vendorAuthMiddleware.
+  const token = req.headers.authorization?.split(" ")[1] || req.cookies.token;
 
   if (!token) {
     return next(new AuthError("No token provided. Please log in."));
@@ -240,6 +360,9 @@ export const authMiddleware = async (
       email: string;
       role?: string;
       businessName?: string;
+      jti?: string;
+      iat?: number;
+      exp?: number;
     };
 
     // A vendor token verifies fine against the same secret but carries `businessName`
@@ -255,11 +378,55 @@ export const authMiddleware = async (
       return next(new AuthError("User not found. Please log in again."));
     }
 
+    /**
+     * A token can verify and still be withdrawn.
+     *
+     * `jti` is the single-token case — a logout. `tokensValidFrom` is the bulk
+     * case — a password change or reset invalidates every token issued before
+     * it, including ones we have never seen. Neither applies to tokens signed
+     * before this shipped: they carry no `jti`, and an account that has never
+     * revoked anything has `tokensValidFrom` null.
+     */
+    if (await isTokenRevoked(decoded.jti)) {
+      return next(new AuthError("This session has been signed out. Please log in again."));
+    }
+
+    if (isIssuedBeforeCutoff(decoded.iat, user.tokensValidFrom)) {
+      return next(
+        new AuthError("Your password changed. Please log in again."),
+      );
+    }
+
+    // Accounts scheduled for deletion (grace period) or already finalized
+    // cannot use their old sessions. Reactivation happens via the login
+    // flows (email/password reactivation endpoint or Google sign-in).
+    if (user.deletionFinalizedAt) {
+      return next(new AuthError("This account no longer exists."));
+    }
+    /**
+     * An account inside its deletion grace period keeps a usable session for
+     * the few routes that exist to get out of it.
+     *
+     * Blanket rejection was the bug: the app offers "cancel deletion" on the
+     * account screen, and the screen could not be loaded, so the only way back
+     * was to guess that signing out and in again reactivates. Everything else
+     * stays refused — no browsing, no ordering — which is the point of the
+     * grace period.
+     */
+    if (user.deletionScheduledFor && !allowsPendingDeletion(req)) {
+      return next(
+        new AuthError(
+          "This account is scheduled for deletion. Cancel the deletion to keep using it.",
+        ),
+      );
+    }
+
     if (!user.isVerified) {
       return next(new AuthError("Account is not verified."));
     }
 
     req.user = user;
+    req.auth = { jti: decoded.jti, iat: decoded.iat, exp: decoded.exp };
     return next();
   } catch (err) {
     if (err instanceof JwtTokenExpiredError) {
@@ -481,38 +648,24 @@ export const isAdminOrVendor = async (
   res: Response,
   next: NextFunction,
 ): Promise<void> => {
-  if (req.user?.role === UserRole.ADMIN || req.vendor) {
+  if (
+    req.user?.role === UserRole.ADMIN ||
+    req.user?.role === UserRole.STAFF ||
+    req.vendor
+  ) {
     return next();
   }
   return next(new ForbiddenError("Admin or Vendor access required"));
 };
 
 /**
- * Validates request body/query/params using a Zod schema.
- * Forwards a ValidationError to the global error handler on failure.
- * @param schema - Zod schema to validate against
- * @param property - Target request property ('body' | 'query' | 'params'), defaults to 'body'
+ * @deprecated Import from "./validation.middleware" instead. Generic request
+ * validation doesn't belong in an authentication middleware file — kept
+ * here only so the ~20 existing route files that import validateZod from
+ * this module don't all need touching in the same change. New code should
+ * import directly from validation.middleware.ts.
  */
-export const validateZod = (
-  schema: ZodSchema,
-  property: "body" | "query" | "params" = "body",
-) => {
-  return async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      req[property] = await schema.parseAsync(req[property]);
-      return next();
-    } catch (error) {
-      if (error instanceof ZodError) {
-        const fields = error.errors.map((e) => ({
-          field: e.path.join("."),
-          message: e.message,
-        }));
-        return next(new ValidationError("Validation failed", fields));
-      }
-      return next(error);
-    }
-  };
-};
+export { validateZod } from "./validation.middleware";
 
 export const canReviewProduct = async (
   req: AuthRequest<{}, {}, { productId: string }, {}>,
@@ -533,17 +686,26 @@ export const canReviewProduct = async (
   try {
     const orderItemRepo = AppDataSource.getRepository(OrderItem);
 
+    // DELIVERED, not CONFIRMED. The old check was backwards in both
+    // directions: CONFIRMED is the status an order holds *before* it ships, so
+    // it let a shopper review something that had not reached them yet, and
+    // because status moves on as the order progresses, an order that actually
+    // arrived no longer matched at all — the one person qualified to review was
+    // the one person refused. A review is a report on a product someone has,
+    // so the order has to have been delivered.
     const purchasedItem = await orderItemRepo
       .createQueryBuilder("orderItem")
       .innerJoinAndSelect("orderItem.order", "order")
       .where("order.orderedById = :userId", { userId })
-      .andWhere("order.status = :status", { status: "CONFIRMED" })
+      .andWhere("order.status = :status", { status: OrderStatus.DELIVERED })
       .andWhere("orderItem.productId = :productId", { productId })
       .getOne();
 
     if (!purchasedItem) {
       return next(
-        new ForbiddenError("You can only review products you have purchased."),
+        new ForbiddenError(
+          "You can only review products from an order that has been delivered to you.",
+        ),
       );
     }
 

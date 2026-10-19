@@ -1,20 +1,35 @@
-import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateColumn, OneToMany, ManyToOne, JoinColumn } from 'typeorm';
-import { Product } from './product.entity';
-import { OrderItem } from './orderItems.entity';
-import { District } from './district.entity';
-import { VendorPaymentOption } from './vendorPaymentOption';
+import {
+    Entity,
+    Column,
+    PrimaryGeneratedColumn,
+    CreateDateColumn,
+    UpdateDateColumn,
+    OneToMany,
+    ManyToOne,
+    JoinColumn,
+    Index,
+} from "typeorm";
+import { Product } from "./product.entity";
+import { OrderItem } from "./orderItems.entity";
+import { District } from "./district.entity";
+import { VendorPaymentOption } from "./vendorPaymentOption";
 
+/** Payout methods; kept identical to the one in vendorPaymentOption.ts. */
 export enum PaymentOption {
-    ESEWA = 'ESEWA',
-    KHALTI = 'KHALTI',
-    NPS = "NPS",
-    BANK = "BANK"
+    ESEWA = "ESEWA",
+    KHALTI = "KHALTI",
+    NPX = "NPX",
 }
 
 @Entity()
 export class Vendor {
     @PrimaryGeneratedColumn()
     id: number;
+
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_vendor_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
 
     @Column()
     businessName: string;
@@ -31,8 +46,8 @@ export class Vendor {
     @Column({ nullable: true })
     telePhone: string;
 
-    @ManyToOne(() => District, district => district.vendors, { eager: true })
-    @JoinColumn({ name: 'districtId' })
+    @ManyToOne(() => District, (district) => district.vendors, { eager: true })
+    @JoinColumn({ name: "districtId" })
     district: District;
 
     @Column({ nullable: true })
@@ -51,7 +66,7 @@ export class Vendor {
     citizenshipDocuments: string[];
 
     @Column({ type: "varchar", nullable: true })
-    chequePhoto: string;// hataune 
+    chequePhoto: string; // hataune
 
     @Column({ type: "varchar", nullable: true })
     accountName: string;
@@ -76,6 +91,22 @@ export class Vendor {
 
     @Column({ default: false })
     isApproved: boolean;
+
+    // Broadcast campaign email only; transactional mail ignores it.
+    @Column({ type: "boolean", default: true })
+    marketingEmailsEnabled: boolean;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionRequestedAt: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionScheduledFor: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionFinalizedAt: Date | null;
+
+    @Column({ type: "boolean", nullable: true })
+    deletionPreviousApproval: boolean | null;
 
     @Column({ nullable: true })
     resetToken: string | null;
@@ -115,4 +146,15 @@ export class Vendor {
 
     @UpdateDateColumn()
     updatedAt: Date;
+
+    /**
+     * Every token issued before this moment is refused.
+     *
+     * Set on a password change or reset, and by an admin ending all sessions.
+     * One write revokes an unbounded number of tokens, including ones that were
+     * never presented to us. Null means nothing has been revoked, which is the
+     * state of every account that predates this column.
+     */
+    @Column({ type: "timestamp", nullable: true })
+    tokensValidFrom?: Date | null;
 }

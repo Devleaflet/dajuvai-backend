@@ -6,6 +6,7 @@ import { User } from "../entities/user.entity";
 import { Vendor } from "../entities/vendor.entity";
 import { Cart } from "../entities/cart.entity";
 import { CommissionDocument } from "../entities/commissionDocument.entity";
+import { Order } from "../entities/order.entity";
 import { allowedOrigins } from "../config/cors.config";
 import config from "../config/env.config";
 
@@ -83,8 +84,9 @@ export const initSocket = (server: HttpServer) => {
     });
 
     io.on("connection", (socket) => {
-        console.log(`User connected: ${socket.id}`)
-        console.log(socket)
+        // Never log the socket itself: it serialises `handshake.auth` and
+        // `handshake.headers`, which carry the caller's access token.
+        console.log(`User connected: ${socket.id}`);
         const userId = (socket.data as { userId?: number }).userId;
         if (userId) {
             socket.join(userRoom(userId));
@@ -111,6 +113,17 @@ export const emitCartUpdate = (userId: number, cart: Cart) => {
     io.to(userRoom(userId)).emit("cart:count", { count });
 };
 
+// Catalog stock can be affected by any customer's completed order. Product
+// screens use this as an invalidation signal and refetch the authoritative
+// product payload; stock values themselves are never trusted from a socket.
+export const emitProductStockUpdate = (payload: {
+    productIds: number[];
+    variantIds: number[];
+}) => {
+    if (!io) return;
+    io.emit("product:stockUpdated", payload);
+};
+
 // Notifies every connected vendor dashboard the moment admin uploads/replaces the commission document.
 export const emitCommissionUpdate = (document: CommissionDocument) => {
     if (!io) return;
@@ -121,4 +134,35 @@ export const emitCommissionUpdate = (document: CommissionDocument) => {
 export const emitCommissionDelete = () => {
     if (!io) return;
     io.to(VENDORS_ROOM).emit("commission:delete");
+};
+
+// Pushes a live status update to the customer and every vendor on the
+// order the moment Order.status changes — closes the gap where status
+// changes only ever reached clients via poll/refresh/email.
+export const emitOrderStatusUpdate = (order: Order) => {
+    if (!io) return;
+    const payload = {
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        status: order.status,
+    };
+    io.to(userRoom(order.orderedById)).emit("order:statusUpdated", payload);
+
+    const vendorIds = [
+        ...new Set((order.orderItems ?? []).map((item) => item.vendorId)),
+    ];
+    for (const vendorId of vendorIds) {
+        io.to(vendorRoom(vendorId)).emit("order:statusUpdated", payload);
+    }
+};
+
+// A new in-app notification for one customer or vendor — today only
+// broadcasts send these live; everything else is picked up on the next fetch.
+export const emitNotification = (
+    ownerType: "user" | "vendor",
+    ownerId: number,
+    notification: Record<string, unknown>,
+) => {
+    if (!io) return;
+    io.to(ownerType === "user" ? userRoom(ownerId) : vendorRoom(ownerId)).emit("notification:new", notification);
 };

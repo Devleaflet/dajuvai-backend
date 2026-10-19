@@ -1,7 +1,10 @@
 import { Router } from 'express';
 import { DealController } from '../controllers/deal.controller';
 import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from '../middlewares/auth.middleware';
+import { checkPermission } from '../middlewares/permission.middleware';
+import { ModuleName, PermissionLevel } from '../entities/permission.enum';
 import { createDealSchema, updateDealSchema } from '../utils/zod_validations/deal.zod';
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const dealController = new DealController();
@@ -31,6 +34,7 @@ const dealController = new DealController();
  *                 type: string
  *                 description: Unique name of the deal
  *                 example: "Summer Bonanza"
+ *                 minLength: 1
  *                 maxLength: 100
  *               discountPercentage:
  *                 type: number
@@ -76,12 +80,45 @@ const dealController = new DealController();
  *                       example: 101
  *       400:
  *         description: Validation error or duplicate deal name
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized – Admin authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
-router.post('/', authMiddleware, isAdminOrStaff, validateZod(createDealSchema), dealController.createDeal.bind(dealController));
+router.post('/', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.DEAL, PermissionLevel.CREATE_EDIT), validateZod(createDealSchema), dealController.createDeal.bind(dealController));
 
 /**
  * @swagger
@@ -215,7 +252,7 @@ router.post('/', authMiddleware, isAdminOrStaff, validateZod(createDealSchema), 
  *                   type: string
  *                   example: "Internal server error"
  */
-router.patch('/:id', authMiddleware, isAdminOrStaff, validateZod(updateDealSchema), dealController.updateDeal.bind(dealController));
+router.patch('/:id', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.DEAL, PermissionLevel.CREATE_EDIT), validateZod(updateDealSchema), dealController.updateDeal.bind(dealController));
 
 /**
  * @swagger
@@ -229,8 +266,8 @@ router.patch('/:id', authMiddleware, isAdminOrStaff, validateZod(updateDealSchem
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: The unique identifier of the deal
+ *           type: string
+ *         description: The deal id, or its URL slug
  *     responses:
  *       200:
  *         description: Deal found successfully
@@ -309,7 +346,7 @@ router.patch('/:id', authMiddleware, isAdminOrStaff, validateZod(updateDealSchem
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/:id', dealController.getDealById.bind(dealController));
+router.get('/:id', resolveSlugParam("deals"), dealController.getDealById.bind(dealController));
 
 /**
  * @swagger
@@ -436,7 +473,7 @@ router.get('/', dealController.getAllDeals.bind(dealController));
  *                   example: true
  *                 msg:
  *                   type: string
- *                   example: Deal deleted successfully
+ *                   example: "Deal deleted successfully"
  *                 deletedDeal:
  *                   type: object
  *                   properties:
@@ -476,7 +513,7 @@ router.get('/', dealController.getAllDeals.bind(dealController));
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: Unauthorized
+ *                   example: "Unauthorized"
  *       404:
  *         description: Deal not found
  *         content:
@@ -504,6 +541,6 @@ router.get('/', dealController.getAllDeals.bind(dealController));
  *                   type: string
  *                   example: Internal server error
  */
-router.delete('/:id', authMiddleware, isAdminOrStaff, dealController.deleteDeal.bind(dealController));
+router.delete('/:id', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.DEAL, PermissionLevel.DELETE), dealController.deleteDeal.bind(dealController));
 
 export default router;

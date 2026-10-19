@@ -1,9 +1,10 @@
-import { Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
+import { Check, Column, CreateDateColumn, Entity, JoinColumn, ManyToOne, PrimaryGeneratedColumn, UpdateDateColumn } from "typeorm";
 import { User } from "./user.entity";
 import { Product } from "./product.entity";
 
 
 @Entity('reviews')
+@Check('"rating" >= 1 AND "rating" <= 5')
 export class Review {
     @PrimaryGeneratedColumn()
     id: number;

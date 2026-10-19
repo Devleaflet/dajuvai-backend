@@ -15,11 +15,14 @@ import { Deal } from "../entities/deal.entity";
 import { Address } from "../entities/address.entity";
 import { Order } from "../entities/order.entity";
 import { OrderItem } from "../entities/orderItems.entity";
+import { OrderVendorShipping } from "../entities/orderVendorShipping.entity";
+import { OrderStatusHistory } from "../entities/orderStatusHistory.entity";
 import { Banner } from "../entities/banner.entity";
 import { Contact } from "../entities/contact.entity";
 import { District } from "../entities/district.entity";
 import { HomePageSection } from "../entities/homePage.entity";
 import { Promo } from "../entities/promo.entity";
+import { PromoRedemption } from "../entities/promo-redemption.entity";
 import { Variant } from "../entities/variant.entity";
 import { HomeCategory } from "../entities/home.category";
 import { Notification } from "../entities/notification.entity";
@@ -27,6 +30,21 @@ import { VendorPaymentOption } from "../entities/vendorPaymentOption";
 import { Rider } from "../entities/rider.entity";
 import { DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 import { CommissionDocument } from "../entities/commissionDocument.entity";
+import { DeviceToken } from "../entities/deviceToken.entity";
+import { NotificationDispatch } from "../entities/notificationDispatch.entity";
+import { Broadcast, BroadcastContent, BroadcastDelivery, BroadcastRecipient } from "../entities/broadcast.entity";
+import { Placement } from "../entities/placement.entity";
+import { PlacementItem } from "../entities/placementItem.entity";
+import { SearchAlias } from "../entities/search-alias.entity";
+import { SearchAliasCandidate } from "../entities/search-alias-candidate.entity";
+import { SearchQueryMetric } from "../entities/search-query-metric.entity";
+import { StaffPermission } from "../entities/staffPermission.entity";
+import { AuditLog } from "../entities/auditLog.entity";
+import { CheckoutDraft } from "../entities/checkoutDraft.entity";
+import { ProcessedWebhook } from "../entities/processedWebhook.entity";
+import { RevokedToken } from "../entities/revokedToken.entity";
+import { SlugRedirect } from "../entities/slugRedirect.entity";
+import { SlugSubscriber } from "../subscribers/slug.subscriber";
 
 // const AppDataSource = new DataSource({
 //     type: "postgres",
@@ -70,12 +88,76 @@ const AppDataSource = new DataSource({
     url: config.DATABASE_URL,
     synchronize: false,
     logging: false,
-    entities: [User, Category, Subcategory, Product, Vendor, Brand, Cart, CartItem, Wishlist, WishlistItem, Review, Deal, Address, Order, OrderItem,
-        Banner, Contact, District, HomePageSection, Promo, Variant, HomeCategory, Notification, VendorPaymentOption, Rider, DeliveryAssignment, CommissionDocument],
-    migrations: ['src/migrations/*.ts'],
+    entities: [
+        User,
+        Category,
+        Subcategory,
+        Product,
+        Vendor,
+        Brand,
+        Cart,
+        CartItem,
+        Wishlist,
+        WishlistItem,
+        Review,
+        Deal,
+        Address,
+        Order,
+        OrderItem,
+        OrderVendorShipping,
+        OrderStatusHistory,
+        Banner,
+        Contact,
+        District,
+        HomePageSection,
+        Promo,
+        PromoRedemption,
+        Variant,
+        HomeCategory,
+        Notification,
+        VendorPaymentOption,
+        Rider,
+        DeliveryAssignment,
+        CommissionDocument,
+        DeviceToken,
+        NotificationDispatch,
+        Broadcast,
+        BroadcastContent,
+        BroadcastRecipient,
+        BroadcastDelivery,
+        Placement,
+        PlacementItem,
+        SearchAlias,
+        SearchAliasCandidate,
+        SearchQueryMetric,
+        StaffPermission,
+        AuditLog,
+        CheckoutDraft,
+        ProcessedWebhook,
+        RevokedToken,
+        SlugRedirect,
+    ],
+    subscribers: [SlugSubscriber],
+    migrations: ["src/migrations/*.ts"],
+    // Each migration file commits in its own transaction instead of the
+    // TypeORM default (all pending migrations sharing one transaction) —
+    // required for the order-status migration pair, where the 2nd file's
+    // backfill UPDATE uses enum values the 1st file just added (Postgres
+    // forbids using a brand-new enum value inside the transaction that
+    // added it).
+    migrationsTransactionMode: "each",
     ssl: false,
+    // node-postgres pool. Its defaults (10 connections, wait forever for one)
+    // turned a single stuck transaction into an API that hung on every route.
+    extra: {
+        max: config.DB_POOL_MAX,
+        // A request that cannot get a connection fails instead of hanging.
+        connectionTimeoutMillis: 10_000,
+        // Postgres ends a transaction left open with no statement running —
+        // a leaked one would otherwise hold its row locks indefinitely.
+        idle_in_transaction_session_timeout: 60_000,
+    },
 });
-
 
 export default AppDataSource;
 export { AppDataSource };

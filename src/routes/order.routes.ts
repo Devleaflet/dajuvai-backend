@@ -1,8 +1,25 @@
-import { Router } from 'express';
-import { OrderController } from '../controllers/order.controller';
-import { authMiddleware, combinedAuthMiddleware, isAccountOwner, isAccountOwnerOrAdmin, isAdmin, isAdminOrStaff, isVendor, validateZod, vendorAuthMiddleware } from '../middlewares/auth.middleware';
-import { createOrderSchema, shippingAddressSchema, updateOrderStatusSchema } from '../utils/zod_validations/order.zod';
-import { asyncHandler } from '../utils/asyncHandler.utils';
+import { Router } from "express";
+import { OrderController } from "../controllers/order.controller";
+import {
+    authMiddleware,
+    combinedAuthMiddleware,
+    isAccountOwner,
+    isAccountOwnerOrAdmin,
+    isAdmin,
+    isAdminOrStaff,
+    isVendor,
+    vendorAuthMiddleware,
+} from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
+import { validateZod } from "../middlewares/validation.middleware";
+import {
+    createOrderSchema,
+    shippingAddressSchema,
+    updateOrderStatusSchema,
+    updateOrderItemFulfillmentSchema,
+} from "../utils/zod_validations/order.zod";
+import { asyncHandler } from "../utils/asyncHandler.utils";
 
 const router = Router();
 const orderController = new OrderController();
@@ -21,35 +38,7 @@ const orderController = new OrderController();
  *       content:
  *         application/json:
  *           schema:
- *             type: object
- *             required:
- *               - shippingAddress
- *               - paymentMethod
- *             properties:
- *               shippingAddress:
- *                 type: object
- *                 required:
- *                   - province
- *                   - city
- *                   - streetAddress
- *                   - district
- *                 properties:
- *                   province:
- *                     type: string
- *                     example: "Bagmati"
- *                   city:
- *                     type: string
- *                     example: "Kathmandu"
- *                   streetAddress:
- *                     type: string
- *                     example: "Pulchowk 123"
- *                   district:
- *                     type: string
- *                     example: "Lalitpur"
- *               paymentMethod:
- *                 type: string
- *                 enum: [ESEWA, KHALTI, CASH_ON_DELIVERY]
- *                 example: CASH_ON_DELIVERY
+ *             $ref: '#/components/schemas/CreateOrderRequest'
  *     responses:
  *       201:
  *         description: Order created successfully (for COD or without redirect)
@@ -75,10 +64,10 @@ const orderController = new OrderController();
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "UNPAID"
  *                     paymentMethod:
  *                       type: string
  *                       example: "CASH_ON_DELIVERY"
@@ -90,47 +79,11 @@ const orderController = new OrderController();
  *                       format: date-time
  *                       example: "2025-06-11T12:00:00Z"
  *       200:
- *         description: Order created successfully and redirect URL provided (for ESEWA/KHALTI)
+ *         description: Draft order created; pay via redirectUrl when present
  *         content:
  *           application/json:
  *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 101
- *                     totalPrice:
- *                       type: number
- *                       example: 1599.00
- *                     shippingFee:
- *                       type: number
- *                       example: 200
- *                     status:
- *                       type: string
- *                       example: "PENDING"
- *                     paymentStatus:
- *                       type: string
- *                       example: "PENDING"
- *                     paymentMethod:
- *                       type: string
- *                       example: "ESEWA"
- *                     shippingAddressId:
- *                       type: integer
- *                       example: 5
- *                     createdAt:
- *                       type: string
- *                       format: date-time
- *                       example: "2025-06-11T12:00:00Z"
- *                 redirectUrl:
- *                   type: string
- *                   format: uri
- *                   example: "https://esewa.com.np/initiate?tx=abc123"
+ *               $ref: '#/components/schemas/CreateOrderDraftResponse'
  *       400:
  *         description: Invalid input or cart is empty
  *         content:
@@ -172,8 +125,83 @@ const orderController = new OrderController();
  *                   example: "Internal server error"
  */
 
-router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(orderController.createOrder.bind(orderController)));
+router.post(
+    "/",
+    authMiddleware,
+    validateZod(createOrderSchema),
+    asyncHandler(orderController.createOrder.bind(orderController)),
+);
 
+// Read-only checkout preview: same vendor-grouped shipping/discount calc as
+// createOrder, without writing an order — the frontend renders these
+// numbers instead of recomputing shipping itself.
+/**
+ * @swagger
+ * /api/order/estimate:
+ *   post:
+ *     summary: Preview checkout totals and transparent price breakdown
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     description: Returns backend-authoritative merchandise, shipping, promo, deal, and product-discount totals without creating an order. Used by web and mobile checkout.
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             $ref: '#/components/schemas/MobileCheckoutEstimateRequest'
+ *     responses:
+ *       200:
+ *         description: Checkout estimate
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     merchandiseSubtotal:
+ *                       type: number
+ *                       example: 4200
+ *                     priceBreakdown:
+ *                       type: object
+ *                       properties:
+ *                         actualPrice:
+ *                           type: number
+ *                           example: 5000
+ *                         productDiscountTotal:
+ *                           type: number
+ *                           example: 300
+ *                         dealDiscountTotal:
+ *                           type: number
+ *                           example: 500
+ *                         promoDiscountTotal:
+ *                           type: number
+ *                           example: 100
+ *                         lineItems:
+ *                           type: array
+ *                           items:
+ *                             type: object
+ *                     shippingTotal:
+ *                       type: number
+ *                       example: 200
+ *                     discountTotal:
+ *                       type: number
+ *                       example: 100
+ *                     grandTotal:
+ *                       type: number
+ *                       example: 4300
+ */
+router.post(
+    "/estimate",
+    authMiddleware,
+    asyncHandler(orderController.estimateCheckout.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -211,10 +239,10 @@ router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(or
  *                         example: 200
  *                       status:
  *                         type: string
- *                         example: "PENDING"
+ *                         example: "ORDER_PLACED"
  *                       paymentStatus:
  *                         type: string
- *                         example: "PENDING"
+ *                         example: "ORDER_PLACED"
  *                       paymentMethod:
  *                         type: string
  *                         example: "CASH_ON_DELIVERY"
@@ -290,7 +318,13 @@ router.post('/', authMiddleware, validateZod(createOrderSchema), asyncHandler(or
  *                   example: "Internal server error"
  */
 
-router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getCustomerOrders.bind(orderController)));
+router.get(
+    "/",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
+    asyncHandler(orderController.getAllOrders.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -334,11 +368,11 @@ router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.get
  *                       example: 25
  *                     paymentStatus:
  *                       type: string
- *                       enum: [PENDING, COMPLETED, FAILED]
- *                       example: COMPLETED
+ *                       enum: [PAID, UNPAID]
+ *                       example: PAID
  *                     status:
  *                       type: string
- *                       enum: [PENDING, CONFIRMED, PROCESSING, SHIPPED, OUT_FOR_DELIVERY, DELIVERED]
+ *                       enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                       example: CONFIRMED
  *                     transactionId:
  *                       type: string
@@ -460,8 +494,11 @@ router.get('/', authMiddleware, isAdminOrStaff, asyncHandler(orderController.get
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/payment/success', asyncHandler(orderController.handlePaymentSuccess.bind(orderController)));
-
+router.get(
+    "/payment/success",
+    authMiddleware,
+    asyncHandler(orderController.handlePaymentSuccess.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -531,8 +568,11 @@ router.get('/payment/success', asyncHandler(orderController.handlePaymentSuccess
  *                   type: string
  *                   example: Internal server error
  */
-router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.bind(orderController)));
-
+router.get(
+    "/payment/cancel",
+    authMiddleware,
+    asyncHandler(orderController.handlePaymentCancel.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -576,10 +616,10 @@ router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.b
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -636,6 +676,23 @@ router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.b
  *                               basePrice:
  *                                 type: number
  *                                 example: 899.99
+ *                           priceBreakdown:
+ *                             type: object
+ *                             description: Historical item price transparency snapshot.
+ *                             properties:
+ *                               basePrice:
+ *                                 type: number
+ *                                 example: 999
+ *                               unitPrice:
+ *                                 type: number
+ *                                 example: 799
+ *                               productDiscount:
+ *                                 type: object
+ *                               dealDiscount:
+ *                                 type: object
+ *                     priceBreakdown:
+ *                       type: object
+ *                       description: Order-level actual price, product discount, deal discount, promo discount, and line totals for web/mobile checkout detail screens.
  *       400:
  *         description: Invalid order ID
  *         content:
@@ -702,19 +759,23 @@ router.get('/payment/cancel', asyncHandler(orderController.handlePaymentCancel.b
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.getCustomerOrderDetails.bind(orderController)));
+router.get(
+    "/:orderId",
+    combinedAuthMiddleware,
+    asyncHandler(orderController.getCustomerOrderDetails.bind(orderController)),
+);
 
 /**
  * @swagger
  * /api/order/customer/order/{id}:
  *   get:
- *     summary: Get order details by order ID 
+ *     summary: Get order details by order ID
  *     tags:
  *       - Orders
  *     security:
  *       - bearerAuth: []
  *     parameters:
- *       - name: orderId
+ *       - name: id
  *         in: path
  *         required: true
  *         description: ID of the order to retrieve
@@ -746,10 +807,10 @@ router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.get
  *                       example: 200
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     paymentMethod:
  *                       type: string
  *                       example: "ESEWA"
@@ -806,6 +867,12 @@ router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.get
  *                               basePrice:
  *                                 type: number
  *                                 example: 899.99
+ *                           priceBreakdown:
+ *                             type: object
+ *                             description: Historical item price transparency snapshot.
+ *                     priceBreakdown:
+ *                       type: object
+ *                       description: Order-level actual price, product discount, deal discount, promo discount, and line totals for mobile checkout/order detail screens.
  *       400:
  *         description: Invalid order ID
  *         content:
@@ -872,8 +939,11 @@ router.get('/:orderId', combinedAuthMiddleware, asyncHandler(orderController.get
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind(orderController)));
-
+router.get(
+    "/customer/order/:id",
+    authMiddleware,
+    asyncHandler(orderController.getOrderById.bind(orderController)),
+);
 
 // /**
 //  * @swagger
@@ -946,7 +1016,7 @@ router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind
 //  *                           example: "Pulchowk Road, Ward 3"
 //  *                     status:
 //  *                       type: string
-//  *                       example: "PENDING"
+//  *                       example: "ORDER_PLACED"
 //  *                     orderedBy:
 //  *                       type: object
 //  *                       properties:
@@ -1064,10 +1134,10 @@ router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind
 //  *                         example: 3500
 //  *                       paymentStatus:
 //  *                         type: string
-//  *                         example: "PENDING"
+//  *                         example: "ORDER_PLACED"
 //  *                       status:
 //  *                         type: string
-//  *                         example: "PENDING"
+//  *                         example: "ORDER_PLACED"
 //  *                       orderedBy:
 //  *                         type: object
 //  *                         properties:
@@ -1201,10 +1271,10 @@ router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind
  *                       example: 3500
  *                     paymentStatus:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     status:
  *                       type: string
- *                       example: "PENDING"
+ *                       example: "ORDER_PLACED"
  *                     orderedBy:
  *                       type: object
  *                       properties:
@@ -1298,8 +1368,13 @@ router.get('/customer/order/:id', asyncHandler(orderController.getOrderById.bind
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(orderController.getOrderDetails.bind(orderController)));// order by id
-
+router.get(
+    "/admin/:orderId",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
+    asyncHandler(orderController.getOrderDetails.bind(orderController)),
+); // order by id
 
 /**
  * @swagger
@@ -1323,13 +1398,27 @@ router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(order
  *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - status
  *             properties:
  *               status:
  *                 type: string
- *                 enum: [PENDING, CONFIRMED, CANCELLED, DELIVERED]
+ *                 enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                 example: CONFIRMED
- *             required:
- *               - status
+ *               expectedCurrentStatus:
+ *                 type: string
+ *                 enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
+ *                 description: Optimistic concurrency guard — rejects if order status has changed since client last fetched it
+ *               reason:
+ *                 type: string
+ *                 maxLength: 500
+ *                 example: "Courier is delayed by roadworks; new estimate is Friday"
+ *                 description: Shown to the customer. Required for DELAYED, CANCELLED, NOT_RECEIVED and RETURNED; ignored for the customer on every other status.
+ *               note:
+ *                 type: string
+ *                 maxLength: 1000
+ *                 example: "Called customer to verify delivery"
+ *                 description: Internal note, kept in the status timeline only
  *     responses:
  *       200:
  *         description: Order status updated successfully
@@ -1415,7 +1504,7 @@ router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(order
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Invalid status transition from PENDING to DELIVERED"
+ *                   example: "Invalid status transition from ORDER_PLACED to DELIVERED"
  *       404:
  *         description: Order not found
  *         content:
@@ -1443,8 +1532,174 @@ router.get('/admin/:orderId', authMiddleware, isAdminOrStaff, asyncHandler(order
  *                   type: string
  *                   example: "Internal server error"
  */
-router.put('/admin/:orderId/status', authMiddleware, isAdminOrStaff, validateZod(updateOrderStatusSchema), asyncHandler(orderController.updateOrderStatus.bind(orderController)));
+router.put(
+    "/admin/:orderId/status",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.CREATE_EDIT),
+    validateZod(updateOrderStatusSchema),
+    asyncHandler(orderController.updateOrderStatus.bind(orderController)),
+);
 
+/**
+ * @swagger
+ * /api/order/admin/{orderId}/items/{itemId}/fulfillment:
+ *   put:
+ *     summary: Confirm or cancel a single order item (multi-vendor fulfillment)
+ *     description: |
+ *       Item-level fulfillment for multi-vendor orders. The parent order
+ *       stays one order; each item is reviewed independently.
+ *       - CONFIRMED: item can be fulfilled; no remark needed.
+ *       - CANCELLED: mandatory non-blank cancellation remark (max 1000
+ *         chars); the item's stock is restocked and its final payable value
+ *         is deducted as cancelledAmount in the order summary.
+ *       Repeated identical requests are safe no-ops. Terminal orders
+ *       (DELIVERED/CANCELLED/NOT_RECEIVED/RETURNED) reject changes. When
+ *       every item ends up CANCELLED the parent order becomes CANCELLED;
+ *       when no item is pending and at least one is confirmed, an
+ *       ORDER_PLACED order advances to CONFIRMED.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *       - in: path
+ *         name: itemId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [status]
+ *             properties:
+ *               status:
+ *                 type: string
+ *                 enum: [CONFIRMED, CANCELLED, PENDING]
+ *                 example: "CANCELLED"
+ *               cancellationRemark:
+ *                 type: string
+ *                 maxLength: 1000
+ *                 example: "Vendor out of stock"
+ *     responses:
+ *       200:
+ *         description: Item fulfillment updated; returns the full sanitized order
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   description: Full sanitized order, including per-item fulfillmentStatus and the order-level cancelledAmount/cancelledItemCount/finalTotal
+ *       400:
+ *         description: Invalid IDs or validation error (e.g. missing cancellation remark)
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin or Staff access required
+ *       404:
+ *         description: Order or order item not found
+ *       409:
+ *         description: Order/item locked (terminal state) or item already cancelled
+ *       500:
+ *         description: Internal server error
+ */
+router.put(
+    "/admin/:orderId/items/:itemId/fulfillment",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.CREATE_EDIT),
+    validateZod(updateOrderItemFulfillmentSchema),
+    asyncHandler(
+        orderController.updateOrderItemFulfillment.bind(orderController),
+    ),
+);
+
+/**
+ * @swagger
+ * /api/order/admin/{orderId}/status-history:
+ *   get:
+ *     summary: Get order status change history
+ *     description: Returns a chronological list of all status changes for a specific order. Admin/Staff only.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the order
+ *     responses:
+ *       200:
+ *         description: Status history retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       previousStatus:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "ORDER_PLACED"
+ *                       newStatus:
+ *                         type: string
+ *                         example: "CONFIRMED"
+ *                       changedBy:
+ *                         type: object
+ *                         nullable: true
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           username:
+ *                             type: string
+ *                             example: "admin"
+ *                       changedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-06-11T12:00:00Z"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Admin or Staff access required
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+    "/admin/:orderId/status-history",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
+    asyncHandler(orderController.getOrderStatusHistory.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1572,30 +1827,29 @@ router.put('/admin/:orderId/status', authMiddleware, isAdminOrStaff, validateZod
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(orderController.searchOrdersById.bind(orderController)));
-
+router.get(
+    "/admin/order/search",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.VIEW),
+    asyncHandler(orderController.searchOrdersById.bind(orderController)),
+);
 
 /**
  * @swagger
- * /api/order/user/track/{orderId}:
+ * /api/order/user/track:
  *   get:
  *     summary: Track order status by order ID
- *     description: Returns the status of a specific order by order ID.
+ *     description: Returns the status of a specific order by order ID (passed as query parameter).
  *     tags:
  *       - Orders
- *     requestBody:
- *       required: true
- *       content:
- *         application/json:
- *           schema:
- *             type: object
- *             required:
- *               - orderId
- *             properties:
- *               orderId:
- *                 type: number
- *                 example: 123
- *                 description: ID of the order to be tracked.
+ *     parameters:
+ *       - in: query
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: ID of the order to be tracked.
  *     responses:
  *       200:
  *         description: Order status retrieved successfully
@@ -1609,7 +1863,7 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *                   example: true
  *                 orderStatus:
  *                   type: string
- *                   enum: [PENDING, CONFIRMED, CANCELLED, DELIVERED]
+ *                   enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                   example: CONFIRMED
  *       400:
  *         description: Bad request - order ID missing or invalid
@@ -1640,7 +1894,10 @@ router.get('/admin/order/search', authMiddleware, isAdminOrStaff, asyncHandler(o
  *       500:
  *         description: Internal server error
  */
-router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(orderController)));
+router.get(
+    "/user/track",
+    asyncHandler(orderController.trackOrderById.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1750,7 +2007,52 @@ router.get("/user/track", asyncHandler(orderController.trackOrderById.bind(order
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/vendor/orders', vendorAuthMiddleware, isVendor, asyncHandler(orderController.getVendorOrders.bind(orderController)));
+router.get(
+    "/vendor/orders",
+    vendorAuthMiddleware,
+    isVendor,
+    asyncHandler(orderController.getVendorOrders.bind(orderController)),
+);
+
+/**
+ * @swagger
+ * /api/order/vendor/orders/export:
+ *   get:
+ *     summary: Export every order matching the current filters (Vendor only, no pagination)
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: status
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: search
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: sort
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: All matching orders, unpaginated
+ *         content:
+ *           application/json:
+ *             example:
+ *               success: true
+ *               data: []
+ *       401:
+ *         description: Unauthorized
+ */
+router.get(
+    "/vendor/orders/export",
+    vendorAuthMiddleware,
+    isVendor,
+    asyncHandler(orderController.exportVendorOrders.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1891,8 +2193,84 @@ router.get('/vendor/orders', vendorAuthMiddleware, isVendor, asyncHandler(orderC
  *                   type: string
  *                   example: "Internal server error"
  */
-router.get('/vendor/:orderId', vendorAuthMiddleware, asyncHandler(orderController.getVendorOrderDetails.bind(orderController)));
+router.get(
+    "/vendor/:orderId",
+    vendorAuthMiddleware,
+    asyncHandler(orderController.getVendorOrderDetails.bind(orderController)),
+);
 
+/**
+ * @swagger
+ * /api/order/vendor/{orderId}/status-history:
+ *   get:
+ *     summary: Get order status change history for vendor
+ *     description: Returns a chronological list of all status changes for a specific order. Vendor only.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     parameters:
+ *       - in: path
+ *         name: orderId
+ *         required: true
+ *         schema:
+ *           type: integer
+ *         description: Numeric ID of the order
+ *     responses:
+ *       200:
+ *         description: Status history retrieved successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: array
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 1
+ *                       previousStatus:
+ *                         type: string
+ *                         nullable: true
+ *                         example: "ORDER_PLACED"
+ *                       newStatus:
+ *                         type: string
+ *                         example: "CONFIRMED"
+ *                       changedBy:
+ *                         type: object
+ *                         nullable: true
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                             example: 1
+ *                           username:
+ *                             type: string
+ *                             example: "vendor_user"
+ *                       changedAt:
+ *                         type: string
+ *                         format: date-time
+ *                         example: "2025-06-11T12:00:00Z"
+ *       401:
+ *         description: Unauthorized
+ *       403:
+ *         description: Forbidden - Vendor access required
+ *       404:
+ *         description: Order not found
+ *       500:
+ *         description: Internal server error
+ */
+router.get(
+    "/vendor/:orderId/status-history",
+    vendorAuthMiddleware,
+    isVendor,
+    asyncHandler(orderController.getVendorOrderStatusHistory.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -1936,12 +2314,12 @@ router.get('/vendor/:orderId', vendorAuthMiddleware, asyncHandler(orderControlle
  *                         example: PAID
  *                       paymentMethod:
  *                         type: string
- *                         enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA]
+ *                         enum: [ONLINE_PAYMENT, CASH_ON_DELIVERY, KHALTI, ESEWA, NPX]
  *                         example: CASH_ON_DELIVERY
  *                       status:
  *                         type: string
- *                         enum: [PENDING, CONFIRMED, CANCELLED]
- *                         example: CONFIRMED
+ *                         enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
+ *                         example: ORDER_PLACED
  *                       shippingAddress:
  *                         type: object
  *                         properties:
@@ -1986,26 +2364,39 @@ router.get('/vendor/:orderId', vendorAuthMiddleware, asyncHandler(orderControlle
  *       500:
  *         description: Internal server error
  */
-router.get("/customer/history", authMiddleware, orderController.getCustomerOrderHistory.bind(orderController));
-
+router.get(
+    "/customer/history",
+    authMiddleware,
+    orderController.getCustomerOrderHistory.bind(orderController),
+);
 
 /**
  * @swagger
  * /api/order/search/merchant-transactionId:
- *   get:
+ *   post:
  *     summary: Get order details by Merchant Transaction ID
  *     description: Fetches order details using the merchant transaction ID. Requires admin authentication.
  *     tags:
  *       - Orders
  *     security:
  *       - bearerAuth: []  # Adjust according to your security scheme (e.g., JWT bearer token)
- *     parameters:
- *       - in: body
- *         name: mTransactionId
- *         description: Merchant transaction ID to search for
- *         required: true
- *         schema:
- *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - mTransactionId
+ *             properties:
+ *               mTransactionId:
+ *                 type: string
+ *                 description: Merchant transaction ID to search for
+ *                 example: "TXN123456"
+ *               returnedFromGateway:
+ *                 type: boolean
+ *                 description: Set true when the customer's browser was redirected back from the payment gateway (payment round-trip finished). A still-pending checkout draft is then settled as cancelled instead of polling.
+ *                 example: true
  *     responses:
  *       200:
  *         description: Successfully retrieved order details
@@ -2072,7 +2463,11 @@ router.get("/customer/history", authMiddleware, orderController.getCustomerOrder
  *                   type: string
  *                   example: Internal server error
  */
-router.post("/search/merchant-transactionId", authMiddleware, orderController.getOrderDetailByMerchantTransactionId.bind(orderController));
+router.post(
+    "/search/merchant-transactionId",
+    authMiddleware,
+    orderController.getOrderDetailByMerchantTransactionId.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2081,13 +2476,43 @@ router.post("/search/merchant-transactionId", authMiddleware, orderController.ge
  *     summary: Delete all orders (dev/test only)
  *     tags:
  *       - Orders
+ *     security:
+ *       - bearerAuth: []
  *     responses:
  *       200:
  *         description: All orders deleted
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "All orders deleted successfully"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
-router.delete("/order/delete/all", orderController.deleteOrder.bind(orderController));
+router.delete(
+    "/order/delete/all",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.ORDER, PermissionLevel.DELETE),
+    asyncHandler(orderController.deleteOrder.bind(orderController)),
+);
 
 /**
  * @swagger
@@ -2103,14 +2528,22 @@ router.delete("/order/delete/all", orderController.deleteOrder.bind(orderControl
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [token, orderId]
  *             properties:
- *               data:
+ *               token:
  *                 type: string
- *                 description: Base64-encoded payment response from eSewa
+ *                 description: eSewa payment token returned for the order
  *                 example: "eyJ0cmFuc2FjdGlvbl9jb2RlIjoiMDAwMEFCQyJ9"
+ *               orderId:
+ *                 type: integer
+ *                 description: Internal order ID being paid
+ *                 example: 42
  *     responses:
  *       200:
  *         description: Payment verified and order updated successfully
+ *         content:
+ *           application/json:
+ *             example: { success: true, data: { id: 101, paymentStatus: "PAID" } }
  *       400:
  *         description: Invalid payment data
  *       404:
@@ -2118,7 +2551,11 @@ router.delete("/order/delete/all", orderController.deleteOrder.bind(orderControl
  *       500:
  *         description: Internal server error
  */
-router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderController));
+router.post(
+    "/esewa/success",
+    authMiddleware,
+    orderController.esewaPaymentSuccess.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2134,19 +2571,28 @@ router.post("/esewa/success", orderController.esewaPaymentSuccess.bind(orderCont
  *         application/json:
  *           schema:
  *             type: object
+ *             required: [orderId]
  *             properties:
- *               data:
- *                 type: string
- *                 description: Base64-encoded failure response from eSewa
+ *               orderId:
+ *                 type: integer
+ *                 description: Internal order ID whose payment failed
+ *                 example: 42
  *     responses:
  *       200:
  *         description: Payment failure handled
+ *         content:
+ *           application/json:
+ *             example: { success: false, message: "Payment cancelled" }
  *       404:
  *         description: Order not found
  *       500:
  *         description: Internal server error
  */
-router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderController));
+router.post(
+    "/esewa/fail",
+    authMiddleware,
+    orderController.esewaPaymentFailed.bind(orderController),
+);
 
 /**
  * @swagger
@@ -2157,7 +2603,7 @@ router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderControll
  *     tags:
  *       - Orders
  *     security:
- *       - cookieAuth: []
+ *       - bearerAuth: []
  *     requestBody:
  *       required: true
  *       content:
@@ -2193,6 +2639,10 @@ router.post("/esewa/fail", orderController.esewaPaymentFailed.bind(orderControll
  *       500:
  *         description: Internal server error
  */
-router.post("/check-promo", authMiddleware, orderController.checkAvailablePromocode.bind(orderController));
+router.post(
+    "/check-promo",
+    authMiddleware,
+    orderController.checkAvailablePromocode.bind(orderController),
+);
 
 export default router;

@@ -1,5 +1,3 @@
-
-
 // export interface IProductIdParams {
 //     categoryId: number;
 //     subcategoryId: number;
@@ -10,13 +8,29 @@
 //     imageUrl: string;
 // }
 
+export type CatalogSort =
+    | "newest"
+    | "relevance"
+    | "rating"
+    | "price_low_high"
+    | "price_high_low"
+    | "discount_high_low"
+    | "best_selling";
+
 export interface IProductQueryParams {
-    brandId?: number;
+    /** Legacy single-value aliases retained for older internal callers. */
     categoryId?: number;
     subcategoryId?: number;
+    categoryIds?: number[];
+    subcategoryIds?: number[];
+    minPrice?: number;
+    maxPrice?: number;
+    minRating?: number;
+    hasDeal?: boolean;
+    dealIds?: number[];
     dealId?: number;
-    sort?: 'all' | 'low-to-high' | 'high-to-low';
-    bannerId?: number
+    sort?: CatalogSort | "all" | "low-to-high" | "high-to-low";
+    bannerId?: number;
     page: number;
     limit: number;
     isAdmin?: boolean;
@@ -29,12 +43,22 @@ export interface IAdminProductQueryParams {
     limit?: number;
 
     // Sorting options
-    sort?: 'createdAt' | 'name' | 'oldest' | 'newest' | 'price_low_high' | 'price_high_low';
+    sort?:
+        | "createdAt"
+        | "name"
+        | "oldest"
+        | "newest"
+        | "price_low_high"
+        | "price_high_low"
+        | "vendor"
+        | "vendor_desc";
 
     // Filtering options
-    filter?: 'out_of_stock';
+    filter?: "out_of_stock";
 
-    vendorId?: string
+    vendorId?: string;
+    categoryId?: string;
+    subcategoryId?: string;
     search?: string;
 }
 

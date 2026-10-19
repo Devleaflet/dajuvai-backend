@@ -9,7 +9,6 @@ import {
     PrimaryGeneratedColumn,
     UpdateDateColumn,
 } from "typeorm";
-import { Product } from "./product.entity";
 import { Address } from "./address.entity";
 import { Order } from "./order.entity";
 // import { Session } from "./session.entity";
@@ -33,6 +32,11 @@ export class User {
     @PrimaryGeneratedColumn()
     id: number;
 
+    /** URL identifier derived from the name. Assigned by `SlugSubscriber`; never written directly. */
+    @Index("UQ_user_slug", { unique: true })
+    @Column({ type: "varchar", length: 128 })
+    slug: string;
+
     @Column({ nullable: true })
     fullName: string;
 
@@ -54,8 +58,6 @@ export class User {
     })
     role: UserRole;
 
-    @OneToMany(() => Product, (product) => product.vendor)
-    products: Product[];
     @OneToOne(() => Address, (address) => address.user, {
         cascade: true,
         eager: true,
@@ -87,6 +89,10 @@ export class User {
     @Column({ default: false })
     isVerified: boolean;
 
+    // Broadcast campaign email only; transactional mail ignores it.
+    @Column({ type: "boolean", default: true })
+    marketingEmailsEnabled: boolean;
+
     @Column({ nullable: true })
     password?: string;
 
@@ -113,6 +119,28 @@ export class User {
 
     @Column({ nullable: true })
     profilePicture?: string;
+
+    // --- Account self-deletion (mirrors vendor deletion grace-period flow) ---
+    @Column({ type: "timestamp", nullable: true })
+    deletionRequestedAt?: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionScheduledFor?: Date | null;
+
+    @Column({ type: "timestamp", nullable: true })
+    deletionFinalizedAt?: Date | null;
+
+    /**
+     * Every token issued before this moment is refused.
+     *
+     * Set on a password change or reset, and by an admin ending all sessions.
+     * One write revokes an unbounded number of tokens, including ones that were
+     * never presented to us. Null means nothing has been revoked, which is the
+     * state of every account that predates this column.
+     */
+    @Column({ type: "timestamp", nullable: true })
+    tokensValidFrom?: Date | null;
+
 
     @CreateDateColumn()
     createdAt: Date;

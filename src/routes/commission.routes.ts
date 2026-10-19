@@ -38,12 +38,71 @@ const commissionController = new CommissionController();
  *     responses:
  *       201:
  *         description: Commission document updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Commission document updated successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "cm-2026-001"
+ *                     title:
+ *                       type: string
+ *                       example: "Commission Structure 2026"
+ *                     fileUrl:
+ *                       type: string
+ *                       example: "https://example.com/commission.pdf"
+ *                     uploadedAt:
+ *                       type: string
+ *                       format: date-time
  *       400:
  *         description: Validation error (missing title/file, or non-PDF file)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Validation error"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
  *       403:
  *         description: Admin or staff access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin or staff access required"
  */
 router.post(
     "/",
@@ -65,10 +124,55 @@ router.post(
  *     responses:
  *       200:
  *         description: Current commission document
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: string
+ *                       example: "cm-2026-001"
+ *                     title:
+ *                       type: string
+ *                       example: "Commission Structure 2026"
+ *                     fileUrl:
+ *                       type: string
+ *                       example: "https://example.com/commission.pdf"
+ *                     uploadedAt:
+ *                       type: string
+ *                       format: date-time
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
  *       404:
  *         description: No commission document has been uploaded yet
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No commission document has been uploaded yet"
  */
 router.get(
     "/",
@@ -96,10 +200,49 @@ router.get(
  *     responses:
  *       200:
  *         description: File stream
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     fileUrl:
+ *                       type: string
+ *                       example: "https://example.com/commission.pdf"
+ *                     contentType:
+ *                       type: string
+ *                       example: "application/pdf"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
  *       404:
  *         description: No commission document has been uploaded yet
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No commission document has been uploaded yet"
  */
 router.get(
     "/file",
@@ -120,12 +263,56 @@ router.get(
  *     responses:
  *       200:
  *         description: Commission document deleted successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Commission document deleted successfully"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Unauthorized"
  *       403:
  *         description: Admin or staff access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin or staff access required"
  *       404:
  *         description: No commission document has been uploaded yet
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "No commission document has been uploaded yet"
  */
 router.delete(
     "/",

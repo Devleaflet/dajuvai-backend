@@ -1,17 +1,90 @@
-import { Request, Response } from 'express';
-import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import { OAuth2Client } from 'google-auth-library';
-import config from '../config/env.config';
-import { fetchAllUser, createUser, findUserByEmail, findUserByEmailLogin, findUserByResetToken, getUserByIdService, updateUserService, saveUser, findVendorByEmail, saveVendor, findVendorByResetToken, getAllStaff, deleteStaffById, findUserById, updateStaffById, findvendorByvendorId } from '../service/user.service';
-import { ISignupRequest, ILoginRequest, IVerificationTokenRequest, IVerifyTokenRequest, IResetPasswordRequest, IChangeEmailRequest, IVerifyEmailChangeRequest, IUpdateUserRequest } from '../interface/user.interface';
-import { signupSchema, loginSchema, verificationTokenSchema, verifyTokenSchema, resetPasswordSchema, changeEmailSchema, verifyEmailChangeSchema, updateUserSchema, AdminResetPasswordInput, UpdateStaffInput } from '../utils/zod_validations/user.zod';
-import { APIError } from '../utils/ApiError.utils';
-import { AuthProvider, User, UserRole } from '../entities/user.entity';
-import { AuthRequest, CombinedAuthRequest, isVendor } from '../middlewares/auth.middleware';
-import { sendVerificationEmail } from '../utils/nodemailer.utils';
-import AppDataSource from '../config/db.config';
-import { VendorService } from '../service/vendor.service';
+import { randomInt } from "crypto";
+import { Request, Response } from "express";
+import { auditService } from "../service/audit.service";
+import { AuditActorType } from "../entities/auditLog.entity";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import { OAuth2Client } from "google-auth-library";
+import config from "../config/env.config";
+import {
+    fetchAllUser,
+    createUser,
+    findUserByEmail,
+    findUserByEmailLogin,
+    findUserByResetToken,
+    getUserByIdService,
+    updateUserService,
+    saveUser,
+    findVendorByEmail,
+    saveVendor,
+    findVendorByResetToken,
+    getAllStaff,
+    deleteStaffById,
+    findUserById,
+    updateStaffById,
+    findvendorByvendorId,
+    setStaffPermissions,
+    getStaffPermissionsById,
+    getFormattedStaffPermissions,
+    updateStaffPermissions,
+} from "../service/user.service";
+import {
+    ISignupRequest,
+    ILoginRequest,
+    IVerificationTokenRequest,
+    IVerifyTokenRequest,
+    IResetPasswordRequest,
+    IChangeEmailRequest,
+    IVerifyEmailChangeRequest,
+    IUpdateUserRequest,
+} from "../interface/user.interface";
+import {
+    signupSchema,
+    loginSchema,
+    verificationTokenSchema,
+    verifyTokenSchema,
+    resetPasswordSchema,
+    changeEmailSchema,
+    verifyEmailChangeSchema,
+    updateUserSchema,
+    AdminResetPasswordInput,
+    UpdateStaffInput,
+    StaffSignUpInput,
+    userDeleteAccountSchema,
+    userReactivateSchema,
+} from "../utils/zod_validations/user.zod";
+import { APIError } from "../utils/ApiError.utils";
+import { AuthProvider, User, UserRole } from "../entities/user.entity";
+import {
+    AUTH_MESSAGES,
+    burnCodeIssue,
+    burnPasswordCheck,
+    INVALID_CODE,
+    INVALID_CREDENTIALS,
+    sendExistingAccountEmailInBackground,
+} from "../utils/authPrivacy.utils";
+import {
+    AuthRequest,
+    CombinedAuthRequest,
+    isVendor,
+} from "../middlewares/auth.middleware";
+import { AuthError } from "../errors/HttpErrors";
+import { isIssuedBeforeCutoff, newTokenId, revokeToken } from "../service/token-revocation.service";
+import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
+import { issueUserSessionTokens } from "../service/oauth.service";
+import { TokenSubjectType } from "../entities/revokedToken.entity";
+
+import {
+    sendVendorApplicationEmail,
+    sendVerificationEmailInBackground,
+} from "../utils/nodemailer.utils";
+import AppDataSource from "../config/db.config";
+import { VendorService } from "../service/vendor.service";
+import { UserDeletionService } from "../service/user-deletion.service";
+import { isUserDeletionGracePeriodActive } from "../service/user-account-deletion.policy";
+import { sanitizeUser } from "../utils/sanitize.util";
+import { assertResetCode } from "../utils/resetCode.utils";
+import { Vendor } from "../entities/vendor.entity";
 
 const googleClient = new OAuth2Client(config.GOOGLE_CLIENT_ID);
 
@@ -27,9 +100,9 @@ class TokenUtils {
      * @returns {string} A randomly generated 6-digit token as a string.
      */
     static generateToken(): string {
-        return Math.floor(100000 + Math.random() * 900000).toString();
+        // A CSPRNG: Math.random is predictable enough to guess reset codes.
+        return randomInt(100000, 1000000).toString();
     }
-
 
     /**
      * @method hashToken
@@ -50,30 +123,38 @@ class TokenUtils {
 export class UserController {
     private readonly jwtSecret: string;
     private vendorService: VendorService;
+    private userDeletionService: UserDeletionService;
 
     /**
-      * @constructor
-      * @description Initializes the UserController with a JWT secret key from environment variables.
-      */
+     * @constructor
+     * @description Initializes the UserController with a JWT secret key from environment variables.
+     */
     constructor() {
         this.jwtSecret = config.JWT_SECRET;
         this.vendorService = new VendorService();
+        this.userDeletionService = new UserDeletionService();
     }
 
     /**
      * @method adminSignup
      * @route POST /auth/admin/signup
-     * @description Registers a new admin user with immediate verification and JWT issuance.
+     * @description Lets an existing admin register another admin account, verified immediately.
      * @param {AuthRequest<{}, {}, ISignupRequest>} req - HTTP request with signup data and authentication context.
-     * @param {Response} res - HTTP response object used to return status, token, and user data.
-     * @returns {Promise<void>} Responds with the created user object and authentication token in a cookie.
-     * @access Public (Admin Signup)
-    */
-    async adminSignup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+     * @param {Response} res - HTTP response object used to return status and user data.
+     * @returns {Promise<void>} Responds with the created user object.
+     * @access Admin only
+     */
+    async adminSignup(
+        req: AuthRequest<{}, {}, ISignupRequest>,
+        res: Response,
+    ): Promise<void> {
         //  Validate request body using Zod schema
         const parsed = signupSchema.safeParse(req.body);
         if (!parsed.success) {
-            res.status(400).json({ success: false, errors: parsed.error.errors });
+            res.status(400).json({
+                success: false,
+                errors: parsed.error.errors,
+            });
             return;
         }
 
@@ -87,7 +168,7 @@ export class UserController {
         // Check if user already exists by email
         const existingUser = await findUserByEmail(email);
         if (existingUser) {
-            throw new APIError(409, 'User with this email already exists');
+            throw new APIError(409, "User with this email already exists");
         }
 
         // Create user with verified status and ADMIN role
@@ -101,22 +182,9 @@ export class UserController {
             role: UserRole.ADMIN,
         });
 
-        //  Generate JWT and set cookie
-        const token = jwt.sign(
-            { id: user.id, email: user.email, username: user.username, role: user.role },
-            this.jwtSecret,
-            { expiresIn: '2h' }
-        );
-
-        // Set httpOnly cookie with token
-        res.cookie('token', token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === 'production',
-            sameSite: 'strict',
-            maxAge: 2 * 60 * 60 * 1000,
-        });
-
-        // Send successful response with user data and token
+        // No token or cookie: the caller is an admin creating a colleague, and
+        // signing the response in as the new account would silently switch the
+        // caller's own session to it.
         res.status(201).json({
             success: true,
             user: {
@@ -124,7 +192,6 @@ export class UserController {
                 username: user.username,
                 email: user.email,
             },
-            token,
         });
     }
 
@@ -140,6 +207,10 @@ export class UserController {
     async adminLogin(req: Request, res: Response): Promise<void> {
         // Extract login credentials
         const { email, password } = req.body;
+        if (typeof email !== "string" || typeof password !== "string" || !email || !password) {
+            res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "email and password are required" });
+            return;
+        }
 
         // Get user repository and find user by email
         const userRepo = AppDataSource.getRepository(User);
@@ -160,23 +231,44 @@ export class UserController {
             return;
         }
 
-        // Check user role is ADMIN, else forbid access
-        if (user.role != UserRole.ADMIN) {
-            res.status(403).json({ success: false, message: "Access denied: not an admin" });
+        // Check user role is ADMIN or STAFF, else forbid access
+        if (user.role !== UserRole.ADMIN && user.role !== UserRole.STAFF) {
+            res.status(403).json({
+                success: false,
+                message: "Access denied: not an admin or staff member",
+            });
             return;
         }
 
         // Compare passwords
-        const isPasswordValid = await bcrypt.compare(password, user.password || "");
+        const isPasswordValid = await bcrypt.compare(
+            password,
+            user.password || "",
+        );
 
         if (!isPasswordValid) {
-            res.status(401).json({ success: false, message: "Invalid credentials" });
+            res.status(401).json({
+                success: false,
+                message: "Invalid credentials",
+            });
             return;
         }
 
-        // Sign JWT token for 7 days
+        // Fetch staff permissions if staff member
+        let permissions: Record<string, string> | undefined = undefined;
+        if (user.role === UserRole.STAFF) {
+            permissions = await getFormattedStaffPermissions(user.id);
+        }
+
+        // 7 days, where every other login here signs 15 minutes, and where
+        // the cookie below expires in 15 minutes. Deliberately left long: the
+        // legacy Vite admin holds this token in localStorage and has no
+        // refresh interceptor, so shortening it signs every admin out
+        // mid-session. Shorten it to 15m once that app is retired and the
+        // Next console — which mints its own sealed cookie and discards this
+        // one — is the only admin client.
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role },
+            { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
             config.JWT_SECRET,
             { expiresIn: "7d" },
         );
@@ -196,7 +288,6 @@ export class UserController {
             maxAge: 15 * 60 * 1000,
         });
 
-
         // Set refresh token in separate httpOnly cookie
         res.cookie("refreshToken", refreshToken, {
             httpOnly: true,
@@ -208,7 +299,7 @@ export class UserController {
         // Send success response with user data and token
         res.status(200).json({
             success: true,
-            message: "Admin logged in successfully",
+            message: user.role === UserRole.STAFF ? "Staff logged in successfully" : "Admin logged in successfully",
             token,
             refreshToken,
             data: {
@@ -216,10 +307,10 @@ export class UserController {
                 username: user.username,
                 email: user.email,
                 role: user.role,
+                ...(permissions ? { permissions } : {}),
             },
         });
     }
-
 
     async getAllStaff(req: Request, res: Response) {
         const staff = await getAllStaff();
@@ -230,8 +321,7 @@ export class UserController {
         });
     }
 
-
-    async deleteStaff(req: Request<{ id: string }, {}, {}, {}>, res: Response) {
+    async deleteStaff(req: AuthRequest<{ id: string }, {}, {}, {}>, res: Response) {
         const id = req.params.id;
 
         const staffExists = await findUserById(Number(id));
@@ -242,14 +332,41 @@ export class UserController {
 
         await deleteStaffById(Number(id));
 
+        // Removing a colleague's access is the kind of change an operator has
+        // to be able to account for later. The staff row is gone by now, so
+        // the record has to carry who they were.
+        //
+        // Logged rather than thrown: the delete has already happened, and
+        // failing the response over the audit write would report a successful
+        // removal as a 500 and invite a retry that 404s on the missing row.
+        await auditService
+          .record({
+            module: "ACCOUNT",
+            action: "STAFF_DELETED",
+            entityType: "User",
+            entityId: Number(id),
+            actor: { type: AuditActorType.ADMIN, id: req.user?.id ?? null },
+            summary: `Deleted staff account ${staffExists.email}`,
+            before: {
+                email: staffExists.email,
+                fullName: staffExists.fullName ?? null,
+                role: staffExists.role,
+            },
+          })
+          .catch((err) =>
+            console.error(`Failed to audit deletion of staff ${id}:`, err),
+          );
+
         res.status(200).json({
             success: true,
             msg: "Staff deleted succesfully",
         });
     }
 
-
-    async updateStaff(req: Request<{ id: string }, {}, UpdateStaffInput, {}>, res: Response) {
+    async updateStaff(
+        req: Request<{ id: string }, {}, UpdateStaffInput, {}>,
+        res: Response,
+    ) {
         const id = req.params.id;
 
         const staffExists = await findUserById(Number(id));
@@ -257,14 +374,23 @@ export class UserController {
             throw new APIError(404, "Staff does not exist");
         }
 
-        const updatedStaff = await updateStaffById(Number(id), req.body);
+        const { permissions, ...profileData } = req.body;
+        // Login lowercases what it looks up, so a mixed-case email saved here
+        // would lock the staff member out. Signup lowercases for the same reason.
+        if (profileData.email) profileData.email = this.toLowerEmail(profileData.email);
+
+        const updatedStaff = await updateStaffById(Number(id), profileData);
+
+        // Update permissions if provided
+        if (permissions !== undefined) {
+            await updateStaffPermissions(Number(id), permissions);
+        }
 
         res.status(200).json({
             success: true,
             msg: "Staff updated successfully",
             data: {
                 id: updatedStaff.id,
-                username: updatedStaff.username,
                 email: updatedStaff.email,
                 fullName: updatedStaff.fullName,
                 phoneNumber: updatedStaff.phoneNumber,
@@ -272,11 +398,38 @@ export class UserController {
         });
     }
 
+    async getStaffPermissions(
+        req: Request<{ id: string }, {}, {}, {}>,
+        res: Response,
+    ) {
+        const id = req.params.id;
+
+        const staffExists = await findUserById(Number(id));
+        if (!staffExists || staffExists.role !== UserRole.STAFF) {
+            throw new APIError(404, "Staff does not exist");
+        }
+
+        const permissions = await getStaffPermissionsById(Number(id));
+        const permissionsMap: Record<string, number> = {};
+        permissions.forEach((p) => {
+            permissionsMap[p.module] = p.permissionLevel;
+        });
+
+        res.status(200).json({
+            success: true,
+            data: permissionsMap,
+        });
+    }
 
 
-    async staffSignup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+    async staffSignup(
+        req: AuthRequest<{}, {}, StaffSignUpInput>,
+        res: Response,
+    ): Promise<void> {
         //  Body already validated by validateZod(signupSchema) middleware
-        const { username, email, password } = req.body;
+        // phoneNumber is required by staffSignupSchema; it used to be validated and
+        // then dropped here, so every staff account was created without one.
+        const { email, password, permissions, fullName, phoneNumber } = req.body;
 
         //  Prepare hashed password and verification token
         const hashedPassword = await bcrypt.hash(password, 10);
@@ -285,47 +438,34 @@ export class UserController {
 
         // Check if user already exists by email
         const existingUser = await findUserByEmail(loweredCaseEmail);
+        const errMsg = existingUser?.role === UserRole.STAFF ? 
+            "Staff account with this email already exists" :
+            "Customer account with this email exists"
         if (existingUser) {
-            throw new APIError(409, "User with this email already exists");
+            throw new APIError(409, errMsg);
         }
 
-        // Create user with verified status and ADMIN role
+        // Create user with verified status and STAFF role
         const user = await createUser({
-            username,
             email: loweredCaseEmail,
             password: hashedPassword,
+            fullName: fullName || null,
+            phoneNumber,
             verificationCode: null,
             isVerified: true,
             verificationCodeExpire: null,
             role: UserRole.STAFF,
         });
 
-        //  Generate JWT and set cookie
-        const token = jwt.sign(
-            { id: user.id, email: user.email, username: user.username, role: user.role },
-            this.jwtSecret,
-            { expiresIn: "24h" },
-        );
+        await setStaffPermissions(user.id, permissions)
 
-        // Set httpOnly cookie with token
-        res.cookie("token", token, {
-            httpOnly: true,
-            secure: config.NODE_ENV === "production",
-            sameSite: "strict",
-            maxAge: 24 * 60 * 60 * 1000,
-        });
-
-        // Send successful response with user data and token
+        // Send successful response with user data
         res.status(201).json({
             success: true,
-            user: {
-                id: user.id,
-                username: user.username,
-                email: user.email,
-            },
-            token,
+            message: "new staff created successfully"
         });
     }
+
 
     /**
      * @method getUsers
@@ -347,137 +487,135 @@ export class UserController {
      * @description Registers a new user, handles existing unverified users,
      * sends a verification email, hashes password and stores user info.
      * Issues JWT token on successful registration.
-     * 
+     *
      * @param {AuthRequest<{}, {}, ISignupRequest>} req - Express request with validated signup data
      * @param {Response} res - Express response object
      * @returns {Promise<void>} Resolves with user object and JWT or throws error
      * @access Public
      */
-    async signup(req: AuthRequest<{}, {}, ISignupRequest>, res: Response): Promise<void> {
+    async signup(
+        req: AuthRequest<{}, {}, ISignupRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             //  Validate request body using Zod schema
             const parsed = signupSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
             //  Extract validated fields
             const { username, email, password } = parsed.data;
 
+            const loweredEmail = this.toLowerEmail(email);
 
-            const loweredEmail = this.toLowerEmail(email)
+            // Check if a user with this email already exists.
+            // findUserForSignup lazily finalizes accounts whose deletion
+            // grace period has elapsed, freeing the email for re-signup.
+            let existingUser =
+                await this.userDeletionService.findUserForSignup(loweredEmail);
 
-            // Check if a user with this email already exists
-            let existingUser = await findUserByEmail(loweredEmail);
+            // Every outcome below answers with the same 201 and message, after the
+            // same password-hashing work, so signup cannot be used to learn who
+            // has an account (see `authPrivacy.utils`). What differs is only the
+            // email: a code for a new or still-unverified account, and a "you
+            // already have an account" note to the owner of a registered one.
+            const received = () =>
+                res.status(201).json({ success: true, message: AUTH_MESSAGES.customerSignupReceived });
 
-            const existingAccount = await this.vendorService.findVendorByEmail(loweredEmail)
+            const hashedPassword = await bcrypt.hash(password, 10);
+            const verificationToken = TokenUtils.generateToken();
+            const hashedToken = await TokenUtils.hashToken(verificationToken);
+            const expire = new Date(Date.now() + 15 * 60 * 1000);
 
-            if (existingAccount) {
-                throw new APIError(400, "User already exists")
+            const deletionPending =
+                existingUser?.deletionRequestedAt &&
+                !existingUser.deletionFinalizedAt &&
+                isUserDeletionGracePeriodActive(existingUser.deletionRequestedAt);
+            if (existingUser && (existingUser.isVerified || deletionPending)) {
+                sendExistingAccountEmailInBackground(loweredEmail, "customer", "customer");
+                received();
+                return;
             }
 
-            //  Prepare hashed password and verification token
-            const hashedPassword = await bcrypt.hash(password, 10);
-            const verificationToken = TokenUtils.generateToken(); // raw token for email
-            const hashedToken = await TokenUtils.hashToken(verificationToken); // hashed version for DB
-            const expire = new Date(Date.now() + 15 * 60 * 1000); // token expires in 15 minutes
+            if (await this.vendorService.findVendorForSignup(loweredEmail)) {
+                sendExistingAccountEmailInBackground(loweredEmail, "vendor", "customer");
+                received();
+                return;
+            }
 
             if (existingUser) {
-                if (existingUser.isVerified) {
-                    // User already verified — reject signup
-                    throw new APIError(409, 'User already exists and is verified');
-                }
-
-                // User exists but is not verified — update info and resend verification email
+                // Registered but never verified: take the new details and send a
+                // fresh code, as the first attempt would have.
                 existingUser.username = username;
                 existingUser.password = hashedPassword;
                 existingUser.verificationCode = hashedToken;
                 existingUser.verificationCodeExpire = expire;
-
-                // Save updated user and send verification email
                 await saveUser(existingUser);
-                await sendVerificationEmail(email, 'Email Verification', verificationToken);
-
-                res.status(200).json({
-                    success: true,
-                    message: 'Verification code resent. Please check your email.',
+            } else {
+                // Unverified until the emailed code is entered: every client
+                // shows the code screen next, and login refuses an unverified
+                // account (sending it a fresh code). No session is issued.
+                await createUser({
+                    username,
+                    email: loweredEmail,
+                    password: hashedPassword,
+                    verificationCode: hashedToken,
+                    verificationCodeExpire: expire,
+                    role: UserRole.USER,
+                    isVerified: false,
                 });
-                return;
             }
 
-            // Create and save new user (first-time signup)
-            const user = await createUser({
-                username,
-                email: loweredEmail,
-                password: hashedPassword,
-                verificationCode: hashedToken,
-                verificationCodeExpire: expire,
-                role: UserRole.USER,
-                isVerified: true
-            });
-
-            //  Send email with raw verification code
-            await sendVerificationEmail(email, 'Email Verification', verificationToken);
-
-            //  Generate JWT and set cookie
-            const token = jwt.sign(
-                { id: user.id, email: user.email, username: user.username, role: user.role },
-                this.jwtSecret,
-                { expiresIn: '2h' }
-            );
-
-            // Set secure cookie with token
-            res.cookie('token', token, {
-                httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                sameSite: 'strict',
-                maxAge: 2 * 60 * 60 * 1000, // 2 hours
-            });
-
-            //  Return user and token (without password or verificationCode)
-            res.status(201).json({
-                success: true,
-                user: {
-                    id: user.id,
-                    username: user.username,
-                    email: user.email,
-                    role: user.role,
-                },
-                token,
-            });
-
+            sendVerificationEmailInBackground(loweredEmail, "Email Verification Code", verificationToken);
+            received();
         } catch (error) {
             console.log(error);
             //  Error handling with meaningful status
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    errorCode: error.errorCode,
+                    message: error.message,
+                });
             } else {
-                console.error('Signup Error:', error);
-                throw new APIError(503, 'Registration service temporarily unavailable');
+                console.error("Signup Error:", error);
+                throw new APIError(
+                    503,
+                    "Registration service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method login
      * @route POST /auth/login
      * @description Authenticates a user or vendor, verifies credentials,
      * handles unverified users, issues JWT token and sets it in a secure cookie.
-     * 
+     *
      * @param {Request<{}, {}, ILoginRequest>} req - Express request with login credentials
      * @param {Response} res - Express response object
      * @returns {Promise<void>} Responds with user or vendor data and token
      * @access Public
      * @throws {APIError} If validation fails or credentials are incorrect
      */
-    async login(req: Request<{}, {}, ILoginRequest>, res: Response): Promise<void> {
+    async login(
+        req: Request<{}, {}, ILoginRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema
             const parsed = loginSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -488,37 +626,73 @@ export class UserController {
 
             const user = await findUserByEmailLogin(loweredEmail);
 
-            if (!user) {
-                throw new APIError(404, "User does not exist");
+            // Unknown email, a vendor's email, a Google/Facebook account and a
+            // wrong password all fail the same way, in the same time: see
+            // `authPrivacy.utils`. Account state (unverified, scheduled for
+            // deletion) is only described once the password is right.
+            const invalid = () => new APIError(401, AUTH_MESSAGES.invalidCustomerLogin, INVALID_CREDENTIALS);
+            if (!user || user.provider !== AuthProvider.LOCAL || !user.password) {
+                await burnPasswordCheck(password);
+                throw invalid();
             }
 
-            if (user.provider !== AuthProvider.LOCAL) {
-                throw new APIError(403, "This account was created with Google. Please log in using Google.");
-            }
-
-
-            if (!user.isVerified) {
-                throw new APIError(403, "Please verify your email before logging in");
-            }
-
-            // Compare password
             const isMatch = await bcrypt.compare(password, user.password);
-            if (!isMatch) {
-                throw new APIError(401, "Invalid credentials");
+            if (!isMatch) throw invalid();
+
+            // After the password check, so only the owner learns the account is
+            // unverified and only the owner can make it send email. Someone who
+            // closed the code screen at signup comes back through here, so the
+            // refusal carries a fresh code rather than a dead end.
+            if (!user.isVerified) {
+                // The login lookup selects only a few columns; the resend
+                // counters live on the full row.
+                const fullUser = await findUserByEmail(user.email);
+                const sent = await this.issueVerificationCode(fullUser).then(
+                    () => true,
+                    (sendError) => {
+                        console.error("Login verification code failed:", sendError);
+                        return false;
+                    },
+                );
+                throw new APIError(
+                    403,
+                    sent
+                        ? "Please verify your email before logging in. We've sent a new code to your email."
+                        : "Please verify your email before logging in. Use the code we sent earlier, or request a new one in a few minutes.",
+                    "EMAIL_NOT_VERIFIED",
+                );
+            }
+
+            // Accounts scheduled for deletion cannot log in normally — the
+            // caller must use the reactivation endpoint (or Google sign-in
+            // for OAuth accounts). Expired grace periods finalize on the spot.
+            if (user.deletionRequestedAt && !user.deletionFinalizedAt) {
+                if (
+                    user.deletionScheduledFor &&
+                    user.deletionScheduledFor <= new Date()
+                ) {
+                    await this.userDeletionService.finalizeUserDeletion(user.id);
+                    throw invalid();
+                }
+                throw new APIError(
+                    409,
+                    `Account scheduled for deletion until ${user.deletionScheduledFor?.toISOString()}. Reactivate it to continue.`,
+                    "USER_DELETION_PENDING",
+                );
             }
 
             // Generate access token (short-lived)
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
-                { expiresIn: "15m" }
+                { expiresIn: "15m" },
             );
 
             // Generate refresh token (long-lived)
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 config.JWT_REFRESH_SECRET,
-                { expiresIn: "1d" }
+                { expiresIn: "1d" },
             );
 
             // Set access token cookie
@@ -537,19 +711,172 @@ export class UserController {
                 maxAge: 1 * 24 * 60 * 60 * 1000,
             });
 
+            // Fetch staff permissions if staff member
+            let permissions: Record<string, string> | undefined = undefined;
+            if (user.role === UserRole.STAFF) {
+                permissions = await getFormattedStaffPermissions(user.id);
+            }
+
             res.status(200).json({
                 success: true,
                 token,
                 refreshToken,
-                data: { userId: user.id, email: user.email, role: user.role },
+                data: {
+                    userId: user.id,
+                    email: user.email,
+                    role: user.role,
+                    ...(permissions ? { permissions } : {}),
+                },
             });
-
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    errorCode: error.errorCode,
+                    message: error.message,
+                });
             } else {
                 console.error("Unexpected error during login:", error);
-                res.status(503).json({ success: false, message: "Authentication service temporarily unavailable" });
+                res.status(503).json({
+                    success: false,
+                    message: "Authentication service temporarily unavailable",
+                });
+            }
+        }
+    }
+
+    /**
+     * @method requestAccountDeletion
+     * @route DELETE /auth/me
+     * @description Schedules the authenticated customer account for deletion
+     * after a 30-day grace period (mirrors the vendor deletion flow).
+     * Email/password accounts must re-enter their password; Google OAuth
+     * accounts are confirmed by the active session alone.
+     * @access Authenticated User
+     */
+    async requestAccountDeletion(
+        req: AuthRequest<{}, {}, { email: string; password?: string; confirmation: "DELETE" }>,
+        res: Response,
+    ): Promise<void> {
+        try {
+            const parsed = userDeleteAccountSchema.safeParse(req.body);
+            if (!parsed.success) {
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
+                return;
+            }
+            if (!req.user) throw new APIError(401, "Authentication required");
+
+            const scheduledFor =
+                await this.userDeletionService.requestAccountDeletion(
+                    req.user.id,
+                    parsed.data.email,
+                    parsed.data.password,
+                );
+
+            // The session is invalidated immediately; the account can be
+            // restored by logging in again before the deadline.
+            res.clearCookie("token");
+            res.clearCookie("refreshToken");
+            res.status(202).json({
+                success: true,
+                message:
+                    "Account scheduled for deletion. You can reactivate it before the deadline by logging in.",
+                deletionScheduledFor: scheduledFor,
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({
+                    success: false,
+                    errorCode: error.errorCode,
+                    message: error.message,
+                });
+            } else {
+                console.error("Request account deletion error:", error);
+                res.status(500).json({
+                    success: false,
+                    message: "Failed to schedule account deletion",
+                });
+            }
+        }
+    }
+
+    /**
+     * @method reactivateAccount
+     * @route POST /auth/reactivate
+     * @description Restores an email/password account that is scheduled for
+     * deletion but still inside the grace period, and issues a fresh session.
+     * @access Public
+     */
+    async reactivateAccount(
+        req: Request<{}, {}, { email: string; password: string }>,
+        res: Response,
+    ): Promise<void> {
+        try {
+            const parsed = userReactivateSchema.safeParse(req.body);
+            if (!parsed.success) {
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
+                return;
+            }
+
+            const user = await this.userDeletionService.reactivateUser(
+                parsed.data.email,
+                parsed.data.password,
+            );
+
+            const token = jwt.sign(
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
+                this.jwtSecret,
+                { expiresIn: "15m" },
+            );
+            const refreshToken = jwt.sign(
+                { id: user.id, email: user.email, role: user.role },
+                config.JWT_REFRESH_SECRET,
+                { expiresIn: "1d" },
+            );
+
+            res.cookie("token", token, {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 15 * 60 * 1000,
+            });
+            res.cookie("refreshToken", refreshToken, {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: 1 * 24 * 60 * 60 * 1000,
+            });
+
+            res.status(200).json({
+                success: true,
+                message: "Account reactivated successfully",
+                token,
+                refreshToken,
+                data: {
+                    userId: user.id,
+                    email: user.email,
+                    role: user.role,
+                },
+            });
+        } catch (error) {
+            if (error instanceof APIError) {
+                res.status(error.status).json({
+                    success: false,
+                    errorCode: error.errorCode,
+                    message: error.message,
+                });
+            } else {
+                console.error("Reactivate account error:", error);
+                res.status(500).json({
+                    success: false,
+                    message: "Failed to reactivate account",
+                });
             }
         }
     }
@@ -565,41 +892,78 @@ export class UserController {
             // Accept refresh token from: cookie, Authorization Bearer header
             const token =
                 req.cookies.refreshToken ||
-                req.headers.authorization?.split(' ')[1];
+                req.headers.authorization?.split(" ")[1];
 
             if (!token) {
-                res.status(401).json({ success: false, message: 'Refresh token missing' });
+                res.status(401).json({
+                    success: false,
+                    message: "Refresh token missing",
+                });
                 return;
             }
 
-            const decoded = jwt.verify(
-                token,
-                config.JWT_REFRESH_SECRET
-            ) as { id: number; email: string; role: string };
+            const decoded = jwt.verify(token, config.JWT_REFRESH_SECRET) as {
+                id: number;
+                email: string;
+                role: string;
+                iat?: number;
+            };
 
             const userRepo = AppDataSource.getRepository(User);
             const user = await userRepo.findOneBy({ id: decoded.id });
             if (!user) {
-                res.status(401).json({ success: false, message: 'User not found' });
+                res.status(401).json({
+                    success: false,
+                    message: "User not found",
+                });
+                return;
+            }
+
+            // A password change or reset ends every session signed before it.
+            // Without this a refresh token kept minting access tokens for a
+            // day after the password changed, which made the cutoff moot.
+            if (isIssuedBeforeCutoff(decoded.iat, user.tokensValidFrom)) {
+                res.status(401).json({
+                    success: false,
+                    errorCode: "SESSION_REVOKED",
+                    message: "Your password changed. Please log in again.",
+                });
+                return;
+            }
+
+            // Deletion-pending or finalized accounts cannot refresh sessions.
+            if (user.deletionFinalizedAt || user.deletionScheduledFor) {
+                res.clearCookie("token");
+                res.clearCookie("refreshToken");
+                res.status(401).json({
+                    success: false,
+                    errorCode: user.deletionFinalizedAt
+                        ? "USER_DELETED"
+                        : "USER_DELETION_PENDING",
+                    message: "This account is scheduled for deletion",
+                });
                 return;
             }
 
             const newAccessToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
-                { expiresIn: '15m' }
+                { expiresIn: "15m" },
             );
 
-            res.cookie('token', newAccessToken, {
+            res.cookie("token", newAccessToken, {
                 httpOnly: true,
-                secure: config.NODE_ENV === 'production',
-                sameSite: 'strict',
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
                 maxAge: 15 * 60 * 1000,
             });
 
             res.status(200).json({ success: true, token: newAccessToken });
         } catch (error) {
-            res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+            res.status(401).json({
+                success: false,
+                message: "Invalid or expired refresh token",
+            });
         }
     }
 
@@ -609,10 +973,65 @@ export class UserController {
      * @description Clears both access and refresh token cookies.
      * @access Public
      */
-    async logout(_req: Request, res: Response): Promise<void> {
-        res.clearCookie('token');
-        res.clearCookie('refreshToken');
-        res.status(200).json({ success: true, message: 'Logged out successfully' });
+    async logout(req: AuthRequest, res: Response): Promise<void> {
+        /**
+         * Clearing the cookie is not logging out.
+         *
+         * The same token is also returned in the response body and kept in
+         * `localStorage` by the legacy admin, so a cleared cookie leaves a
+         * working credential behind. Revoking the `jti` is what makes the
+         * token stop being accepted; the cookies are cleared as well so the
+         * browser stops sending one that will now be refused.
+         *
+         * Tolerant of an unauthenticated call: logging out twice, or with an
+         * already-expired token, is a success from the caller's point of view.
+         */
+        if (req.auth?.jti && req.user?.id) {
+            await revokeToken({
+                jti: req.auth.jti,
+                subjectType: TokenSubjectType.USER,
+                subjectId: req.user.id,
+                expiresAtSeconds: req.auth.exp,
+                reason: "logout",
+            });
+        }
+
+        res.clearCookie("token");
+        res.clearCookie("refreshToken");
+        res.status(200).json({
+            success: true,
+            message: "Logged out successfully",
+        });
+    }
+
+    /**
+     * @method cancelAccountDeletion
+     * @route POST /auth/me/cancel-deletion
+     * @description Stops a scheduled deletion from inside the app, for an
+     * account still in its grace period. Reachable because
+     * `DELETION_GRACE_ALLOWLIST` in `auth.middleware.ts` lets exactly this
+     * request through; every other authenticated route stays refused.
+     * @access Authenticated (grace period)
+     */
+    async cancelAccountDeletion(req: AuthRequest, res: Response): Promise<void> {
+        if (!req.user) throw new AuthError("User not authenticated");
+
+        if (!req.user.deletionScheduledFor) {
+            // Not an error: the shopper asked for the state they are already
+            // in, and saying so is more useful than a 409.
+            res.status(200).json({
+                success: true,
+                message: "This account is not scheduled for deletion.",
+            });
+            return;
+        }
+
+        await this.userDeletionService.cancelScheduledDeletion(req.user.id);
+
+        res.status(200).json({
+            success: true,
+            message: "Account deletion cancelled. Your account stays active.",
+        });
     }
 
     /**
@@ -628,7 +1047,10 @@ export class UserController {
             const { idToken } = req.body;
 
             if (!idToken) {
-                res.status(400).json({ success: false, message: 'idToken is required' });
+                res.status(400).json({
+                    success: false,
+                    message: "idToken is required",
+                });
                 return;
             }
 
@@ -646,7 +1068,10 @@ export class UserController {
 
             const payload = ticket.getPayload();
             if (!payload || !payload.email) {
-                res.status(401).json({ success: false, message: 'Invalid Google token' });
+                res.status(401).json({
+                    success: false,
+                    message: "Invalid Google token",
+                });
                 return;
             }
 
@@ -662,10 +1087,14 @@ export class UserController {
 
                 if (user) {
                     // Existing local account — link Google ID to it
-                    if (user.provider !== AuthProvider.GOOGLE && user.provider !== AuthProvider.LOCAL) {
+                    if (
+                        user.provider !== AuthProvider.GOOGLE &&
+                        user.provider !== AuthProvider.LOCAL
+                    ) {
                         res.status(400).json({
                             success: false,
-                            message: 'This email is registered with a different provider.',
+                            message:
+                                "This email is registered with a different provider.",
                         });
                         return;
                     }
@@ -678,7 +1107,7 @@ export class UserController {
                     user = userRepo.create({
                         googleId,
                         email,
-                        username: name || email.split('@')[0],
+                        username: name || email.split("@")[0],
                         isVerified: true,
                         provider: AuthProvider.GOOGLE,
                     });
@@ -686,17 +1115,37 @@ export class UserController {
                 }
             }
 
+            // Account-deletion grace handling (same policy as the web Google
+            // callback): sign-in during the grace period reactivates the
+            // account; after expiry the old account is finalized and Google
+            // sign-in starts a fresh one.
+            if (user.deletionScheduledFor && !user.deletionFinalizedAt) {
+                if (user.deletionScheduledFor <= new Date()) {
+                    await this.userDeletionService.finalizeUserDeletion(user.id);
+                    user = userRepo.create({
+                        googleId,
+                        email,
+                        username: name || email.split("@")[0],
+                        isVerified: true,
+                        provider: AuthProvider.GOOGLE,
+                    });
+                    await userRepo.save(user);
+                } else {
+                    await this.userDeletionService.reactivateOAuthUser(user.id);
+                }
+            }
+
             // Issue access + refresh tokens
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
                 this.jwtSecret,
-                { expiresIn: '15m' }
+                { expiresIn: "15m" },
             );
 
             const refreshToken = jwt.sign(
                 { id: user.id, email: user.email, role: user.role },
                 config.JWT_REFRESH_SECRET,
-                { expiresIn: '7d' }
+                { expiresIn: "7d" },
             );
 
             res.status(200).json({
@@ -706,15 +1155,85 @@ export class UserController {
                 data: { userId: user.id, email: user.email, role: user.role },
             });
         } catch (error) {
-            console.error('Google mobile login error:', error);
-            res.status(401).json({ success: false, message: 'Google authentication failed' });
+            console.error("Google mobile login error:", error);
+            res.status(401).json({
+                success: false,
+                message: "Google authentication failed",
+            });
         }
     }
 
     toLowerEmail(email: string): string {
-        return email.toLowerCase()
+        return email.toLowerCase();
     }
 
+    /**
+     * Google and Facebook accounts have no password of their own, so neither
+     * signing in with one nor resetting one means anything for them. Says which
+     * provider to use instead of a generic refusal.
+     */
+    /**
+     * The account a reset code belongs to. An unknown email or a social
+     * account (which is never sent a code) fails exactly like a wrong code, so
+     * the reset steps reveal nothing the request step hides.
+     */
+    private async findUserForReset(rawEmail: string): Promise<User> {
+        const user = await findUserByEmail(this.toLowerEmail(rawEmail));
+        if (user && user.provider === AuthProvider.LOCAL) return user;
+        await burnPasswordCheck(rawEmail);
+        throw new APIError(400, AUTH_MESSAGES.invalidCode, INVALID_CODE);
+    }
+
+    private assertPasswordAccount(user: User, purpose: "log in" | "password"): void {
+        if (user.provider === AuthProvider.LOCAL) return;
+        const provider = user.provider === AuthProvider.FACEBOOK ? "Facebook" : "Google";
+        throw new APIError(
+            403,
+            purpose === "log in"
+                ? `This account is linked to ${provider}. Please sign in with ${provider}.`
+                : `This account is linked to ${provider}, so it has no password to reset or change. Please sign in with ${provider}.`,
+            "SOCIAL_ACCOUNT",
+        );
+    }
+
+    /**
+     * Emails a new 15-minute verification code to a user or vendor, three per
+     * ten minutes before a cooldown. Shared by "resend code" and by login, which
+     * sends one to an account that never finished verifying.
+     */
+    private async issueVerificationCode(entity: User | Vendor): Promise<void> {
+        const now = new Date();
+        if (entity.resendBlockUntil && entity.resendBlockUntil > now) {
+            const remainingMinutes = Math.ceil(
+                (entity.resendBlockUntil.getTime() - now.getTime()) / 60_000,
+            );
+            throw new APIError(
+                429,
+                `Too many verification attempts. Please try again in ${remainingMinutes} minute(s).`,
+            );
+        }
+
+        // The block has passed: start a new allowance.
+        if (entity.resendCount >= 3) {
+            entity.resendCount = 0;
+            entity.resendBlockUntil = null;
+        }
+
+        const verificationToken = TokenUtils.generateToken();
+        entity.verificationCode = await TokenUtils.hashToken(verificationToken);
+        entity.verificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
+        entity.resendCount += 1;
+        if (entity.resendCount >= 3) {
+            entity.resendBlockUntil = new Date(Date.now() + 10 * 60 * 1000);
+        }
+
+        await (entity instanceof Vendor ? saveVendor(entity) : saveUser(entity as User));
+        sendVerificationEmailInBackground(
+            entity.email,
+            "Email Verification Code",
+            verificationToken,
+        );
+    }
 
     /**
      * @method sendVerificationToken
@@ -722,102 +1241,64 @@ export class UserController {
      * @description Sends a new email verification token to a user or vendor.
      * Implements rate limiting to avoid abuse, hashes token before storing,
      * and sends email with raw token.
-     * 
+     *
      * @param {Request<{}, {}, IVerificationTokenRequest>} req - Express request with email in body
      * @param {Response} res - Express response object
      * @returns {Promise<void>} Sends token or error response
      * @access Public
      * @throws {APIError} On validation failure, rate limit breach, or user/vendor not found
      */
-    async sendVerificationToken(req: Request<{}, {}, IVerificationTokenRequest>, res: Response): Promise<void> {
+    async sendVerificationToken(
+        req: Request<{}, {}, IVerificationTokenRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema to ensure correct structure and types
             const parsed = verificationTokenSchema.safeParse(req.body);
             if (!parsed.success) {
                 // Return 400 Bad Request if validation fails, including detailed errors
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
             // Extract email from validated data
             const { email } = parsed.data;
 
-            const loweredEmail = this.toLowerEmail(email)
+            const loweredEmail = this.toLowerEmail(email);
 
-            // Attempt to find user by email
-            let user = await findUserByEmail(loweredEmail);
-            let vendor = null;
-            let isVendor = false;
-
-            // If no user found, attempt to find vendor by email
-            if (!user) {
-                vendor = await findVendorByEmail(loweredEmail);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor exists, respond with 404 Not Found
-                    throw new APIError(404, 'User or vendor not found');
-                }
+            // The same 202 for every email — unknown, already verified, or
+            // waiting on a code — so the form cannot be used to learn who has an
+            // account. A code is only sent to an account that still needs one,
+            // and a per-account resend block is applied silently.
+            const entity = (await findUserByEmail(loweredEmail)) ?? (await findVendorByEmail(loweredEmail));
+            if (entity && !entity.isVerified) {
+                await this.issueVerificationCode(entity).catch((error) => {
+                    if (!(error instanceof APIError)) throw error;
+                });
+            } else {
+                await burnCodeIssue();
             }
 
-            // Reference the correct entity (user or vendor) for further processing
-            const entity = isVendor ? vendor : user;
-            const now = new Date();
-
-            // Check if the entity is currently blocked from resending verification tokens
-            if (entity.resendBlockUntil && entity.resendBlockUntil > now) {
-                // Calculate remaining block time in minutes
-                const remainingSeconds = Math.ceil((entity.resendBlockUntil.getTime() - now.getTime()) / 1000);
-                const remainingMinutes = Math.ceil(remainingSeconds / 60);
-                // Respond with 429 Too Many Requests and inform about the cooldown period
-                throw new APIError(429, `Too many verification attempts. Please try again in ${remainingMinutes} minute(s).`);
-            }
-
-            // Reset resend count and block if the resend limit has been reached
-            if (entity.resendCount >= 3) {
-                entity.resendCount = 0;
-                entity.resendBlockUntil = null;
-            }
-
-            // Generate a new 6-digit verification token (raw, for emailing)
-            const verificationToken = TokenUtils.generateToken();
-            // Hash the token securely before storing it in the database
-            const hashedToken = await TokenUtils.hashToken(verificationToken);
-            // Set token expiration time to 15 minutes from now
-            const expire = new Date(Date.now() + 15 * 60 * 1000);
-
-            // Update entity with new hashed token and expiration
-            entity.verificationCode = hashedToken;
-            entity.verificationCodeExpire = expire;
-            // Increment resend attempt counter
-            entity.resendCount += 1;
-
-            // If resend attempts hit limit, set block duration of 10 minutes
-            if (entity.resendCount >= 3) {
-                entity.resendBlockUntil = new Date(Date.now() + 10 * 60 * 1000);
-            }
-
-            // Save updated user or vendor entity back to the database
-            await (isVendor ? saveVendor(vendor) : saveUser(user));
-
-            // Send verification email containing the raw token to the user's or vendor's email address
-            await sendVerificationEmail(entity.email, 'Email Verification', verificationToken);
-
-            // Respond with HTTP 202 Accepted to indicate the token has been sent
-            res.status(202).json({
-                success: true,
-                message: 'Verification token sent',
-            });
+            res.status(202).json({ success: true, message: AUTH_MESSAGES.verificationRequested });
         } catch (error) {
             // Handle known APIError with appropriate status and message
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(503, 'Verification service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Verification service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method verifyToken
@@ -831,52 +1312,42 @@ export class UserController {
      * @throws {APIError} For validation issues, expired/invalid tokens, or missing entities.
      * @access Public
      */
-    async verifyToken(req: Request<{}, {}, IVerifyTokenRequest>, res: Response): Promise<void> {
+    async verifyToken(
+        req: Request<{}, {}, IVerifyTokenRequest>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema to ensure email and token are correctly provided
             const parsed = verifyTokenSchema.safeParse(req.body);
             if (!parsed.success) {
                 // Return 400 Bad Request if validation fails, including detailed errors
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
             // Extract email and token from validated data
             const { email, token } = parsed.data;
 
-            // Attempt to find user by email
-            let user = await findUserByEmail(email);
-            let vendor = null;
-            let isVendor = false;
+            const loweredEmail = this.toLowerEmail(email);
+            const user = await findUserByEmail(loweredEmail);
+            const vendor = user ? null : await findVendorByEmail(loweredEmail);
+            const isVendor = !user;
+            const entity = user ?? vendor;
 
-            // If no user found, attempt to find vendor by email
-            if (!user) {
-                vendor = await findVendorByEmail(email);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor exists, token is no longer valid
-                    throw new APIError(410, 'Token no longer valid');
-                }
-            }
-
-            // Reference the correct entity (user or vendor) for further validation
-            const entity = isVendor ? vendor : user;
-
-            // Check if verification token and its expiration exist for the entity
-            if (!entity.verificationCode || !entity.verificationCodeExpire) {
-                throw new APIError(410, 'Token no longer valid');
-            }
-
-            // Check if the token has expired
-            if (entity.verificationCodeExpire < new Date()) {
-                throw new APIError(410, 'Token expired');
-            }
-
-            // Compare provided token with the hashed token stored in the database
-            const isMatch = await bcrypt.compare(token, entity.verificationCode);
+            // Unknown email, no pending code, expired code and wrong code all
+            // fail the same way, in the same time, so this cannot be used to
+            // learn who has an account or a pending verification.
+            const pending = Boolean(
+                entity?.verificationCode && entity.verificationCodeExpire && entity.verificationCodeExpire >= new Date(),
+            );
+            const isMatch = pending
+                ? await bcrypt.compare(token, entity!.verificationCode!)
+                : (await burnPasswordCheck(token), false);
             if (!isMatch) {
-                // If token does not match, respond with 400 Bad Request
-                throw new APIError(400, 'Invalid token');
+                throw new APIError(400, AUTH_MESSAGES.invalidCode, INVALID_CODE);
             }
 
             // Token is valid: reset verification-related fields and mark entity as verified
@@ -889,179 +1360,189 @@ export class UserController {
             // Save the updated user or vendor entity to the database
             await (isVendor ? saveVendor(vendor) : saveUser(user));
 
+            if (isVendor) {
+                const vendorEmail = (entity as Vendor).email;
+                const businessName = (entity as Vendor).businessName;
+                // The account is already verified and saved; the receipt email is
+                // best-effort and must not turn a success into an error.
+                void sendVendorApplicationEmail(vendorEmail, businessName).catch((error) =>
+                    console.error("Vendor application email failed:", error),
+                );
+            }
+
             // Respond with 200 OK and success message
             res.status(200).json({
                 success: true,
-                message: 'Email verified successfully',
+                message: "Email verified successfully",
             });
         } catch (error) {
             // Handle known APIError with appropriate status and message
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                    errorCode: error.errorCode,
+                });
             } else {
                 // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(503, 'Verification service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Verification service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method forgotPassword
      * @route POST /auth/forgot-password
-     * @description Handles a password reset request by generating and emailing a reset token.
-     * Sends a token with 15-minute expiry to the user's or vendor's email if found.
+     * @description Emails a six-digit, 15-minute password reset code.
      *
-     * @param {Request<{}, {}, IVerificationTokenRequest>} req - Express request with email field.
-     * @param {Response} res - Express response object for sending HTTP responses.
-     * @returns {Promise<void>} Sends success message on token generation or appropriate error.
-     * @throws {APIError} On validation failure, user/vendor not found, or internal issues.
+     * Every email gets the same 202 and message, so the form reveals nothing
+     * about who has an account (see `authPrivacy.utils`). Only an account with
+     * a password is sent a code; Google and Facebook accounts have none.
      * @access Public
      */
-    async forgotPassword(req: Request<{}, {}, IVerificationTokenRequest>, res: Response): Promise<void> {
-        try {
-            // Validate request body using Zod schema to ensure email is provided and correctly formatted
-            const parsed = verificationTokenSchema.safeParse(req.body);
-            if (!parsed.success) {
-                // Respond with 400 Bad Request if validation fails, including detailed error information
-                res.status(400).json({ success: false, errors: parsed.error.errors });
-                return;
-            }
+    async forgotPassword(
+        req: Request<{}, {}, IVerificationTokenRequest>,
+        res: Response,
+    ): Promise<void> {
+        // The same 202 for every email — a customer's, a vendor's, a Google
+        // account's, an unknown one — so the form cannot be used to learn who
+        // has an account. A code is only issued to an account with a password.
+        const email = this.toLowerEmail(req.body.email);
+        const user = await findUserByEmail(email);
 
-            // Extract email from validated data
-            const { email } = parsed.data;
-
-            // Attempt to find a user with the provided email
-            let user = await findUserByEmail(email);
-
-            if (user) {
-                if (user.provider === AuthProvider.GOOGLE) {
-                    throw new APIError(400, "Google login users cannot change password.");
-                }
-            }
-
-            let vendor = null;
-            let isVendor = false;
-
-            // If user is not found, attempt to find a vendor with the email
-            if (!user) {
-                vendor = await findVendorByEmail(email);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor exists, respond with 404 Not Found
-                    throw new APIError(404, 'User or vendor not found');
-                }
-            }
-
-            // Select the correct entity (user or vendor) to update
-            const entity = isVendor ? vendor : user;
-
-            // Generate a new password reset token and set its expiration time (1 minutes from now)
+        if (user && user.provider === AuthProvider.LOCAL) {
             const token = TokenUtils.generateToken();
-            const tokenExpire = new Date(Date.now() + 1 * 60 * 1000);
-
-            // Store the reset token and expiration time in the entity
-            entity.resetToken = token;
-            entity.resetTokenExpire = tokenExpire;
-
-            // Save the updated entity to the database
-            await (isVendor ? saveVendor(vendor) : saveUser(user));
-
-            // Send an email to the user or vendor with the reset token and instructions
-            await sendVerificationEmail(entity.email, 'Reset Password', token);
-
-            // Respond with 202 Accepted indicating the reset email has been sent successfully
-            res.status(202).json({
-                success: true,
-                message: 'Password reset request sent',
-            });
-        } catch (error) {
-            console.log(error)
-            // Handle expected API errors with their respective status and message
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // For unexpected errors, throw a generic 503 Service Unavailable error
-                throw new APIError(503, 'Password reset service temporarily unavailable');
-            }
+            user.resetToken = await TokenUtils.hashToken(token);
+            user.resetTokenExpire = new Date(Date.now() + 15 * 60 * 1000);
+            await saveUser(user);
+            sendVerificationEmailInBackground(user.email, "Reset Password", token);
+        } else {
+            await burnCodeIssue();
         }
+
+        res.status(202).json({ success: true, message: AUTH_MESSAGES.resetRequested });
     }
 
+    /**
+     * @method verifyCurrentPassword
+     * @route POST /auth/change-password/verify
+     * @description First step of a signed-in password change: confirms the
+     * current password so the new one is only asked for once it is known to be
+     * right. `changePassword` checks it again.
+     * @access Customer (password accounts only)
+     */
+    async verifyCurrentPassword(
+        req: AuthRequest<{}, {}, { currentPassword: string }>,
+        res: Response,
+    ): Promise<void> {
+        const user = req.user!;
+        this.assertPasswordAccount(user, "password");
+        await assertCurrentPassword(user, req.body.currentPassword);
+        res.status(200).json({ success: true, message: "Password confirmed" });
+    }
+
+    /**
+     * @method changePassword
+     * @route POST /auth/change-password
+     * @description Sets a new password for the signed-in account, proven by the
+     * current password or an emailed reset code. Every other session is signed
+     * out; this one gets fresh tokens so it stays signed in.
+     * @access Customer (password accounts only)
+     */
+    async changePassword(
+        req: AuthRequest<{}, {}, { currentPassword?: string; token?: string; newPassword: string }>,
+        res: Response,
+    ): Promise<void> {
+        const user = req.user!;
+        this.assertPasswordAccount(user, "password");
+        await applyPasswordChange(user, req.body);
+        await saveUser(user);
+
+        const { token, refreshToken } = issueUserSessionTokens(user);
+        const cookie = {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict" as const,
+        };
+        res.cookie("token", token, { ...cookie, maxAge: 15 * 60 * 1000 });
+        res.cookie("refreshToken", refreshToken, { ...cookie, maxAge: 24 * 60 * 60 * 1000 });
+
+        res.status(200).json({
+            success: true,
+            message: "Password changed. Other devices have been signed out.",
+            token,
+            refreshToken,
+        });
+    }
+
+    /**
+     * @method verifyResetCode
+     * @route POST /auth/reset-password/verify
+     * @description Checks an emailed reset code without spending it, so the
+     * new password is only asked for once the code is known to be right.
+     * `resetPassword` checks it again; this is a courtesy, not the gate.
+     * @access Public
+     */
+    async verifyResetCode(
+        req: Request<{}, {}, { email: string; token: string }>,
+        res: Response,
+    ): Promise<void> {
+        const user = await this.findUserForReset(req.body.email);
+        await assertResetCode(user, req.body.token);
+
+        res.status(200).json({ success: true, message: "Code verified" });
+    }
 
     /**
      * @method resetPassword
      * @route POST /auth/reset-password
-     * @description Resets the user's or vendor's password using a valid reset token.
-     * Verifies the token, hashes the new password, updates the entity, and clears the token.
-     *
-     * @param {Request<{}, {}, IResetPasswordRequest>} req - Express request containing reset token and new password.
-     * @param {Response} res - Express response object to return result.
-     * @returns {Promise<void>} Sends success message upon successful password reset.
-     * @throws {APIError} For invalid or expired token, user/vendor not found, or unexpected errors.
+     * @description Sets a new password with a valid reset code, then clears
+     * the code and ends every existing session.
      * @access Public
      */
-    async resetPassword(req: Request<{}, {}, IResetPasswordRequest>, res: Response): Promise<void> {
-        try {
-            // Validate request body using Zod schema to ensure newPass and token are provided and valid
-            const parsed = resetPasswordSchema.safeParse(req.body);
-            if (!parsed.success) {
-                // Respond with 400 Bad Request if validation fails, including error details
-                res.status(400).json({ success: false, errors: parsed.error.errors });
-                return;
-            }
+    async resetPassword(
+        req: Request<{}, {}, IResetPasswordRequest>,
+        res: Response,
+    ): Promise<void> {
+        const { newPass, token } = req.body;
+        const user = await this.findUserForReset(req.body.email);
+        await assertResetCode(user, token);
 
-            // Extract new password and reset token from validated data
-            const { newPass, token } = parsed.data;
+        user.password = await bcrypt.hash(newPass, 10);
 
-            // Attempt to find a user associated with the reset token
-            let user = await findUserByResetToken(token);
-            let vendor = null;
-            let isVendor = false;
+        /**
+         * Every session signed before now stops working.
+         *
+         * A password reset is usually someone recovering an account they
+         * believe is compromised. Leaving the attacker's existing token
+         * valid for its full lifetime — up to seven days for an admin —
+         * would make the reset theatre. `authMiddleware` refuses any token
+         * whose `iat` predates this.
+         */
+        user.tokensValidFrom = new Date();
 
-            // If no user found, try to find a vendor associated with the reset token
-            if (!user) {
-                vendor = await findVendorByResetToken(token);
-                isVendor = true;
-                if (!vendor) {
-                    // If neither user nor vendor found, respond with 410 Gone (token no longer valid)
-                    throw new APIError(410, 'Reset token no longer valid');
-                }
-            }
+        // The code arrived by email, which is all verification proves, so an
+        // account that never finished signup can sign in after resetting.
+        user.isVerified = true;
 
-            // Select the correct entity (user or vendor) to update
-            const entity = isVendor ? vendor : user;
+        // Clear reset token and expiration to prevent reuse
+        user.resetToken = null;
+        user.resetTokenExpire = null;
+        await saveUser(user);
 
-            // Hash the new password securely using bcrypt with salt rounds = 10
-            const hashedPassword = await bcrypt.hash(newPass, 10);
-
-            // Update the entity's password with the hashed password
-            entity.password = hashedPassword;
-
-            // Clear reset token and expiration to prevent reuse
-            entity.resetToken = null;
-            entity.resetTokenExpire = null;
-
-            // Save the updated entity to the database
-            await (isVendor ? saveVendor(vendor) : saveUser(user));
-
-            // Respond with 200 OK indicating password reset was successful
-            res.status(200).json({
-                success: true,
-                message: 'Password reset successfully',
-            });
-        } catch (error) {
-            // Handle known API errors with their specific status and message
-            if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
-            } else {
-                // Handle unexpected errors with generic 503 Service Unavailable
-                throw new APIError(503, 'Password reset service temporarily unavailable');
-            }
-        }
+        res.status(200).json({
+            success: true,
+            message: "Password reset successfully",
+        });
     }
 
-
-    async adminChangeVendorPassword(req: Request<{ vendorId: number }, {}, AdminResetPasswordInput, {}>, res: Response) {
+    async adminChangeVendorPassword(
+        req: Request<{ vendorId: number }, {}, AdminResetPasswordInput, {}>,
+        res: Response,
+    ) {
         try {
             const vendorId = req.params.vendorId;
 
@@ -1070,7 +1551,7 @@ export class UserController {
 
             const vendor = await findvendorByvendorId(vendorId);
             if (!vendor) {
-                throw new APIError(404, 'Vendor not found');
+                throw new APIError(404, "Vendor not found");
             }
 
             const hashedPassword = await bcrypt.hash(newPass, 10);
@@ -1080,20 +1561,21 @@ export class UserController {
 
             res.status(200).json({
                 success: true,
-                message: 'Vendor password updated by admin',
+                message: "Vendor password updated by admin",
             });
-
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                throw new APIError(503, 'Service temporarily unavailable');
+                throw new APIError(503, "Service temporarily unavailable");
             }
         }
     }
 
-
-    /** 
+    /**
      * @method getUserById
      * @route GET /users/:id
      * @description Retrieves a user by their unique ID. Returns 404 if not found.
@@ -1104,18 +1586,21 @@ export class UserController {
      * @throws {APIError} For invalid ID, user not found, or service errors.
      * @access Admin
      */
-    async getUserById(req: Request<{ id: string }>, res: Response): Promise<void> {
+    async getUserById(
+        req: Request<{ id: string }>,
+        res: Response,
+    ): Promise<void> {
         try {
             // Parse and validate user ID from request parameters
             const id = parseInt(req.params.id, 10);
             if (isNaN(id)) {
-                throw new APIError(400, 'Invalid user ID');
+                throw new APIError(400, "Invalid user ID");
             }
 
             // Retrieve user data using service layer
             const user = await getUserByIdService(id);
             if (!user) {
-                throw new APIError(404, 'User not found');
+                throw new APIError(404, "User not found");
             }
 
             // Return success response with user data
@@ -1126,10 +1611,13 @@ export class UserController {
         } catch (error) {
             // Handle known API errors with specific status codes
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
                 // Handle unexpected errors with generic service unavailable response
-                throw new APIError(503, 'User service temporarily unavailable');
+                throw new APIError(503, "User service temporarily unavailable");
             }
         }
     }
@@ -1148,46 +1636,57 @@ export class UserController {
      */
     async updateUser(
         req: AuthRequest<{ id: string }, {}, IUpdateUserRequest>,
-        res: Response
+        res: Response,
     ): Promise<void> {
         try {
             // Validate request body using Zod schema
             const parsed = updateUserSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
-
-            console.log(req.body)
 
             // Validate and parse user ID from URL parameters
             const id = parseInt(req.params.id, 10);
             if (isNaN(id)) {
-                throw new APIError(400, 'Invalid user ID');
+                throw new APIError(400, "Invalid user ID");
             }
 
             const userExists = await findUserById(id);
 
             if (!userExists) {
-                throw new APIError(404, "USer does not existsf")
+                throw new APIError(404, "User does not exist");
             }
 
             // Enforce role update restrictions: only admins can change roles
             if (parsed.data.role && req.user?.role !== UserRole.ADMIN) {
-                throw new APIError(403, 'Only admins can change roles');
+                throw new APIError(403, "Only admins can change roles");
+            }
+
+            // The email is the login identity. Customers change it through the
+            // verified change-email flow; only an admin may set it directly.
+            if (
+                parsed.data.email &&
+                parsed.data.email !== userExists.email &&
+                req.user?.role !== UserRole.ADMIN
+            ) {
+                throw new APIError(403, "Use the change-email flow to change your email");
             }
 
             // Proceed to update user data with validated input
             const updateData = parsed.data;
             const user = await updateUserService(id, updateData, userExists);
             if (!user) {
-                throw new APIError(404, 'User not found');
+                throw new APIError(404, "User not found");
             }
 
             // Respond with success and updated user info summary
             res.status(200).json({
                 success: true,
-                message: 'User updated successfully',
+                message: "User updated successfully",
                 data: {
                     id: user.id,
                     fullName: user.fullName,
@@ -1202,73 +1701,79 @@ export class UserController {
                 },
             });
         } catch (error) {
-            console.log("------------Error----------------")
-            console.log(error)
+            console.log("------------Error----------------");
+            console.log(error);
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                throw new APIError(503, 'User update service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "User update service temporarily unavailable",
+                );
             }
         }
     }
 
-
-
     /**
-    * @method updateEmail
-    * @route POST /auth/update-email
-    * @description Initiates an email change request for an authenticated user or vendor.
-    * Sends a verification token to the new email and returns a signed emailChangeToken JWT.
-    *
-    * @param {CombinedAuthRequest<{}, {}, IChangeEmailRequest>} req - Request with new email in body and authenticated user/vendor.
-    * @param {Response} res - Express response object.
-    * @returns {Promise<void>} Responds with success message and emailChangeToken.
-    * @throws {APIError} For validation, authentication, or duplicate email.
-    * @access Authenticated
-    */
+     * @method updateEmail
+     * @route POST /auth/update-email
+     * @description Initiates an email change request for an authenticated user or vendor.
+     * Sends a verification token to the new email and returns a signed emailChangeToken JWT.
+     *
+     * @param {CombinedAuthRequest<{}, {}, IChangeEmailRequest>} req - Request with new email in body and authenticated user/vendor.
+     * @param {Response} res - Express response object.
+     * @returns {Promise<void>} Responds with success message and emailChangeToken.
+     * @throws {APIError} For validation, authentication, or duplicate email.
+     * @access Authenticated
+     */
     async updateEmail(
         req: CombinedAuthRequest<{}, {}, IChangeEmailRequest>,
-        res: Response
+        res: Response,
     ): Promise<void> {
         try {
-            console.log(req.user)
-            console.log(req.body)
             // Validate request body using Zod schema
             const parsed = changeEmailSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
-
 
             // Verify user or vendor authentication
             const { newEmail } = parsed.data;
             const user = req.user;
             const vendor = req.vendor;
             if (!user && !vendor) {
-                throw new APIError(401, 'Unauthorized. Please log in.');
+                throw new APIError(401, "Unauthorized. Please log in.");
             }
             // Check if new email is already in use
             const existingUser = await findUserByEmail(newEmail);
             const existingVendor = await findVendorByEmail(newEmail);
 
-            const isVendor = vendor;
-
-            const entity = isVendor ? existingVendor : existingUser;
+            const isVendor = Boolean(vendor);
 
             if (existingUser || existingVendor) {
-                throw new APIError(409, 'Email already in use.');
+                throw new APIError(409, "Email already in use.");
             }
 
+            // The account being changed is the caller's own. (This used to be
+            // the account found by the *new* email, which the 409 above
+            // guarantees is null, so every request failed with a 503.)
+            const entity = isVendor ? vendor : user;
 
             // Generate verification token and JWT for email change
             const verificationToken = TokenUtils.generateToken();
             const hashedToken = await TokenUtils.hashToken(verificationToken);
             const expire = new Date(Date.now() + 15 * 60 * 1000);
             const emailChangeToken = jwt.sign(
-                { id: entity.id, newEmail, type: isVendor ? 'vendor' : 'user' },
+                { id: entity.id, newEmail, type: isVendor ? "vendor" : "user" },
                 this.jwtSecret,
-                { expiresIn: '15m' }
+                { expiresIn: "15m" },
             );
 
             // Update user or vendor with verification token
@@ -1277,23 +1782,32 @@ export class UserController {
             await (isVendor ? saveVendor(vendor) : saveUser(user));
 
             // Send verification email to new address
-            await sendVerificationEmail(newEmail, 'Verify New Email', verificationToken);
+            sendVerificationEmailInBackground(
+                newEmail,
+                "Verify New Email",
+                verificationToken,
+            );
 
             res.status(202).json({
                 success: true,
-                message: 'Verification email sent to new email address.',
+                message: "Verification email sent to new email address.",
                 emailChangeToken,
             });
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                console.log(error)
-                throw new APIError(503, 'Email change service temporarily unavailable');
+                console.log(error);
+                throw new APIError(
+                    503,
+                    "Email change service temporarily unavailable",
+                );
             }
         }
     }
-
 
     /**
      * @method deleteUserHandler
@@ -1311,7 +1825,10 @@ export class UserController {
             const userId = parseInt(req.params.id);
 
             if (isNaN(userId)) {
-                res.status(400).json({ success: false, message: "Invalid user ID" });
+                res.status(400).json({
+                    success: false,
+                    message: "Invalid user ID",
+                });
                 return;
             }
 
@@ -1320,20 +1837,27 @@ export class UserController {
             const user = await userRepo.findOneBy({ id: userId });
 
             if (!user) {
-                res.status(404).json({ success: false, message: "User not found" });
+                res.status(404).json({
+                    success: false,
+                    message: "User not found",
+                });
                 return;
             }
 
             await userRepo.remove(user);
 
-            res.status(200).json({ success: true, message: "User deleted successfully" });
-
+            res.status(200).json({
+                success: true,
+                message: "User deleted successfully",
+            });
         } catch (error) {
             console.error("Delete user error:", error);
-            res.status(500).json({ success: false, message: "Internal server error" });
+            res.status(500).json({
+                success: false,
+                message: "Internal server error",
+            });
         }
     }
-
 
     /**
      * @method verifyEmailChange
@@ -1346,12 +1870,22 @@ export class UserController {
      * @throws {APIError} For token mismatch, expiry, conflict, or malformed JWT.
      * @access Authenticated
      */
-    async verifyEmailChange(req: CombinedAuthRequest<{}, {}, IVerifyEmailChangeRequest & { emailChangeToken: string }>, res: Response): Promise<void> {
+    async verifyEmailChange(
+        req: CombinedAuthRequest<
+            {},
+            {},
+            IVerifyEmailChangeRequest & { emailChangeToken: string }
+        >,
+        res: Response,
+    ): Promise<void> {
         try {
             // Validate request body using Zod schema
             const parsed = verifyEmailChangeSchema.safeParse(req.body);
             if (!parsed.success) {
-                res.status(400).json({ success: false, errors: parsed.error.errors });
+                res.status(400).json({
+                    success: false,
+                    errors: parsed.error.errors,
+                });
                 return;
             }
 
@@ -1360,7 +1894,7 @@ export class UserController {
             const user = req.user;
             const vendor = req.vendor;
             if (!user && !vendor) {
-                throw new APIError(401, 'Unauthorized. Please log in.');
+                throw new APIError(401, "Unauthorized. Please log in.");
             }
 
             const isVendor = !!vendor;
@@ -1368,14 +1902,17 @@ export class UserController {
 
             // Check for valid verification token
             if (!entity.verificationCode || !entity.verificationCodeExpire) {
-                throw new APIError(410, 'No email change request found.');
+                throw new APIError(410, "No email change request found.");
             }
             if (entity.verificationCodeExpire < new Date()) {
-                throw new APIError(410, 'Token expired.');
+                throw new APIError(410, "Token expired.");
             }
-            const isMatch = await bcrypt.compare(token, entity.verificationCode);
+            const isMatch = await bcrypt.compare(
+                token,
+                entity.verificationCode,
+            );
             if (!isMatch) {
-                throw new APIError(400, 'Invalid token.');
+                throw new APIError(400, "Invalid token.");
             }
 
             // Verify email change JWT
@@ -1387,19 +1924,28 @@ export class UserController {
                     type: string;
                 };
             } catch (error) {
-                throw new APIError(400, 'Invalid or expired email change token.');
+                throw new APIError(
+                    400,
+                    "Invalid or expired email change token.",
+                );
             }
 
             // Ensure user ID and type match
-            if (decoded.id !== entity.id || decoded.type !== (isVendor ? 'vendor' : 'user')) {
-                throw new APIError(400, 'Invalid token: User or type mismatch.');
+            if (
+                decoded.id !== entity.id ||
+                decoded.type !== (isVendor ? "vendor" : "user")
+            ) {
+                throw new APIError(
+                    400,
+                    "Invalid token: User or type mismatch.",
+                );
             }
 
             // Check if new email is already in use
             const existingUser = await findUserByEmail(decoded.newEmail);
             const existingVendor = await findVendorByEmail(decoded.newEmail);
             if (existingUser || existingVendor) {
-                throw new APIError(409, 'Email already in use.');
+                throw new APIError(409, "Email already in use.");
             }
 
             // Update user or vendor email and clear verification data
@@ -1410,30 +1956,38 @@ export class UserController {
 
             res.status(200).json({
                 success: true,
-                message: 'Email updated successfully.',
+                message: "Email updated successfully.",
             });
         } catch (error) {
             if (error instanceof APIError) {
-                res.status(error.status).json({ success: false, message: error.message });
+                res.status(error.status).json({
+                    success: false,
+                    message: error.message,
+                });
             } else {
-                throw new APIError(503, 'Email verification service temporarily unavailable');
+                throw new APIError(
+                    503,
+                    "Email verification service temporarily unavailable",
+                );
             }
         }
     }
 
-    async checkEmailExists(req: Request<{}, {}, {}, { email: string }>, res: Response): Promise<void> {
+    /**
+     * Kept for the signup wizards that still call it, but it no longer answers
+     * the question: a public "is this email registered?" endpoint is account
+     * enumeration by definition. Signup itself now handles a registered email
+     * without revealing it (see `answerDuplicateSignup`), so the wizards lose
+     * nothing by always hearing "not registered".
+     */
+    async checkEmailExists(
+        req: Request<{}, {}, {}, { email: string }>,
+        res: Response,
+    ): Promise<void> {
         if (!req.query.email) {
-            res.status(400).json({ success: false, message: "Invalid Email" });
+            res.status(400).json({ success: false, message: "Enter a valid email address." });
             return;
         }
-        try {
-            const userExists = await findUserByEmail(req.query.email);
-            const vendorExists = userExists
-                ? null
-                : await this.vendorService.findVendorByEmail(req.query.email);
-            res.json({ success: true, exists: !!(userExists || vendorExists) });
-        } catch (error) {
-            res.status(503).json({ success: false, message: 'Email verification service temporarily unavailable' });
-        }
+        res.json({ success: true, exists: false });
     }
 }

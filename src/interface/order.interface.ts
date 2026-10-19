@@ -1,6 +1,7 @@
 
 import { Province } from '../entities/address.entity';
 import { OrderStatus, PaymentMethod, PaymentStatus } from '../entities/order.entity';
+import { ItemFulfillmentStatus } from '../entities/orderItems.entity';
 
 export interface IShippingAddressRequest {
     province: Province;
@@ -18,11 +19,13 @@ export interface IOrderCreateRequest {
     instrumentName?: string;
     promoCode?: string;
     fullName?: string;
+    idempotencyKey?: string;
+    ageRestrictedAcknowledged?: boolean;
 
     // buy now 
     isBuyNow?: boolean;   
     productId?: number;   
-    variantId?: string;   
+    variantId?: number;   
     quantity?: number;    
 }
 
@@ -51,6 +54,14 @@ export interface IVendorOrderResponse {
 
 export interface IUpdateOrderStatusRequest {
     status: OrderStatus;
+    expectedCurrentStatus?: OrderStatus;
+    reason?: string;
+    note?: string;
+}
+
+export interface IUpdateOrderItemFulfillmentRequest {
+    status: ItemFulfillmentStatus;
+    cancellationRemark?: string | null;
 }
 
 export interface IOrderResponse {
@@ -71,4 +82,55 @@ export interface IOrderResponse {
 
 export interface ISearchOrdersRequest {
     orderId?: string; // For searching by order ID
+}
+
+export type AdminOrderSort =
+    | "newest"
+    | "oldest"
+    | "highest_total"
+    | "lowest_total"
+    | "recently_updated"
+    | "order_number";
+
+export interface IAdminOrderQueryParams {
+    page?: number;
+    limit?: number;
+    search?: string;
+    status?: OrderStatus;
+    paymentStatus?: PaymentStatus;
+    vendorId?: number;
+    startDate?: string;
+    endDate?: string;
+    minPrice?: number;
+    maxPrice?: number;
+    sort?: AdminOrderSort;
+}
+
+export type VendorOrderSort =
+    | "newest"
+    | "oldest"
+    | "highestPrice"
+    | "lowestPrice";
+
+export interface IVendorOrderQueryParams {
+    page?: number;
+    limit?: number;
+    /** Maps to order.status (e.g. ORDER_PLACED, DELIVERED, CANCELLED) */
+    status?: string;
+    sort?: VendorOrderSort;
+    /** Free-text search across order number, customer name/email/phone,
+     * and product name — see OrderService.buildVendorOrderIdQuery. */
+    search?: string;
+}
+
+export interface IPaginatedResult<T> {
+    items: T[];
+    pagination: {
+        page: number;
+        limit: number;
+        totalItems: number;
+        totalPages: number;
+        hasNextPage: boolean;
+        hasPreviousPage: boolean;
+    };
 }

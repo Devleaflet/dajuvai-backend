@@ -1,22 +1,41 @@
-import { Router } from 'express';
-import { ProductController } from '../controllers/product.controller';
-import { authMiddleware, combinedAuthMiddleware, isAdmin, isAdminOrStaff, isAdminOrVendor, isVendor, isVendorAccountOwnerOrAdminOrStaff, requireAdminStaffOrVendor, restrictToVendorOrAdmin, validateZod, vendorAuthMiddleware } from '../middlewares/auth.middleware';
-import { multerOptions, uploadMiddleware } from '../config/multer.config';
-import multer from 'multer';
-import { createCategorySchema, updateCategorySchema } from '../utils/zod_validations/category.zod';
-import { SubcategoryController } from '../controllers/subcategory.controller';
-import { CategoryController } from '../controllers/category.controller';
-import { createSubCategorySchema, updateSubcategorySchema } from '../utils/zod_validations/subcategory.zod';
-import AppDataSource from '../config/db.config';
-import { responseCache } from '../middlewares/responseCache.middleware';
+import { Router } from "express";
+import { ProductController } from "../controllers/product.controller";
+import {
+    authMiddleware,
+    combinedAuthMiddleware,
+    isAdmin,
+    isAdminOrStaff,
+    isAdminOrVendor,
+    isVendor,
+    isVendorAccountOwnerOrAdminOrStaff,
+    requireAdminStaffOrVendor,
+    restrictToVendorOrAdmin,
+    validateZod,
+    vendorAuthMiddleware,
+} from "../middlewares/auth.middleware";
+import { checkPermission, checkPermissionUnlessVendor } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
+import { multerOptions, uploadMiddleware } from "../config/multer.config";
+import multer from "multer";
+import {
+    createCategorySchema,
+    updateCategorySchema,
+} from "../utils/zod_validations/category.zod";
+import { SubcategoryController } from "../controllers/subcategory.controller";
+import { CategoryController } from "../controllers/category.controller";
+import {
+    createSubCategorySchema,
+    updateSubcategorySchema,
+} from "../utils/zod_validations/subcategory.zod";
+import AppDataSource from "../config/db.config";
+import { responseCache } from "../middlewares/responseCache.middleware";
+import { resolveSlugParam, resolveSlugQuery } from "../middlewares/slug.middleware";
 
 const router = Router();
 const productController = new ProductController(AppDataSource);
 const categoryController = new CategoryController();
 const subcategoryController = new SubcategoryController();
 const upload = multer(multerOptions);
-
-
 
 // CATEGORY
 
@@ -96,8 +115,15 @@ const upload = multer(multerOptions);
  *       500:
  *         description: Internal server error
  */
-router.post('/', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(createCategorySchema), categoryController.createCategory.bind(categoryController));
-
+router.post(
+    "/",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
+    upload.single("image"),
+    validateZod(createCategorySchema),
+    categoryController.createCategory.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -161,7 +187,11 @@ router.post('/', authMiddleware, isAdminOrStaff, upload.single('image'), validat
  *         description: Internal server error
  */
 
-router.get('/', responseCache({ ttlSeconds: 300 }), categoryController.getCategories.bind(categoryController));
+router.get(
+    "/",
+    responseCache({ ttlSeconds: 300 }),
+    categoryController.getCategories.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -175,8 +205,8 @@ router.get('/', responseCache({ ttlSeconds: 300 }), categoryController.getCatego
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: The ID of the category to retrieve
+ *           type: string
+ *         description: The category id, or its URL slug
  *     responses:
  *       200:
  *         description: Category retrieved successfully
@@ -234,7 +264,12 @@ router.get('/', responseCache({ ttlSeconds: 300 }), categoryController.getCatego
  *         description: Internal server error
  */
 
-router.get('/:id', responseCache({ ttlSeconds: 300 }), categoryController.getCategoryById.bind(categoryController));
+router.get(
+    "/:id",
+    resolveSlugParam("category"),
+    responseCache({ ttlSeconds: 300 }),
+    categoryController.getCategoryById.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -329,7 +364,15 @@ router.get('/:id', responseCache({ ttlSeconds: 300 }), categoryController.getCat
  *       500:
  *         description: Internal server error
  */
-router.put('/:id', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(updateCategorySchema), categoryController.updateCategory.bind(categoryController));
+router.put(
+    "/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
+    upload.single("image"),
+    validateZod(updateCategorySchema),
+    categoryController.updateCategory.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -472,7 +515,13 @@ router.put('/:id', authMiddleware, isAdminOrStaff, upload.single('image'), valid
  *                   type: string
  *                   example: Internal server error
  */
-router.get("/search/name", authMiddleware, isAdminOrStaff, categoryController.searchCategories.bind(categoryController));
+router.get(
+    "/search/name",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.VIEW),
+    categoryController.searchCategories.bind(categoryController),
+);
 
 /**
  * @swagger
@@ -503,13 +552,13 @@ router.get("/search/name", authMiddleware, isAdminOrStaff, categoryController.se
  *         description: Internal server error
  */
 
-router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteCategory.bind(categoryController));
-
-
-
-
-
-
+router.delete(
+    "/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.DELETE),
+    categoryController.deleteCategory.bind(categoryController),
+);
 
 // SUBCATEGORY
 /**
@@ -605,7 +654,15 @@ router.delete('/:id', authMiddleware, isAdminOrStaff, categoryController.deleteC
  *       500:
  *         description: Internal server error
  */
-router.post('/:categoryId/subcategories', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(createSubCategorySchema), subcategoryController.createSubcategory.bind(subcategoryController));
+router.post(
+    "/:categoryId/subcategories",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
+    upload.single("image"),
+    validateZod(createSubCategorySchema),
+    subcategoryController.createSubcategory.bind(subcategoryController),
+);
 
 /**
  * @swagger
@@ -619,8 +676,8 @@ router.post('/:categoryId/subcategories', authMiddleware, isAdminOrStaff, upload
  *         name: categoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the parent category
+ *           type: string
+ *         description: The category id, or its URL slug
  *     responses:
  *       200:
  *         description: A list of subcategories
@@ -673,7 +730,8 @@ router.post('/:categoryId/subcategories', authMiddleware, isAdminOrStaff, upload
  */
 
 router.get(
-    '/:categoryId/subcategories',
+    "/:categoryId/subcategories",
+    resolveSlugParam("category", "categoryId"),
     responseCache({ ttlSeconds: 300 }),
     subcategoryController.getSubcategories.bind(subcategoryController),
 );
@@ -690,14 +748,14 @@ router.get(
  *         name: categoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the parent category
+ *           type: string
+ *         description: The category id, or its URL slug
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the subcategory
+ *           type: string
+ *         description: The subcategory id, or its URL slug
  *     responses:
  *       200:
  *         description: Subcategory found
@@ -750,7 +808,9 @@ router.get(
  */
 
 router.get(
-    '/:categoryId/subcategories/:id',
+    "/:categoryId/subcategories/:id",
+    resolveSlugParam("category", "categoryId"),
+    resolveSlugParam("subcategory"),
     responseCache({ ttlSeconds: 300 }),
     subcategoryController.getSubcategoryById.bind(subcategoryController),
 );
@@ -847,8 +907,15 @@ router.get(
  *       500:
  *         description: Internal server error
  */
-router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upload.single('image'), validateZod(updateSubcategorySchema), subcategoryController.updateSubcategory.bind(subcategoryController));
-
+router.put(
+    "/:categoryId/subcategories/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.CREATE_EDIT),
+    upload.single("image"),
+    validateZod(updateSubcategorySchema),
+    subcategoryController.updateSubcategory.bind(subcategoryController),
+);
 
 /**
  * @swagger
@@ -873,7 +940,7 @@ router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upl
  *           type: integer
  *         description: ID of the subcategory to delete
  *     responses:
- *       204:
+ *       200:
  *         description: Subcategory deleted successfully
  *         content:
  *           application/json:
@@ -896,13 +963,13 @@ router.put('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, upl
  *         description: Internal server error
  */
 
-router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, subcategoryController.deleteSubcategory.bind(subcategoryController));
-
-
-
-
-
-
+router.delete(
+    "/:categoryId/subcategories/:id",
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.CATALOG, PermissionLevel.DELETE),
+    subcategoryController.deleteSubcategory.bind(subcategoryController),
+);
 
 // PRODUCT
 
@@ -911,7 +978,7 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  * /api/categories/{categoryId}/subcategories/{subcategoryId}/products:
  *   post:
  *     summary: Create a new product
- *     description: Creates a new product. Product images must be uploaded separately first to get URLs (e.g., from Cloudinary). Requires vendor or admin authorization via JWT.
+ *     description: Creates a new product. Product images must be uploaded separately first to get URLs (e.g., from Cloudinary). Requires vendor authorization via JWT. Server refreshes normalized search fields and PostgreSQL full-text index automatically; clients must not send search_vector.
  *     tags: [Products]
  *     security:
  *       - bearerAuth: []
@@ -938,26 +1005,36 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *               name:
  *                 type: string
  *                 example: T-Shirt
+ *               brand:
+ *                 type: string
+ *                 example: Nike
  *               description:
  *                 type: string
  *                 nullable: true
  *                 example: Premium Cotton T-shirt
+ *               keywords:
+ *                 type: string
+ *                 nullable: true
+ *                 example: "cotton,summer,t-shirt"
  *               basePrice:
  *                 type: number
  *                 nullable: true
- *               discount:
+ *               discountAmount:
+ *                 type: number
+ *                 default: 0
+ *               discountPercent:
  *                 type: number
  *                 default: 0
  *               discountType:
  *                 type: string
- *                 enum: [PERCENTAGE, FLAT]
- *                 default: PERCENTAGE
+ *                 enum: [NONE, PERCENTAGE, FLAT]
+ *                 default: NONE
  *               stock:
  *                 type: integer
  *                 nullable: true
  *               status:
  *                 type: string
- *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *               hasVariants:
  *                 type: boolean
  *               productImages:
@@ -973,6 +1050,9 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                 description: Required if hasVariants is true
  *                 items:
  *                   type: object
+ *                   required:
+ *                     - sku
+ *                     - stock
  *                   properties:
  *                     sku:
  *                       type: string
@@ -980,13 +1060,19 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                     basePrice:
  *                       type: number
  *                       example: 25.00
- *                     discount:
+ *                     price:
+ *                       type: number
+ *                       example: 25.00
+ *                     discountAmount:
+ *                       type: number
+ *                       default: 0
+ *                     discountPercent:
  *                       type: number
  *                       default: 0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       default: PERCENTAGE
+ *                       enum: [NONE, PERCENTAGE, FLAT]
+ *                       default: NONE
  *                     attributes:
  *                       type: object
  *                       description: Key-value pairs of attributes
@@ -998,12 +1084,17 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                         type: string
  *                         format: uri
  *                         example: https://res.cloudinary.com/.../variants/white_l_1.jpg
+ *                     images:
+ *                       type: array
+ *                       description: Array of image objects or URLs for this variant
+ *                       items:
+ *                         type: string
  *                     stock:
  *                       type: integer
  *                       example: 50
  *                     status:
  *                       type: string
- *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *               dealId:
  *                 type: integer
  *                 nullable: true
@@ -1012,61 +1103,91 @@ router.delete('/:categoryId/subcategories/:id', authMiddleware, isAdminOrStaff, 
  *                 nullable: true
  *             required:
  *               - name
- *               - subcategoryId
  *               - hasVariants
  *               - productImages
  *     responses:
  *       201:
  *         description: Product created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 message:
+ *                   type: string
+ *                   example: "Product created successfully"
+ *                 data:
+ *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 1
+ *                     name:
+ *                       type: string
+ *                       example: "T-Shirt"
  *       400:
  *         description: Bad request (missing fields or no product images)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Missing required fields"
  */
-router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMiddleware, isVendor, productController.createProduct.bind(productController))
-
+router.post(
+    "/:categoryId/subcategories/:subcategoryId/products",
+    vendorAuthMiddleware,
+    isVendor,
+    productController.createProduct.bind(productController),
+);
 
 /**
  * @swagger
  * /api/categories/all/products:
  *   get:
- *     summary: Retrieve all products with optional filtering and search
+ *     summary: Browse the public product catalog
  *     description: >
- *       Fetches products with optional filtering by brand, category, subcategory, deal, vendor, and banner.
- *       Supports case-insensitive search across product name and description using partial matching.
- *       Results where the product name matches the search term are prioritized over description-only matches.
+ *       Returns public products using server-side filters. Repeated or comma-separated categoryId and
+ *       subcategoryId values are ORed within their own group; all other active filters are ANDed together.
+ *       Search is case-insensitive. `q` is the preferred search parameter and `search` remains supported.
+ *       Prices are NPR effective product prices. Results are deterministically ordered by the selected sort
+ *       and product ID, so page/limit Load More requests do not duplicate items.
  *     tags: [Product]
  *     parameters:
- *       - in: query
- *         name: brandId
- *         schema:
- *           type: string
- *         description: Filter by brand ID (positive integer)
- *         example: "1"
  *       - in: query
  *         name: categoryId
  *         schema:
  *           type: string
- *         description: Filter by category ID (positive integer)
- *         example: "2"
+ *         description: One or more positive category IDs, separated by commas or repeated. Matches any selected category.
+ *         example: "2,8"
  *       - in: query
  *         name: subcategoryId
  *         schema:
  *           type: string
- *         description: Filter by subcategory ID (positive integer)
- *         example: "5"
+ *         description: One or more positive subcategory IDs, separated by commas or repeated. Matches any selected subcategory.
+ *         example: "5,11"
  *       - in: query
  *         name: dealId
  *         schema:
  *           type: string
- *         description: Filter by deal ID (positive integer)
- *         example: "1"
+ *         description: One or more enabled deal IDs, separated by commas or repeated. Matches any selected deal.
+ *         example: "1,7"
  *       - in: query
  *         name: sort
  *         schema:
  *           type: string
- *           enum: [all, low-to-high, high-to-low]
- *           default: all
- *         description: Sort products by price
- *         example: "low-to-high"
+ *           enum: [newest, price_low_high, price_high_low, discount_high_low, best_selling, all, low-to-high, high-to-low]
+ *           default: newest
+ *         description: Sort order. The last three values are backward-compatible aliases for newest, price_low_high, and price_high_low.
+ *         example: "best_selling"
  *       - in: query
  *         name: bannerId
  *         schema:
@@ -1075,35 +1196,61 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *         example: "3"
  *       - in: query
  *         name: page
- *         required: true
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: Page number for pagination
+ *         description: One-based page number. Defaults to 1.
  *         example: 1
  *       - in: query
  *         name: limit
- *         required: true
  *         schema:
  *           type: integer
  *           minimum: 1
- *         description: Number of items per page
- *         example: 10
+ *           maximum: 100
+ *           default: 40
+ *         description: Number of products per page. Shop uses 24.
+ *         example: 24
  *       - in: query
- *         name: isAdmin
+ *         name: q
  *         schema:
- *           type: boolean
- *         description: Optional flag used by clients to indicate admin context
- *         example: false
+ *           type: string
+ *           maxLength: 100
+ *         description: Preferred case-insensitive product search. Matches name, keywords, brand, SKU, category, subcategory, and description for terms of four or more characters.
+ *         example: "wireless headphone"
  *       - in: query
  *         name: search
  *         schema:
  *           type: string
- *         description: >
- *           Case-insensitive search across product name and description using ILIKE.
- *           Performs partial matching using wildcard (%search%).
- *           Products with name matches are ranked higher than those matching only in description.
+ *         description: Backward-compatible alias for q.
  *         example: "headphone"
+ *       - in: query
+ *         name: minPrice
+ *         schema:
+ *           type: number
+ *           minimum: 0
+ *         description: Inclusive minimum effective price in NPR.
+ *         example: 500
+ *       - in: query
+ *         name: maxPrice
+ *         schema:
+ *           type: number
+ *           minimum: 0
+ *         description: Inclusive maximum effective price in NPR. Must be greater than or equal to minPrice.
+ *         example: 5000
+ *       - in: query
+ *         name: minRating
+ *         schema:
+ *           type: number
+ *           minimum: 1
+ *           maximum: 5
+ *         description: Inclusive minimum average review rating.
+ *         example: 4
+ *       - in: query
+ *         name: hasDeal
+ *         schema:
+ *           type: boolean
+ *         description: true returns products with an enabled deal; false excludes enabled-deal products.
+ *         example: true
  *       - in: query
  *         name: vendorId
  *         schema:
@@ -1135,13 +1282,35 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                       name:
  *                         type: string
  *                         example: "Wireless Headphones"
+ *                       brand:
+ *                         type: string
+ *                         example: "Sony"
  *                       description:
  *                         type: string
  *                         example: "Noise cancelling over-ear headphones"
+ *                       keywords:
+ *                         type: string
+ *                         example: "tech,headphones,sony,original"
  *                       basePrice:
  *                         type: number
  *                         format: float
  *                         example: 199.99
+ *                       effectivePrice:
+ *                         type: number
+ *                         format: float
+ *                         description: Lowest active sell price used for filtering and sorting.
+ *                         example: 179.99
+ *                       avgRating:
+ *                         type: number
+ *                         format: float
+ *                         example: 4.5
+ *                       reviewCount:
+ *                         type: integer
+ *                         example: 18
+ *                       soldQuantity:
+ *                         type: integer
+ *                         description: Sum of purchased order-item quantities for best-selling sort.
+ *                         example: 42
  *                       stock:
  *                         type: integer
  *                         example: 25
@@ -1151,7 +1320,7 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                         example: 10.5
  *                       discountType:
  *                         type: string
- *                         enum: [PERCENTAGE, FLAT]
+ *                         enum: [NONE, PERCENTAGE, FLAT]
  *                         example: "PERCENTAGE"
  *                       size:
  *                         type: array
@@ -1186,15 +1355,6 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                         type: string
  *                         format: date-time
  *                         example: "2024-01-05T12:34:56Z"
- *                       brand:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                             example: 2
- *                           name:
- *                             type: string
- *                             example: "Sony"
  *                       vendor:
  *                         type: object
  *                         properties:
@@ -1232,12 +1392,45 @@ router.post('/:categoryId/subcategories/:subcategoryId/products', vendorAuthMidd
  *                               name:
  *                                 type: string
  *                                 example: "Electronics"
+ *                 meta:
+ *                   type: object
+ *                   required: [total, page, limit, totalPages, hasNextPage]
+ *                   properties:
+ *                     total:
+ *                       type: integer
+ *                       example: 83
+ *                     page:
+ *                       type: integer
+ *                       example: 1
+ *                     limit:
+ *                       type: integer
+ *                       example: 24
+ *                     totalPages:
+ *                       type: integer
+ *                       example: 4
+ *                     hasNextPage:
+ *                       type: boolean
+ *                       example: true
  *       400:
  *         description: Bad request - Invalid query parameters
  *       500:
  *         description: Internal server error
  */
-router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController.getAllProducts.bind(productController));
+router.get(
+    "/all/products",
+    resolveSlugQuery({
+        categoryId: "category",
+        categoryIds: "category",
+        subcategoryId: "subcategory",
+        subcategoryIds: "subcategory",
+        dealId: "deals",
+        dealIds: "deals",
+        bannerId: "banners",
+        vendorId: "vendor",
+    }),
+    responseCache({ ttlSeconds: 60 }),
+    productController.getAllProducts.bind(productController),
+);
 
 /**
  * @swagger
@@ -1251,20 +1444,20 @@ router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController
  *         name: categoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the parent category
+ *           type: string
+ *         description: The category id, or its URL slug
  *       - in: path
  *         name: subcategoryId
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the subcategory
+ *           type: string
+ *         description: The subcategory id, or its URL slug
  *       - in: path
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: ID of the product
+ *           type: string
+ *         description: The product id, or its URL slug
  *     responses:
  *       200:
  *         description: Product retrieved successfully
@@ -1285,9 +1478,15 @@ router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController
  *                     name:
  *                       type: string
  *                       example: "Bluetooth Speaker"
+ *                     brand:
+ *                       type: string
+ *                       example: "Boat"
  *                     description:
  *                       type: string
  *                       example: "Portable Bluetooth speaker with rich bass"
+ *                     keywords:
+ *                       type: string
+ *                       example: "tech,headphones,sony,original"
  *                     basePrice:
  *                       type: number
  *                       format: float
@@ -1301,7 +1500,7 @@ router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController
  *                       example: 5.0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
+ *                       enum: [NONE, PERCENTAGE, FLAT]
  *                       example: "FLAT"
  *                     size:
  *                       type: array
@@ -1361,14 +1560,17 @@ router.get('/all/products', responseCache({ ttlSeconds: 60 }), productController
  */
 
 router.get(
-    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    "/:categoryId/subcategories/:subcategoryId/products/:id",
+    resolveSlugParam("category", "categoryId"),
+    resolveSlugParam("subcategory", "subcategoryId"),
+    resolveSlugParam("products"),
     responseCache({ ttlSeconds: 60 }),
     productController.getProductById.bind(productController),
 );
 
 /**
  * @swagger
- * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{productId}:
+ * /api/categories/{categoryId}/subcategories/{subcategoryId}/products/{id}:
  *   put:
  *     summary: Update an existing product
  *     description: Updates a product with individual optional fields. Supports partial updates for product details and variants. Requires vendor or admin authorization via JWT. All fields are optional, and existing data is preserved if not provided.
@@ -1393,7 +1595,7 @@ router.get(
  *         description: ID of the subcategory
  *         example: 1
  *       - in: path
- *         name: productId
+ *         name: id
  *         required: true
  *         schema:
  *           type: integer
@@ -1411,26 +1613,38 @@ router.get(
  *                 type: string
  *                 description: Updated name of the product (optional)
  *                 example: Updated T-Shirt
+ *               brand:
+ *                 type: string
+ *                 description: Brand name of the product (optional)
+ *                 example: Nike
  *               description:
  *                 type: string
  *                 description: Updated description of the product (optional)
  *                 example: Premium Cotton T-shirt
+ *               keywords:
+ *                 type: string
+ *                 description: Updated keywords of the product (optional)
+ *                 example: "cotton,summer,t-shirt"
  *               basePrice:
  *                 type: number
  *                 description: Base price for non-variant products (optional, ignored if hasVariants is true)
  *                 example: 20
- *               discount:
+ *               discountAmount:
  *                 type: number
- *                 description: Discount amount (optional)
+ *                 description: Discount amount for FLAT discount type (optional)
  *                 example: 5
+ *               discountPercent:
+ *                 type: number
+ *                 description: Discount percent for PERCENTAGE discount type (optional)
+ *                 example: 10
  *               discountType:
  *                 type: string
- *                 enum: [PERCENTAGE, FLAT]
+ *                 enum: [NONE, PERCENTAGE, FLAT]
  *                 description: Discount type (optional)
- *                 example: FLAT
+ *                 example: NONE
  *               status:
  *                 type: string
- *                 enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *                 description: Inventory status (optional)
  *                 example: AVAILABLE
  *               stock:
@@ -1453,13 +1667,19 @@ router.get(
  *                     basePrice:
  *                       type: number
  *                       example: 25
- *                     discount:
+ *                     price:
+ *                       type: number
+ *                       example: 25
+ *                     discountAmount:
+ *                       type: number
+ *                       example: 0
+ *                     discountPercent:
  *                       type: number
  *                       example: 0
  *                     discountType:
  *                       type: string
- *                       enum: [PERCENTAGE, FLAT]
- *                       example: PERCENTAGE
+ *                       enum: [NONE, PERCENTAGE, FLAT]
+ *                       example: NONE
  *                     attributes:
  *                       type: object
  *                       example: { "color": "Red", "size": "L" }
@@ -1468,12 +1688,16 @@ router.get(
  *                       items:
  *                         type: string
  *                       example: ["https://res.cloudinary.com/.../variants/red_l.jpg"]
+ *                     images:
+ *                       type: array
+ *                       items:
+ *                         type: string
  *                     stock:
  *                       type: integer
  *                       example: 50
  *                     status:
  *                       type: string
- *                       enum: [AVAILABLE, OUT_OF_STOCK, DISCONTINUED]
+ *                       enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
  *                       example: AVAILABLE
  *               productImages:
  *                 type: array
@@ -1507,6 +1731,29 @@ router.get(
  *                   example: "Product updated successfully"
  *                 data:
  *                   type: object
+ *                   properties:
+ *                     id:
+ *                       type: integer
+ *                       example: 13
+ *                     name:
+ *                       type: string
+ *                       example: "Updated T-Shirt"
+ *                     brand:
+ *                       type: string
+ *                       example: "Nike"
+ *                     description:
+ *                       type: string
+ *                       example: "Premium Cotton T-shirt"
+ *                     basePrice:
+ *                       type: number
+ *                       example: 20
+ *                     stock:
+ *                       type: integer
+ *                       example: 100
+ *               status:
+ *                 type: string
+ *                 enum: [AVAILABLE, OUT_OF_STOCK, LOW_STOCK]
+ *                 example: AVAILABLE
  *       400:
  *         description: Bad request (e.g., invalid productId or variant data)
  *         content:
@@ -1561,12 +1808,12 @@ router.get(
  *                   example: "Internal Server Error"
  */
 router.put(
-    '/:categoryId/subcategories/:subcategoryId/products/:id',
+    "/:categoryId/subcategories/:subcategoryId/products/:id",
     combinedAuthMiddleware,
     isVendorAccountOwnerOrAdminOrStaff,
-    productController.updateProduct.bind(productController)
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.CREATE_EDIT),
+    productController.updateProduct.bind(productController),
 );
-
 
 /**
  * @swagger
@@ -1656,5 +1903,10 @@ router.put(
  *       500:
  *         description: Internal server error
  */
-router.delete('/:categoryId/subcategories/:subcategoryId/products/:id/images', combinedAuthMiddleware, isVendorAccountOwnerOrAdminOrStaff, productController.deleteProductImage.bind(productController));
+router.delete(
+    "/:categoryId/subcategories/:subcategoryId/products/:id/images",
+    combinedAuthMiddleware,
+    isVendorAccountOwnerOrAdminOrStaff,
+    productController.deleteProductImage.bind(productController),
+);
 export default router;

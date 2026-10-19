@@ -15,6 +15,8 @@ export enum AssignmentStatus {
     PICKED_UP = "picked_up",
     DELIVERED = "delivered",
     FAILED = "failed",
+    REASSIGNED = "reassigned",
+    NONE = "none"
 }
 
 @Entity("delivery_assignments")

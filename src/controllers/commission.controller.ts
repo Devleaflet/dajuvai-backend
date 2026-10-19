@@ -1,5 +1,6 @@
 import { Response, NextFunction } from "express";
 import fs from "fs";
+import { Readable } from "stream";
 import {
   AuthRequest,
   CombinedAuthRequest,
@@ -26,7 +27,12 @@ export class CommissionController {
 
     if (!title) throw new BadRequestError("Title is required");
     if (!file) throw new BadRequestError("Please choose a file to upload");
-    if (file.mimetype !== "application/pdf") {
+    // The declared type is the browser's guess; the bytes are checked too, so
+    // a renamed image cannot be published as the agreement.
+    if (
+      file.mimetype !== "application/pdf" ||
+      file.buffer.subarray(0, 5).toString("ascii") !== "%PDF-"
+    ) {
       throw new BadRequestError(
         "Only PDF files are allowed for the commission document",
       );
@@ -71,25 +77,37 @@ export class CommissionController {
     _next: NextFunction,
   ): Promise<void> {
     const document = await this.commissionService.getCurrentDocumentOrThrow();
-    const filePath = this.commissionService.getFilePath(document);
+    const fileName = document.fileName || "commission-document.pdf";
+    const disposition = req.query.download === "1" ? "attachment" : "inline";
 
+    const sendHeaders = (size: number | string | null) => {
+      res.setHeader("Content-Type", "application/pdf");
+      res.setHeader(
+        "Content-Disposition",
+        `${disposition}; filename="${fileName.replace(/"/g, '\\"')}"`,
+      );
+      if (size) res.setHeader("Content-Length", size);
+      res.setHeader("Cache-Control", "private, max-age=300");
+    };
+
+    // Relayed rather than redirected, so a download keeps its filename and
+    // existing clients of this route need not change.
+    if (this.commissionService.isRemoteFile(document)) {
+      const upstream = await fetch(document.fileUrl);
+      if (!upstream.ok || !upstream.body) {
+        throw new NotFoundError("Commission document file");
+      }
+      sendHeaders(upstream.headers.get("content-length"));
+      Readable.fromWeb(upstream.body as any).pipe(res);
+      return;
+    }
+
+    const filePath = this.commissionService.getFilePath(document);
     if (!fs.existsSync(filePath)) {
       throw new NotFoundError("Commission document file");
     }
 
-    const fileName = document.fileName || "commission-document.pdf";
-    const disposition = req.query.download === "1" ? "attachment" : "inline";
-
-    res.setHeader("Content-Type", "application/pdf");
-    res.setHeader(
-      "Content-Disposition",
-      `${disposition}; filename="${fileName.replace(/"/g, '\\"')}"`,
-    );
-
-    const stat = fs.statSync(filePath);
-    res.setHeader("Content-Length", stat.size);
-    res.setHeader("Cache-Control", "private, max-age=300");
-
+    sendHeaders(fs.statSync(filePath).size);
     fs.createReadStream(filePath).pipe(res);
   }
 

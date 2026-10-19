@@ -1,23 +1,33 @@
-import { Repository } from "typeorm";
+import { In, IsNull, LessThanOrEqual, MoreThan, Repository } from "typeorm";
+import bcrypt from "bcryptjs";
+import { AUTH_MESSAGES, burnPasswordCheck, INVALID_CREDENTIALS } from "../utils/authPrivacy.utils";
+import { randomUUID } from "crypto";
 import { Vendor } from "../entities/vendor.entity";
 import AppDataSource from "../config/db.config";
 import {
-  IVendorSignupRequest,
-  IUpdateVendorRequest,
+    IVendorSignupRequest,
+    IUpdateVendorRequest,
 } from "../interface/vendor.interface";
 import { Address } from "../entities/address.entity";
 import { APIError } from "../utils/ApiError.utils";
 import { DistrictService } from "./district.service";
 import { District } from "../entities/district.entity";
 import {
-  IUpdateVendorPaymentOptionRequest,
-  IUpdateVendorRequestV2,
+    IUpdateVendorPaymentOptionRequest,
+    IUpdateVendorRequestV2,
+    vendorPaymentOptionSchema,
 } from "../utils/zod_validations/vendor.zod";
 import {
-  PaymentOption,
-  VendorPaymentOption,
+    PaymentOption,
+    VendorPaymentOption,
 } from "../entities/vendorPaymentOption";
 import { toVendorAdminDTO } from "../utils/vendorAdminDto";
+import { sanitizeVendor } from "../utils/sanitize.util";
+import { getVendorDeletionDeadline, isVendorDeletionGracePeriodActive } from "./vendor-account-deletion.policy";
+import { Product } from "../entities/product.entity";
+import { Variant } from "../entities/variant.entity";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { auditService } from "./audit.service";
 
 /**
  * Service for managing vendor-related operations such as
@@ -25,464 +35,751 @@ import { toVendorAdminDTO } from "../utils/vendorAdminDto";
  * Handles validation, error checking, and database interactions.
  */
 export class VendorService {
-  private readonly vendorRepository: Repository<Vendor>;
-  private addressRepository: Repository<Address>;
-  private districtService: DistrictService;
-  private vendorPaymentOptionRepository: Repository<VendorPaymentOption>;
+    private readonly vendorRepository: Repository<Vendor>;
+    private addressRepository: Repository<Address>;
+    private districtService: DistrictService;
+    private vendorPaymentOptionRepository: Repository<VendorPaymentOption>;
 
-  /**
-   * Initializes repositories and dependent services.
-   */
-  constructor() {
-    this.vendorRepository = AppDataSource.getRepository(Vendor);
-    this.addressRepository = AppDataSource.getRepository(Address);
-    this.districtService = new DistrictService();
-    this.vendorPaymentOptionRepository =
-      AppDataSource.getRepository(VendorPaymentOption);
-  }
-
-  /**
-   * Fetches all vendors from the database.
-   * @returns {Promise<Vendor[]>} Array of all vendor entities.
-   */
-  async fetchAllVendors(
-    page: number = 1,
-    limit: number = 50,
-  ): Promise<Vendor[]> {
-    return await this.vendorRepository.find({
-      where: { isApproved: true },
-      relations: { paymentOptions: true },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-  }
-  async fetchPartialVendors(): Promise<Vendor[]> {
-    return await this.vendorRepository.find({
-      where: {
-        isApproved: true,
-      },
-      select: {
-        email: true,
-        id: true,
-        businessName: true,
-      },
-    });
-  }
-
-  async fetchAllUnapprovedVendor(page: number = 1, limit: number = 50) {
-    const vendors = await this.vendorRepository.find({
-      where: { isApproved: false, isVerified: true },
-      relations: { paymentOptions: true },
-      skip: (page - 1) * limit,
-      take: limit,
-    });
-
-    return vendors.map(toVendorAdminDTO);
-  }
-
-  /**
-   * Creates a new vendor with validation on email uniqueness and district existence.
-   * @param vendorSignupData - Vendor data for signup, including business info and optional verification.
-   * @returns {Promise<Vendor>} The newly created vendor entity.
-   * @throws {APIError} Throws error if vendor exists or district invalid.
-   */
-  async createVendor(vendorSignupData: IVendorSignupRequest): Promise<Vendor> {
-    try {
-      const email = vendorSignupData.email;
-      const district = vendorSignupData.district;
-      //  Prevent duplicate vendors
-      const existing = await this.vendorRepository.findOne({
-        where: { email },
-      });
-      if (existing) throw new APIError(409, "Vendor already exists");
-
-      //  Ensure district exists
-      const districtEntity =
-        await this.districtService.findDistrictByName(district);
-      if (!districtEntity) throw new APIError(400, "District does not exist");
-
-      // Create vendor entity
-      const vendor = this.vendorRepository.create({
-        ...vendorSignupData,
-        district: districtEntity,
-        districtId: districtEntity.id,
-        isVerified: false,
-        isApproved: false,
-      });
-
-      return await this.vendorRepository.save(vendor);
-    } catch (error) {
-      throw new Error(`Failed to create vendor: ${error.message}`);
-    }
-  }
-  /**
-   * Finds a vendor by email.
-   * @param email - Vendor's email to search for.
-   * @returns {Promise<Vendor | null>} The vendor entity or null if not found.
-   */
-  async findVendorByEmail(email: string): Promise<Vendor | null> {
-    // Simple search by email, useful for signup/login flows
-    return await this.vendorRepository.findOne({ where: { email } });
-  }
-
-  /**
-   * Finds a vendor by email for login purposes.
-   * @param email - Vendor's email.
-   * @returns {Promise<Vendor | null>} The vendor entity or null if not found.
-   */
-  async findVendorByEmailLogin(email: string): Promise<Vendor | null> {
-    // Same as findVendorByEmail - can customize if login logic differs later
-    return await this.vendorRepository.findOne({ where: { email } });
-  }
-
-  /**
-   * Finds a vendor by reset token (e.g., for password reset).
-   * @param token - Reset token string.
-   * @returns {Promise<Vendor | null>} Vendor if token matches, null otherwise.
-   */
-  async findVendorByResetToken(token: string): Promise<Vendor | null> {
-    // Used in password reset flows to find vendor by token
-    return await this.vendorRepository.findOne({
-      where: { resetToken: token },
-    });
-  }
-
-  /**
-   * Fetches a vendor by their unique ID.
-   * @param id - Vendor ID.
-   * @returns {Promise<Vendor | null>} Vendor entity or null if not found.
-   */
-  // async getVendorByIdService(id: number): Promise<Vendor | null> {
-  //     // Straightforward ID-based lookup
-  //     return await this.vendorRepository.findOne({
-  //         select: ["id", "businessName", "district", "districtId", "email", "phoneNumber", "telePhone"],
-  //         where: { id }
-  //     });
-  // }
-  async getVendorByIdService(id: number): Promise<Vendor | null> {
-    // Straightforward ID-based lookup
-    return await this.vendorRepository.findOne({
-      where: { id },
-      relations: {
-        paymentOptions: true,
-      },
-    });
-  }
-
-  /**
-   * Finds a vendor by ID for validation or other use cases.
-   * @param id - Vendor ID.
-   * @returns {Promise<Vendor | null>} Vendor entity or null.
-   */
-  async findVendorById(id: number): Promise<Vendor | null> {
-    // Duplicate of getVendorByIdService - could unify if desired
-    return await this.vendorRepository.findOne({
-      where: { id },
-      relations: {
-        paymentOptions: true,
-      },
-    });
-  }
-
-  async checkVendorProduct(id: number): Promise<boolean> {
-    const vendorWithProduct = await this.vendorRepository.findOne({
-      where: { id },
-      relations: {
-        products: true,
-      },
-    });
-
-    return vendorWithProduct.products.length > 0;
-  }
-
-  /**
-   * Updates vendor information.
-   * @param id - Vendor ID.
-   * @param updateData - Partial data for vendor update.
-   * @returns {Promise<Vendor | null>} Updated vendor or null if vendor does not exist.
-   */
-  async updateVendorService(
-    id: number,
-    updateData: Partial<IUpdateVendorRequest>,
-  ) {
-    let district: District;
-    if (updateData.district) {
-      const districtDb = AppDataSource.getRepository(District);
-
-      district = await districtDb.findOne({
-        where: {
-          id: updateData.districtId,
-        },
-      });
+    /**
+     * Initializes repositories and dependent services.
+     */
+    constructor() {
+        this.vendorRepository = AppDataSource.getRepository(Vendor);
+        this.addressRepository = AppDataSource.getRepository(Address);
+        this.districtService = new DistrictService();
+        this.vendorPaymentOptionRepository =
+            AppDataSource.getRepository(VendorPaymentOption);
     }
 
-    const updateFinalData = {
-      ...updateData,
-      district: district,
-    };
-    const updateDistrict = this.vendorRepository.update(id, updateFinalData);
+    /**
+     * Fetches all vendors from the database.
+     * @returns {Promise<Vendor[]>} Array of all vendor entities.
+     */
+    async fetchAllVendors(
+        page: number = 1,
+        limit: number = 50,
+    ): Promise<Vendor[]> {
+        return await this.vendorRepository.find({
+            where: { isApproved: true },
+            relations: { paymentOptions: true },
+            skip: (page - 1) * limit,
+            take: limit,
+        });
+    }
+    async fetchPartialVendors(): Promise<Vendor[]> {
+        return await this.vendorRepository.find({
+            where: {
+                isApproved: true,
+            },
+            select: {
+                email: true,
+                id: true,
+                slug: true,
+                businessName: true,
+            },
+        });
+    }
 
-    return this.vendorRepository.findOne({ where: { id } });
-  }
-
-  async approveVendor(id: number) {
-    return await this.vendorRepository.update(
-      { id },
-      {
-        isApproved: true,
-      },
-    );
-  }
-
-  async deleteVendor(id: number) {
-    return await this.vendorRepository.delete(id);
-  }
-
-  /**
-   * Saves a vendor entity directly to the database.
-   * @param vendor - Vendor entity to save.
-   * @returns {Promise<Vendor>} The saved vendor.
-   */
-  async saveVendor(vendor: Vendor): Promise<Vendor> {
-    // Useful for saving vendor after manual changes outside update method
-    return await this.vendorRepository.save(vendor);
-  }
-
-  // ---------------------------------------------------------------------------------------------------------------------
-  async createVendorV2(data: any): Promise<Vendor> {
-    const queryRunner =
-      this.vendorRepository.manager.connection.createQueryRunner();
-
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
-
-    try {
-      const existing = await queryRunner.manager.findOne(Vendor, {
-        where: { email: data.email },
-      });
-
-      if (existing) throw new APIError(409, "Vendor already exists");
-
-      const vendor = queryRunner.manager.create(Vendor, {
-        businessName: data.businessName,
-        email: data.email,
-        password: data.password,
-        phoneNumber: data.phoneNumber,
-        telePhone: data.telePhone,
-        businessRegNumber: data.businessRegNumber,
-        taxNumber: data.taxNumber,
-        taxDocuments: data.taxDocuments,
-        citizenshipDocuments: data.citizenshipDocuments,
-        district: data.districtEntity,
-        districtId: data.districtEntity.id,
-        verificationCode: data.verificationCode,
-        verificationCodeExpire: data.verificationCodeExpire,
-        isVerified: true,
-        isApproved: false,
-
-        accountName: data.accountName,
-        bankName: data.bankName,
-        accountNumber: data.accountNumber,
-        bankBranch: data.bankBranch,
-      });
-
-      const savedVendor = await queryRunner.manager.save(vendor);
-
-      if (data.paymentOptions && data.paymentOptions.length > 0) {
-        const paymentEntities = data.paymentOptions.map((option) =>
-          queryRunner.manager.create(VendorPaymentOption, {
-            paymentType: option.paymentType,
-            details: option.details,
-            qrCodeImage: option.qrCodeImage ?? null,
-            isActive: option.isActive ?? true,
-            vendor: savedVendor,
-            vendorId: savedVendor.id,
-          }),
-        );
-
-        await queryRunner.manager.save(paymentEntities);
-      }
-
-      if (
-        data.accountNumber &&
-        (!data.paymentOptions ||
-          !data.paymentOptions.some((p) => p.paymentType === "BANK"))
-      ) {
-        const bankOption = queryRunner.manager.create(VendorPaymentOption, {
-          paymentType: PaymentOption.BANK,
-          details: {
-            accountNumber: data.accountNumber,
-            bankName: data.bankName,
-            accountName: data.accountName,
-            branch: data.bankBranch,
-          },
-          vendor: savedVendor,
-          vendorId: savedVendor.id,
+    async fetchAllUnapprovedVendor(page: number = 1, limit: number = 50) {
+        const vendors = await this.vendorRepository.find({
+            where: { isApproved: false, isVerified: true },
+            relations: { paymentOptions: true },
+            skip: (page - 1) * limit,
+            take: limit,
         });
 
-        await queryRunner.manager.save(bankOption);
-      }
-
-      await queryRunner.commitTransaction();
-
-      return vendor;
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
-    } finally {
-      await queryRunner.release();
+        return vendors.map(toVendorAdminDTO);
     }
-  }
 
-  async updateVendorServiceV2(
-    id: number,
-    updateData: Partial<IUpdateVendorRequestV2>,
-  ): Promise<Vendor> {
-    const queryRunner =
-      this.vendorRepository.manager.connection.createQueryRunner();
-    await queryRunner.connect();
-    await queryRunner.startTransaction();
+    /**
+     * Creates a new vendor with validation on email uniqueness and district existence.
+     * @param vendorSignupData - Vendor data for signup, including business info and optional verification.
+     * @returns {Promise<Vendor>} The newly created vendor entity.
+     * @throws {APIError} Throws error if vendor exists or district invalid.
+     */
+    async createVendor(
+        vendorSignupData: IVendorSignupRequest,
+    ): Promise<Vendor> {
+        try {
+            const email = vendorSignupData.email;
+            const district = vendorSignupData.district;
+            //  Prevent duplicate vendors
+            const existing = await this.vendorRepository.findOne({
+                where: { email },
+            });
+            if (existing) throw new APIError(409, "Vendor already exists");
 
-    try {
-      const vendor = await queryRunner.manager.findOne(Vendor, {
-        where: { id },
-        relations: {
-          paymentOptions: true,
-        },
-      });
+            //  Ensure district exists
+            const districtEntity =
+                await this.districtService.findDistrictByName(district);
+            if (!districtEntity)
+                throw new APIError(400, "District does not exist");
 
-      if (!vendor) throw new APIError(404, "Vendor not found");
-
-      // Handle district update
-      if (updateData.district) {
-        const districtEntity = await queryRunner.manager.findOne(District, {
-          where: { name: updateData.district },
-        });
-
-        if (!districtEntity) throw new APIError(404, "District does not exist");
-
-        vendor.district = districtEntity;
-        vendor.districtId = districtEntity.id;
-      }
-
-      // Update scalar fields safely - INCLUDING profilePicture
-      Object.assign(vendor, {
-        businessName: updateData.businessName ?? vendor.businessName,
-        phoneNumber: updateData.phoneNumber ?? vendor.phoneNumber,
-        telePhone: updateData.telePhone ?? vendor.telePhone,
-        taxNumber: updateData.taxNumber ?? vendor.taxNumber,
-        taxDocuments: updateData.taxDocuments ?? vendor.taxDocuments,
-        citizenshipDocuments:
-          updateData.citizenshipDocuments ?? vendor.citizenshipDocuments,
-        // FIX: Handle profilePicture updates
-        ...(updateData.profilePicture !== undefined && {
-          profilePicture: updateData.profilePicture,
-        }),
-      });
-
-      await queryRunner.manager.save(vendor);
-
-      if (updateData.paymentOptions) {
-        const existingOptions = vendor.paymentOptions;
-
-        const existingMap = new Map(
-          existingOptions.map((opt) => [opt.paymentType, opt]),
-        );
-
-        const incomingMap = new Map(
-          updateData.paymentOptions.map((opt) => [opt.paymentType, opt]),
-        );
-
-        const toUpdate: VendorPaymentOption[] = [];
-        const toCreate: VendorPaymentOption[] = [];
-        const toDelete: VendorPaymentOption[] = [];
-
-        // UPDATE OR CREATE
-        for (const [paymentType, incomingOption] of incomingMap.entries()) {
-          const existingOption = existingMap.get(paymentType);
-
-          if (existingOption) {
-            existingOption.details = incomingOption.details;
-
-            if (incomingOption.qrCodeImage !== undefined) {
-              existingOption.qrCodeImage = incomingOption.qrCodeImage;
-            }
-
-            if (incomingOption.isActive !== undefined) {
-              existingOption.isActive = incomingOption.isActive;
-            }
-
-            toUpdate.push(existingOption);
-          } else {
-            const newOption = queryRunner.manager.create(VendorPaymentOption, {
-              paymentType: incomingOption.paymentType,
-              details: incomingOption.details,
-              qrCodeImage: incomingOption.qrCodeImage ?? null,
-              isActive: incomingOption.isActive ?? true,
-              vendor: vendor,
+            // Create vendor entity
+            const vendor = this.vendorRepository.create({
+                ...vendorSignupData,
+                district: districtEntity,
+                districtId: districtEntity.id,
+                isVerified: false,
+                isApproved: false,
             });
 
-            toCreate.push(newOption);
-          }
+            return await this.vendorRepository.save(vendor);
+        } catch (error) {
+            throw new Error(`Failed to create vendor: ${error.message}`);
+        }
+    }
+    /**
+     * Finds a vendor by email.
+     * @param email - Vendor's email to search for.
+     * @returns {Promise<Vendor | null>} The vendor entity or null if not found.
+     */
+    async findVendorByEmail(email: string): Promise<Vendor | null> {
+        // Simple search by email, useful for signup/login flows
+        return await this.vendorRepository.findOne({ where: { email } });
+    }
+
+    /**
+     * Finds a vendor by email for login purposes.
+     * @param email - Vendor's email.
+     * @returns {Promise<Vendor | null>} The vendor entity or null if not found.
+     */
+    async findVendorByEmailLogin(email: string): Promise<Vendor | null> {
+        // Same as findVendorByEmail - can customize if login logic differs later
+        return await this.vendorRepository.findOne({ where: { email } });
+    }
+
+    async findVendorForSignup(email: string): Promise<Vendor | null> {
+        const vendor = await this.findVendorByEmail(email);
+        if (
+            vendor?.deletionScheduledFor &&
+            vendor.deletionScheduledFor <= new Date() &&
+            !vendor.deletionFinalizedAt
+        ) {
+            await this.finalizeVendorDeletion(vendor.id);
+            return null;
+        }
+        return vendor;
+    }
+
+    /**
+     * Finds a vendor by reset token (e.g., for password reset).
+     * @param token - Reset token string.
+     * @returns {Promise<Vendor | null>} Vendor if token matches, null otherwise.
+     */
+    async findVendorByResetToken(token: string): Promise<Vendor | null> {
+        // Used in password reset flows to find vendor by token
+        return await this.vendorRepository.findOne({
+            where: {
+                resetToken: token,
+                resetTokenExpire: MoreThan(new Date()),
+            },
+        });
+    }
+
+    /**
+     * Fetches a vendor by their unique ID.
+     * @param id - Vendor ID.
+     * @returns {Promise<Vendor | null>} Vendor entity or null if not found.
+     */
+    // async getVendorByIdService(id: number): Promise<Vendor | null> {
+    //     // Straightforward ID-based lookup
+    //     return await this.vendorRepository.findOne({
+    //         select: ["id", "businessName", "district", "districtId", "email", "phoneNumber", "telePhone"],
+    //         where: { id }
+    //     });
+    // }
+    async getVendorByIdService(id: number): Promise<ReturnType<typeof sanitizeVendor> | null> {
+        // Straightforward ID-based lookup
+        const vendor = await this.vendorRepository.findOne({
+            where: { id },
+            relations: {
+                paymentOptions: true,
+            },
+        });
+        return vendor ? sanitizeVendor(vendor) : null;
+    }
+
+    /**
+     * Finds a vendor by ID for validation or other use cases.
+     * @param id - Vendor ID.
+     * @returns {Promise<Vendor | null>} Vendor entity or null.
+     */
+    async findVendorById(id: number): Promise<Vendor | null> {
+        // Duplicate of getVendorByIdService - could unify if desired
+        return await this.vendorRepository.findOne({
+            where: { id },
+            relations: {
+                paymentOptions: true,
+            },
+        });
+    }
+
+    async checkVendorProduct(id: number): Promise<boolean> {
+        const vendorWithProduct = await this.vendorRepository.findOne({
+            where: { id },
+            relations: {
+                products: true,
+            },
+        });
+
+        if (!vendorWithProduct || !vendorWithProduct.products) {
+            return false;
+        }
+        return vendorWithProduct.products.length > 0;
+    }
+
+    /**
+     * Updates vendor information.
+     * @param id - Vendor ID.
+     * @param updateData - Partial data for vendor update.
+     * @returns {Promise<Vendor | null>} Updated vendor or null if vendor does not exist.
+     */
+    async updateVendorService(
+        id: number,
+        updateData: Partial<IUpdateVendorRequest>,
+    ) {
+        let district: District;
+        if (updateData.district) {
+            const districtDb = AppDataSource.getRepository(District);
+
+            district = await districtDb.findOne({
+                where: {
+                    id: updateData.districtId,
+                },
+            });
         }
 
-        // DELETE REMOVED
-        for (const [paymentType, existingOption] of existingMap.entries()) {
-          if (!incomingMap.has(paymentType)) {
-            toDelete.push(existingOption);
-          }
+        const vendor = await this.vendorRepository.findOne({ where: { id } });
+        if (!vendor) return null;
+
+        // save(), not update(): a new business name must also move the store's
+        // slug, which only the entity subscriber on save() does.
+        Object.assign(vendor, updateData, district ? { district } : {});
+        await this.vendorRepository.save(vendor);
+
+        return this.vendorRepository.findOne({ where: { id } });
+    }
+
+    async approveVendor(id: number) {
+        return await this.vendorRepository.update(
+            { id },
+            {
+                isApproved: true,
+            },
+        );
+    }
+
+    async requestAccountDeletion(
+        id: number,
+        email: string,
+        password: string,
+    ): Promise<Date> {
+        const vendor = await this.vendorRepository.findOne({ where: { id } });
+        if (!vendor) throw new APIError(404, "Vendor not found");
+        if (vendor.email.toLowerCase() !== email.trim().toLowerCase()) {
+            throw new APIError(400, "Current password is incorrect", "INVALID_CURRENT_PASSWORD");
+        }
+        if (!(await bcrypt.compare(password, vendor.password))) {
+            throw new APIError(400, "Current password is incorrect", "INVALID_CURRENT_PASSWORD");
+        }
+        if (vendor.deletionScheduledFor && !vendor.deletionFinalizedAt) {
+            return vendor.deletionScheduledFor;
         }
 
-        if (toUpdate.length) await queryRunner.manager.save(toUpdate);
-        if (toCreate.length) await queryRunner.manager.save(toCreate);
-        if (toDelete.length) await queryRunner.manager.remove(toDelete);
-      }
+        const requestedAt = new Date();
+        const scheduledFor = getVendorDeletionDeadline(requestedAt);
 
-      await queryRunner.commitTransaction();
+        await this.vendorRepository.manager.transaction(async (manager) => {
+            const currentVendor = await manager.findOne(Vendor, { where: { id } });
+            if (!currentVendor) throw new APIError(404, "Vendor not found");
 
-      return await queryRunner.manager.findOne(Vendor, {
-        where: { id },
-        relations: ["paymentOptions", "district"],
-      });
-    } catch (error) {
-      await queryRunner.rollbackTransaction();
-      throw error;
-    } finally {
-      await queryRunner.release();
-    }
-  }
+            currentVendor.deletionRequestedAt = requestedAt;
+            currentVendor.deletionScheduledFor = scheduledFor;
+            currentVendor.deletionFinalizedAt = null;
+            currentVendor.deletionPreviousApproval = currentVendor.isApproved;
+            currentVendor.isApproved = false;
+            await manager.save(currentVendor);
 
-  async updatePaymentOptionService(
-    vendorId: number,
-    paymentOptionId: number,
-    updateData: Partial<IUpdateVendorPaymentOptionRequest>,
-  ): Promise<VendorPaymentOption> {
-    const paymentOption = await this.vendorPaymentOptionRepository.findOne({
-      where: {
-        id: paymentOptionId,
-        vendor: { id: vendorId },
-      },
-      relations: ["vendor"],
-    });
+            const products = await manager.find(Product, { where: { vendorId: id } });
+            for (const product of products) {
+                product.deletedAt = requestedAt;
+                product.vendorDeletionArchivedAt = requestedAt;
+                await manager.save(product);
 
-    if (!paymentOption) {
-      throw new APIError(404, "Payment option not found for this vendor");
-    }
+                const variants = await manager.find(Variant, { where: { productId: product.id } });
+                for (const variant of variants) {
+                    variant.deletedAt = requestedAt;
+                    variant.vendorDeletionArchivedAt = requestedAt;
+                    await manager.save(variant);
+                }
+            }
 
-    if (updateData.details !== undefined) {
-      paymentOption.details = updateData.details;
-    }
+            await auditService.record({
+                module: "ACCOUNT",
+                action: "DELETION_REQUESTED",
+                entityType: "Vendor",
+                entityId: id,
+                actor: {
+                    type: AuditActorType.VENDOR,
+                    id,
+                },
+                summary: "Vendor requested account deletion",
+                after: { deletionScheduledFor: scheduledFor.toISOString() },
+            }, manager);
+        });
 
-    if (updateData.qrCodeImage !== undefined) {
-      paymentOption.qrCodeImage = updateData.qrCodeImage;
-    }
-
-    if (updateData.isActive !== undefined) {
-      paymentOption.isActive = updateData.isActive;
+        return scheduledFor;
     }
 
-    await this.vendorPaymentOptionRepository.save(paymentOption);
+    async reactivateVendor(email: string, password: string): Promise<Vendor> {
+        const vendor = await this.findVendorByEmail(email.trim().toLowerCase());
+        // Same failure, in the same time, whatever the email: see authPrivacy.utils.
+        const invalid = () => new APIError(401, AUTH_MESSAGES.invalidVendorLogin, INVALID_CREDENTIALS);
+        if (!vendor || !vendor.password || !vendor.deletionRequestedAt || vendor.deletionFinalizedAt) {
+            await burnPasswordCheck(password);
+            throw invalid();
+        }
+        if (!(await bcrypt.compare(password, vendor.password))) throw invalid();
+        if (!isVendorDeletionGracePeriodActive(vendor.deletionRequestedAt)) {
+            await this.finalizeVendorDeletion(vendor.id);
+            throw new APIError(410, "Account deletion grace period has expired");
+        }
 
-    return paymentOption;
-  }
+        await this.vendorRepository.manager.transaction(async (manager) => {
+            const currentVendor = await manager.findOne(Vendor, { where: { id: vendor.id } });
+            if (!currentVendor) throw new APIError(401, AUTH_MESSAGES.invalidVendorLogin, INVALID_CREDENTIALS);
+
+            currentVendor.isApproved = currentVendor.deletionPreviousApproval ?? true;
+            currentVendor.deletionRequestedAt = null;
+            currentVendor.deletionScheduledFor = null;
+            currentVendor.deletionPreviousApproval = null;
+            await manager.save(currentVendor);
+
+            const products = await manager
+                .createQueryBuilder(Product, "product")
+                .withDeleted()
+                .where("product.vendorId = :vendorId", { vendorId: vendor.id })
+                .andWhere("product.vendorDeletionArchivedAt = :archivedAt", {
+                    archivedAt: vendor.deletionRequestedAt,
+                })
+                .getMany();
+
+            for (const product of products) {
+                product.deletedAt = null;
+                product.vendorDeletionArchivedAt = null;
+                await manager.save(product);
+            }
+
+            const variants = await manager
+                .createQueryBuilder(Variant, "variant")
+                .withDeleted()
+                .where("variant.vendorDeletionArchivedAt = :archivedAt", {
+                    archivedAt: vendor.deletionRequestedAt,
+                })
+                .andWhere("variant.productId IN (:...productIds)", {
+                    productIds: products.length ? products.map((p) => p.id) : [0],
+                })
+                .getMany();
+
+            for (const variant of variants) {
+                variant.deletedAt = null;
+                variant.vendorDeletionArchivedAt = null;
+                await manager.save(variant);
+            }
+
+            await auditService.record({
+                module: "ACCOUNT",
+                action: "REACTIVATED",
+                entityType: "Vendor",
+                entityId: vendor.id,
+                actor: {
+                    type: AuditActorType.VENDOR,
+                    id: vendor.id,
+                },
+                summary: "Vendor reactivated account",
+            }, manager);
+        });
+
+        return (await this.findVendorByEmail(email.trim().toLowerCase()))!;
+    }
+
+    async finalizeVendorDeletion(id: number): Promise<void> {
+        await this.vendorRepository.manager.transaction(async (manager) => {
+            const vendor = await manager.findOne(Vendor, { where: { id } });
+            if (!vendor || vendor.deletionFinalizedAt) return;
+
+            const finalizationAt = new Date();
+            const products = await manager
+                .createQueryBuilder(Product, "product")
+                .withDeleted()
+                .where("product.vendorId = :vendorId", { vendorId: id })
+                .getMany();
+            for (const product of products) {
+                if (!product.deletedAt) product.deletedAt = finalizationAt;
+                product.vendorDeletionArchivedAt = null;
+                await manager.save(product);
+            }
+
+            const variants = await manager
+                .createQueryBuilder(Variant, "variant")
+                .withDeleted()
+                .where("variant.productId IN (:...productIds)", {
+                    productIds: products.length ? products.map((p) => p.id) : [0],
+                })
+                .getMany();
+            for (const variant of variants) {
+                if (!variant.deletedAt) variant.deletedAt = finalizationAt;
+                variant.vendorDeletionArchivedAt = null;
+                await manager.save(variant);
+            }
+
+            await manager.delete(VendorPaymentOption, { vendorId: id });
+            vendor.email = `deleted-vendor-${vendor.id}-${Date.now()}@deleted.invalid`;
+            vendor.password = await bcrypt.hash(randomUUID(), 10);
+            vendor.businessName = `Deleted Vendor ${vendor.id}`;
+            vendor.phoneNumber = "";
+            vendor.telePhone = null;
+            vendor.businessRegNumber = null;
+            vendor.taxNumber = null;
+            vendor.taxDocuments = null;
+            vendor.citizenshipDocuments = null;
+            vendor.chequePhoto = null;
+            vendor.accountName = null;
+            vendor.bankName = null;
+            vendor.accountNumber = null;
+            vendor.bankBranch = null;
+            vendor.profilePicture = null;
+            vendor.fcmToken = null;
+            vendor.isApproved = false;
+            vendor.isVerified = false;
+            vendor.resetToken = null;
+            vendor.resetTokenExpire = null;
+            vendor.verificationCode = null;
+            vendor.verificationCodeExpire = null;
+            vendor.resendCount = 0;
+            vendor.resendBlockUntil = null;
+            vendor.deletionFinalizedAt = new Date();
+            vendor.deletionPreviousApproval = null;
+            await manager.save(vendor);
+        });
+    }
+
+    async finalizeExpiredVendorDeletions(now = new Date()): Promise<number> {
+        const vendors = await this.vendorRepository.find({
+            where: {
+                deletionScheduledFor: LessThanOrEqual(now),
+                deletionFinalizedAt: IsNull(),
+            },
+        });
+        for (const vendor of vendors) await this.finalizeVendorDeletion(vendor.id);
+        return vendors.length;
+    }
+
+    async deleteVendor(id: number): Promise<{ affected: number }> {
+        await this.finalizeVendorDeletion(id);
+        return { affected: 1 };
+    }
+
+    /**
+     * Saves a vendor entity directly to the database.
+     * @param vendor - Vendor entity to save.
+     * @returns {Promise<Vendor>} The saved vendor.
+     */
+    async saveVendor(vendor: Vendor): Promise<Vendor> {
+        // Useful for saving vendor after manual changes outside update method
+        return await this.vendorRepository.save(vendor);
+    }
+
+    // ---------------------------------------------------------------------------------------------------------------------
+    async createVendorV2(data: any): Promise<Vendor> {
+        const queryRunner =
+            this.vendorRepository.manager.connection.createQueryRunner();
+
+        await queryRunner.connect();
+        try {
+            await queryRunner.startTransaction();
+        } catch (error) {
+            // The finally below only covers what follows; without this the
+            // connection would never return to the pool.
+            await queryRunner.release();
+            throw error;
+        }
+
+        try {
+            const existing = await queryRunner.manager.findOne(Vendor, {
+                where: { email: data.email },
+            });
+
+            if (existing) throw new APIError(409, "Vendor already exists");
+
+            const vendor = queryRunner.manager.create(Vendor, {
+                businessName: data.businessName,
+                email: data.email,
+                password: data.password,
+                phoneNumber: data.phoneNumber,
+                telePhone: data.telePhone,
+                businessRegNumber: data.businessRegNumber,
+                taxNumber: data.taxNumber,
+                taxDocuments: data.taxDocuments,
+                citizenshipDocuments: data.citizenshipDocuments,
+                district: data.districtEntity,
+                districtId: data.districtEntity.id,
+                verificationCode: data.verificationCode,
+                verificationCodeExpire: data.verificationCodeExpire,
+                isVerified: true, // only for now, change later
+                isApproved: false,
+
+                accountName: data.accountName,
+                bankName: data.bankName,
+                accountNumber: data.accountNumber,
+                bankBranch: data.bankBranch,
+            });
+
+            const savedVendor = await queryRunner.manager.save(vendor);
+
+            if (data.paymentOptions && data.paymentOptions.length > 0) {
+                const paymentEntities = data.paymentOptions.map((option) =>
+                    queryRunner.manager.create(VendorPaymentOption, {
+                        paymentType: option.paymentType,
+                        details: option.details,
+                        qrCodeImage: option.qrCodeImage ?? null,
+                        isActive: option.isActive ?? true,
+                        vendor: savedVendor,
+                        vendorId: savedVendor.id,
+                    }),
+                );
+
+                await queryRunner.manager.save(paymentEntities);
+            }
+
+            if (
+                data.accountNumber &&
+                (!data.paymentOptions ||
+                    !data.paymentOptions.some((p) => p.paymentType === PaymentOption.NPX))
+            ) {
+                const bankOption = queryRunner.manager.create(
+                    VendorPaymentOption,
+                    {
+                        paymentType: PaymentOption.NPX,
+                        details: {
+                            accountNumber: data.accountNumber,
+                            bankName: data.bankName,
+                            accountName: data.accountName,
+                            branch: data.bankBranch,
+                        },
+                        vendor: savedVendor,
+                        vendorId: savedVendor.id,
+                    },
+                );
+
+                await queryRunner.manager.save(bankOption);
+            }
+
+            await queryRunner.commitTransaction();
+
+            return vendor;
+        } catch (error) {
+            await queryRunner.rollbackTransaction();
+            throw error;
+        } finally {
+            await queryRunner.release();
+        }
+    }
+
+    async updateVendorServiceV2(
+        id: number,
+        updateData: Partial<IUpdateVendorRequestV2>,
+    ): Promise<Vendor> {
+        const queryRunner =
+            this.vendorRepository.manager.connection.createQueryRunner();
+
+        // If connect() throws, there's nothing to release yet, so this stays outside the try/finally.
+        await queryRunner.connect();
+
+        try {
+            await queryRunner.startTransaction();
+
+            try {
+                const vendor = await queryRunner.manager.findOne(Vendor, {
+                    where: { id },
+                    relations: {
+                        paymentOptions: true,
+                    },
+                });
+
+                if (!vendor) throw new APIError(404, "Vendor not found");
+
+                // Handle district update
+                if (updateData.district) {
+                    const districtEntity = await queryRunner.manager.findOne(
+                        District,
+                        {
+                            where: { name: updateData.district },
+                        },
+                    );
+
+                    if (!districtEntity)
+                        throw new APIError(404, "District does not exist");
+
+                    vendor.district = districtEntity;
+                    vendor.districtId = districtEntity.id;
+                }
+
+                // Update scalar fields safely - INCLUDING profilePicture
+                Object.assign(vendor, {
+                    businessName:
+                        updateData.businessName ?? vendor.businessName,
+                    phoneNumber: updateData.phoneNumber ?? vendor.phoneNumber,
+                    telePhone:
+                        updateData.telePhone !== undefined
+                            ? updateData.telePhone
+                            : vendor.telePhone,
+                    taxNumber: updateData.taxNumber ?? vendor.taxNumber,
+                    businessRegNumber:
+                        updateData.businessRegNumber ?? vendor.businessRegNumber,
+                    taxDocuments:
+                        updateData.taxDocuments ?? vendor.taxDocuments,
+                    citizenshipDocuments:
+                        updateData.citizenshipDocuments ??
+                        vendor.citizenshipDocuments,
+                    // FIX: Handle profilePicture updates
+                    ...(updateData.profilePicture !== undefined && {
+                        profilePicture: updateData.profilePicture,
+                    }),
+                });
+
+                await queryRunner.manager.save(vendor);
+
+                if (updateData.paymentOptions) {
+                    const existingOptions = vendor.paymentOptions;
+
+                    const existingMap = new Map(
+                        existingOptions.map((opt) => [opt.paymentType, opt]),
+                    );
+
+                    const incomingMap = new Map(
+                        updateData.paymentOptions.map((opt) => [
+                            opt.paymentType,
+                            opt,
+                        ]),
+                    );
+
+                    const toUpdate: VendorPaymentOption[] = [];
+                    const toCreate: VendorPaymentOption[] = [];
+                    const toDelete: VendorPaymentOption[] = [];
+
+                    // UPDATE OR CREATE
+                    for (const [
+                        paymentType,
+                        incomingOption,
+                    ] of incomingMap.entries()) {
+                        const existingOption = existingMap.get(paymentType);
+
+                        if (existingOption) {
+                            existingOption.details = incomingOption.details;
+
+                            if (incomingOption.qrCodeImage !== undefined) {
+                                existingOption.qrCodeImage =
+                                    incomingOption.qrCodeImage;
+                            }
+
+                            if (incomingOption.isActive !== undefined) {
+                                existingOption.isActive =
+                                    incomingOption.isActive;
+                            }
+
+                            toUpdate.push(existingOption);
+                        } else {
+                            const newOption = queryRunner.manager.create(
+                                VendorPaymentOption,
+                                {
+                                    paymentType: incomingOption.paymentType,
+                                    details: incomingOption.details,
+                                    qrCodeImage:
+                                        incomingOption.qrCodeImage ?? null,
+                                    isActive: incomingOption.isActive ?? true,
+                                    vendor: vendor,
+                                },
+                            );
+
+                            toCreate.push(newOption);
+                        }
+                    }
+
+                    // DELETE REMOVED
+                    for (const [
+                        paymentType,
+                        existingOption,
+                    ] of existingMap.entries()) {
+                        if (!incomingMap.has(paymentType)) {
+                            toDelete.push(existingOption);
+                        }
+                    }
+
+                    if (toUpdate.length)
+                        await queryRunner.manager.save(toUpdate);
+                    if (toCreate.length)
+                        await queryRunner.manager.save(toCreate);
+                    if (toDelete.length)
+                        await queryRunner.manager.remove(toDelete);
+                }
+
+                await queryRunner.commitTransaction();
+
+                return await queryRunner.manager.findOne(Vendor, {
+                    where: { id },
+                    relations: ["paymentOptions", "district"],
+                });
+            } catch (error) {
+                await queryRunner.rollbackTransaction();
+                throw error;
+            }
+        } finally {
+            await queryRunner.release();
+        }
+    }
+
+    async updatePaymentOptionService(
+        vendorId: number,
+        paymentOptionId: number,
+        updateData: Partial<IUpdateVendorPaymentOptionRequest>,
+    ): Promise<VendorPaymentOption> {
+        const paymentOption = await this.vendorPaymentOptionRepository.findOne({
+            where: {
+                id: paymentOptionId,
+                vendor: { id: vendorId },
+            },
+            relations: ["vendor"],
+        });
+
+        if (!paymentOption) {
+            throw new APIError(404, "Payment option not found for this vendor");
+        }
+
+        if (updateData.details !== undefined) {
+            // The route only checks `details` is an object; hold it to the
+            // shape this option's type needs (wallet or bank details).
+            const parsed = vendorPaymentOptionSchema.safeParse({
+                paymentType: paymentOption.paymentType,
+                details: updateData.details,
+            });
+            if (!parsed.success) {
+                throw new APIError(400, parsed.error.issues[0]?.message ?? "Invalid payment details");
+            }
+            paymentOption.details = parsed.data.details;
+        }
+
+        if (updateData.qrCodeImage !== undefined) {
+            paymentOption.qrCodeImage = updateData.qrCodeImage;
+        }
+
+        if (updateData.isActive !== undefined) {
+            paymentOption.isActive = updateData.isActive;
+        }
+
+        await this.vendorPaymentOptionRepository.save(paymentOption);
+
+        return paymentOption;
+    }
 }

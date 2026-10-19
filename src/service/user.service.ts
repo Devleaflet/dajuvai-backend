@@ -1,18 +1,30 @@
-import { DataSource, MoreThan } from 'typeorm';
-import bcrypt from 'bcryptjs';
-import AppDataSource from '../config/db.config';
-import { User, UserRole } from '../entities/user.entity';
-import { Vendor } from '../entities/vendor.entity';
-import { APIError } from '../utils/ApiError.utils';
-import { waitForDebugger } from 'inspector';
-import { IUpdateUserRequest } from '../interface/user.interface';
-import { Address } from '../entities/address.entity';
-import { add } from 'winston';
+import { DataSource, MoreThan } from "typeorm";
+import bcrypt from "bcryptjs";
+import AppDataSource from "../config/db.config";
+import { User, UserRole } from "../entities/user.entity";
+import { Vendor } from "../entities/vendor.entity";
+import { APIError } from "../utils/ApiError.utils";
+import { waitForDebugger } from "inspector";
+import { IUpdateUserRequest } from "../interface/user.interface";
+import { Address } from "../entities/address.entity";
+import { add } from "winston";
+import { SanitizedUser, sanitizeUser } from "../utils/sanitize.util";
+import { StaffSignUpInput } from "../utils/zod_validations/user.zod";
+import { StaffPermission } from "../entities/staffPermission.entity";
+import { PermissionAction, PermissionLevel } from "../entities/permission.enum";
+import { getPermissionString } from "../utils/permission.utils";
+import { deriveSignInProvider } from "../utils/signInProvider.util";
+import {
+    getUserDeletionStatus,
+    UserDeletionStatus,
+} from "./user-account-deletion.policy";
 
 /**
  * User repository instance for database operations.
  */
 const userDB = AppDataSource.getRepository(User);
+
+const staffPerDB = AppDataSource.getRepository(StaffPermission);
 
 /**
  * Vendor repository instance for database operations.
@@ -23,8 +35,52 @@ const vendorDB = AppDataSource.getRepository(Vendor);
  * Fetches all users from the database.
  * @returns Promise<User[]> - Array of all users
  */
-export const fetchAllUser = async (): Promise<User[]> => {
-    return await userDB.find();
+export type AdminUserListItem = Omit<
+    User,
+    "deletionRequestedAt" | "deletionFinalizedAt" | "googleId" | "facebookId"
+> & {
+    deletionStatus: UserDeletionStatus;
+    deletionScheduledFor: Date | null;
+};
+
+export const fetchAllUser = async (): Promise<AdminUserListItem[]> => {
+    const users = await userDB.find({
+        select: [
+            "id",
+            "fullName",
+            "username",
+            "email",
+            "phoneNumber",
+            "role",
+            "isVerified",
+            "createdAt",
+            "updatedAt",
+            "profilePicture",
+            "provider",
+            // Read only to derive `provider` below; stripped before returning.
+            "googleId",
+            "facebookId",
+            "deletionScheduledFor",
+            "deletionFinalizedAt",
+        ],
+    });
+
+    return users.map((user) => {
+        const deletionStatus = getUserDeletionStatus(user);
+        const {
+            deletionFinalizedAt: _deletionFinalizedAt,
+            googleId: _googleId,
+            facebookId: _facebookId,
+            ...adminUser
+        } = user;
+
+        return {
+            ...adminUser,
+            provider: deriveSignInProvider(user),
+            deletionStatus,
+            deletionScheduledFor: user.deletionScheduledFor ?? null,
+        };
+    });
 };
 
 /**
@@ -37,6 +93,51 @@ export const createUser = async (userData: Partial<User>): Promise<User> => {
     return await userDB.save(user);
 };
 
+export const setStaffPermissions = async(userId:number, data: StaffSignUpInput["permissions"]) => {
+    const permissionArray = [];
+    
+    for(const [module, permission] of Object.entries(data)){
+        const action = getPermissionString(permission)
+
+        permissionArray.push({
+            staffId: userId,
+            module,
+            permissionLevel: permission,
+            permissionAction: action
+        })
+    }
+
+    if(permissionArray.length > 0){
+        await staffPerDB.insert(permissionArray)
+    }
+}
+
+export const getStaffPermissionsById = async (staffId: number) => {
+    return await staffPerDB.find({
+        where: { staffId },
+    });
+};
+
+export const getFormattedStaffPermissions = async (staffId: number): Promise<Record<string, string>> => {
+    const staffPerms = await getStaffPermissionsById(staffId);
+    const permissions: Record<string, string> = {};
+    staffPerms.forEach((p) => {
+        const actionStr = p.permissionAction || getPermissionString(p.permissionLevel);
+        permissions[p.module] = actionStr;
+    });
+    return permissions;
+};
+
+export const updateStaffPermissions = async (staffId: number, data: StaffSignUpInput["permissions"]) => {
+    // Remove all existing permissions for this staff member
+    await staffPerDB.delete({ staffId });
+    // Re-insert the new set (if any)
+    if (data && Object.keys(data).length > 0) {
+        await setStaffPermissions(staffId, data);
+    }
+};
+
+
 /**
  * Finds a user by their email.
  * @param email - User's email
@@ -47,15 +148,17 @@ export const findUserByEmail = async (email: string): Promise<User | null> => {
 };
 
 export const findUserById = async (id: number): Promise<User> => {
-    return await userDB.findOneBy({ id })
-}
+    return await userDB.findOneBy({ id });
+};
 
 /**
  * Finds a user by email or username (for login).
  * @param email - Email or username string
  * @returns Promise<User | null> - User entity if found, else null
  */
-export const findUserByEmailLogin = async (email: string): Promise<User | null> => {
+export const findUserByEmailLogin = async (
+    email: string,
+): Promise<User | null> => {
     return await userDB.findOne({
         where: [{ email }, { username: email }],
         select: {
@@ -64,8 +167,11 @@ export const findUserByEmailLogin = async (email: string): Promise<User | null> 
             role: true,
             provider: true,
             isVerified: true,
-            password: true
-        }
+            password: true,
+            deletionRequestedAt: true,
+            deletionScheduledFor: true,
+            deletionFinalizedAt: true,
+        },
     });
 };
 
@@ -74,7 +180,9 @@ export const findUserByEmailLogin = async (email: string): Promise<User | null> 
  * @param token - Password reset token string
  * @returns Promise<User | null> - User entity if found, else null
  */
-export const findUserByResetToken = async (token: string): Promise<User | null> => {
+export const findUserByResetToken = async (
+    token: string,
+): Promise<User | null> => {
     return await userDB.findOne({
         where: {
             resetToken: token,
@@ -88,28 +196,33 @@ export const findUserByResetToken = async (token: string): Promise<User | null> 
  * @param id - User ID
  * @returns Promise<User | null> - User entity if found, else null
  */
-export const getUserByIdService = async (id: number): Promise<User | null> => {
+export const getUserByIdService = async (
+    id: number,
+): Promise<(SanitizedUser & { permissions?: Record<string, string> }) | null> => {
     const user = await userDB.findOne({
         where: { id: id },
-        relations: ['address']
-    })
+        relations: ["address"],
+    });
 
-    console.log("----------------User------------------------")
-    console.log(user)
-    return user;
-    // return await userDB.findOneBy({ id });
+    if (!user) return null;
+    const sanitized = sanitizeUser(user);
+
+    if (user.role === UserRole.STAFF) {
+        const permissions = await getFormattedStaffPermissions(user.id);
+        return { ...sanitized, permissions };
+    }
+
+    return sanitized;
 };
 
 export const getAllStaff = async () => {
-    return await userDB.find({
+    const users = await userDB.find({
         where: {
-            role: UserRole.STAFF
+            role: UserRole.STAFF,
         },
-        // Exclude password hash and other sensitive/internal fields from the list response
         select: [
             "id",
             "fullName",
-            "username",
             "email",
             "phoneNumber",
             "role",
@@ -117,14 +230,27 @@ export const getAllStaff = async () => {
             "createdAt",
             "updatedAt",
         ],
-    })
-}
+    });
+
+    // Attach permissions for each staff member
+    const staffWithPermissions = await Promise.all(
+        users.map(async (user) => {
+            const permissions = await staffPerDB.find({ where: { staffId: user.id } });
+            const permissionsMap: Record<string, number> = {};
+            permissions.forEach((p) => {
+                permissionsMap[p.module] = p.permissionLevel;
+            });
+            return { ...user, permissions: permissionsMap };
+        })
+    );
+
+    return staffWithPermissions;
+};
 
 
 export const deleteStaffById = async (id: number) => {
-    return await userDB.delete(id)
-}
-
+    return await userDB.delete(id);
+};
 
 export const updateStaffById = async (id: number, data: any) => {
     const { confirmPassword, password, ...rest } = data;
@@ -134,19 +260,29 @@ export const updateStaffById = async (id: number, data: any) => {
         updateData.password = await bcrypt.hash(password, 10);
     }
 
-    await userDB.update({
-        id,
-        role: UserRole.STAFF
-    },
-        updateData
-    )
+    // save(), not update(), so a name change also moves the slug.
+    const staff = await userDB.findOne({ where: { id, role: UserRole.STAFF } });
+    if (staff) {
+        await userDB.save({ id, ...updateData });
+    }
 
     const updateStaff = await userDB.findOne({
-        where: { id }
-    })
+        where: { id },
+        select: [
+            "id",
+            "fullName",
+            "email",
+            "phoneNumber",
+            "role",
+            "isVerified",
+            "createdAt",
+            "updatedAt",
+            "profilePicture",
+        ],
+    });
 
-    return updateStaff
-}
+    return updateStaff;
+};
 
 /**
  * Updates user data for a given user ID.
@@ -154,10 +290,14 @@ export const updateStaffById = async (id: number, data: any) => {
  * @param data - Partial user data to update
  * @returns Promise<User | null> - Updated user entity if found, else null
  */
-export const updateUserService = async (id: number, data: IUpdateUserRequest, user: User): Promise<User | null> => {
-    const addressDb = AppDataSource.getRepository(Address)
+export const updateUserService = async (
+    id: number,
+    data: IUpdateUserRequest,
+    user: User,
+): Promise<User | null> => {
+    const addressDb = AppDataSource.getRepository(Address);
 
-    // update address 
+    // update address
     if (data.address) {
         const existingAddress = await addressDb.findOne({
             where: { user: { id: user.id } },
@@ -175,11 +315,13 @@ export const updateUserService = async (id: number, data: IUpdateUserRequest, us
     }
 
     const { address, ...userData } = data;
-    await userDB.update(id, userData)
+    // save(), not update(), so a name change also moves the slug. Saving a
+    // partial object leaves the (separately updated) address relation alone.
+    await userDB.save({ id, ...userData });
 
     return await userDB.findOne({
         where: { id },
-        relations: ["address"]
+        relations: ["address"],
     });
 };
 
@@ -197,17 +339,19 @@ export const saveUser = async (user: User): Promise<User> => {
  * @param email - Vendor's email
  * @returns Promise<Vendor | null> - Vendor entity if found, else null
  */
-export const findVendorByEmail = async (email: string): Promise<Vendor | null> => {
+export const findVendorByEmail = async (
+    email: string,
+): Promise<Vendor | null> => {
     return await vendorDB.findOne({ where: { email } });
 };
 
-
-
-export const findvendorByvendorId = async (vendorId: number): Promise<Vendor | null> => {
+export const findvendorByvendorId = async (
+    vendorId: number,
+): Promise<Vendor | null> => {
     return await vendorDB.findOne({
-        where: { id: vendorId }
-    })
-}
+        where: { id: vendorId },
+    });
+};
 /**
  * Saves a vendor entity.
  * @param vendor - Vendor entity instance
@@ -222,7 +366,9 @@ export const saveVendor = async (vendor: Vendor): Promise<Vendor> => {
  * @param token - Password reset token string
  * @returns Promise<Vendor | null> - Vendor entity if found, else null
  */
-export const findVendorByResetToken = async (token: string): Promise<Vendor | null> => {
+export const findVendorByResetToken = async (
+    token: string,
+): Promise<Vendor | null> => {
     return await vendorDB.findOne({
         where: {
             resetToken: token,
@@ -231,23 +377,20 @@ export const findVendorByResetToken = async (token: string): Promise<Vendor | nu
     });
 };
 
-
 export const deleteUserDataByFacebookId = async (user_id: string) => {
-    const userId = await userDB.findOne({
+    const user = await userDB.findOne({
         where: {
-            facebookId: user_id
-        }
-    })
+            facebookId: user_id,
+        },
+    });
 
-    if (!userId) {
-        throw new APIError(404, "User not found")
+    if (!user) {
+        throw new APIError(404, "User not found");
     }
 
-    const userid = Number(userId);
+    const deleteUser = await userDB.remove(user);
 
-    const deleteUser = await userDB.delete(userid);
-
-    console.log(deleteUser)
+    console.log(deleteUser);
 
     return deleteUser;
-}
+};

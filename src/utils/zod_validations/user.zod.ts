@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { UserRole } from '../../entities/user.entity';
 import { Province } from '../../entities/address.entity';
+import { ModuleName, PermissionLevel } from '../../entities/permission.enum';
 
 /**
  * Schema for user signup input validation.
@@ -27,12 +28,53 @@ export const signupSchema = z.object({
     path: ["confirmPassword"],
 });
 
+export const staffSignupSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(8, 'Password must be at least 8 characters long'),
+    phoneNumber: z.string().length(10, "Phone number must have 10 digits"),
+    fullName: z.string().optional(),
+    permissions: z.object({
+        order: z.nativeEnum(PermissionLevel).optional(),
+        delivery: z.nativeEnum(PermissionLevel).optional(),
+        catalog: z.nativeEnum(PermissionLevel).optional(),
+        promo: z.nativeEnum(PermissionLevel).optional(),
+        deal: z.nativeEnum(PermissionLevel).optional(),
+        vendor: z.nativeEnum(PermissionLevel).optional(),
+        banner: z.nativeEnum(PermissionLevel).optional(),
+        arrangement: z.nativeEnum(PermissionLevel).optional(),
+        customer: z.nativeEnum(PermissionLevel).optional(),
+        // Was missing, so a category grant at creation was silently stripped.
+        category: z.nativeEnum(PermissionLevel).optional(),
+        product: z.nativeEnum(PermissionLevel).optional(),
+        audit: z.nativeEnum(PermissionLevel).optional(),
+    })
+})
 
 /**
  * Schema for user login input validation.
  * Validates email and password presence and format.
  */
 export const loginSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required'),
+});
+
+/**
+ * Schema for user self-deletion requests.
+ * Email is always required; password only for email/password accounts
+ * (Google OAuth accounts have no password and rely on the active session).
+ */
+export const userDeleteAccountSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    password: z.string().min(1, 'Password is required').optional(),
+    confirmation: z.literal('DELETE'),
+});
+
+/**
+ * Schema for reactivating an account scheduled for deletion
+ * (email/password accounts only; OAuth accounts reactivate via sign-in).
+ */
+export const userReactivateSchema = z.object({
     email: z.string().email('Invalid email format'),
     password: z.string().min(1, 'Password is required'),
 });
@@ -55,13 +97,36 @@ export const verifyTokenSchema = z.object({
 });
 
 /**
+ * Schema for checking a password-reset code before the new password is chosen.
+ * Shared by the customer and vendor reset flows.
+ */
+export const resetCodeSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    token: z.string().regex(/^\d{6}$/, 'Code must be 6 digits'),
+});
+
+/**
  * Schema for updating a staff member (admin-only).
  * Fields are optional but at least one must be provided.
  * If password is provided, confirmPassword must match and meet the same
  * complexity rules enforced at signup.
  */
+const permissionsSchema = z.object({
+    order: z.nativeEnum(PermissionLevel).optional(),
+    delivery: z.nativeEnum(PermissionLevel).optional(),
+    catalog: z.nativeEnum(PermissionLevel).optional(),
+    promo: z.nativeEnum(PermissionLevel).optional(),
+    deal: z.nativeEnum(PermissionLevel).optional(),
+    vendor: z.nativeEnum(PermissionLevel).optional(),
+    banner: z.nativeEnum(PermissionLevel).optional(),
+    arrangement: z.nativeEnum(PermissionLevel).optional(),
+    customer: z.nativeEnum(PermissionLevel).optional(),
+    category: z.nativeEnum(PermissionLevel).optional(),
+    product: z.nativeEnum(PermissionLevel).optional(),
+    audit: z.nativeEnum(PermissionLevel).optional(),
+}).optional();
+
 export const updateStaffSchema = z.object({
-    username: z.string().min(3, "Username must be at least 3 characters").optional(),
     email: z.string().email("Invalid email format").optional(),
     fullName: z.string().min(1, "Full name is required").optional(),
     phoneNumber: z
@@ -76,6 +141,7 @@ export const updateStaffSchema = z.object({
         .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character")
         .optional(),
     confirmPassword: z.string().optional(),
+    permissions: permissionsSchema,
 }).refine(data => Object.keys(data).length > 0, {
     message: "At least one field is required",
 }).refine(data => !data.password || data.password === data.confirmPassword, {
@@ -118,12 +184,45 @@ export const updateUserSchema = z.object({
  * Ensures newPass and confirmPass match.
  */
 export const resetPasswordSchema = z.object({
+    email: z.string().email('Invalid email format'),
     newPass: z.string().min(8, 'New password must be at least 8 characters long'),
     confirmPass: z.string().min(1, 'Confirm password is required'),
     token: z.string().min(1, 'Token is required'),
 }).refine(data => data.newPass === data.confirmPass, {
     message: 'Passwords do not match',
     path: ['confirmPass'],
+});
+
+/** Same rules signup enforces, so a changed password is never weaker than a new one. */
+const strongPassword = z.string()
+    .min(8, 'Password must be at least 8 characters long')
+    .max(100, 'Password must be at most 100 characters long')
+    .regex(/[A-Z]/, 'Password must contain at least one uppercase letter')
+    .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
+    .regex(/[0-9]/, 'Password must contain at least one number')
+    .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character');
+
+/** Checks the signed-in account's current password before a new one is asked for. */
+export const verifyCurrentPasswordSchema = z.object({
+    currentPassword: z.string().min(1, 'Enter your current password').max(100),
+});
+
+/**
+ * A signed-in password change, shared by customers and vendors. Proven by the
+ * current password or, for someone who forgot it, a code from forgot-password —
+ * exactly one of the two.
+ */
+export const changePasswordSchema = z.object({
+    currentPassword: z.string().min(1).max(100).optional(),
+    token: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
+    newPassword: strongPassword,
+    confirmPassword: z.string().min(1, 'Confirm your new password'),
+}).refine(data => Boolean(data.currentPassword) !== Boolean(data.token), {
+    message: 'Enter your current password',
+    path: ['currentPassword'],
+}).refine(data => data.newPassword === data.confirmPassword, {
+    message: 'Passwords do not match',
+    path: ['confirmPassword'],
 });
 
 /**
@@ -144,7 +243,11 @@ export const verifyEmailChangeSchema = z.object({
 });
 
 export const adminResetPasswordSchema = z.object({
-    newPass: z.string().min(8, 'New password must be at least 8 characters long'),
+    newPass: z.string()
+        .min(8, 'New password must be at least 8 characters long')
+        .regex(/[0-9]/, 'Password must contain at least one number')
+        .regex(/[A-Z]/, 'Password must contain at least one capital letter')
+        .regex(/[^a-zA-Z0-9]/, 'Password must contain at least one symbol'),
     confirmPass: z.string().min(1, 'Confirm password is required'),
 }).refine(data => data.newPass === data.confirmPass, {
     message: 'Passwords do not match',
@@ -162,3 +265,4 @@ export type VerifyEmailChangeInput = z.infer<typeof verifyEmailChangeSchema>;
 export type UpdateUserInput = z.infer<typeof updateUserSchema>;
 export type UpdateStaffInput = z.infer<typeof updateStaffSchema>;
 export type AdminResetPasswordInput = z.infer<typeof adminResetPasswordSchema>;
+export type StaffSignUpInput = z.infer<typeof staffSignupSchema>

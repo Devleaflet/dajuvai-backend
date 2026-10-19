@@ -1,4 +1,5 @@
 import express, { Request, Response } from "express";
+import { redactEntitySecrets } from "./utils/response-redaction.utils";
 import passport from "passport";
 import cookieParser from "cookie-parser";
 import swaggerUi from "swagger-ui-express";
@@ -11,7 +12,7 @@ import cors from "cors";
 import { createServer } from "http";
 import { corsOptions } from "./config/cors.config";
 import { initSocket } from "./socket/socket";
-import config from "./config/env.config";
+import config, { missingConfig } from "./config/env.config";
 import { cacheInvalidationMiddleware } from "./middlewares/cacheInvalidation.middleware";
 import logger from "./utils/logger";
 import {
@@ -22,6 +23,8 @@ import {
 // Route imports
 import userRouter from "./routes/user.routes";
 import categoryRoutes from "./routes/category.routes";
+import searchRoutes from "./routes/search.routes";
+import catalogSearchRoutes from "./routes/catalog-search.routes";
 import cartRouter from "./routes/cart.routes";
 import vendorRoutes from "./routes/vendor.routes";
 import wishlistRoutes from "./routes/wishlist.routes";
@@ -45,13 +48,20 @@ import vendorOrdersRouter from "./routes/vendor/vendor.orders.routes";
 import {
   orderCleanUp,
   removeUnverifiedVendors,
+  staleDeviceTokenCleanUp,
   startOrderCleanupJob,
   tokenCleanUp,
+  finalizeVendorAccountDeletions,
+  finalizeUserAccountDeletions,
+  expireStaleCheckoutDraftsJob,
 } from "./utils/cronjob.utils";
 import paymentRouter from "./routes/payment.routes";
 import promoRouter from "./routes/promo.routes";
 import imageRouter from "./routes/image.routes";
-import homecategoryRoutes from "./routes/home.category.routes";
+import homepageCategoryRoutes from "./routes/homepageCategory.routes";
+import merchandisingRoutes from "./routes/merchandising.routes";
+import merchandisingAdminRouter from "./routes/admin/merchandising.admin.routes";
+import storefrontRoutes from "./routes/storefront.routes";
 import notificationRoutes from "./routes/notification.routes";
 import commissionRoutes from "./routes/commission.routes";
 import checkoutRouter from "./routes/mobile.checkout.routes";
@@ -60,7 +70,11 @@ import userProfileRouter from "./routes/product.recommend.routes";
 import productRecommendRouter from "./routes/product.recommend.routes";
 import deliveryRouter from "./routes/delivery.routes";
 import deliveryAdminRouter from "./routes/delivery.admin.routes";
+import searchAliasRouter from "./routes/search-alias.routes";
 import deliveryRiderRouter from "./routes/delivery.rider.routes";
+import adminAuditRouter from "./routes/admin/admin.audit.routes";
+import adminBroadcastRouter from "./routes/admin/admin.broadcast.routes";
+import { startBroadcastWorker } from "./jobs/broadcast.jobs";
 
 // Create uploads folder if it doesn't exist to store uploaded files
 const uploadDir = join(__dirname, "uploads");
@@ -84,17 +98,22 @@ process.on("uncaughtException", (error: Error) => {
   process.exit(1);
 });
 
+// A rejected promise nobody awaited (a fire-and-forget push, a cron tick) is
+// a bug to log, not a reason to drop every request in flight. Shutting down
+// here turned each one into an outage while the container restarted.
+// Synchronous throws above still exit: after one, process state is unknown.
 process.on("unhandledRejection", (reason: unknown) => {
-  logger.error("UNHANDLED REJECTION — shutting down", {
+  logger.error("UNHANDLED REJECTION", {
     reason: reason instanceof Error ? reason.message : String(reason),
     stack: reason instanceof Error ? reason.stack : undefined,
   });
-  server.close(() => process.exit(1));
-  // Force exit if graceful close hangs
-  setTimeout(() => process.exit(1), 10_000).unref();
 });
 
 app.use(cors(corsOptions));
+
+// Password hashes, reset tokens and the like never reach a response body,
+// whichever query loaded them. See response-redaction.utils.ts.
+app.set("json replacer", redactEntitySecrets);
 
 // Middleware to parse JSON request bodies
 app.use(express.json());
@@ -134,6 +153,10 @@ app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
+app.use("/api/search", searchRoutes);
+app.use("/api/search", catalogSearchRoutes);
+app.use("/api/placements", merchandisingRoutes);
+app.use("/api/storefront", storefrontRoutes);
 app.use("/api/vendors", vendorRoutes);
 app.use("/api/cart", cartRouter);
 app.use("/api/wishlist", wishlistRoutes);
@@ -149,6 +172,10 @@ app.use("/api/admin/dashboard", adminDashboardRouter);
 app.use("/api/admin/vendors", adminVendorsRouter);
 app.use("/api/admin/orders", adminOrdersRouter);
 app.use("/api/admin/users", adminUsersRouter);
+app.use("/api/admin/placements", merchandisingAdminRouter);
+app.use("/api/admin/search-aliases", searchAliasRouter);
+app.use("/api/admin/audit-logs", adminAuditRouter);
+app.use("/api/admin/broadcasts", adminBroadcastRouter);
 
 // admin delivery
 app.use("/api/admin/delivery", deliveryAdminRouter);
@@ -161,7 +188,7 @@ app.use("/api/vendor/orders", vendorOrdersRouter);
 app.use("/api/payments", paymentRouter);
 app.use("/api/promo", promoRouter);
 app.use("/api/image", imageRouter);
-app.use("/api/home/category/section", homecategoryRoutes);
+app.use("/api/home/category/section", homepageCategoryRoutes);
 app.use("/api/notification", notificationRoutes);
 app.use("/api/commission", commissionRoutes);
 app.use("/api/checkout", checkoutRouter);
@@ -177,6 +204,15 @@ app.use(globalErrorHandler);
 
 const port = config.PORT;
 
+const { required: missingRequired, payments: missingPayments } = missingConfig();
+if (missingRequired.length && config.NODE_ENV === "production") {
+  logger.error(`Refusing to start: missing ${missingRequired.join(", ")}`);
+  process.exit(1);
+}
+if (missingPayments.length) {
+  logger.warn(`Payment settings missing, those gateways will refuse every payment: ${missingPayments.join(", ")}`);
+}
+
 // Initialize database connection
 AppDataSource.initialize()
   .then(async () => {
@@ -187,6 +223,11 @@ AppDataSource.initialize()
     orderCleanUp();
     startOrderCleanupJob();
     removeUnverifiedVendors();
+    finalizeVendorAccountDeletions();
+    finalizeUserAccountDeletions();
+    expireStaleCheckoutDraftsJob();
+    staleDeviceTokenCleanUp();
+    startBroadcastWorker();
     // await updateAllProductPrices(AppDataSource)
 
     // Start Express + WebSocket server

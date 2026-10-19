@@ -5,7 +5,10 @@ import {
     updateHomePageSectionSchema,
 } from "../utils/zod_validations/homepage.zod";
 import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { responseCache } from "../middlewares/responseCache.middleware";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const homePageSectionController = new HomePageSectionController();
@@ -26,7 +29,7 @@ const homePageSectionController = new HomePageSectionController();
  *             type: object
  *             required:
  *               - title
- *               - productIds
+ *               - productSource
  *             properties:
  *               title:
  *                 type: string
@@ -39,15 +42,29 @@ const homePageSectionController = new HomePageSectionController();
  *                 default: true
  *                 description: Whether the section is active
  *                 example: true
+ *               productSource:
+ *                 type: string
+ *                 enum: [manual, category, subcategory, deal]
+ *                 description: Source type for products
+ *                 example: manual
  *               productIds:
  *                 type: array
  *                 items:
- *                   type: integer
- *                   minimum: 1
- *                 minItems: 1
- *                 maxItems: 50
- *                 description: Array of product IDs to include in this section
+ *                   type: number
+ *                 description: Array of product IDs (for manual source)
  *                 example: [1, 2, 3, 4]
+ *               selectedCategoryId:
+ *                 type: number
+ *                 description: Category ID (for category source)
+ *                 example: 1
+ *               selectedSubcategoryId:
+ *                 type: number
+ *                 description: Subcategory ID (for subcategory source)
+ *                 example: 1
+ *               selectedDealId:
+ *                 type: number
+ *                 description: Deal ID (for deal source)
+ *                 example: 1
  *     responses:
  *       201:
  *         description: Homepage section created successfully
@@ -59,10 +76,7 @@ const homePageSectionController = new HomePageSectionController();
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 message:
- *                   type: string
- *                   example: "Home page section created successfully"
- *                 data:
+ *                 homepage:
  *                   type: object
  *                   properties:
  *                     id:
@@ -100,19 +114,75 @@ const homePageSectionController = new HomePageSectionController();
  *                   example: "Title is required"
  *       401:
  *         description: Unauthorized - Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Authentication required"
  *       403:
  *         description: Forbidden - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin access required"
  *       404:
  *         description: Some product IDs are invalid
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Some product IDs are invalid"
  *       409:
  *         description: Section with this title already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Section with this title already exists"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.post(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     validateZod(createHomePageSectionSchema),
     homePageSectionController.createHomePageSection.bind(homePageSectionController)
 );
@@ -151,16 +221,30 @@ router.post(
  *                 type: boolean
  *                 description: Whether the section is active
  *                 example: false
+ *               productSource:
+ *                 type: string
+ *                 enum: [manual, category, subcategory, deal]
+ *                 description: Source type for products
+ *                 example: manual
  *               productIds:
  *                 type: array
  *                 items:
- *                   type: integer
- *                   minimum: 1
- *                 minItems: 1
- *                 maxItems: 50
- *                 description: Array of product IDs to include in this section
+ *                   type: number
+ *                 description: Array of product IDs (for manual source)
  *                 example: [1, 2, 5, 6]
- *             note: At least one field must be provided for update
+ *               selectedCategoryId:
+ *                 type: number
+ *                 description: Category ID (for category source)
+ *                 example: 1
+ *               selectedSubcategoryId:
+ *                 type: number
+ *                 description: Subcategory ID (for subcategory source)
+ *                 example: 1
+ *               selectedDealId:
+ *                 type: number
+ *                 description: Deal ID (for deal source)
+ *                 example: 1
+ *             description: At least one field must be provided for update
  *     responses:
  *       200:
  *         description: Homepage section updated successfully
@@ -191,23 +275,97 @@ router.post(
  *                       type: array
  *                       items:
  *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                           name:
+ *                             type: string
+ *                           price:
+ *                             type: number
  *       400:
  *         description: Bad request (validation errors or no fields provided)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Validation errors"
  *       401:
  *         description: Unauthorized - Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Authentication required"
  *       403:
  *         description: Forbidden - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin access required"
  *       404:
  *         description: Homepage section not found or invalid product IDs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Homepage section not found or invalid product IDs"
  *       409:
  *         description: Section with this title already exists
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Section with this title already exists"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.put(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     validateZod(updateHomePageSectionSchema),
     homePageSectionController.updateHomePageSection.bind(homePageSectionController)
 );
@@ -273,14 +431,38 @@ router.put(
  *                               type: string
  *                             price:
  *                               type: number
- *                 count:
- *                   type: integer
- *                   description: Total number of sections returned
- *                   example: 3
+ *                             avgRating:
+ *                               type: number
+ *                               example: 4.5
+ *                             reviewCount:
+ *                               type: integer
+ *                               example: 12
  *       400:
  *         description: Bad request (invalid query parameters)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid query parameters"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.get(
     "/",
@@ -299,9 +481,9 @@ router.get(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
+ *           type: string
  *           minimum: 1
- *         description: Homepage section ID
+ *         description: The homepage section id, or its URL slug
  *         example: 1
  *     responses:
  *       200:
@@ -318,41 +500,75 @@ router.get(
  *                   type: string
  *                   example: "Home page section retrieved successfully"
  *                 data:
- *                   type: object
- *                   properties:
- *                     id:
- *                       type: integer
- *                       example: 1
- *                     title:
- *                       type: string
- *                       example: "Best of Oils"
- *                     isActive:
- *                       type: boolean
- *                       example: true
- *                     products:
- *                       type: array
- *                       items:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                           name:
- *                             type: string
- *                           price:
- *                             type: number
- *                           image:
- *                             type: string
- *                           description:
- *                             type: string
+ *                   type: array
+ *                   description: Products in the requested homepage section, enriched with review data.
+ *                   items:
+ *                     type: object
+ *                     properties:
+ *                       id:
+ *                         type: integer
+ *                         example: 42
+ *                       name:
+ *                         type: string
+ *                         example: "Premium Cooking Oil"
+ *                       price:
+ *                         type: number
+ *                         example: 450
+ *                       image:
+ *                         type: string
+ *                         nullable: true
+ *                       description:
+ *                         type: string
+ *                       avgRating:
+ *                         type: number
+ *                         example: 4.5
+ *                       count:
+ *                         type: integer
+ *                         description: Number of reviews for this product.
+ *                         example: 12
  *       400:
  *         description: Bad request (invalid ID format)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid ID format"
  *       404:
  *         description: Homepage section not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Homepage section not found"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.get(
     "/:id",
+    resolveSlugParam("homepage_section"),
     responseCache({ ttlSeconds: 30 }),
     homePageSectionController.getHomePageSectionById.bind(homePageSectionController)
 );
@@ -390,19 +606,75 @@ router.get(
  *                   example: "Home page section deleted successfully"
  *       400:
  *         description: Bad request (invalid ID format)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid ID format"
  *       401:
  *         description: Unauthorized - Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Authentication required"
  *       403:
  *         description: Forbidden - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin access required"
  *       404:
  *         description: Homepage section not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Homepage section not found"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.delete(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.DELETE),
     homePageSectionController.deleteHomePageSection.bind(homePageSectionController)
 );
 
@@ -453,21 +725,84 @@ router.delete(
  *                       type: array
  *                       items:
  *                         type: object
+ *                         properties:
+ *                           id:
+ *                             type: integer
+ *                           name:
+ *                             type: string
+ *                           price:
+ *                             type: number
  *       400:
  *         description: Bad request (invalid ID format)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Invalid ID format"
  *       401:
  *         description: Unauthorized - Authentication required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Authentication required"
  *       403:
  *         description: Forbidden - Admin access required
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Admin access required"
  *       404:
  *         description: Homepage section not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Homepage section not found"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Internal server error"
  */
 router.patch(
     "/:id/toggle-status",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.ARRANGEMENT, PermissionLevel.CREATE_EDIT),
     homePageSectionController.toggleSectionStatus.bind(homePageSectionController)
 );
 

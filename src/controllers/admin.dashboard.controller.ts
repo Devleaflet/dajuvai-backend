@@ -51,8 +51,9 @@ export class AdminDashboardController {
         res.status(200).json({ success: true, data });
     }
 
-    async getRevenueByVendor(_req: AuthRequest, res: Response, _next: NextFunction) {
-        const data = await this.adminDashboardService.getRevenueByVendor();
+    async getRevenueByVendor(req: AuthRequest<{}, {}, {}, { startDate?: string; endDate?: string }>, res: Response, _next: NextFunction) {
+        const { startDate, endDate } = req.query;
+        const data = await this.adminDashboardService.getRevenueByVendor(startDate, endDate);
         res.status(200).json({ success: true, data });
     }
 

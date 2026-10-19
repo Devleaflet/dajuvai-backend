@@ -5,11 +5,14 @@ import {
 	isAdminOrStaff,
 	validateZod,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import {
 	createBannerSchema,
 	updateBannerSchema,
 } from "../utils/zod_validations/banner.zod";
 import multer from "multer";
+import { resolveSlugParam } from "../middlewares/slug.middleware";
 
 const router = Router();
 const bannerController = new BannerController();
@@ -26,21 +29,49 @@ const upload = multer({ storage: multer.memoryStorage() });
  *     requestBody:
  *       required: true
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
+ *             required:
+ *               - name
+ *               - type
+ *               - productSource
+ *               - startDate
+ *               - endDate
  *             properties:
  *               name:
  *                 type: string
+ *                 maxLength: 100
  *                 example: "Summer Sale Banner"
  *               type:
  *                 type: string
  *                 enum: [HERO, SIDEBAR, PRODUCT, SPECIAL_DEALS]
  *                 example: HERO
- *               status:
+ *               productSource:
  *                 type: string
- *                 enum: [ACTIVE, EXPIRED, SCHEDULED]
- *                 example: SCHEDULED
+ *                 enum: [manual, category, subcategory, deal, external]
+ *                 example: manual
+ *               selectedProducts:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *                 description: Required if productSource is manual
+ *               selectedCategoryId:
+ *                 type: integer
+ *                 description: Required if productSource is category or subcategory
+ *               selectedSubcategoryId:
+ *                 type: integer
+ *                 description: Required if productSource is subcategory
+ *               placementAfterSection:
+ *                 type: integer
+ *                 description: Homepage position for SIDEBAR banners (positive integer)
+ *               selectedDealId:
+ *                 type: integer
+ *                 description: Required if productSource is deal
+ *               externalLink:
+ *                 type: string
+ *                 format: uri
+ *                 description: Required if productSource is external
  *               startDate:
  *                 type: string
  *                 format: date-time
@@ -51,26 +82,66 @@ const upload = multer({ storage: multer.memoryStorage() });
  *                 example: "2025-06-30T23:59:59Z"
  *               desktopImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for desktop view (required)
+ *                 description: URL for desktop view image (optional)
  *               mobileImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for mobile view (required)
+ *                 description: URL for mobile view image (optional)
  *     responses:
  *       201:
  *         description: Banner created successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       400:
  *         description: Bad request (validation errors)
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.post(
 	"/",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.CREATE_EDIT),
 	validateZod(createBannerSchema),
 	bannerController.createBanner.bind(bannerController)
 );
@@ -93,18 +164,34 @@ router.post(
  *     requestBody:
  *       required: false
  *       content:
- *         multipart/form-data:
+ *         application/json:
  *           schema:
  *             type: object
  *             properties:
  *               name:
  *                 type: string
+ *                 maxLength: 100
  *               type:
  *                 type: string
  *                 enum: [HERO, SIDEBAR, PRODUCT, SPECIAL_DEALS]
- *               status:
+ *               productSource:
  *                 type: string
- *                 enum: [ACTIVE, EXPIRED, SCHEDULED]
+ *                 enum: [manual, category, subcategory, deal, external]
+ *               selectedProducts:
+ *                 type: array
+ *                 items:
+ *                   type: integer
+ *               selectedCategoryId:
+ *                 type: integer
+ *               selectedSubcategoryId:
+ *                 type: integer
+ *               placementAfterSection:
+ *                 type: integer
+ *               selectedDealId:
+ *                 type: integer
+ *               externalLink:
+ *                 type: string
+ *                 format: uri
  *               startDate:
  *                 type: string
  *                 format: date-time
@@ -113,28 +200,72 @@ router.post(
  *                 format: date-time
  *               desktopImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for desktop view (optional)
+ *                 description: URL for desktop view image (optional)
  *               mobileImage:
  *                 type: string
- *                 format: binary
- *                 description: Image for mobile view (optional)
+ *                 description: URL for mobile view image (optional)
  *     responses:
  *       200:
  *         description: Banner updated successfully
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       400:
  *         description: Bad request
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       404:
  *         description: Banner not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/ApiError'
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.patch(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.CREATE_EDIT),
 	validateZod(updateBannerSchema),
 	bannerController.updateBanner.bind(bannerController)
 );
@@ -153,19 +284,47 @@ router.patch(
  *         name: id
  *         required: true
  *         schema:
- *           type: integer
- *         description: Banner ID
+ *           type: string
+ *         description: The banner id, or its URL slug
  *     responses:
  *       200:
  *         description: Banner details
- *       404:
- *         description: Banner not found
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       401:
  *         description: Unauthorized
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
-router.get("/:id", bannerController.getBannerById.bind(bannerController));
+router.get("/:id", resolveSlugParam("banners"), bannerController.getBannerById.bind(bannerController));
 
 /**
  * @swagger
@@ -173,11 +332,41 @@ router.get("/:id", bannerController.getBannerById.bind(bannerController));
  *   get:
  *     summary: Get all banners
  *     tags: [Banners]
+ *     parameters:
+ *       - in: query
+ *         name: type
+ *         required: false
+ *         description: Filter banners by banner type.
+ *         schema:
+ *           type: string
+ *           enum: [HERO, SIDEBAR, PRODUCT, SPECIAL_DEALS]
+ *         example: HERO
  *     responses:
  *       200:
  *         description: List of banners
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               required: [success, data]
+ *               properties:
+ *                 success: { type: boolean, example: true }
+ *                 data:
+ *                   type: array
+ *                   items: { $ref: '#/components/schemas/Banner' }
  *       500:
  *         description: Internal server error
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 message:
+ *                   type: string
+ *                   example: "Error message describing what went wrong"
  */
 router.get("/", bannerController.getAllBanners.bind(bannerController));
 
@@ -255,6 +444,7 @@ router.delete(
 	"/:id",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.DELETE),
 	bannerController.deleteBanner.bind(bannerController)
 );
 
@@ -285,43 +475,7 @@ router.delete(
  *                 success:
  *                   type: boolean
  *                   example: true
- *                 data:
- *                   type: array
- *                   items:
- *                     type: object
- *                     properties:
- *                       id:
- *                         type: integer
- *                         example: 1
- *                       name:
- *                         type: string
- *                         example: "Summer Sale"
- *                       image:
- *                         type: string
- *                         example: "https://example.com/banner.jpg"
- *                       type:
- *                         type: string
- *                         example: "Hero"
- *                       status:
- *                         type: string
- *                         example: "ACTIVE"
- *                       startDate:
- *                         type: string
- *                         format: date-time
- *                         example: "2025-06-01T00:00:00.000Z"
- *                       endDate:
- *                         type: string
- *                         format: date-time
- *                         example: "2025-06-30T23:59:59.000Z"
- *                       createdBy:
- *                         type: object
- *                         properties:
- *                           id:
- *                             type: integer
- *                             example: 10
- *                           name:
- *                             type: string
- *                             example: "Admin User"
+ *                 data: { $ref: '#/components/schemas/Banner' }
  *       404:
  *         description: Banner name is missing or no banner found
  *         content:
@@ -353,6 +507,7 @@ router.get(
 	"/search/:bannerName",
 	authMiddleware,
 	isAdminOrStaff,
+	checkPermission(ModuleName.BANNER, PermissionLevel.VIEW),
 	bannerController.searchBannerByBannerName.bind(bannerController)
 );
 

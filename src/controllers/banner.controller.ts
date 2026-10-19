@@ -25,74 +25,77 @@ export class BannerController {
         this.dealService = new DealService();
     }
 
-    async createBanner(req: AuthRequest<{}, {}, CreateBannerInput>, res: Response, next: NextFunction): Promise<void> {
+    async createBanner(req: AuthRequest<{}, {}, CreateBannerInput>, res: Response, _next: NextFunction): Promise<void> {
         const bannerData = req.body;
         const { productSource, selectedProducts, selectedCategoryId, selectedSubcategoryId, selectedDealId, externalLink } = bannerData;
 
         const bannernameExists = await this.bannerService.getBannerByName(bannerData.name);
         if (bannernameExists) throw new ConflictError("Banner with this name already exists");
 
+        let result;
+
         switch (productSource as ProductSource) {
             case ProductSource.MANUAL:
                 if (!selectedProducts || selectedProducts.length === 0) throw new BadRequestError("At least one product must be selected for manual product source");
-                const productIds = await Promise.all(
-                    selectedProducts.map(async (productId) => {
+                await Promise.all(
+                    selectedProducts.map(async (productId: number) => {
                         const productExists = await this.productService.getProductDetailsById(productId);
                         if (!productExists) throw new BadRequestError(`Product with ID ${productId} does not exist`);
-                        return productId;
                     })
                 );
-                const bannerManual = await this.bannerService.createBanner({ ...bannerData, selectedProducts: productIds }, req.user.id);
-                res.status(201).json({ success: true, data: bannerManual });
+                result = await this.bannerService.createBanner({ ...bannerData, selectedProducts }, req.user.id);
                 break;
 
             case ProductSource.CATEGORY:
                 if (!selectedCategoryId) throw new BadRequestError("Selected category is required");
                 const categoryExists = await this.categoryService.getCategoryById(selectedCategoryId);
                 if (!categoryExists) throw new BadRequestError(`Category with ID ${selectedCategoryId} does not exist`);
-                await this.bannerService.createBanner({ ...bannerData, selectedCategoryId }, req.user.id);
-                res.status(201).json({ success: true, message: "Banner created with category" });
+                result = await this.bannerService.createBanner({ ...bannerData, selectedCategoryId }, req.user.id);
                 break;
 
             case ProductSource.SUBCATEGORY:
-                await this.bannerService.createBanner({ ...bannerData, selectedCategoryId, selectedSubcategoryId }, req.user.id);
-                res.status(201).json({ success: true, message: "Banner created with subcategory" });
+                if (!selectedCategoryId) throw new BadRequestError("Selected category is required");
+                if (!selectedSubcategoryId) throw new BadRequestError("Selected subcategory is required");
+                result = await this.bannerService.createBanner({ ...bannerData, selectedCategoryId, selectedSubcategoryId }, req.user.id);
                 break;
 
             case ProductSource.DEAL:
+                if (!selectedDealId) throw new BadRequestError("Deal is required");
                 const dealExists = await this.dealService.getDealById(selectedDealId);
                 if (!dealExists) throw new BadRequestError(`Deal with ID ${selectedDealId} does not exist`);
-                await this.bannerService.createBanner({ ...bannerData, selectedDealId }, req.user.id as number);
-                res.status(201).json({ success: true, message: "Banner created with deal" });
+                result = await this.bannerService.createBanner({ ...bannerData, selectedDealId }, req.user.id as number);
                 break;
 
             case ProductSource.EXTERNAL:
                 if (!externalLink) throw new BadRequestError("External link is required");
-                await this.bannerService.createBanner({ ...bannerData, externalLink }, req.user.id);
-                res.status(201).json({ success: true, message: "Banner created with external link" });
+                result = await this.bannerService.createBanner({ ...bannerData, externalLink }, req.user.id);
                 break;
 
             default:
                 throw new BadRequestError("Invalid product source type");
         }
+
+        res.status(201).json({ success: true, data: result });
     }
 
-    async updateBanner(req: AuthRequest<{ id: number }, {}, UpdateBannerInput>, res: Response, next: NextFunction): Promise<void> {
+    async updateBanner(req: AuthRequest<{ id: number }, {}, UpdateBannerInput>, res: Response, _next: NextFunction): Promise<void> {
         const { id } = req.params;
         const bannerData = req.body;
 
         const existingBanner = await this.bannerService.getBannerById(Number(id));
         if (!existingBanner) throw new NotFoundError("Banner");
 
-        const newStartDate = new Date(req.body.startDate);
-        newStartDate.setHours(0, 0, 0, 0);
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const existingStartDate = new Date(existingBanner.startDate);
-        existingStartDate.setHours(0, 0, 0, 0);
+        if (req.body.startDate) {
+            const newStartDate = new Date(req.body.startDate);
+            newStartDate.setHours(0, 0, 0, 0);
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const existingStartDate = new Date(existingBanner.startDate);
+            existingStartDate.setHours(0, 0, 0, 0);
 
-        if (newStartDate.getTime() !== existingStartDate.getTime() && newStartDate < today) {
-            throw new BadRequestError("Start date must be today or in the future");
+            if (newStartDate.getTime() !== existingStartDate.getTime() && newStartDate < today) {
+                throw new BadRequestError("Start date must be today or in the future");
+            }
         }
 
         if (bannerData.productSource) {
