@@ -427,6 +427,32 @@ export const swaggerSchemas = {
       productId: { type: "integer", minimum: 1, example: 12 },
       variantId: { type: "number", minimum: 1, example: 60 },
       quantity: { type: "integer", minimum: 1, example: 1 },
+      idempotencyKey: { type: "string", example: "checkout-123" },
+      cartItems: {
+        type: "array",
+        maxItems: 200,
+        description:
+          "The cart lines the checkout showed as included. Lines left out (sold out or short) stay in the cart. If any of these changed since, the order is refused with 409 INSUFFICIENT_STOCK or CHECKOUT_CHANGED. Omit it and any line that can't be filled refuses the order.",
+        items: {
+          type: "object",
+          required: ["id", "quantity"],
+          properties: { id: { type: "integer", minimum: 1 }, quantity: { type: "integer", minimum: 1 } },
+        },
+      },
+    },
+  },
+  /** A line that can't be ordered as asked, and why. */
+  StockIssue: {
+    type: "object",
+    required: ["name", "requested", "available", "reason"],
+    properties: {
+      cartItemId: { type: "integer", nullable: true, example: 14 },
+      productId: { type: "integer", nullable: true, example: 2 },
+      variantId: { type: "integer", nullable: true, example: null },
+      name: { type: "string", example: "Ten Pack Mug" },
+      requested: { type: "integer", example: 8 },
+      available: { type: "integer", example: 5 },
+      reason: { type: "string", enum: ["SOLD_OUT", "LOW_STOCK", "UNAVAILABLE"], example: "LOW_STOCK" },
     },
   },
   /**

@@ -1,3 +1,4 @@
+import { credentialRateLimiter, credentialSprayLimiter } from "../middlewares/credentialRateLimit.middleware";
 import { Router } from "express";
 import rateLimit, { Options } from "express-rate-limit";
 import { VendorController } from "../controllers/vendor.controller";
@@ -1302,6 +1303,8 @@ router.post(
  */
 router.post(
     "/login",
+    credentialSprayLimiter,
+    credentialRateLimiter,
     validateZod(vendorLoginSchema),
     vendorController.login.bind(vendorController),
 );

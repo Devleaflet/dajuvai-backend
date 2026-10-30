@@ -22,6 +22,21 @@ const STATUS_WORDS: Record<string, string> = {
     NOT_RECEIVED: "not delivered",
 };
 
+const statusWords = (status: string) => STATUS_WORDS[status] ?? status.replace(/_/g, " ").toLowerCase();
+
+/**
+ * Status notifications stored before the copy changed end in a raw enum
+ * ("Order #X status updated to ASSIGNED_TO_RIDER"); they are read in the
+ * words new ones are written in. Anything else is returned as stored.
+ */
+export function readableNotificationMessage<T extends string | null | undefined>(message: T): T {
+    if (!message) return message;
+    return message.replace(
+        /^(Order #\S+) status updated to ([A-Z_]+)$/,
+        (_match, order: string, status: string) => `${order} is now ${statusWords(status)}.`,
+    ) as T;
+}
+
 export class NotificationService {
     private notificationRepo = AppDataSource.getRepository(Notification);
     private vendorRepo = AppDataSource.getRepository(Vendor);
@@ -117,6 +132,8 @@ export class NotificationService {
             this.notificationRepo.count({ where: unreadWhere }),
         ]);
 
+        for (const row of data) row.message = readableNotificationMessage(row.message);
+
         return {
             data,
             total,
@@ -183,16 +200,13 @@ export class NotificationService {
         await this.notificationRepo.save(notifications);
 
         // --- Push Notifications ---
+        // No push to the shopper: they are looking at the confirmation. Their
+        // feed entry above and the confirmation email record it.
         const data = { type: "ORDER_PLACED", orderId: String(order.id) };
         await Promise.all([
             this.push(await this.adminTokens(), {
                 title: "New Order Placed",
                 body: `Order #${orderDisplayNumber} placed by ${fullName}`,
-                data,
-            }),
-            this.push(await deviceTokenService.getTokensForUser(audience.customerId), {
-                title: "Order Placed",
-                body: `Your order #${orderDisplayNumber} has been placed successfully.`,
                 data,
             }),
             this.push(await deviceTokenService.getTokensForVendors(vendorIds), {
@@ -284,8 +298,7 @@ export class NotificationService {
         }
 
         const orderDisplayNumber = orderNumber || order.id;
-        const statusLabel =
-            STATUS_WORDS[order.status] ?? String(order.status).replace(/_/g, " ").toLowerCase();
+        const statusLabel = statusWords(String(order.status));
         const statusMessage = `Order #${orderDisplayNumber} is now ${statusLabel}.${reason ? ` Reason: ${reason}` : ""}`;
 
         // Admin notification
@@ -356,15 +369,11 @@ export class NotificationService {
     }
 
 
-    /** Feed row + push for a payment outcome. The three payment states differ only in copy. */
-    private async notifyPaymentOutcome(
-        orderId: number,
-        userId: number,
-        title: string,
-        feedMessage: string,
-        pushBody: string,
-        dataType: string,
-    ): Promise<void> {
+    /**
+     * Feed row for a payment outcome. Not pushed: a payment settles while the
+     * shopper is on the payment result screen, which already says how it went.
+     */
+    private async notifyPaymentOutcome(orderId: number, userId: number, title: string, feedMessage: string): Promise<void> {
         const user = await this.userRepo.findOne({ where: { id: userId }, select: { id: true } });
         if (!user) return;
 
@@ -382,12 +391,6 @@ export class NotificationService {
                 createdById: userId,
             })
         );
-
-        await this.push(await deviceTokenService.getTokensForUser(userId), {
-            title,
-            body: pushBody,
-            data: { type: dataType, orderId: String(orderId) },
-        });
     }
 
     async notifyVendorAccountEvent(
@@ -436,50 +439,22 @@ export class NotificationService {
             userId,
             "Payment Successful",
             `Your payment for Order #${orderId} was successful. Your order is confirmed!`,
-            `Your payment for Order #${orderId} was successful!`,
-            "PAYMENT_SUCCESS",
         );
     }
 
     async notifyPaymentFailed(orderId: number, userId: number): Promise<void> {
-        const message = `Your payment for Order #${orderId} failed. Please try again.`;
         return this.notifyPaymentOutcome(
             orderId,
             userId,
             "Payment Failed",
-            message,
-            message,
-            "PAYMENT_FAILED",
+            `Your payment for Order #${orderId} failed. Please try again.`,
         );
     }
 
     async notifyPaymentCancelled(orderId: number, userId: number): Promise<void> {
-        const message = `Your payment for Order #${orderId} was cancelled.`;
-        return this.notifyPaymentOutcome(
-            orderId,
-            userId,
-            "Payment Cancelled",
-            message,
-            message,
-            "PAYMENT_CANCELLED",
-        );
+        return this.notifyPaymentOutcome(orderId, userId, "Payment Cancelled", `Your payment for Order #${orderId} was cancelled.`);
     }
 
-    async notifyAddToCart(userId: number, productName: string): Promise<void> {
-        await this.push(await deviceTokenService.getTokensForUser(userId), {
-            title: "Added to Cart",
-            body: `${productName} has been added to your cart.`,
-            data: { type: "ADD_TO_CART" },
-        });
-    }
-
-    async notifyAddToWishlist(userId: number, productName: string): Promise<void> {
-        await this.push(await deviceTokenService.getTokensForUser(userId), {
-            title: "Added to Wishlist",
-            body: `${productName} has been saved to your wishlist.`,
-            data: { type: "ADD_TO_WISHLIST" },
-        });
-    }
 
     /**
      * Registers a device for push.

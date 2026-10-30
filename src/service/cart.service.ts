@@ -7,12 +7,19 @@ import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { ICartAddRequest, ICartRemoveRequest } from '../interface/cart.interface';
 import { Variant } from '../entities/variant.entity';
-import { NotificationService } from './notification.service';
 import { calculatePriceSnapshot, normalizeDiscountType, resolveFinalPrice } from '../utils/pricing.utils';
 import { emitCartUpdate } from '../socket/socket';
 import { DealStatus } from '../entities/deal.entity';
 import { DiscountType } from '../entities/product.enum';
 import { withAgeRestriction } from './age-restriction.service';
+import { lineStockIssue, StockIssue, StockIssueReason, stockHeldBy } from '../utils/stockAvailability';
+
+/** One short line per verdict, shown under the cart line. */
+const STOCK_WARNINGS: Record<StockIssueReason, (issue: StockIssue) => string> = {
+    SOLD_OUT: () => 'Sold out.',
+    LOW_STOCK: (issue) => `Only ${issue.available} left — you have ${issue.requested} in your cart.`,
+    UNAVAILABLE: () => 'No longer available.',
+};
 
 const CART_RELATIONS = [
     'items',
@@ -251,12 +258,8 @@ export class CartService {
             });
         }
 
-        // Push notification (fire-and-forget). Not for Buy Now: that path goes
-        // straight to checkout and never shows a cart, so "added to cart" is a
-        // notification about something the customer did not do.
-        if (data.source !== "buy_now") {
-            new NotificationService().notifyAddToCart(userId, name).catch(() => {});
-        }
+        // No push: the shopper is looking at the app as they add, which
+        // already confirms it. Push is for things that happen while away.
 
         return this.getCart(userId);
     }
@@ -336,38 +339,25 @@ export class CartService {
         // time and self-heal the stored snapshot so the cart never drifts
         // from what checkout will actually charge.
         const priceChanges: { id: number; price: number }[] = [];
+        const held = await stockHeldBy(AppDataSource.manager, userId);
 
         const cartItemsWithWarnings = cart.items.map((item) => {
-            let warningMessage: string | undefined;
             let currentPrice = Number(item.price);
             const product = item.product;
+            const variant = item.variantId ? item.variant : null;
 
-            if (item.variantId) {
-                const variant = item.variant;
-                if (!variant) {
-                    warningMessage = 'Associated variant no longer exists';
-                } else {
-                    if (variant.status === 'OUT_OF_STOCK') {
-                        warningMessage = 'Variant is not available';
-                    } else if (item.quantity > variant.stock) {
-                        warningMessage = `Only ${variant.stock} units available for this variant. You have ${item.quantity} in your cart.`;
-                    }
-                    currentPrice = resolveFinalPrice({
-                        finalPrice: variant.finalPrice,
-                        basePrice: variant.basePrice,
-                        discountAmount: variant.discountAmount,
-                    });
-                }
-            } else if (!product) {
-                warningMessage = 'Associated product no longer exists';
-            } else {
-                if (product.hasVariants) {
-                    warningMessage = 'Product requires a variant but none is selected';
-                } else if (product.status === 'OUT_OF_STOCK') {
-                    warningMessage = 'Product is not available';
-                } else if (item.quantity > (product.stock ?? 0)) {
-                    warningMessage = `Only ${product.stock} units available. You have ${item.quantity} in your cart.`;
-                }
+            // The same verdict checkout reaches, so the cart never promises
+            // a line the order will then refuse.
+            const stockIssue = lineStockIssue(item, undefined, held);
+            const warningMessage = stockIssue ? STOCK_WARNINGS[stockIssue.reason](stockIssue) : undefined;
+
+            if (variant) {
+                currentPrice = resolveFinalPrice({
+                    finalPrice: variant.finalPrice,
+                    basePrice: variant.basePrice,
+                    discountAmount: variant.discountAmount,
+                });
+            } else if (product && !item.variantId) {
                 currentPrice = resolveFinalPrice({
                     finalPrice: product.finalPrice,
                     basePrice: product.basePrice,
@@ -385,6 +375,7 @@ export class CartService {
                 price: currentPrice,
                 priceBreakdown: this.buildCartItemPriceBreakdown(item, currentPrice),
                 warningMessage,
+                stockIssue,
             };
         });
 

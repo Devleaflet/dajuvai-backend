@@ -206,13 +206,18 @@ export const finalizeUserAccountDeletions = () => {
     });
 };
 
-// Expires online-payment checkout drafts whose TTL elapsed without a gateway
-// verdict. Drafts never reserve stock or claim promos, so expiring them is a
-// pure status flip — safe to retry every 10 minutes.
+// Expires online-payment checkout drafts whose hold elapsed without a gateway
+// verdict and puts their stock back. Each draft is ended under its own row
+// lock, so overlapping runs return the stock once. Every 5 minutes, so a
+// 30-minute hold is never kept from other shoppers much longer than that.
+// Both steps ask the gateway first, so a payment whose shopper never came
+// back still becomes their order.
 export const expireStaleCheckoutDraftsJob = () => {
-    cron.schedule("*/10 * * * *", async () => {
+    cron.schedule("*/5 * * * *", async () => {
         try {
-            await new OrderService().expireStaleCheckoutDrafts();
+            const orderService = new OrderService();
+            await orderService.expireStaleCheckoutDrafts();
+            await orderService.settleLatePayments();
         } catch (error) {
             // silent fail for cron; next run retries safely
         }

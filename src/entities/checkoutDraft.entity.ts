@@ -16,18 +16,21 @@ export enum CheckoutDraftStatus {
 }
 
 /**
- * How long a pending online-payment checkout stays alive before the cron
- * sweep marks it expired. Generous enough to cover slow gateway flows,
- * short enough to not accumulate abandoned sessions.
+ * How long a pending online-payment checkout holds its stock before the cron
+ * sweep expires it and puts the stock back. Long enough for a gateway
+ * payment; short enough that an abandoned one doesn't keep the last unit
+ * from other shoppers for long. A payment confirmed after expiry still
+ * becomes its order when the stock is still there (materializeDraftOrder).
  */
-export const CHECKOUT_DRAFT_TTL_MS = 2 * 60 * 60 * 1000; // 2 hours
+export const CHECKOUT_DRAFT_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
  * A checkout that has been validated & priced but NOT yet turned into an
  * order. Online-payment checkouts (NPX / eSewa / ONLINE_PAYMENT) only
  * materialize into a real Order after the gateway confirms success; COD
- * checkouts never use drafts. Abandoned or failed payments simply expire
- * here — no order row, no stock reservation, no promo claim.
+ * checkouts never use drafts. The draft holds its stock while the shopper
+ * pays; a failed, cancelled or abandoned payment puts it back. No order row
+ * and no promo claim exist until the payment is confirmed.
  */
 @Entity("checkout_drafts")
 @Index(["userId", "status"])
@@ -101,6 +104,14 @@ export class CheckoutDraft {
 
     @Column({ type: "timestamp" })
     expiresAt: Date;
+
+    /**
+     * True while this draft's items are off the shelf. Set when the draft is
+     * created, cleared when it becomes an order or ends without one — the
+     * second puts the stock back. Drafts from before holds existed are false.
+     */
+    @Column({ type: "boolean", default: false })
+    stockHeld: boolean;
 
     @CreateDateColumn()
     createdAt: Date;

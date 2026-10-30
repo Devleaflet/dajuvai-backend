@@ -69,6 +69,7 @@ import { updateAllProductPrices } from "./scripts/update.product";
 import userProfileRouter from "./routes/product.recommend.routes";
 import productRecommendRouter from "./routes/product.recommend.routes";
 import deliveryRouter from "./routes/delivery.routes";
+import healthRouter from "./routes/health.routes";
 import deliveryAdminRouter from "./routes/delivery.admin.routes";
 import searchAliasRouter from "./routes/search-alias.routes";
 import deliveryRiderRouter from "./routes/delivery.rider.routes";
@@ -196,6 +197,8 @@ app.use("/api/profile", productRecommendRouter);
 
 // old
 app.use("/api/delivery", deliveryRouter);
+
+app.use("/api/health", healthRouter);
 
 // ── Catch-all for unknown routes + global error handler ───────────────────────
 // These MUST come after all route registrations.

@@ -139,3 +139,22 @@ describe("assertResetCode", () => {
         await expect(assertResetCode(cases[2], "123456")).resolves.toBeUndefined();
     });
 });
+
+describe("vendor signup email check (deliberately answers; rate limited)", () => {
+    async function check(email: string | undefined) {
+        const res = response();
+        await users.checkEmailExists.bind(users)({ query: { email } }, res);
+        return { status: res.statusCode || 200, body: res.body };
+    }
+
+    it("reports customer and vendor emails as taken, case and spaces aside", async () => {
+        expect(await check("  Shopper@Example.com ")).toEqual({ status: 200, body: { success: true, exists: true } });
+        expect(await check("seller@example.com")).toEqual({ status: 200, body: { success: true, exists: true } });
+        expect(await check("nobody@example.com")).toEqual({ status: 200, body: { success: true, exists: false } });
+    });
+
+    it("rejects a missing or malformed address", async () => {
+        expect((await check(undefined)).status).toBe(400);
+        expect((await check("not-an-email")).status).toBe(400);
+    });
+});

@@ -9,6 +9,7 @@ import { SubcategoryService } from "../service/subcategory.service";
 import { DealService } from "../service/deal.service";
 import AppDataSource from "../config/db.config";
 import { BadRequestError, ConflictError, NotFoundError } from "../errors";
+import { userAuditActor } from "../service/audit.service";
 
 export class BannerController {
     private bannerService: BannerService;
@@ -43,32 +44,32 @@ export class BannerController {
                         if (!productExists) throw new BadRequestError(`Product with ID ${productId} does not exist`);
                     })
                 );
-                result = await this.bannerService.createBanner({ ...bannerData, selectedProducts }, req.user.id);
+                result = await this.bannerService.createBanner({ ...bannerData, selectedProducts }, userAuditActor(req.user));
                 break;
 
             case ProductSource.CATEGORY:
                 if (!selectedCategoryId) throw new BadRequestError("Selected category is required");
                 const categoryExists = await this.categoryService.getCategoryById(selectedCategoryId);
                 if (!categoryExists) throw new BadRequestError(`Category with ID ${selectedCategoryId} does not exist`);
-                result = await this.bannerService.createBanner({ ...bannerData, selectedCategoryId }, req.user.id);
+                result = await this.bannerService.createBanner({ ...bannerData, selectedCategoryId }, userAuditActor(req.user));
                 break;
 
             case ProductSource.SUBCATEGORY:
                 if (!selectedCategoryId) throw new BadRequestError("Selected category is required");
                 if (!selectedSubcategoryId) throw new BadRequestError("Selected subcategory is required");
-                result = await this.bannerService.createBanner({ ...bannerData, selectedCategoryId, selectedSubcategoryId }, req.user.id);
+                result = await this.bannerService.createBanner({ ...bannerData, selectedCategoryId, selectedSubcategoryId }, userAuditActor(req.user));
                 break;
 
             case ProductSource.DEAL:
                 if (!selectedDealId) throw new BadRequestError("Deal is required");
                 const dealExists = await this.dealService.getDealById(selectedDealId);
                 if (!dealExists) throw new BadRequestError(`Deal with ID ${selectedDealId} does not exist`);
-                result = await this.bannerService.createBanner({ ...bannerData, selectedDealId }, req.user.id as number);
+                result = await this.bannerService.createBanner({ ...bannerData, selectedDealId }, userAuditActor(req.user));
                 break;
 
             case ProductSource.EXTERNAL:
                 if (!externalLink) throw new BadRequestError("External link is required");
-                result = await this.bannerService.createBanner({ ...bannerData, externalLink }, req.user.id);
+                result = await this.bannerService.createBanner({ ...bannerData, externalLink }, userAuditActor(req.user));
                 break;
 
             default:
@@ -120,7 +121,7 @@ export class BannerController {
             }
         }
 
-        const banner = await this.bannerService.updateBanner(Number(id), bannerData, req.user.id);
+        const banner = await this.bannerService.updateBanner(Number(id), bannerData, userAuditActor(req.user));
         res.status(200).json({ success: true, data: banner });
     }
 
@@ -134,12 +135,12 @@ export class BannerController {
         res.status(200).json({ success: true, data: banners });
     }
 
-    async deleteBanner(req: Request<{ id: number }>, res: Response, _next: NextFunction): Promise<void> {
+    async deleteBanner(req: AuthRequest<{ id: number }>, res: Response, _next: NextFunction): Promise<void> {
         const { id } = req.params;
         const banner = await this.bannerService.getBannerById(Number(id));
         if (!banner) throw new NotFoundError(`Banner with id: ${id}`);
 
-        await this.bannerService.deleteBanner(id);
+        await this.bannerService.deleteBanner(id, userAuditActor(req.user));
         res.status(200).json({ success: true, message: `Banner with id: ${id} deleted successfully` });
     }
 

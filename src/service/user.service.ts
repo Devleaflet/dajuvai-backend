@@ -1,5 +1,7 @@
 import { DataSource, MoreThan } from "typeorm";
 import bcrypt from "bcryptjs";
+import { randomBytes } from "crypto";
+import { getUserDeletionDeadline } from "./user-account-deletion.policy";
 import AppDataSource from "../config/db.config";
 import { User, UserRole } from "../entities/user.entity";
 import { Vendor } from "../entities/vendor.entity";
@@ -168,6 +170,8 @@ export const findUserByEmailLogin = async (
             provider: true,
             isVerified: true,
             password: true,
+            username: true,
+            profilePicture: true,
             deletionRequestedAt: true,
             deletionScheduledFor: true,
             deletionFinalizedAt: true,
@@ -377,20 +381,24 @@ export const findVendorByResetToken = async (
     });
 };
 
-export const deleteUserDataByFacebookId = async (user_id: string) => {
-    const user = await userDB.findOne({
-        where: {
-            facebookId: user_id,
-        },
-    });
+/**
+ * Facebook's data-deletion callback (the caller has already verified the
+ * signed_request). Starts the same grace-period deletion a customer requests
+ * from their account — the cron finalises it — rather than removing the row,
+ * which would orphan orders. Staff and admin accounts are never touched.
+ *
+ * Returns only a confirmation code, and the same shape whether or not the id
+ * belongs to anyone, so the callback reveals nothing about our accounts.
+ */
+export const deleteUserDataByFacebookId = async (facebookId: string) => {
+    const user = await userDB.findOne({ where: { facebookId } });
 
-    if (!user) {
-        throw new APIError(404, "User not found");
+    if (user && user.role === UserRole.USER && !user.deletionScheduledFor && !user.deletionFinalizedAt) {
+        const requestedAt = new Date();
+        user.deletionRequestedAt = requestedAt;
+        user.deletionScheduledFor = getUserDeletionDeadline(requestedAt);
+        await userDB.save(user);
     }
 
-    const deleteUser = await userDB.remove(user);
-
-    console.log(deleteUser);
-
-    return deleteUser;
+    return { confirmationCode: randomBytes(12).toString("hex") };
 };

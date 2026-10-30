@@ -3,6 +3,7 @@ import { Request, Response } from "express";
 import { auditService } from "../service/audit.service";
 import { AuditActorType } from "../entities/auditLog.entity";
 import bcrypt from "bcryptjs";
+import { z } from "zod";
 import jwt from "jsonwebtoken";
 import { OAuth2Client } from "google-auth-library";
 import config from "../config/env.config";
@@ -76,6 +77,7 @@ import { TokenSubjectType } from "../entities/revokedToken.entity";
 
 import {
     sendVendorApplicationEmail,
+    sendPasswordChangedEmailInBackground,
     sendVerificationEmailInBackground,
 } from "../utils/nodemailer.utils";
 import AppDataSource from "../config/db.config";
@@ -725,6 +727,9 @@ export class UserController {
                     userId: user.id,
                     email: user.email,
                     role: user.role,
+                    // As /me answers, so a client can greet the shopper by name.
+                    username: user.username ?? null,
+                    profilePicture: user.profilePicture ?? null,
                     ...(permissions ? { permissions } : {}),
                 },
             });
@@ -862,6 +867,8 @@ export class UserController {
                     userId: user.id,
                     email: user.email,
                     role: user.role,
+                    username: user.username ?? null,
+                    profilePicture: user.profilePicture ?? null,
                 },
             });
         } catch (error) {
@@ -1067,7 +1074,9 @@ export class UserController {
             });
 
             const payload = ticket.getPayload();
-            if (!payload || !payload.email) {
+            // An unverified address could belong to someone else, and the
+            // account lookup below links by email.
+            if (!payload || !payload.email || payload.email_verified !== true) {
                 res.status(401).json({
                     success: false,
                     message: "Invalid Google token",
@@ -1135,18 +1144,8 @@ export class UserController {
                 }
             }
 
-            // Issue access + refresh tokens
-            const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
-                this.jwtSecret,
-                { expiresIn: "15m" },
-            );
-
-            const refreshToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
-                config.JWT_REFRESH_SECRET,
-                { expiresIn: "7d" },
-            );
+            // The same pair password login issues.
+            const { token, refreshToken } = issueUserSessionTokens(user);
 
             res.status(200).json({
                 success: true,
@@ -1460,6 +1459,7 @@ export class UserController {
         this.assertPasswordAccount(user, "password");
         await applyPasswordChange(user, req.body);
         await saveUser(user);
+        sendPasswordChangedEmailInBackground(user.email, "customer");
 
         const { token, refreshToken } = issueUserSessionTokens(user);
         const cookie = {
@@ -1844,7 +1844,18 @@ export class UserController {
                 return;
             }
 
-            await userRepo.remove(user);
+            // Only customer accounts are deleted here; staff and admins have
+            // their own console flows, and nobody may remove an admin this way.
+            if (user.role !== UserRole.USER) {
+                res.status(403).json({
+                    success: false,
+                    message: "Only customer accounts can be deleted here",
+                });
+                return;
+            }
+
+            // Anonymise rather than remove: orders keep their customer row.
+            await this.userDeletionService.finalizeUserDeletion(user.id);
 
             res.status(200).json({
                 success: true,
@@ -1974,20 +1985,25 @@ export class UserController {
     }
 
     /**
-     * Kept for the signup wizards that still call it, but it no longer answers
-     * the question: a public "is this email registered?" endpoint is account
-     * enumeration by definition. Signup itself now handles a registered email
-     * without revealing it (see `answerDuplicateSignup`), so the wizards lose
-     * nothing by always hearing "not registered".
+     * Lets the vendor signup wizards stop on the account step when the email
+     * already belongs to a customer or vendor — the same two tables signup
+     * checks. This does answer "is this email registered?" (a product decision,
+     * 2026-10-29), so it is only as safe as `emailLookupLimiter` (20 per 15
+     * minutes per client) makes it. Signup itself still answers a duplicate
+     * without revealing it (`answerDuplicateSignup`).
      */
     async checkEmailExists(
         req: Request<{}, {}, {}, { email: string }>,
         res: Response,
     ): Promise<void> {
-        if (!req.query.email) {
+        const email = String(req.query.email ?? "").trim().toLowerCase();
+        if (!z.string().email().safeParse(email).success) {
             res.status(400).json({ success: false, message: "Enter a valid email address." });
             return;
         }
-        res.json({ success: true, exists: false });
+        const exists = Boolean(
+            (await findUserByEmail(email)) || (await this.vendorService.findVendorForSignup(email)),
+        );
+        res.json({ success: true, exists });
     }
 }

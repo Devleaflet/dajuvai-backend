@@ -41,7 +41,7 @@ import { buildAdminProductSearch } from "../search/admin-product-search";
 import { withAgeRestriction } from "./age-restriction.service";
 import { getManualBannerProductIds } from "../utils/bannerProductSelection";
 import { AuditActorType } from "../entities/auditLog.entity";
-import { auditService } from "./audit.service";
+import { AuditActor, auditService } from "./audit.service";
 
 interface GetProductsOptions {
   search?: string;
@@ -729,6 +729,7 @@ export class ProductService {
     data: Partial<ProductInterface>,
     categoryId: number,
     subcategoryId: number,
+    actor: AuditActor,
   ): Promise<Product> {
     const {
       name,
@@ -1077,6 +1078,20 @@ export class ProductService {
     if (variantsForResponse !== undefined) {
       savedProduct.variants = variantsForResponse;
     }
+    await auditService.record({
+      module: "PRODUCT",
+      action: "UPDATED",
+      entityType: "Product",
+      entityId: savedProduct.id,
+      actor,
+      summary: `Product updated: ${savedProduct.name}`,
+      after: {
+        name: savedProduct.name,
+        stock: savedProduct.stock,
+        status: savedProduct.status,
+        hasVariants: savedProduct.hasVariants,
+      },
+    });
     await this.productSearchIndexer.rebuildProduct(savedProduct.id);
     return savedProduct;
   }
@@ -1890,13 +1905,14 @@ export class ProductService {
 
   /**
    * Throws unless `actor` is an admin or the given product's owning vendor.
-   * `product.vendor` must be loaded by the caller.
+   * `product.vendor` must be loaded by the caller. Returns whichever of the
+   * two it authorized, as the audit actor.
    */
   private async assertProductOwner(
     product: Product,
     actor: ProductActor,
     action: string,
-  ): Promise<void> {
+  ): Promise<AuditActor> {
     if (actor.userId === undefined && actor.vendorId === undefined) {
       throw new APIError(404, "User not found");
     }
@@ -1918,6 +1934,10 @@ export class ProductService {
     if (!isAdmin && !isVendorOwner) {
       throw new APIError(403, `You can only ${action} your own products`);
     }
+
+    return isAdmin
+      ? { type: AuditActorType.ADMIN, id: actor.userId }
+      : { type: AuditActorType.VENDOR, id: actor.vendorId };
   }
 
   async deleteProductImage(
@@ -2143,7 +2163,7 @@ export class ProductService {
       throw new APIError(404, "Product does not exist");
     }
 
-    await this.assertProductOwner(product, actor, "delete");
+    const auditActor = await this.assertProductOwner(product, actor, "delete");
 
     // Archive (soft-delete) rather than hard-delete: order history must
     // never be broken, and OrderItem.product cascades on a real DELETE.
@@ -2162,6 +2182,17 @@ export class ProductService {
       if (variantIds.length > 0) {
         await manager.getRepository(Variant).softDelete(variantIds);
       }
+      await auditService.record(
+        {
+          module: "PRODUCT",
+          action: "ARCHIVED",
+          entityType: "Product",
+          entityId: id,
+          actor: auditActor,
+          summary: `Product archived: ${product.name}`,
+        },
+        manager,
+      );
     });
     await this.removeFromCartsAndWishlists(id);
   }
@@ -2169,7 +2200,7 @@ export class ProductService {
   private async resolveDeletedProductForOwner(
     id: number,
     actor: ProductActor,
-  ): Promise<Product> {
+  ): Promise<{ product: Product; auditActor: AuditActor }> {
     const product = await this.productRepository.findOne({
       where: { id },
       relations: ["vendor"],
@@ -2180,9 +2211,9 @@ export class ProductService {
       throw new APIError(404, "Archived product not found");
     }
 
-    await this.assertProductOwner(product, actor, "restore");
+    const auditActor = await this.assertProductOwner(product, actor, "restore");
 
-    return product;
+    return { product, auditActor };
   }
 
   /**
@@ -2193,7 +2224,7 @@ export class ProductService {
    * are left archived rather than being resurrected.
    */
   async restoreProduct(id: number, actor: ProductActor): Promise<Product> {
-    const product = await this.resolveDeletedProductForOwner(id, actor);
+    const { product, auditActor } = await this.resolveDeletedProductForOwner(id, actor);
 
     // Compared entirely in SQL against the still-archived product row —
     // round-tripping `product.deletedAt` through a JS Date and back loses
@@ -2215,6 +2246,15 @@ export class ProductService {
     if (siblingVariants.length > 0) {
       await this.variantRepository.recover(siblingVariants);
     }
+    await auditService.record({
+      module: "PRODUCT",
+      action: "RESTORED",
+      entityType: "Product",
+      entityId: id,
+      actor: auditActor,
+      summary: `Product restored: ${product.name}`,
+      after: { restoredVariants: siblingVariants.length },
+    });
 
     const restored = await this.productRepository.findOne({
       where: { id },
@@ -2246,7 +2286,7 @@ export class ProductService {
       throw new APIError(404, "Product not found");
     }
 
-    await this.assertProductOwner(product, actor, "restore variants of");
+    const auditActor = await this.assertProductOwner(product, actor, "restore variants of");
 
     if (product.deletedAt) {
       throw new APIError(
@@ -2264,6 +2304,14 @@ export class ProductService {
     }
 
     await this.variantRepository.recover(variant);
+    await auditService.record({
+      module: "PRODUCT",
+      action: "VARIANT_RESTORED",
+      entityType: "Variant",
+      entityId: variantId,
+      actor: auditActor,
+      summary: `Variant ${variant.sku} restored on product: ${product.name}`,
+    });
 
     // A restored variant is invisible otherwise: every read (and the edit
     // form) gates the variants array on hasVariants, and stock/status are
@@ -2311,7 +2359,7 @@ export class ProductService {
       throw new APIError(404, "Product not found");
     }
 
-    await this.assertProductOwner(product, actor, "archive variants of");
+    const auditActor = await this.assertProductOwner(product, actor, "archive variants of");
 
     if (product.deletedAt) {
       throw new APIError(
@@ -2344,6 +2392,17 @@ export class ProductService {
       await manager.getRepository(CartItem).delete({ variantId });
       await manager.getRepository(WishlistItem).delete({ variantId });
       await manager.getRepository(Variant).softDelete(variantId);
+      await auditService.record(
+        {
+          module: "PRODUCT",
+          action: "VARIANT_ARCHIVED",
+          entityType: "Variant",
+          entityId: variantId,
+          actor: auditActor,
+          summary: `Variant ${variant.sku} archived on product: ${product.name}`,
+        },
+        manager,
+      );
     });
 
     // Stock and status are aggregated from the variants, and nothing else

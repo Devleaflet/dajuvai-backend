@@ -3,9 +3,15 @@ import jwt from "jsonwebtoken";
 
 import config from "../config/env.config";
 import { AuthProvider, User } from "../entities/user.entity";
+import { createHash } from "crypto";
+
 import {
+    appCallbackUrl,
     cookieStateStore,
+    isAppChallenge,
+    issueAppCode,
     issueUserSessionTokens,
+    redeemAppCode,
     oauthCallbackUrl,
     resolveOAuthUser,
 } from "./oauth.service";
@@ -174,3 +180,38 @@ describe("cookieStateStore", () => {
         expect(await run("abc", "abd")).toEqual({ ok: false, info: { message: "invalid_state" } });
     });
 });
+
+describe("mobile app sign-in handoff", () => {
+    const verifier = "v".repeat(20) + "-verifier-0123456789abcdefghij";
+    const challenge = createHash("sha256").update(verifier).digest("base64url");
+    const tokens = { token: "access", refreshToken: "refresh" };
+
+    it("accepts only a base64url SHA-256 challenge", () => {
+        expect(isAppChallenge(challenge)).toBe(true);
+        expect(isAppChallenge("short")).toBe(false);
+        expect(isAppChallenge(undefined)).toBe(false);
+    });
+
+    it("redeems once, with the right verifier, before expiry", () => {
+        const code = issueAppCode(tokens, challenge);
+        expect(redeemAppCode(code, verifier)).toEqual(tokens);
+        expect(redeemAppCode(code, verifier)).toBeNull();
+    });
+
+    it("refuses a wrong verifier and burns the code", () => {
+        const code = issueAppCode(tokens, challenge);
+        expect(redeemAppCode(code, "x".repeat(43))).toBeNull();
+        expect(redeemAppCode(code, verifier)).toBeNull();
+    });
+
+    it("refuses an expired code", () => {
+        const code = issueAppCode(tokens, challenge, 0);
+        expect(redeemAppCode(code, verifier, 3 * 60 * 1000)).toBeNull();
+    });
+
+    it("sends only a code or a known error code to the app scheme", () => {
+        expect(appCallbackUrl({ code: "abc" })).toBe("dajuvai://auth/callback?code=abc");
+        expect(appCallbackUrl({ error: "<script>" })).toBe("dajuvai://auth/callback?error=authentication_error");
+    });
+});
+

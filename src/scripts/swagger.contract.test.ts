@@ -6,6 +6,14 @@ const documentedPath = (routePath: string) =>
     routePath.replace(/:\w+/g, (name) => `{${name.slice(1)}}`);
 
 describe("generated Swagger route contract", () => {
+    // QA BUG-009: one request wiped every order in the database.
+    it("mounts no route that deletes every order", () => {
+        const wipe = mountedRouteInventory.filter(
+            (route) => route.method === "DELETE" && /\/order\/delete\/all$/.test(route.path),
+        );
+        expect(wipe).toEqual([]);
+    });
+
     it("describes every mounted operation", () => {
         const document = swaggerSpec as any;
         const missing = mountedRouteInventory

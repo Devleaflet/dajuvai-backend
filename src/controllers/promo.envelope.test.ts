@@ -13,6 +13,9 @@ import { PromoController } from "./promo.controller";
  * to try again. The route's own swagger block documented `success` all along,
  * so this pins the implementation to its contract.
  */
+// The routes sit behind authMiddleware, so a write always carries its admin.
+const admin = { id: 1, role: "ADMIN" };
+
 function fakeResponse() {
     const res: any = {};
     res.status = vi.fn(() => res);
@@ -36,7 +39,7 @@ describe("promo response envelopes", () => {
         const res = fakeResponse();
 
         await controller.updatePromo(
-            { params: { id: 14 }, body: { maxUsagePerUser: 2 } } as any,
+            { params: { id: 14 }, body: { maxUsagePerUser: 2 }, user: admin } as any,
             res,
             vi.fn() as any,
         );
@@ -51,12 +54,12 @@ describe("promo response envelopes", () => {
         const promo = { id: 14, promoCode: "SAVE10" };
         const created = controllerWith({ createPromo: vi.fn(async () => promo) });
         const createdRes = fakeResponse();
-        await created.createPromo({ body: promo } as any, createdRes, vi.fn() as any);
+        await created.createPromo({ body: promo, user: admin } as any, createdRes, vi.fn() as any);
         expect(createdRes.json.mock.calls[0][0]).toMatchObject({ success: true });
 
         const deleted = controllerWith({ deletePromo: vi.fn(async () => undefined) });
         const deletedRes = fakeResponse();
-        await deleted.deletePromo({ params: { id: 14 } } as any, deletedRes, vi.fn() as any);
+        await deleted.deletePromo({ params: { id: 14 }, user: admin } as any, deletedRes, vi.fn() as any);
         expect(deletedRes.json.mock.calls[0][0]).toMatchObject({ success: true });
     });
 });

@@ -20,6 +20,7 @@ import { SubcategoryService } from "./subcategory.service";
 import { CloudinaryService } from "./image.service";
 import { Product } from "../entities/product.entity";
 import { normalizeManualBannerProductIds } from "../utils/bannerProductSelection";
+import { AuditActor, auditService } from "./audit.service";
 
 let cronScheduled = false;
 
@@ -79,7 +80,7 @@ export class BannerService {
         return ids.map((id) => byId.get(id)!);
     }
 
-    async createBanner(dto: CreateBannerInput, adminId: number) {
+    async createBanner(dto: CreateBannerInput, actor: AuditActor) {
         const status = this.determineStatus(
             new Date(dto.startDate),
             new Date(dto.endDate),
@@ -93,7 +94,7 @@ export class BannerService {
             type: dto.type,
             startDate: new Date(dto.startDate),
             endDate: new Date(dto.endDate),
-            createdById: adminId,
+            createdById: actor.id,
             placementAfterSection:
                 dto.type === BannerType.SIDEBAR
                     ? (dto.placementAfterSection ?? 3)
@@ -143,13 +144,21 @@ export class BannerService {
         banner.productSource = dto.productSource;
 
         const savedBanner = await this.bannerRepository.save(banner);
+        await auditService.record({
+            module: "BANNER",
+            action: "CREATED",
+            entityType: "Banner",
+            entityId: savedBanner.id,
+            actor,
+            summary: `Banner created: ${savedBanner.name}`,
+        });
         return savedBanner;
     }
 
     async updateBanner(
         id: number,
         dto: UpdateBannerInput,
-        adminId?: number,
+        actor: AuditActor,
     ): Promise<Banner> {
         const banner = await this.bannerRepository.findOne({
             where: { id },
@@ -216,7 +225,7 @@ export class BannerService {
             banner.startDate,
             banner.endDate,
         );
-        banner.createdById = adminId || banner.createdById;
+        banner.createdById = actor.id || banner.createdById;
 
         if (dto.placementAfterSection !== undefined) {
             banner.placementAfterSection = dto.placementAfterSection;
@@ -228,6 +237,14 @@ export class BannerService {
         }
 
         const savedBanner = await this.bannerRepository.save(banner);
+        await auditService.record({
+            module: "BANNER",
+            action: "UPDATED",
+            entityType: "Banner",
+            entityId: id,
+            actor,
+            summary: `Banner updated: ${savedBanner.name}`,
+        });
         return savedBanner;
     }
 
@@ -414,7 +431,7 @@ export class BannerService {
         }
     }
 
-    async deleteBanner(id: number) {
+    async deleteBanner(id: number, actor: AuditActor) {
         const banner = await this.bannerRepository.findOne({ where: { id } });
         if (banner) {
             await this.deleteBannerImages([
@@ -422,7 +439,18 @@ export class BannerService {
                 banner.mobileImage,
             ]);
         }
-        return await this.bannerRepository.delete(id);
+        const result = await this.bannerRepository.delete(id);
+        if (result.affected) {
+            await auditService.record({
+                module: "BANNER",
+                action: "DELETED",
+                entityType: "Banner",
+                entityId: id,
+                actor,
+                summary: `Banner deleted: ${banner?.name ?? id}`,
+            });
+        }
+        return result;
     }
 
     async searchBannersByName(name: string): Promise<Banner[]> {

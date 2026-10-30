@@ -22,7 +22,7 @@ export class DistrictController {
         if (!parsed.success) {
             return next(new ValidationError("Validation failed", parsed.error.errors.map(e => ({ field: e.path.join("."), message: e.message }))));
         }
-        const district = await this.districtService.createDistrict(parsed.data.name);
+        const district = await this.districtService.createDistrict(parsed.data.name, parsed.data.province ?? null);
         res.status(201).json({ success: true, data: district });
     }
 
@@ -35,7 +35,7 @@ export class DistrictController {
         if (!parsed.success) {
             return next(new ValidationError("Validation failed", parsed.error.errors.map(e => ({ field: e.path.join("."), message: e.message }))));
         }
-        const district = await this.districtService.updateDistrict(idParsed.data.id, parsed.data.name);
+        const district = await this.districtService.updateDistrict(idParsed.data.id, parsed.data.name, parsed.data.province);
         res.status(200).json({ success: true, data: district });
     }
 

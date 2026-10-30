@@ -22,6 +22,8 @@ import { DataSource } from "typeorm";
 import { ReviewService } from "../service/review.service";
 import { CloudinaryService } from "../service/image.service";
 import { UserRole } from "../entities/user.entity";
+import { AuditActorType } from "../entities/auditLog.entity";
+import { userAuditActor } from "../service/audit.service";
 
 /**
  * @class ProductController
@@ -116,7 +118,7 @@ export class ProductController {
     }
 
     async updateProduct(
-        req: VendorAuthRequest<
+        req: CombinedAuthRequest<
             { id: string; categoryId: string; subcategoryId: string },
             {},
             Partial<ProductInterface>,
@@ -141,6 +143,9 @@ export class ProductController {
             data,
             categoryId,
             subcategoryId,
+            req.vendor
+                ? { type: AuditActorType.VENDOR, id: req.vendor.id }
+                : userAuditActor(req.user!),
         );
 
         res.status(200).json({

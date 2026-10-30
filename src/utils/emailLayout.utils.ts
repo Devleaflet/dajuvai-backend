@@ -1,6 +1,51 @@
 import config from "../config/env.config";
 
 /**
+ * The header logo travels inside each email as an inline (cid:) part rather
+ * than as a remote picture: Gmail for new senders and Spam, Outlook by
+ * default, and most corporate clients hide remote images until the reader
+ * allows them, leaving only the alt-text placeholder. [attachInlineLogo]
+ * adds the part to any message that references it.
+ */
+export const EMAIL_LOGO_CID = "dajuvai-logo";
+
+let logoBytes: Promise<Buffer | null> | null = null;
+
+/** The logo PNG, fetched from EMAIL_LOGO_URL once per process. */
+const loadLogo = () =>
+    (logoBytes ??= fetch(config.EMAIL_LOGO_URL, { signal: AbortSignal.timeout(10_000) })
+        .then(async (res) => (res.ok ? Buffer.from(await res.arrayBuffer()) : null))
+        .catch(() => null)
+        .then((bytes) => {
+            if (!bytes) logoBytes = null; // try again on the next email
+            return bytes;
+        }));
+
+type CompiledMail = { data: { html?: unknown; attachments?: unknown[] } };
+
+/**
+ * Nodemailer "compile" plugin. Attaches the logo when the html uses it; if
+ * the logo cannot be fetched, points the image back at the hosted URL so the
+ * email still sends.
+ */
+export function attachInlineLogo(mail: CompiledMail, done: (err?: Error | null) => void): void {
+    const html = typeof mail.data.html === "string" ? mail.data.html : "";
+    const ref = `cid:${EMAIL_LOGO_CID}`;
+    if (!html.includes(ref)) return done();
+    loadLogo().then((bytes) => {
+        if (bytes) {
+            mail.data.attachments = [
+                ...(mail.data.attachments ?? []),
+                { filename: "dajuvai.png", content: bytes, contentType: "image/png", cid: EMAIL_LOGO_CID, contentDisposition: "inline" },
+            ];
+        } else {
+            mail.data.html = html.split(ref).join(config.EMAIL_LOGO_URL);
+        }
+        done();
+    }, done);
+}
+
+/**
  * The one look every DajuVai email shares.
  *
  * Table-based and inline-styled because that is what email clients render;
@@ -291,7 +336,7 @@ export function emailLayout(options: EmailLayoutOptions): string {
             <table role="presentation" class="dv-full" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;min-width:100%;">
               <tr>
                 <td class="dv-pad dv-rule" style="padding:24px 32px 20px;border-bottom:1px solid ${LINE};">
-                  <a href="${esc(appUrl("/"))}" style="text-decoration:none;"><img src="${esc(config.EMAIL_LOGO_URL)}" width="57" height="72" alt="DajuVai" style="display:block;width:57px;height:72px;border:0;outline:none;text-decoration:none;font-size:20px;font-weight:800;color:${BRAND};" /></a>
+                  <a href="${esc(appUrl("/"))}" style="text-decoration:none;"><img src="cid:${EMAIL_LOGO_CID}" width="57" height="72" alt="DajuVai" style="display:block;width:57px;height:72px;border:0;outline:none;text-decoration:none;font-size:20px;font-weight:800;color:${BRAND};" /></a>
                 </td>
               </tr>
               <tr>

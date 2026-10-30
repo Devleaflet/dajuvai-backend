@@ -66,6 +66,7 @@ const editLimiter = generalNotificationLimiter;
  *         sentCount: { type: integer }
  *         failedCount: { type: integer }
  *         skippedCount: { type: integer }
+ *         failureReason: { type: string, nullable: true, description: "Why a FAILED broadcast could not start" }
  *         createdBy: { type: object, properties: { id: { type: integer }, name: { type: string, nullable: true } } }
  *         createdAt: { type: string, format: date-time }
  *         updatedAt: { type: string, format: date-time }

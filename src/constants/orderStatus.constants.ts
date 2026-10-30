@@ -53,13 +53,17 @@ export const CUSTOMER_REASON_STATUSES: ReadonlySet<OrderStatus> = new Set([
 ]);
 
 /**
- * Statuses worth an email. Every other change reaches people through the
- * in-app feed and push only, which saves the mail quota. ORDER_PLACED is
- * absent because checkout already sends its own confirmation.
+ * Statuses worth an email: confirmed, delivered, and the two that need a
+ * reason (delayed, cancelled). Every other change, NOT_RECEIVED and RETURNED
+ * included, reaches the customer through the in-app feed and push only,
+ * which saves the mail quota. ORDER_PLACED is absent because checkout
+ * already sends its own confirmation.
  */
 export const CUSTOMER_EMAIL_STATUSES: ReadonlySet<OrderStatus> = new Set([
-    ...CUSTOMER_REASON_STATUSES,
+    OrderStatus.CONFIRMED,
     OrderStatus.DELIVERED,
+    OrderStatus.DELAYED,
+    OrderStatus.CANCELLED,
 ]);
 /** Vendors are emailed only when they must act: stop, hurry, or expect stock back. */
 export const VENDOR_EMAIL_STATUSES: ReadonlySet<OrderStatus> = CUSTOMER_REASON_STATUSES;

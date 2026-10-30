@@ -1,5 +1,6 @@
 
 import { z } from 'zod';
+import { nepalPhoneNumberSchema } from './phone.zod';
 import { OrderStatus } from '../../entities/order.entity';
 import { PaymentMethod } from '../../entities/order.entity';
 import { CUSTOMER_REASON_STATUSES } from '../../constants/orderStatus.constants';
@@ -68,9 +69,8 @@ export const createOrderSchema = z.object({
     paymentMethod: PaymentMethodEnum,
     // Digits, not merely ten characters: "98AB345678" is the right length and
     // is not a phone number, and it reached the order record unchallenged.
-    phoneNumber: z
-        .string()
-        .regex(/^\d{10}$/, "Phone number must be 10 digits"),
+    // +977 and spaces are normalised away first (QA BUG-016).
+    phoneNumber: nepalPhoneNumberSchema,
     promoCode: z.string().optional(),
     fullName: z.string().optional(),
     isBuyNow: z.boolean().optional(),
@@ -84,6 +84,12 @@ export const createOrderSchema = z.object({
     instrumentName: z.string().trim().min(1).optional(),
     /** Lets a retried checkout resolve to the same order rather than a second. */
     idempotencyKey: z.string().trim().min(1).optional(),
+    // The cart lines the checkout showed as included. Clients that send them
+    // can order around a sold-out line; clients that don't keep the strict rule.
+    cartItems: z
+        .array(z.object({ id: z.number().int().positive(), quantity: z.number().int().positive() }))
+        .max(200)
+        .optional(),
 }).superRefine((values, context) => {
     // Buy Now skips the cart, so the product is the only thing saying what is
     // being bought. Without it the order is created with nothing in it.
@@ -94,6 +100,11 @@ export const createOrderSchema = z.object({
             path: ["productId"],
         });
     }
+});
+
+/** The pending online checkout a shopper is backing out of. */
+export const cancelCheckoutSchema = z.object({
+    draftId: z.number().int().positive(),
 });
 
 export const mobileCheckoutEstimateSchema = z.object({

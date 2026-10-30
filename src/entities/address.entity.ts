@@ -3,16 +3,9 @@ import { Entity, Column, PrimaryGeneratedColumn, CreateDateColumn, UpdateDateCol
 import { User } from './user.entity';
 import { Order } from './order.entity';
 import { District } from './district.entity';
+import { Province } from './province.enum';
 
-export enum Province {
-    Koshi = 'Koshi',
-    MADHESH = 'Madhesh',
-    BAGMATI = 'Bagmati',
-    GANDAKI = 'Gandaki',
-    LUMBINI = 'Lumbini',
-    KARNALI = 'Karnali',
-    SUDURPASHCHIM = 'Sudurpashchim'
-}
+export { Province } from './province.enum';
 
 @Entity('addresses')
 export class Address {

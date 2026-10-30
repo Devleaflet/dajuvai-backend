@@ -14,7 +14,6 @@ import {
 } from "../interface/wishlist.interface";
 import { CartService } from "./cart.service";
 import { Variant } from "../entities/variant.entity";
-import { NotificationService } from "./notification.service";
 import { resolveFinalPrice } from "../utils/pricing.utils";
 import {
     normalizeLegacyProductDiscount,
@@ -162,11 +161,6 @@ export class WishlistService {
                         : item.variant,
                 }));
             }
-
-            // Push notification (fire-and-forget)
-            new NotificationService()
-                .notifyAddToWishlist(userId, product.name)
-                .catch(() => {});
 
             return wishlist!;
         });

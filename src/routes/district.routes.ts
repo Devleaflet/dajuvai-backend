@@ -37,6 +37,12 @@ const districtController = new DistrictController();
  *                 minLength: 1
  *                 description: Unique district name
  *                 example: Central District
+ *               province:
+ *                 type: string
+ *                 nullable: true
+ *                 enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                 description: Province the district belongs to. Optional.
+ *                 example: Bagmati
  *     responses:
  *       201:
  *         description: District created successfully
@@ -57,6 +63,12 @@ const districtController = new DistrictController();
  *                     name:
  *                       type: string
  *                       example: Central District
+ *                     province:
+ *                       type: string
+ *                       nullable: true
+ *                       enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                       description: Null until an admin sets it
+ *                       example: Bagmati
  *       400:
  *         description: Bad request - validation errors or missing required fields
  *         content:
@@ -149,6 +161,12 @@ router.post(
  *                 minLength: 1
  *                 description: Updated district name (unique)
  *                 example: Updated Central District
+ *               province:
+ *                 type: string
+ *                 nullable: true
+ *                 enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                 description: Province to move the district to. Optional.
+ *                 example: Bagmati
  *     responses:
  *       200:
  *         description: District updated successfully
@@ -169,6 +187,12 @@ router.post(
  *                     name:
  *                       type: string
  *                       example: Updated Central District
+ *                     province:
+ *                       type: string
+ *                       nullable: true
+ *                       enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                       description: Null until an admin sets it
+ *                       example: Bagmati
  *       400:
  *         description: Bad request - validation errors or missing name
  *         content:
@@ -273,6 +297,12 @@ router.put(
  *                       name:
  *                         type: string
  *                         example: Central District
+ *                       province:
+ *                         type: string
+ *                         nullable: true
+ *                         enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                         description: Null until an admin sets it
+ *                         example: Bagmati
  *       500:
  *         description: Internal server error
  *         content:
@@ -328,6 +358,12 @@ router.get(
  *                     name:
  *                       type: string
  *                       example: Central District
+ *                     province:
+ *                       type: string
+ *                       nullable: true
+ *                       enum: [Koshi, Madhesh, Bagmati, Gandaki, Lumbini, Karnali, Sudurpashchim]
+ *                       description: Null until an admin sets it
+ *                       example: Bagmati
  *       400:
  *         description: Bad request - invalid district ID
  *         content:

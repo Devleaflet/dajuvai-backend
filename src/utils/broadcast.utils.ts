@@ -137,6 +137,20 @@ export const isPermanentEmailError = (message: string): boolean =>
         message,
     );
 
+/**
+ * A worker error as an admin may read it: its first line (never a stack),
+ * with URL credentials and `password=`-style values blanked, kept short.
+ */
+export function failureReason(error: unknown): string {
+    const message = error instanceof Error ? error.message : String(error);
+    const line = message
+        .split("\n")[0]
+        .replace(/(\b[a-z][a-z0-9+.-]*:\/\/)[^\s/@]+@/gi, "$1")
+        .replace(/\b(password|passwd|pass|secret|token|api[_-]?key)=\S+/gi, "$1=[redacted]")
+        .trim();
+    return (line || "Unknown error").slice(0, 300);
+}
+
 
 // ── Unsubscribe tokens ──────────────────────────────────────────────────────
 // `<type>.<id>.<hmac>`: no expiry, because an unsubscribe link in a months-old

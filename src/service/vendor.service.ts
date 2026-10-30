@@ -27,7 +27,7 @@ import { getVendorDeletionDeadline, isVendorDeletionGracePeriodActive } from "./
 import { Product } from "../entities/product.entity";
 import { Variant } from "../entities/variant.entity";
 import { AuditActorType } from "../entities/auditLog.entity";
-import { auditService } from "./audit.service";
+import { AuditActor, auditService } from "./audit.service";
 
 /**
  * Service for managing vendor-related operations such as
@@ -261,13 +261,25 @@ export class VendorService {
         return this.vendorRepository.findOne({ where: { id } });
     }
 
-    async approveVendor(id: number) {
-        return await this.vendorRepository.update(
+    async approveVendor(id: number, actor: AuditActor) {
+        const vendor = await this.vendorRepository.findOne({ where: { id } });
+        const result = await this.vendorRepository.update(
             { id },
             {
                 isApproved: true,
             },
         );
+        if (result.affected) {
+            await auditService.record({
+                module: "ACCOUNT",
+                action: "APPROVED",
+                entityType: "Vendor",
+                entityId: id,
+                actor,
+                summary: `Vendor approved: ${vendor?.businessName ?? id}`,
+            });
+        }
+        return result;
     }
 
     async requestAccountDeletion(
@@ -476,8 +488,25 @@ export class VendorService {
         return vendors.length;
     }
 
-    async deleteVendor(id: number): Promise<{ affected: number }> {
+    /** Rejecting an applicant is a deletion too; a reason marks it as one. */
+    async deleteVendor(
+        id: number,
+        actor: AuditActor,
+        rejectionReason?: string,
+    ): Promise<{ affected: number }> {
+        // Read first: finalizing anonymizes the name the entry has to carry.
+        const vendor = await this.vendorRepository.findOne({ where: { id } });
         await this.finalizeVendorDeletion(id);
+        const rejected = rejectionReason !== undefined;
+        await auditService.record({
+            module: "ACCOUNT",
+            action: rejected ? "REJECTED" : "DELETED",
+            entityType: "Vendor",
+            entityId: id,
+            actor,
+            summary: `Vendor ${rejected ? "rejected" : "deleted"}: ${vendor?.businessName ?? id}`,
+            after: rejected ? { rejectionReason } : null,
+        });
         return { affected: 1 };
     }
 

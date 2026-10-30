@@ -1,4 +1,6 @@
+import axios from "axios";
 import crypto from "crypto";
+import config from "../config/env.config";
 
 /**
  * eSewa ePay v2 return payload, as found base64-encoded in the `data` query
@@ -78,6 +80,41 @@ export function verifyEsewaReturn(payload: EsewaReturn, secret: string): boolean
     const expected = Buffer.from(esewaSignature(message, secret));
     const received = Buffer.from(payload.fields.signature);
     return expected.length === received.length && crypto.timingSafeEqual(expected, received);
+}
+
+/** eSewa's answer from its status API, or UNKNOWN when it could not be reached. */
+export type EsewaStatus =
+    | "COMPLETE"
+    | "PENDING"
+    | "FULL_REFUND"
+    | "PARTIAL_REFUND"
+    | "AMBIGUOUS"
+    | "NOT_FOUND"
+    | "CANCELED"
+    | "UNKNOWN";
+
+/**
+ * Asks eSewa, server to server, what became of a payment. It is served from
+ * the host the payment form is posted to (rc-epay in UAT, epay in
+ * production). Never throws.
+ */
+export async function checkEsewaStatus(transactionUuid: string, totalAmount: number): Promise<EsewaStatus> {
+    try {
+        const url = new URL("/api/epay/transaction/status/", config.ESEWA_PAYMENT_URL);
+        url.search = new URLSearchParams({
+            product_code: config.ESEWA_MERCHANT,
+            total_amount: String(totalAmount),
+            transaction_uuid: transactionUuid,
+        }).toString();
+        const { data } = await axios.get(url.toString(), { timeout: 15000 });
+        return data?.transaction_uuid === transactionUuid && data?.status ? data.status : "UNKNOWN";
+    } catch (error) {
+        console.error(
+            `[ESEWA] Status check failed for ${transactionUuid}:`,
+            error instanceof Error ? error.message : error,
+        );
+        return "UNKNOWN";
+    }
 }
 
 /** Money is compared in paisa so 1000 and "1,000.0" agree and float noise does not. */

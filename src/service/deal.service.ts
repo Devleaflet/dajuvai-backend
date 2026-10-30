@@ -9,6 +9,7 @@ import {
 import { APIError } from "../utils/ApiError.utils";
 import AppDataSource from "../config/db.config";
 import { User } from "../entities/user.entity";
+import { AuditActor, auditService, userAuditActor } from "./audit.service";
 /**
  * Service for managing deal-related operations including creation, update,
  * retrieval, and deletion of promotional deals.
@@ -60,7 +61,16 @@ export class DealService {
             createdById: adminId,
         });
 
-        return this.dealRepository.save(deal);
+        const saved = await this.dealRepository.save(deal);
+        await auditService.record({
+            module: "DEAL",
+            action: "CREATED",
+            entityType: "Deal",
+            entityId: saved.id,
+            actor: userAuditActor(user),
+            summary: `Deal created: ${saved.name}`,
+        });
+        return saved;
     }
 
     /**
@@ -72,7 +82,7 @@ export class DealService {
      * @throws {APIError} - If deal not found
      * @access Admin
      */
-    async updateDeal(id: number, dto: UpdateDealInput): Promise<Deal> {
+    async updateDeal(id: number, dto: UpdateDealInput, actor: AuditActor): Promise<Deal> {
         const deal = await this.dealRepository.findOne({ where: { id } });
         if (!deal) {
             throw new APIError(404, "Deal not found");
@@ -80,6 +90,15 @@ export class DealService {
 
         // save(), not update(), so a rename also moves the slug.
         await this.dealRepository.save(Object.assign(deal, dto));
+        await auditService.record({
+            module: "DEAL",
+            action: "UPDATED",
+            entityType: "Deal",
+            entityId: id,
+            actor,
+            summary: `Deal updated: ${deal.name}`,
+            after: dto,
+        });
 
         // findOneOrFail throws if entity doesn't exist (safer for chained logic)
         return await this.dealRepository.findOneOrFail({ where: { id } });
@@ -185,7 +204,7 @@ export class DealService {
      * @throws {APIError} - If deal not found
      * @access Admin
      */
-    async deleteDeal(id: number): Promise<Deal> {
+    async deleteDeal(id: number, actor: AuditActor): Promise<Deal> {
         const deal = await this.dealRepository.findOne({ where: { id } });
         if (!deal) {
             throw new APIError(404, "Deal not found");
@@ -220,6 +239,15 @@ export class DealService {
 
         // Delete deal
         await this.dealRepository.delete(id);
+        await auditService.record({
+            module: "DEAL",
+            action: "DELETED",
+            entityType: "Deal",
+            entityId: id,
+            actor,
+            summary: `Deal deleted: ${deal.name}`,
+            after: { unassignedProducts: affectedProducts.length },
+        });
 
         return deal;
     }

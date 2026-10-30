@@ -21,6 +21,8 @@ export interface IOrderCreateRequest {
     fullName?: string;
     idempotencyKey?: string;
     ageRestrictedAcknowledged?: boolean;
+    /** The cart lines the checkout showed as included; see linesToOrder. */
+    cartItems?: Array<{ id: number; quantity: number }>;
 
     // buy now 
     isBuyNow?: boolean;   

@@ -9,6 +9,7 @@ vi.mock("nodemailer", () => ({
                 sent.push(message);
                 return { messageId: "test" };
             },
+            use: () => {},
         }),
     },
 }));
@@ -152,6 +153,6 @@ describe("email templates", () => {
         expect(html).toContain("Rs 450.00"); // Beta: 300 + 150
         expect(html).toContain("Summary by seller");
         expect(html).toContain("Rs 1,550.00"); // order total
-        expect(html).toContain("res.cloudinary.com");
+        expect(html).toContain(`src="cid:dajuvai-logo"`); // inline part, see attachInlineLogo
     });
 });

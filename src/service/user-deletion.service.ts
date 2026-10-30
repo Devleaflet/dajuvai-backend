@@ -11,6 +11,7 @@ import { DeviceToken } from "../entities/deviceToken.entity";
 import { APIError } from "../utils/ApiError.utils";
 import { AuditActorType } from "../entities/auditLog.entity";
 import { auditService } from "./audit.service";
+import { sendAccountDeletionScheduledEmailInBackground } from "../utils/nodemailer.utils";
 import {
     getUserDeletionDeadline,
     isUserDeletionGracePeriodActive,
@@ -109,6 +110,7 @@ export class UserDeletionService {
             );
         });
 
+        sendAccountDeletionScheduledEmailInBackground(user.email, scheduledFor);
         return scheduledFor;
     }
 

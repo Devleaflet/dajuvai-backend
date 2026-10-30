@@ -1,4 +1,4 @@
-import { randomBytes, timingSafeEqual } from "crypto";
+import { createHash, randomBytes, timingSafeEqual } from "crypto";
 import jwt from "jsonwebtoken";
 
 import config from "../config/env.config";
@@ -195,3 +195,70 @@ export const cookieStateStore = {
         callback(null, true);
     },
 };
+
+/**
+ * Social sign-in for the mobile app (RFC 8252, "OAuth for native apps").
+ *
+ * The app opens the same web flow in a system browser tab with
+ * `?client=app&challenge=<base64url sha256 of a secret verifier>`. The
+ * challenge rides in a short-lived cookie to the callback, which then sends the
+ * browser to the app's own scheme with a one-time code instead of the tokens.
+ * The app trades code + verifier for the session at `POST /api/auth/oauth/exchange`.
+ *
+ * Tokens never travel in a URL another app could intercept: a custom scheme can
+ * be claimed by any app, but only the app holding the verifier can redeem.
+ */
+export const APP_CLIENT_COOKIE = "oauth_app";
+export const APP_REDIRECT = "dajuvai://auth/callback";
+const APP_CODE_TTL_MS = 2 * 60 * 1000;
+const CHALLENGE = /^[A-Za-z0-9_-]{43}$/;
+
+export function isAppChallenge(value: unknown): value is string {
+    return typeof value === "string" && CHALLENGE.test(value);
+}
+
+export function appCallbackUrl(outcome: { error: string } | { code: string }): string {
+    const params =
+        "error" in outcome
+            ? new URLSearchParams({
+                  error: OAUTH_ERROR_CODES.has(outcome.error) ? outcome.error : "authentication_error",
+              })
+            : new URLSearchParams({ code: outcome.code });
+    return `${APP_REDIRECT}?${params}`;
+}
+
+type PendingAppSignIn = { token: string; refreshToken: string; challenge: string; expires: number };
+
+// ponytail: in-process store, fine for the single backend container; move to
+// Redis if the API is ever scaled out, or codes minted on one node fail on another.
+const pendingAppSignIns = new Map<string, PendingAppSignIn>();
+
+export function issueAppCode(
+    tokens: { token: string; refreshToken: string },
+    challenge: string,
+    now = Date.now(),
+): string {
+    for (const [code, entry] of pendingAppSignIns) {
+        if (entry.expires <= now) pendingAppSignIns.delete(code);
+    }
+    const code = randomBytes(32).toString("base64url");
+    pendingAppSignIns.set(code, { ...tokens, challenge, expires: now + APP_CODE_TTL_MS });
+    return code;
+}
+
+/** One use only, verifier required, expired codes refused. */
+export function redeemAppCode(
+    code: string,
+    verifier: string,
+    now = Date.now(),
+): { token: string; refreshToken: string } | null {
+    const entry = pendingAppSignIns.get(code);
+    pendingAppSignIns.delete(code);
+    if (!entry || entry.expires <= now) return null;
+    const actual = createHash("sha256").update(verifier).digest("base64url");
+    const ok =
+        actual.length === entry.challenge.length &&
+        timingSafeEqual(Buffer.from(actual), Buffer.from(entry.challenge));
+    return ok ? { token: entry.token, refreshToken: entry.refreshToken } : null;
+}
+

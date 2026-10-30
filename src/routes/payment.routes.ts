@@ -20,6 +20,7 @@ import { sameAmount } from "../utils/esewa.util";
 import { CartService } from "../service/cart.service";
 import { NotificationService } from "../service/notification.service";
 import { OrderService } from "../service/order.service";
+import { confirmPaidNpxOrder } from "../service/npxSettlement";
 import {
     NPS_CONFIG,
     NpsPaymentService,
@@ -52,7 +53,9 @@ async function settleDraftFromGateway(
     merchantTxnId: string,
     verdict: { status: NpsTransactionStatus; raw: any },
 ): Promise<void> {
-    if (draft.status !== CheckoutDraftStatus.PENDING) return;
+    // A payment confirmed after the hold ran out still becomes the order
+    // (materializeDraftOrder re-takes the stock); only a finished one is done.
+    if (draft.status === CheckoutDraftStatus.COMPLETED) return;
     const orderService = new OrderService();
     if (verdict.status === "Success") {
         const collected = verdict.raw?.data?.Amount;
@@ -442,7 +445,7 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
                 throw new APIError(404, "Checkout session not found or no longer active");
             }
             if (draft.expiresAt && draft.expiresAt <= new Date()) {
-                throw new APIError(410, "This checkout session has expired. Please check out again.");
+                throw new APIError(410, "This checkout session has expired. Please check out again.", "CHECKOUT_ENDED");
             }
             // Never trust the client-provided amount over the priced draft.
             const draftTotal = Number(draft.totals?.totalPrice);
@@ -450,12 +453,20 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
                 throw new APIError(400, "Payment amount does not match the checkout total");
             }
 
-            persist = () => {
-                draft.mTransactionId = merchantTxnId;
-                if (draft.payload) {
-                    draft.payload = { ...draft.payload, instrumentName: instrumentCode || null };
+            // Targeted, and only while still pending: saving the whole draft
+            // loaded above could undo an end or a settlement that happened
+            // while the gateway was being called.
+            persist = async () => {
+                const updated = await draftDb.update(
+                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
+                    {
+                        mTransactionId: merchantTxnId,
+                        payload: { ...(draft.payload || {}), instrumentName: instrumentCode || null },
+                    },
+                );
+                if (!updated.affected) {
+                    throw new APIError(410, "This checkout session has ended. Please check out again.", "CHECKOUT_ENDED");
                 }
-                return draftDb.save(draft);
             };
         } else {
             const order = await orderDb.findOne({ where: { id: Number(orderId) } });
@@ -575,6 +586,7 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
         if (error instanceof APIError) {
             res.status(error.status).json({
                 success: false,
+                errorCode: error.errorCode,
                 message: error.message,
             });
         } else {
@@ -866,10 +878,12 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                     );
                     break;
                 }
-                order.paymentStatus = PaymentStatus.PAID;
-                order.status = OrderStatus.CONFIRMED;
                 await cartService.clearCart(userId);
-                await orderDb.save(order);
+                await confirmPaidNpxOrder(order, {
+                    saveOrder: (paid) => orderDb.save(paid),
+                    changeOrderStatus: (id, status, options) =>
+                        new OrderService().changeOrderStatus(id, status, options),
+                });
                 await notificationService.notifyPaymentSuccess(
                     order.id,
                     userId,
@@ -959,6 +973,7 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
         if (error instanceof APIError) {
             res.status(error.status).json({
                 success: false,
+                errorCode: error.errorCode,
                 message: error.message,
             });
         } else {

@@ -3,6 +3,7 @@ import { District } from '../entities/district.entity';
 import AppDataSource from "../config/db.config";
 import { APIError } from "../utils/ApiError.utils";
 import { Vendor } from "../entities/vendor.entity";
+import { Province } from "../entities/province.enum";
 
 /**
  * Service to manage District entities including create, update, delete,
@@ -30,7 +31,7 @@ export class DistrictService {
      * @throws {APIError} - If district name is missing or district already exists
      * @access Admin
      */
-    async createDistrict(districtName: string): Promise<District> {
+    async createDistrict(districtName: string, province: Province | null = null): Promise<District> {
         if (!districtName) {
             throw new APIError(400, "District name is required");
         }
@@ -40,7 +41,7 @@ export class DistrictService {
             throw new APIError(409, "District already exists");
         }
 
-        const newDistrict = this.districtRepository.create({ name: districtName });
+        const newDistrict = this.districtRepository.create({ name: districtName, province });
         return await this.districtRepository.save(newDistrict);
     }
 
@@ -54,9 +55,9 @@ export class DistrictService {
      *                      or duplicate name exists
      * @access Admin
      */
-    async updateDistrict(districtId: number, newName: string): Promise<District> {
-        if (!districtId || !newName) {
-            throw new APIError(400, "District ID and new name are required");
+    async updateDistrict(districtId: number, newName?: string, province?: Province | null): Promise<District> {
+        if (!districtId || (!newName && province === undefined)) {
+            throw new APIError(400, "District ID and a new name or province are required");
         }
 
         const district = await this.findDistrictById(districtId);
@@ -64,12 +65,14 @@ export class DistrictService {
             throw new APIError(404, "District not found");
         }
 
-        const duplicate = await this.districtRepository.findOne({ where: { name: newName } });
-        if (duplicate && duplicate.id !== districtId) {
-            throw new APIError(409, "Another district with the same name already exists");
+        if (newName) {
+            const duplicate = await this.districtRepository.findOne({ where: { name: newName } });
+            if (duplicate && duplicate.id !== districtId) {
+                throw new APIError(409, "Another district with the same name already exists");
+            }
+            district.name = newName;
         }
-
-        district.name = newName;
+        if (province !== undefined) district.province = province;
         return await this.districtRepository.save(district);
     }
 
@@ -111,7 +114,7 @@ export class DistrictService {
      * @access Public/Admin
      */
     async getDistricts(): Promise<District[]> {
-        return await this.districtRepository.find();
+        return await this.districtRepository.find({ order: { name: "ASC" } });
     }
 
     /**

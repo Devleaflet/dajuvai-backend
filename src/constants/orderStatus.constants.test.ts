@@ -9,9 +9,9 @@ import {
 } from "./orderStatus.constants";
 
 describe("order status notification policy", () => {
-    it("emails only on statuses that matter", () => {
+    it("emails the customer only on confirmed, delivered, delayed and cancelled", () => {
         expect([...CUSTOMER_EMAIL_STATUSES].sort()).toEqual(
-            ["CANCELLED", "DELAYED", "DELIVERED", "NOT_RECEIVED", "RETURNED"],
+            ["CANCELLED", "CONFIRMED", "DELAYED", "DELIVERED"],
         );
         expect(VENDOR_EMAIL_STATUSES.has(OrderStatus.CONFIRMED)).toBe(false);
         expect(VENDOR_EMAIL_STATUSES.has(OrderStatus.CANCELLED)).toBe(true);

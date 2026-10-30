@@ -6,6 +6,8 @@ import {
   UpdatePromoCodeInput,
 } from "../utils/zod_validations/promo.zod";
 import { APIError, BadRequestError } from "../errors";
+import { AuthRequest } from "../middlewares/auth.middleware";
+import { userAuditActor } from "../service/audit.service";
 
 export class PromoController {
   private promoService: PromoService;
@@ -19,24 +21,25 @@ export class PromoController {
     res.status(200).json({ success: true, data: promoCodes });
   }
 
-  async createPromo(req: Request, res: Response, _next: NextFunction) {
+  async createPromo(req: AuthRequest, res: Response, _next: NextFunction) {
     const promoCode = await this.promoService.createPromo(
       req.body as CreatePromoCodeInput,
+      userAuditActor(req.user!),
     );
     res.status(201).json({ success: true, promocode: promoCode });
   }
 
-  async deletePromo(req: Request, res: Response, next: NextFunction) {
+  async deletePromo(req: AuthRequest<{ id: number }>, res: Response, next: NextFunction) {
     if (!req.params.id)
       return next(new BadRequestError("Promo id is required"));
-    await this.promoService.deletePromo(req.params);
+    await this.promoService.deletePromo(req.params, userAuditActor(req.user!));
     res
       .status(200)
       .json({ success: true, msg: "Promo code deleted successfully" });
   }
 
   async updatePromo(
-    req: Request<{ id: number }, {}, UpdatePromoCodeInput, {}>,
+    req: AuthRequest<{ id: number }, {}, UpdatePromoCodeInput, {}>,
     res: Response,
     next: NextFunction,
   ) {
@@ -59,6 +62,7 @@ export class PromoController {
     const updatePromo = await this.promoService.updatePromoCodeById(
       req.params.id,
       data,
+      userAuditActor(req.user!),
     );
 
     res

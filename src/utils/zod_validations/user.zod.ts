@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { nepalPhoneNumberSchema } from "./phone.zod";
 import { UserRole } from '../../entities/user.entity';
 import { Province } from '../../entities/address.entity';
 import { ModuleName, PermissionLevel } from '../../entities/permission.enum';
@@ -31,7 +32,7 @@ export const signupSchema = z.object({
 export const staffSignupSchema = z.object({
     email: z.string().email('Invalid email format'),
     password: z.string().min(8, 'Password must be at least 8 characters long'),
-    phoneNumber: z.string().length(10, "Phone number must have 10 digits"),
+    phoneNumber: nepalPhoneNumberSchema,
     fullName: z.string().optional(),
     permissions: z.object({
         order: z.nativeEnum(PermissionLevel).optional(),
@@ -74,6 +75,12 @@ export const userDeleteAccountSchema = z.object({
  * Schema for reactivating an account scheduled for deletion
  * (email/password accounts only; OAuth accounts reactivate via sign-in).
  */
+/** The mobile app trading its one-time social sign-in code for a session. */
+export const oauthAppExchangeSchema = z.object({
+    code: z.string().min(16).max(128),
+    verifier: z.string().regex(/^[A-Za-z0-9._~-]{43,128}$/, 'Invalid verifier'),
+});
+
 export const userReactivateSchema = z.object({
     email: z.string().email('Invalid email format'),
     password: z.string().min(1, 'Password is required'),
@@ -129,10 +136,7 @@ const permissionsSchema = z.object({
 export const updateStaffSchema = z.object({
     email: z.string().email("Invalid email format").optional(),
     fullName: z.string().min(1, "Full name is required").optional(),
-    phoneNumber: z
-        .string()
-        .regex(/^[0-9]{7,15}$/, "Invalid phone number")
-        .optional(),
+    phoneNumber: nepalPhoneNumberSchema.optional(),
     password: z.string()
         .min(8, "Password must be at least 8 characters long")
         .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
@@ -158,10 +162,7 @@ export const updateUserSchema = z.object({
     fullName: z.string().min(1, "Full name is required").optional(),
     username: z.string().min(1, "Username is required").optional(),
     email: z.string().email("Invalid email format").optional(),
-    phoneNumber: z
-        .string()
-        .regex(/^[0-9]{7,15}$/, "Invalid phone number")
-        .optional(),
+    phoneNumber: nepalPhoneNumberSchema.optional(),
     role: z.nativeEnum(UserRole, {
         errorMap: () => ({ message: "Invalid role" }),
     }).optional(),

@@ -160,7 +160,19 @@ export const createBannerSchema = baseBannerSchema
             message: 'External link must be provided for external product source',
             path: ['externalLink'],
         }
-    );
+    )
+    // Hero and shop (PRODUCT) banners are drawn from a desktop and a mobile
+    // file, each cropped to its own fixed size by the admin console.
+    .refine((data) => !NEEDS_BOTH_IMAGES.includes(data.type) || !!data.desktopImage, {
+        message: 'Desktop image is required for hero and shop banners',
+        path: ['desktopImage'],
+    })
+    .refine((data) => !NEEDS_BOTH_IMAGES.includes(data.type) || !!data.mobileImage, {
+        message: 'Mobile image is required for hero and shop banners',
+        path: ['mobileImage'],
+    });
+
+const NEEDS_BOTH_IMAGES: BannerType[] = [BannerType.HERO, BannerType.PRODUCT];
 
 // Update schema: all fields are optional for partial updates
 export const updateBannerSchema = baseBannerSchema.partial();

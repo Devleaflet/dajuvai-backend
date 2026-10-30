@@ -20,6 +20,7 @@ import {
     updateStaffSchema,
     userDeleteAccountSchema,
     userReactivateSchema,
+    oauthAppExchangeSchema,
     verificationTokenSchema,
     verifyEmailChangeSchema,
     verifyTokenSchema,
@@ -27,13 +28,28 @@ import {
     verifyCurrentPasswordSchema,
 } from "../utils/zod_validations/user.zod";
 import { deleteUserDataByFacebookId, getFormattedStaffPermissions } from "../service/user.service";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
+import { parseFacebookSignedRequest } from "../utils/facebookSignedRequest";
+import { asyncHandler } from "../utils/asyncHandler.utils";
 import { APIError } from "../utils/ApiError.utils";
 import { AuthProvider, UserRole } from "../entities/user.entity";
 import {
+    APP_CLIENT_COOKIE,
+    appCallbackUrl,
+    isAppChallenge,
+    issueAppCode,
     issueUserSessionTokens,
     oauthCallbackUrl,
     OAuthProvider,
+    redeemAppCode,
 } from "../service/oauth.service";
+import {
+    credentialRateLimiter,
+    credentialSprayLimiter,
+    perRouteClientKey,
+    signupRateLimiter,
+} from "../middlewares/credentialRateLimit.middleware";
 import config from "../config/env.config";
 import { publicRateLimitKey } from "../middlewares/publicRateLimit.middleware";
 
@@ -50,7 +66,17 @@ const frontendUrl = config.FRONTEND_URL;
  */
 const oauthCallback =
     (provider: OAuthProvider) => (req: Request, res: Response, next: NextFunction) => {
-        const fail = (code: string) => res.redirect(oauthCallbackUrl(frontendUrl, provider, { error: code }));
+        // Started by the mobile app (see `rememberAppClient`): answer the app's
+        // own scheme with a one-time code instead of the web callback.
+        const appChallenge = req.cookies?.[APP_CLIENT_COOKIE];
+        res.clearCookie(APP_CLIENT_COOKIE, { path: "/api/auth" });
+        const forApp = isAppChallenge(appChallenge);
+        const fail = (code: string) =>
+            res.redirect(
+                forApp
+                    ? appCallbackUrl({ error: code })
+                    : oauthCallbackUrl(frontendUrl, provider, { error: code }),
+            );
 
         // The user pressed Cancel on the provider's consent screen.
         if (req.query.error === "access_denied") return fail("access_denied");
@@ -63,6 +89,11 @@ const oauthCallback =
             if (!result) return fail(info?.message || "authentication_error");
 
             const { token, refreshToken } = issueUserSessionTokens(result.user);
+            if (forApp) {
+                return res.redirect(
+                    appCallbackUrl({ code: issueAppCode({ token, refreshToken }, appChallenge) }),
+                );
+            }
             const cookie = {
                 httpOnly: true,
                 secure: config.NODE_ENV === "production",
@@ -74,13 +105,34 @@ const oauthCallback =
         })(req, res, next);
     };
 
+/**
+ * Marks a social sign-in as started by the mobile app. Anything else clears the
+ * marker, so a web sign-in in the same browser never ends in the app.
+ */
+const rememberAppClient = (req: Request, res: Response, next: NextFunction) => {
+    const challenge = req.query.challenge;
+    if (req.query.client === "app" && isAppChallenge(challenge)) {
+        res.cookie(APP_CLIENT_COOKIE, challenge, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "lax",
+            path: "/api/auth",
+            maxAge: 10 * 60 * 1000,
+        });
+    } else {
+        res.clearCookie(APP_CLIENT_COOKIE, { path: "/api/auth" });
+    }
+    next();
+};
+
 // Rate limiter for sensitive endpoints
 export const authRateLimiter = rateLimit({
     windowMs: 15 * 60 * 1000, // 15 minutes
     max: 5, // Limit each client to 5 requests per window
     // Keyed on the real client behind the Next proxy, not the proxy itself —
-    // otherwise every shopper shares one allowance.
-    keyGenerator: publicRateLimitKey as Options["keyGenerator"],
+    // otherwise every shopper shares one allowance — and on the route, so
+    // the flows this guards each get their own five (QA BUG-020).
+    keyGenerator: perRouteClientKey as Options["keyGenerator"],
     message: "Too many requests, please try again later.",
 });
 
@@ -813,7 +865,7 @@ userRouter.put(
  *                   type: string
  *                   example: Internal server error
  */
-userRouter.post("/admin/login", userController.adminLogin.bind(userController));
+userRouter.post("/admin/login", credentialSprayLimiter, credentialRateLimiter, userController.adminLogin.bind(userController));
 
 /**
  * @swagger
@@ -887,6 +939,7 @@ userRouter.get(
     "/users",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.CUSTOMER, PermissionLevel.VIEW),
     userController.getUsers.bind(userController),
 );
 
@@ -991,6 +1044,7 @@ userRouter.get(
  */
 userRouter.post(
     "/signup",
+    signupRateLimiter,
     validateZod(signupSchema),
     userController.signup.bind(userController),
 );
@@ -1161,6 +1215,13 @@ userRouter.post(
  *                     role:
  *                       type: string
  *                       example: "user"
+ *                     username:
+ *                       type: string
+ *                       nullable: true
+ *                       example: "Asha"
+ *                     profilePicture:
+ *                       type: string
+ *                       nullable: true
  *             example:
  *               success: true
  *               token: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.access"
@@ -1182,6 +1243,8 @@ userRouter.post(
  */
 userRouter.post(
     "/login",
+    credentialSprayLimiter,
+    credentialRateLimiter,
     validateZod(loginSchema),
     userController.login.bind(userController),
 );
@@ -1314,6 +1377,7 @@ userRouter.post(
  */
 userRouter.get(
     "/google",
+    rememberAppClient,
     passport.authenticate("google", { scope: ["email", "profile"] }),
 );
 
@@ -1370,6 +1434,7 @@ userRouter.get(
  */
 userRouter.post(
     "/google/mobile",
+    authRateLimiter,
     userController.googleMobileLogin.bind(userController),
 );
 
@@ -1495,26 +1560,22 @@ userRouter.get(
  * /api/auth/facebook/data-deletion:
  *   post:
  *     summary: Facebook Data Deletion Callback
- *     description: Endpoint that Facebook calls when a user requests deletion of their data. Deletes the user and related data from the system.
+ *     description: Endpoint that Facebook calls when a user requests deletion of their data. Verifies the HMAC-SHA256 signed_request with the app secret, then schedules the account's normal grace-period deletion. Answers the same way whether or not the Facebook id is known.
  *     tags:
  *       - Facebook
  *     requestBody:
- *       description: Data deletion request payload from Facebook
+ *       description: Facebook's signed deletion request
  *       required: true
  *       content:
- *         application/json:
+ *         application/x-www-form-urlencoded:
  *           schema:
  *             type: object
  *             properties:
- *               user_id:
+ *               signed_request:
  *                 type: string
- *                 description: Facebook user ID of the user to delete
- *               deletion_request_id:
- *                 type: string
- *                 description: Unique ID of the deletion request provided by Facebook
+ *                 description: base64url HMAC-SHA256 signature and payload, signed with the app secret
  *             required:
- *               - user_id
- *               - deletion_request_id
+ *               - signed_request
  *     responses:
  *       200:
  *         description: Successful deletion confirmation response to Facebook
@@ -1528,40 +1589,12 @@ userRouter.get(
  *                   description: URL of the confirmation page shown to the user
  *                 confirmation_code:
  *                   type: string
- *                   description: The deletion request ID from Facebook
- *                 status:
- *                   type: string
- *                   description: Status of the deletion request processing, typically "complete"
+ *                   description: Code the person can quote to check their request
  *               example:
- *                 url: https://dajuvai-frontend-ykrq.vercel.app/deletion-confirmation
- *                 confirmation_code: 1234567890
- *                 status: complete
+ *                 url: https://dajuvai.com/data-deletion?code=4f1c2a9be07d33a1c5e8a2b0
+ *                 confirmation_code: 4f1c2a9be07d33a1c5e8a2b0
  *       400:
- *         description: Missing required fields in request body
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 msg:
- *                   type: string
- *                   example: Missing user_id or deletion_request_id
- *       404:
- *         description: User not found for given Facebook ID
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 msg:
- *                   type: string
- *                   example: User not found
+ *         description: signed_request missing, malformed or not signed with our app secret
  *       500:
  *         description: Internal server error
  *         content:
@@ -1578,33 +1611,23 @@ userRouter.get(
  */
 userRouter.post(
     "/facebook/data-deletion",
-    async (req: Request, res: Response) => {
-        try {
-            const { user_id } = req.body;
-            if (typeof user_id !== "string" || !user_id.trim()) {
-                res.status(400).json({ success: false, errorCode: "VALIDATION_ERROR", message: "user_id is required" });
-                return;
-            }
-            const deleteUser = await deleteUserDataByFacebookId(user_id);
-            res.status(200).json({
-                success: true,
-                msg: "User deleted succesfully",
-                data: deleteUser,
-            });
-        } catch (error) {
-            if (error instanceof APIError) {
-                res.status(error.status).json({
-                    success: false,
-                    msg: error.message,
-                });
-            } else {
-                res.status(500).json({
-                    success: false,
-                    msg: "Internal server error",
-                });
-            }
+    authRateLimiter,
+    asyncHandler(async (req: Request, res: Response) => {
+        // Facebook posts a form field, signed with the app secret. Nothing
+        // unsigned is trusted: a bare user_id would let anyone delete anyone.
+        const payload = parseFacebookSignedRequest(req.body?.signed_request, config.FACEBOOK_APP_SECRET);
+        if (!payload) {
+            res.status(400).json({ success: false, errorCode: "INVALID_SIGNED_REQUEST", message: "Invalid signed_request" });
+            return;
         }
-    },
+        const { confirmationCode } = await deleteUserDataByFacebookId(payload.user_id);
+        // The shape Facebook requires: where the person can check the request,
+        // and a code they can quote. No account data is ever echoed.
+        res.status(200).json({
+            url: new URL(`/data-deletion?code=${confirmationCode}`, config.FRONTEND_URL).toString(),
+            confirmation_code: confirmationCode,
+        });
+    }),
 );
 
 /**
@@ -1620,7 +1643,64 @@ userRouter.post(
  */
 userRouter.get(
     "/facebook",
+    rememberAppClient,
     passport.authenticate("facebook", { scope: ["email", "public_profile"] }),
+);
+
+/**
+ * @swagger
+ * /api/auth/oauth/exchange:
+ *   post:
+ *     summary: Finish a mobile app social sign-in
+ *     description: >
+ *       The app starts Google or Facebook sign-in in a browser tab with
+ *       `?client=app&challenge=<base64url SHA-256 of a verifier>`; the callback
+ *       returns to `dajuvai://auth/callback?code=…`. This trades that one-time
+ *       code, with the verifier, for a session. Codes expire after two minutes
+ *       and work once.
+ *     tags: [Authentication]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [code, verifier]
+ *             properties:
+ *               code:
+ *                 type: string
+ *               verifier:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Session issued
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: true
+ *                 token:
+ *                   type: string
+ *                 refreshToken:
+ *                   type: string
+ *       400:
+ *         description: Code unknown, expired, already used, or verifier mismatch
+ */
+userRouter.post(
+    "/oauth/exchange",
+    authRateLimiter,
+    validateZod(oauthAppExchangeSchema),
+    (req: Request, res: Response) => {
+        const session = redeemAppCode(req.body.code, req.body.verifier);
+        if (!session) {
+            res.status(400).json({ success: false, errorCode: "INVALID_CODE", message: "Sign-in expired. Please try again." });
+            return;
+        }
+        res.status(200).json({ success: true, ...session });
+    },
 );
 
 /**
@@ -2497,7 +2577,8 @@ userRouter.delete(
     "/:id",
     authMiddleware,
     isAdminOrStaff,
-    userController.deleteUserHandler,
+    checkPermission(ModuleName.CUSTOMER, PermissionLevel.DELETE),
+    userController.deleteUserHandler.bind(userController),
 );
 
 /**

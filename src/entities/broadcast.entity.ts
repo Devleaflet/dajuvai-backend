@@ -9,7 +9,8 @@ import {
 } from "typeorm";
 
 // Schema: migrations 1785900000000 (tables, from the original broadcast
-// branch) and 1787700000000 (claims and result counters).
+// branch), 1787700000000 (claims and result counters) and 1788200000000
+// (failure reason).
 
 export enum BroadcastStatus {
     DRAFT = "DRAFT",
@@ -88,7 +89,8 @@ export class Broadcast {
     @Column({ type: "enum", enum: BroadcastStatus, default: BroadcastStatus.DRAFT })
     status: BroadcastStatus;
 
-    @Column({ type: "enum", enum: BroadcastAudienceType })
+    // enumName: TypeORM's default lowercases the column; the migration did not.
+    @Column({ type: "enum", enum: BroadcastAudienceType, enumName: "broadcasts_audienceType_enum" })
     audienceType: BroadcastAudienceType;
 
     @Column({ type: "jsonb" })
@@ -125,6 +127,10 @@ export class Broadcast {
 
     @Column({ type: "int", default: 0 })
     skippedCount: number;
+
+    // Why a broadcast that never started is FAILED; see failureReason().
+    @Column({ type: "varchar", length: 300, nullable: true })
+    failureReason?: string | null;
 
     @CreateDateColumn({ type: "timestamptz" })
     createdAt: Date;
@@ -184,7 +190,8 @@ export class BroadcastRecipient {
     @Column({ type: "uuid" })
     broadcastId: string;
 
-    @Column({ type: "enum", enum: BroadcastRecipientType })
+    // enumName: the worker casts to this, the name migration 1785900000000 created.
+    @Column({ type: "enum", enum: BroadcastRecipientType, enumName: "broadcast_recipients_recipientType_enum" })
     recipientType: BroadcastRecipientType;
 
     @Column({ type: "int", nullable: true })

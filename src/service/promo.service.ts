@@ -4,6 +4,7 @@ import AppDataSource from "../config/db.config";
 import { CreatePromoCodeInput, PromoIdParam, UpdatePromoCodeInput } from "../utils/zod_validations/promo.zod";
 import { APIError } from "../utils/ApiError.utils";
 import { normalizePromoCode } from "./promoRules";
+import { AuditActor, auditService } from "./audit.service";
 
 export class PromoService {
 
@@ -16,7 +17,7 @@ export class PromoService {
         return await this.promoRepository.find();
     }
 
-    async createPromo(data: CreatePromoCodeInput): Promise<Promo> {
+    async createPromo(data: CreatePromoCodeInput, actor: AuditActor): Promise<Promo> {
         const newpromoCode = this.promoRepository.create({
             ...data,
             // Store codes normalized (trim + uppercase) so customer-facing
@@ -25,11 +26,19 @@ export class PromoService {
         })
 
         const savedpromoCode = await this.promoRepository.save(newpromoCode);
+        await auditService.record({
+            module: "PROMO",
+            action: "CREATED",
+            entityType: "Promo",
+            entityId: savedpromoCode.id,
+            actor,
+            summary: `Promo code created: ${savedpromoCode.promoCode}`,
+        });
 
         return savedpromoCode;
     }
 
-    async deletePromo(data: PromoIdParam) {
+    async deletePromo(data: PromoIdParam, actor: AuditActor) {
 
         const promo = await this.promoRepository.findOne({
             where: {
@@ -39,9 +48,15 @@ export class PromoService {
         if (!promo) {
             throw new APIError(404, "Promo code not found");
         }
-        const deletedPromo = this.promoRepository.delete(data.id);
-
-        console.log("deleted promo code", deletedPromo);
+        const deletedPromo = await this.promoRepository.delete(data.id);
+        await auditService.record({
+            module: "PROMO",
+            action: "DELETED",
+            entityType: "Promo",
+            entityId: data.id,
+            actor,
+            summary: `Promo code deleted: ${promo.promoCode}`,
+        });
         return deletedPromo;
     }
 
@@ -65,7 +80,7 @@ export class PromoService {
         })
     }
 
-    async updatePromoCodeById(promoId: number, data: UpdatePromoCodeInput) {
+    async updatePromoCodeById(promoId: number, data: UpdatePromoCodeInput, actor: AuditActor) {
         const payload: Partial<UpdatePromoCodeInput> & { id: number } = {
             // Coerced here as well as in the route's params schema. `save()`
             // reads a string primary key as "no key yet" and INSERTs, so a
@@ -77,6 +92,16 @@ export class PromoService {
         if (data.promoCode) {
             payload.promoCode = normalizePromoCode(data.promoCode);
         }
-        return await this.promoRepository.save(payload);
+        const saved = await this.promoRepository.save(payload);
+        await auditService.record({
+            module: "PROMO",
+            action: "UPDATED",
+            entityType: "Promo",
+            entityId: payload.id,
+            actor,
+            summary: `Promo code updated: ${saved.promoCode ?? payload.id}`,
+            after: payload,
+        });
+        return saved;
     }
 }

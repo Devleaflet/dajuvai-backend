@@ -2,10 +2,16 @@ import { Brackets, EntityManager, In } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { AuditActorType, AuditLog } from "../entities/auditLog.entity";
 import { redactAuditValue } from "../utils/audit-redaction.utils";
-import { User } from "../entities/user.entity";
+import { User, UserRole } from "../entities/user.entity";
 import { Vendor } from "../entities/vendor.entity";
 
 export type AuditActor = { type: AuditActorType; id?: number | null };
+
+/** A console user as an audit actor: staff and admins are both users, told apart by role. */
+export const userAuditActor = (user: { id: number; role?: UserRole | null }): AuditActor => ({
+  type: user.role === UserRole.STAFF ? AuditActorType.STAFF : AuditActorType.ADMIN,
+  id: user.id,
+});
 export type AuditInput = { module: string; action: string; entityType: string; entityId?: string | number | null; actor: AuditActor; summary: string; before?: Record<string, unknown> | null; after?: Record<string, unknown> | null; requestId?: string | null; ipAddress?: string | null; userAgent?: string | null };
 export type AuditListQuery = {
   page: number;
@@ -109,8 +115,11 @@ export class AuditService {
         return { ...log, actor: { id: null, type: AuditActorType.SYSTEM, name: "System", email: null, phoneNumber: null, displayName: "System (SYSTEM)" } };
       }
 
-      const user = log.actorId == null ? undefined : usersById.get(log.actorId);
-      const vendor = log.actorId == null ? undefined : vendorsById.get(log.actorId);
+      // Users and vendors are separate tables whose ids overlap, so look up
+      // only the kind of account the actor type names (QA NEW-2).
+      const isVendor = log.actorType === AuditActorType.VENDOR;
+      const user = log.actorId == null || isVendor ? undefined : usersById.get(log.actorId);
+      const vendor = log.actorId == null || !isVendor ? undefined : vendorsById.get(log.actorId);
       const name = vendor?.businessName?.trim()
         || user?.fullName?.trim()
         || user?.username?.trim()

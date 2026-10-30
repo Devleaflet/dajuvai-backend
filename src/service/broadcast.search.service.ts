@@ -69,7 +69,7 @@ export class BroadcastSearchService {
         const t = user
             ? {
                   from: `"user" p`,
-                  base: `p.role = 'user' AND p."deletionRequestedAt" IS NULL`,
+                  base: `p.role = 'user' AND p."deletionRequestedAt" IS NULL AND p."deletionFinalizedAt" IS NULL`,
                   name: `COALESCE(NULLIF(p."fullName", ''), p.username)`,
                   columns: [`p."fullName"`, `p.username`, `p.email`],
                   detail: `NULL::text`,
@@ -78,7 +78,7 @@ export class BroadcastSearchService {
               }
             : {
                   from: `"vendor" p`,
-                  base: `p."deletionRequestedAt" IS NULL`,
+                  base: `p."deletionRequestedAt" IS NULL AND p."deletionFinalizedAt" IS NULL`,
                   name: `p."businessName"`,
                   columns: [`p."businessName"`, `p.email`, `d.name`],
                   detail: `d.name`,

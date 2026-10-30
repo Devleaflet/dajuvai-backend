@@ -3,6 +3,7 @@ import { CreateDealInput, UpdateDealInput } from "../utils/zod_validations/deal.
 import { AuthRequest } from "../middlewares/auth.middleware";
 import { DealStatus } from "../entities/deal.entity";
 import { DealService } from "../service/deal.service";
+import { userAuditActor } from "../service/audit.service";
 
 export class DealController {
     private dealService: DealService;
@@ -17,7 +18,7 @@ export class DealController {
     }
 
     async updateDeal(req: AuthRequest<{ id: string }, {}, UpdateDealInput>, res: Response, _next: NextFunction): Promise<void> {
-        const deal = await this.dealService.updateDeal(Number(req.params.id), req.body);
+        const deal = await this.dealService.updateDeal(Number(req.params.id), req.body, userAuditActor(req.user!));
         res.status(200).json({ success: true, data: deal });
     }
 
@@ -33,7 +34,7 @@ export class DealController {
     }
 
     async deleteDeal(req: AuthRequest<{ id: string }>, res: Response, _next: NextFunction): Promise<void> {
-        const deletedDeal = await this.dealService.deleteDeal(Number(req.params.id));
+        const deletedDeal = await this.dealService.deleteDeal(Number(req.params.id), userAuditActor(req.user!));
         res.status(200).json({ success: true, msg: "Deal deleted successfully", deletedDeal });
     }
 }

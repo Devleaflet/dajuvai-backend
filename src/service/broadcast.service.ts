@@ -32,7 +32,7 @@ import {
 } from "../jobs/broadcast.jobs";
 import { resolveEntityId } from "../middlewares/slug.middleware";
 import { emitNotification } from "../socket/socket";
-import { verifyUnsubscribeToken } from "../utils/broadcast.utils";
+import { failureReason, verifyUnsubscribeToken } from "../utils/broadcast.utils";
 import { sendToTokens } from "../utils/fcm.utils";
 import {
     BroadcastDeliveriesQuery,
@@ -413,7 +413,7 @@ export class BroadcastService {
                     );
                 }
             } catch (error) {
-                results.push({ channel, status: "FAILED", detail: error instanceof Error ? error.message : String(error) });
+                results.push({ channel, status: "FAILED", detail: failureReason(error) });
             }
         }
         return { results };
@@ -537,6 +537,7 @@ export class BroadcastService {
             sentCount: broadcast.sentCount,
             failedCount: broadcast.failedCount,
             skippedCount: broadcast.skippedCount,
+            failureReason: broadcast.failureReason ?? null,
             createdBy: creators.get(broadcast.createdById) ?? { id: broadcast.createdById, name: null },
             createdAt: broadcast.createdAt,
             updatedAt: broadcast.updatedAt,

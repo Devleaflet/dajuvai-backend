@@ -1,3 +1,4 @@
+import { lookupRateLimiter } from "../middlewares/credentialRateLimit.middleware";
 import { Router } from "express";
 import { OrderController } from "../controllers/order.controller";
 import {
@@ -14,6 +15,7 @@ import { checkPermission } from "../middlewares/permission.middleware";
 import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import { validateZod } from "../middlewares/validation.middleware";
 import {
+    cancelCheckoutSchema,
     createOrderSchema,
     shippingAddressSchema,
     updateOrderStatusSchema,
@@ -97,6 +99,32 @@ const orderController = new OrderController();
  *                 message:
  *                   type: string
  *                   example: "Cart is empty"
+ *       409:
+ *         description: >-
+ *           Stock changed under this checkout. INSUFFICIENT_STOCK names each affected
+ *           line in details.items; CHECKOUT_CHANGED means the cart differs from the
+ *           cartItems sent. Online payments hold their stock while the shopper pays.
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 success:
+ *                   type: boolean
+ *                   example: false
+ *                 errorCode:
+ *                   type: string
+ *                   example: "INSUFFICIENT_STOCK"
+ *                 message:
+ *                   type: string
+ *                   example: 'Only 5 of "Ten Pack Mug" left — you asked for 8. Review your order, then place it again.'
+ *                 details:
+ *                   type: object
+ *                   properties:
+ *                     items:
+ *                       type: array
+ *                       items:
+ *                         $ref: '#/components/schemas/StockIssue'
  *       401:
  *         description: Unauthorized request
  *         content:
@@ -196,11 +224,62 @@ router.post(
  *                     grandTotal:
  *                       type: number
  *                       example: 4300
+ *                     unavailableItems:
+ *                       type: array
+ *                       description: Cart lines priced out of these totals because they can't be filled.
+ *                       items:
+ *                         $ref: '#/components/schemas/StockIssue'
+ *       409:
+ *         description: A Buy Now item that can't be filled (INSUFFICIENT_STOCK, see details.items)
  */
 router.post(
     "/estimate",
     authMiddleware,
     asyncHandler(orderController.estimateCheckout.bind(orderController)),
+);
+
+/**
+ * @swagger
+ * /api/order/checkout/cancel:
+ *   post:
+ *     summary: Back out of a pending online payment
+ *     description: >-
+ *       Ends the caller's own pending online checkout (eSewa or NPX) before it is
+ *       paid, putting the stock it held back on the shelf now rather than when the
+ *       30-minute hold expires. Idempotent. A checkout that was already paid is
+ *       refused with 409 and is never cancelled.
+ *     tags:
+ *       - Orders
+ *     security:
+ *       - bearerAuth: []
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [draftId]
+ *             properties:
+ *               draftId:
+ *                 type: integer
+ *                 minimum: 1
+ *                 example: 42
+ *     responses:
+ *       200:
+ *         description: The checkout is ended (or had already ended)
+ *         content:
+ *           application/json:
+ *             example: { success: true }
+ *       404:
+ *         description: No checkout with this id belongs to the caller
+ *       409:
+ *         description: This checkout has already been paid
+ */
+router.post(
+    "/checkout/cancel",
+    authMiddleware,
+    validateZod(cancelCheckoutSchema),
+    asyncHandler(orderController.cancelCheckout.bind(orderController)),
 );
 
 /**
@@ -1865,6 +1944,25 @@ router.get(
  *                   type: string
  *                   enum: [ORDER_PLACED, CONFIRMED, PROCESSING, ARRIVED_AT_WAREHOUSE, DELAYED, ASSIGNED_TO_RIDER, DELIVERED, NOT_RECEIVED, CANCELLED, RETURNED]
  *                   example: CONFIRMED
+ *                 order:
+ *                   type: object
+ *                   description: How the order is doing. Never who it is going to (no name, address, phone or email).
+ *                   properties:
+ *                     orderNumber: { type: string, example: "DJV-MVV8IA76-0GSJ" }
+ *                     status: { type: string, example: ASSIGNED_TO_RIDER }
+ *                     createdAt: { type: string, format: date-time }
+ *                     paymentMethod: { type: string, example: CASH_ON_DELIVERY }
+ *                     paymentStatus: { type: string, example: UNPAID }
+ *                     finalTotal: { type: number, example: 1099.55 }
+ *                     itemCount: { type: integer, example: 2 }
+ *                     statusHistory:
+ *                       type: array
+ *                       items:
+ *                         type: object
+ *                         properties:
+ *                           status: { type: string }
+ *                           reason: { type: string, nullable: true }
+ *                           at: { type: string, format: date-time }
  *       400:
  *         description: Bad request - order ID missing or invalid
  *         content:
@@ -1896,6 +1994,7 @@ router.get(
  */
 router.get(
     "/user/track",
+    lookupRateLimiter,
     asyncHandler(orderController.trackOrderById.bind(orderController)),
 );
 
@@ -2471,51 +2570,6 @@ router.post(
 
 /**
  * @swagger
- * /api/order/order/delete/all:
- *   delete:
- *     summary: Delete all orders (dev/test only)
- *     tags:
- *       - Orders
- *     security:
- *       - bearerAuth: []
- *     responses:
- *       200:
- *         description: All orders deleted
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: true
- *                 message:
- *                   type: string
- *                   example: "All orders deleted successfully"
- *       500:
- *         description: Internal server error
- *         content:
- *           application/json:
- *             schema:
- *               type: object
- *               properties:
- *                 success:
- *                   type: boolean
- *                   example: false
- *                 message:
- *                   type: string
- *                   example: "Internal server error"
- */
-router.delete(
-    "/order/delete/all",
-    authMiddleware,
-    isAdminOrStaff,
-    checkPermission(ModuleName.ORDER, PermissionLevel.DELETE),
-    asyncHandler(orderController.deleteOrder.bind(orderController)),
-);
-
-/**
- * @swagger
  * /api/order/esewa/success:
  *   post:
  *     summary: Handle eSewa payment success callback
@@ -2642,6 +2696,7 @@ router.post(
 router.post(
     "/check-promo",
     authMiddleware,
+    lookupRateLimiter,
     orderController.checkAvailablePromocode.bind(orderController),
 );
 

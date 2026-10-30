@@ -7,6 +7,7 @@ import { AuthRequest, VendorAuthRequest } from "../middlewares/auth.middleware";
 import {
     sendVendorApprovedEmail,
     sendVendorRejectedEmail,
+    sendPasswordChangedEmailInBackground,
     sendVerificationEmailInBackground,
 } from "../utils/nodemailer.utils";
 import { sanitizeVendor, sanitizeVendorForAdmin } from "../utils/sanitize.util";
@@ -57,6 +58,7 @@ import {
 } from "../utils/authPrivacy.utils";
 import { assertResetCode } from "../utils/resetCode.utils";
 import { Vendor } from "../entities/vendor.entity";
+import { userAuditActor } from "../service/audit.service";
 
 /**
  * Utility class for token management
@@ -610,6 +612,7 @@ export class VendorController {
         const vendor = req.vendor!;
         await applyPasswordChange(vendor, req.body);
         await this.vendorService.saveVendor(vendor);
+        sendPasswordChangedEmailInBackground(vendor.email, "vendor");
         const { token, refreshToken } = this.issueVendorSession(res, vendor);
         res.status(200).json({
             success: true,
@@ -760,6 +763,7 @@ export class VendorController {
 
         const approveVendor = await this.vendorService.approveVendor(
             Number(vendorId),
+            userAuditActor(req.user!),
         );
 
         if (approveVendor.affected && approveVendor.affected > 0) {
@@ -797,6 +801,8 @@ export class VendorController {
         // delete vendor completely as it was before
         const rejectVendor = await this.vendorService.deleteVendor(
             Number(vendorId),
+            userAuditActor(req.user!),
+            rejectionReason,
         );
 
         if (rejectVendor.affected && rejectVendor.affected > 0) {
@@ -839,7 +845,7 @@ export class VendorController {
             );
         }
 
-        await this.vendorService.deleteVendor(Number(vendorId));
+        await this.vendorService.deleteVendor(Number(vendorId), userAuditActor(req.user!));
 
         res.status(200).json({ success: true, msg: "Vendor deleted" });
     }

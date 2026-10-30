@@ -14,12 +14,14 @@ import { deviceTokenService } from "../service/deviceToken.service";
 import { emitNotification } from "../socket/socket";
 import {
     actionUrl,
+    failureReason,
     isPermanentEmailError,
     renderBroadcastEmail,
     settledStatus,
     signUnsubscribeToken,
 } from "../utils/broadcast.utils";
 import { sendToTokens } from "../utils/fcm.utils";
+import { attachInlineLogo } from "../utils/emailLayout.utils";
 import logger from "../utils/logger";
 
 /**
@@ -146,20 +148,21 @@ export const includesVendors = (audience: BroadcastAudienceType) =>
 
 /**
  * Who a broadcast can reach: every customer and vendor account, minus anyone
- * in their account-deletion grace period. Channel-level skips (no email, no
+ * in their account-deletion grace period or already deleted (an admin delete
+ * anonymises at once, with no grace period). Channel-level skips (no email, no
  * device, unsubscribed) are decided per delivery, not here. `$1` is the
  * hand-picked ids, NULL for an "all" audience.
  */
 export const USER_AUDIENCE_SQL = `
     SELECT u.id, NULLIF(TRIM(u.email), '') AS email, u."marketingEmailsEnabled" AS "emailOptIn"
     FROM "user" u
-    WHERE u.role = 'user' AND u."deletionRequestedAt" IS NULL
+    WHERE u.role = 'user' AND u."deletionRequestedAt" IS NULL AND u."deletionFinalizedAt" IS NULL
       AND ($1::int[] IS NULL OR u.id = ANY($1::int[]))`;
 
 export const VENDOR_AUDIENCE_SQL = `
     SELECT v.id, NULLIF(TRIM(v.email), '') AS email, v."marketingEmailsEnabled" AS "emailOptIn"
     FROM "vendor" v
-    WHERE v."deletionRequestedAt" IS NULL
+    WHERE v."deletionRequestedAt" IS NULL AND v."deletionFinalizedAt" IS NULL
       AND ($1::int[] IS NULL OR v.id = ANY($1::int[]))`;
 
 export function audienceParams(
@@ -394,7 +397,8 @@ async function deliverPush(rows: ClaimedRow[], content: BroadcastContent, broadc
 
 let transporter: Transporter | null = null;
 function mailer(): Transporter {
-    transporter ??= config.SMTP_HOST
+    if (transporter) return transporter;
+    transporter = config.SMTP_HOST
         ? nodemailer.createTransport({
               host: config.SMTP_HOST,
               port: config.SMTP_PORT,
@@ -407,6 +411,7 @@ function mailer(): Transporter {
               auth: { user: config.USER_EMAIL, pass: config.PASS_EMAIL },
               pool: true,
           });
+    transporter.use("compile", attachInlineLogo);
     return transporter;
 }
 
@@ -453,9 +458,9 @@ async function deliverEmail(rows: ClaimedRow[], content: BroadcastContent, final
                 });
                 outcomes.push({ id: row.id, status: "SENT", error: null });
             } catch (error) {
-                const message = error instanceof Error ? error.message : String(error);
+                const message = failureReason(error);
                 if (isPermanentEmailError(message) || finalAttempt)
-                    outcomes.push({ id: row.id, status: "FAILED", error: message.slice(0, 500) });
+                    outcomes.push({ id: row.id, status: "FAILED", error: message });
                 else retry = true;
             }
         }
@@ -600,16 +605,16 @@ async function failClaimed(job: Job<DeliverJob>, error: Error): Promise<void> {
         `UPDATE "broadcast_deliveries" SET status = 'FAILED', "failedAt" = now(), "claimedBy" = NULL,
              "errorMessage" = $2, "updatedAt" = now()
          WHERE "claimedBy" = $1 AND status = 'PROCESSING'`,
-        [job.id, error.message.slice(0, 500)],
+        [job.id, failureReason(error)],
     );
     await settleIfDone(job.data.broadcastId);
 }
 
 async function failStart(job: Job<StartJob>, error: Error): Promise<void> {
     await AppDataSource.query(
-        `UPDATE "broadcasts" SET status = 'FAILED', "completedAt" = now(), "updatedAt" = now()
+        `UPDATE "broadcasts" SET status = 'FAILED', "failureReason" = $2, "completedAt" = now(), "updatedAt" = now()
          WHERE id = $1 AND status IN ('QUEUED', 'PROCESSING') AND "totalRecipients" = 0`,
-        [job.data.broadcastId],
+        [job.data.broadcastId, `Could not start: ${failureReason(error)}`.slice(0, 300)],
     );
     logger.error("Broadcast could not start", { broadcastId: job.data.broadcastId, error: error.message });
 }

@@ -19,7 +19,7 @@ import {
 } from "../errors";
 import { UserRole } from "../entities/user.entity";
 import { AuditActorType } from "../entities/auditLog.entity";
-import { findUserByEmail, findUserById } from "../service/user.service";
+import { findUserById } from "../service/user.service";
 import {
     sendCustomerOrderEmail,
     sendVendorOrderEmail,
@@ -204,6 +204,7 @@ export class OrderController {
                         null,
                         // Each seller's own shipping, shown in their block.
                         await AppDataSource.getRepository(OrderVendorShipping).findBy({ orderId: order.id }),
+                        order.paymentMethod,
                     );
                 } catch (error) {
                     console.log("Failed to send customer order email:", error);
@@ -386,7 +387,11 @@ export class OrderController {
         if (user.role === UserRole.ADMIN || user.role === UserRole.STAFF || order.orderedById === user.id) {
             res.status(200).json({
                 success: true,
-                data: sanitizeOrderFull(order),
+                data: {
+                    ...sanitizeOrderFull(order),
+                    // The steps reached and any reason the shopper was told.
+                    statusHistory: await this.orderService.getCustomerStatusTimeline(order.id),
+                },
             });
             return;
         }
@@ -652,13 +657,29 @@ export class OrderController {
         const email = req.query.email;
 
         if (!orderId) throw new BadRequestError("Order Number is required");
+        if (typeof email !== "string" || !email.trim()) throw new BadRequestError("Email is required");
 
-        const userExists = await findUserByEmail(email);
-        if (!userExists) throw new NotFoundError("User");
+        // One answer for "no such account" and "no such order for it": this
+        // form is public, and a different message told anyone whether an email
+        // has an account (QA BUG-018). trackOrder matches on both together.
+        const order = await this.orderService.trackOrder(email.trim(), orderId);
 
-        const order = await this.orderService.trackOrder(email, orderId);
-
-        res.status(200).json({ success: true, orderStatus: order.status });
+        // Order number and email prove enough to see how the order is doing,
+        // not who it is going to: no name, address, phone or email.
+        res.status(200).json({
+            success: true,
+            orderStatus: order.status,
+            order: {
+                orderNumber: order.orderNumber,
+                status: order.status,
+                createdAt: order.createdAt,
+                paymentMethod: order.paymentMethod,
+                paymentStatus: order.paymentStatus,
+                finalTotal: sanitizeOrderFull(order).finalTotal,
+                itemCount: (order.orderItems ?? []).reduce((sum, item) => sum + Number(item.quantity || 0), 0),
+                statusHistory: await this.orderService.getCustomerStatusTimeline(order.id),
+            },
+        });
     }
 
     /**
@@ -770,7 +791,10 @@ export class OrderController {
         const orders =
             await this.orderService.getOrderDetailByMerchantTransactionId(
                 mTransactionId,
-                { returnedFromGateway: returnedFromGateway === true },
+                {
+                    returnedFromGateway: returnedFromGateway === true,
+                    requester: { id: req.user.id, role: req.user.role },
+                },
             );
         if (!orders) throw new NotFoundError("Order");
 
@@ -780,18 +804,6 @@ export class OrderController {
         }
 
         res.status(200).json({ success: true, data: orders });
-    }
-
-    async deleteOrder(
-        _req: AuthRequest,
-        res: Response,
-        _next: NextFunction,
-    ): Promise<void> {
-        await this.orderService.deleteOrder();
-        res.status(200).json({
-            success: true,
-            msg: "Order deleted successfully",
-        });
     }
 
     async esewaPaymentSuccess(
@@ -890,6 +902,21 @@ export class OrderController {
         throw new BadRequestError("Payment not found");
     }
 
+    /**
+     * The shopper backed out of an online payment before paying: end their
+     * pending checkout now so its held stock goes back on the shelf, instead
+     * of when the hold expires. Any gateway; idempotent; a paid checkout is
+     * refused (409), never cancelled.
+     */
+    async cancelCheckout(
+        req: AuthRequest<{}, {}, { draftId: number }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        await this.orderService.esewaFailed(req.user!.id, undefined, req.body.draftId);
+        res.status(200).json({ success: true });
+    }
+
     async checkAvailablePromocode(
         req: AuthRequest,
         res: Response,
@@ -902,7 +929,10 @@ export class OrderController {
             userId,
         );
         if (promo) {
-            res.status(200).json({ success: true, data: promo });
+            // What the shopper needs to see the discount, not the promo's
+            // usage counters and limits (QA BUG-019).
+            const { promoCode: code, discountPercentage, applyOn } = promo;
+            res.status(200).json({ success: true, data: { promoCode: code, discountPercentage, applyOn } });
             return;
         }
         throw new NotFoundError("Promo code");

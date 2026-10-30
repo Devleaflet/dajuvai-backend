@@ -24,6 +24,7 @@ import {
     pill,
     simpleTable,
     totalsTable,
+    attachInlineLogo,
 } from "./emailLayout.utils";
 
 // Configure nodemailer transporter with Gmail SMTP using credentials from env
@@ -40,6 +41,8 @@ export const transporter = nodemailer.createTransport({
         pass: config.PASS_EMAIL, // App password or actual password (prefer app password for security)
     },
 });
+
+transporter.use("compile", attachInlineLogo);
 
 /** "DajuVai" as the sender name, so the inbox does not show a bare address. */
 export const FROM = () => `"DajuVai" <${config.USER_EMAIL}>`;
@@ -74,6 +77,14 @@ export const sendTransactionalEmail = async (
 };
 
 type StatusMeta = { label: string; tone: EmailTone; copy: string };
+
+/** Payment method and status as a person reads them, never the enum (QA BUG-024). */
+const paymentMethodLabel = (method?: string | null): string =>
+    ({ CASH_ON_DELIVERY: "Cash on delivery", ESEWA: "eSewa", NPX: "NPX (card, wallet or bank)", KHALTI: "Khalti", ONLINE_PAYMENT: "Online payment" } as Record<string, string>)[
+        (method ?? "").toUpperCase()
+    ] ?? (method || "—");
+const paymentStatusLabel = (status?: string | null): string =>
+    ({ PAID: "Paid", UNPAID: "Unpaid" } as Record<string, string>)[(status ?? "").toUpperCase()] ?? (status || "—");
 
 const getOrderStatusEmailMeta = (status: string): StatusMeta => {
     const normalized = status.toUpperCase();
@@ -218,6 +229,58 @@ export const sendVerificationEmailInBackground = (
     );
 };
 
+/**
+ * Account security notices (QA BUG-034). Fire-and-forget like the code emails:
+ * the change they report has already happened, so a mail failure is logged and
+ * never fails the request.
+ */
+const sendSecurityEmailInBackground = (to: string, subject: string, html: string): void => {
+    if (!isEmailConfigured()) return;
+    void transporter
+        .sendMail({ from: FROM(), to, subject, html })
+        .catch((error: unknown) => console.error(`"${subject}" email failed:`, error));
+};
+
+export const sendPasswordChangedEmailInBackground = (to: string, kind: "customer" | "vendor"): void => {
+    const reset = kind === "vendor" ? appUrl("/vendor/forgot-password") : appUrl("/forgot-password");
+    sendSecurityEmailInBackground(
+        to,
+        "Your DajuVai password was changed",
+        emailLayout({
+            preheader: "The password for your DajuVai account was just changed.",
+            eyebrow: "Account security",
+            title: "Your password was changed",
+            html: [
+                paragraph("The password for your DajuVai account was just changed, and every other device was signed out."),
+                paragraph("If this was you, there is nothing else to do."),
+                notice("If you did not change your password, reset it now to lock out whoever did, then contact our support team.", "danger", "Wasn't you?"),
+                button("Reset password", reset),
+            ].join(""),
+            footerNote: "You are receiving this because the password on your DajuVai account changed.",
+        }),
+    );
+};
+
+export const sendAccountDeletionScheduledEmailInBackground = (to: string, scheduledFor: Date): void => {
+    const date = scheduledFor.toLocaleDateString("en-CA");
+    sendSecurityEmailInBackground(
+        to,
+        "Your DajuVai account is scheduled for deletion",
+        emailLayout({
+            preheader: `Your DajuVai account will be deleted on ${date}.`,
+            eyebrow: "Account security",
+            title: "Your account is scheduled for deletion",
+            html: [
+                paragraph(`Your DajuVai account is scheduled for deletion on ${date}. After that date your personal details are removed and the account cannot be restored.`),
+                notice(`Changed your mind? Sign in to your account before ${date} and the deletion is cancelled.`, "warning", "How to cancel"),
+                button("Sign in", appUrl("/login")),
+                paragraph("If you did not ask to delete your account, sign in now to cancel it and change your password."),
+            ].join(""),
+            footerNote: "You are receiving this because a deletion was requested for your DajuVai account.",
+        }),
+    );
+};
+
 type CustomerOrderItem = {
     name: string;
     vendorId?: number | null;
@@ -263,6 +326,7 @@ export const sendCustomerOrderEmail = async (
     manualIdVerification?: { required: boolean; minimumAge: number | null },
     promoApplyOn?: string | null,
     vendorShippings?: any[],
+    paymentMethod?: string | null,
 ) => {
     // totalPrice/shippingFee come from TypeORM `numeric` columns, which arrive
     // as strings — coerce here or `.toFixed()` throws and `+` silently
@@ -341,6 +405,7 @@ export const sendCustomerOrderEmail = async (
                 ["Order number", `#${orderNumber}`],
                 ["Items", String(items.reduce((sum, i) => sum + i.quantity, 0))],
                 ["Total", money(orderTotal)],
+                ...(paymentMethod ? ([["Payment", paymentMethodLabel(paymentMethod)]] as [string, string][]) : []),
             ]),
             idNotice,
             heading(groups.size > 1 ? `Your items · ${groups.size} sellers` : "Your items"),
@@ -413,7 +478,7 @@ export const sendVendorOrderEmail = async (
                 ["Email", customer.email],
                 ["Phone", customer.phone],
                 ["Address", fullAddress],
-                ["Payment", paymentMethod],
+                ["Payment", paymentMethodLabel(paymentMethod)],
             ]),
             button("Open your orders", appUrl("/vendor/orders")),
             notice("Pack and hand over this order within your usual processing window. Update its status from your vendor dashboard.", "brand"),
@@ -509,7 +574,7 @@ export const sendOrderStatusEmail = async (
                   detailsTable([
                       ["Order number", `#${orderNumber}`],
                       ["Placed on", order.orderDate],
-                      ["Payment", `${order.paymentMethod} · ${order.paymentStatus}`],
+                      ["Payment", `${paymentMethodLabel(order.paymentMethod)} · ${paymentStatusLabel(order.paymentStatus)}`],
                       ["Deliver to", order.customer.address],
                   ]) +
                   heading(order.vendors.length > 1 ? `Items · ${order.vendors.length} sellers` : "Items") +
@@ -698,9 +763,9 @@ const buildAdminOrderEmailHtml = (data: AdminOrderEmailData, mode: "created" | "
             detailsTable([
                 ["Order number", `#${data.orderNumber}`],
                 ["Placed on", data.orderDate],
-                ["Payment method", data.paymentMethod],
-                ["Payment status", data.paymentStatus],
-                ["Order status", data.orderStatus],
+                ["Payment method", paymentMethodLabel(data.paymentMethod)],
+                ["Payment status", paymentStatusLabel(data.paymentStatus)],
+                ["Order status", getOrderStatusEmailMeta(data.orderStatus).label],
             ]),
             heading("Customer"),
             detailsTable([

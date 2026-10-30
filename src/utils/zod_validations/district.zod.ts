@@ -1,13 +1,17 @@
 import { z } from "zod";
+import { Province } from "../../entities/address.entity";
 
 export const createDistrictSchema = z.object({
     // District name is required and must be at least 1 character
     name: z.string().min(1, "District name is required"),
+    // Optional so the legacy admin, which only sends a name, keeps working.
+    province: z.nativeEnum(Province).nullable().optional(),
 });
 
 export const updateDistrictSchema = z.object({
     // District name is optional on update but if present, must be at least 1 character
     name: z.string().min(1, "District name is required").optional(),
+    province: z.nativeEnum(Province).nullable().optional(),
 });
 
 export const getDistrictByIdSchema = z.object({

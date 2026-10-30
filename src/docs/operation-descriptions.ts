@@ -61,8 +61,6 @@ export const operationDescriptions: Record<string, string> = {
         "One order as the calling vendor may see it: their own lines, their own payable, and the delivery address.",
     "GET /api/order/customer/history":
         "The calling customer's own orders, newest first.",
-    "DELETE /api/order/order/delete/all":
-        "Deletes every order. Development and test environments only.",
     "POST /api/district":
         "Adds a district. Districts drive shipping zones, so the name must be unique.",
     "PUT /api/district/{id}":

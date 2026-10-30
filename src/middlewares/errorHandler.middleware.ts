@@ -18,9 +18,13 @@ import {
     ValidationError,
 } from "../errors/HttpErrors";
 import logger from "../utils/logger";
-import config from "../config/env.config";
 
-const isProduction = config.NODE_ENV === "production";
+// Fail closed: only an explicit development/test NODE_ENV may expose stack
+// traces or a programmer error's message. Unset, "production", "staging" or a
+// typo all get the opaque response. Reads the raw variable, not config's
+// "development" default, so a deploy that forgets it leaks nothing.
+const exposeErrorDetails = () =>
+    process.env.NODE_ENV === "development" || process.env.NODE_ENV === "test";
 
 // ── Normalize any unknown thrown value into a typed APIError ─────────────────
 
@@ -192,8 +196,8 @@ export function globalErrorHandler(
         logger.warn("Client error", logPayload);
     }
 
-    // Non-operational errors in production → always return opaque 500
-    if (!apiError.isOperational && isProduction) {
+    // Non-operational errors outside development → always return opaque 500
+    if (!apiError.isOperational && !exposeErrorDetails()) {
         res.status(500).json({
             success: false,
             errorCode: "INTERNAL_ERROR",
@@ -213,8 +217,12 @@ export function globalErrorHandler(
         response.errors = apiError.fields;
     }
 
-    // Stack traces only in non-production environments
-    if (!isProduction) {
+    if (apiError.details) {
+        response.details = apiError.details;
+    }
+
+    // Stack traces only in an explicit development/test environment
+    if (exposeErrorDetails()) {
         response.stack = apiError.stack;
     }
 

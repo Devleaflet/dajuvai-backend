@@ -522,12 +522,29 @@ export const sanitizeOrderFull = (order: Order): SanitizedOrderFull => {
     // Cancelled-item impact, derived from the items themselves — never a
     // client-supplied value (spec §11).
     const rawItems = order.orderItems ?? [];
-    const cancelledAmount = round2(computeCancelledAmount(rawItems));
-    const cancelledItemCount = rawItems.filter(
-        (item) =>
-            (item.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING) ===
-            ItemFulfillmentStatus.CANCELLED,
-    ).length;
+    const isCancelled = (item: OrderItem) =>
+        (item.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING) ===
+        ItemFulfillmentStatus.CANCELLED;
+    const cancelledItemCount = rawItems.filter(isCancelled).length;
+    // A seller with nothing left to deliver charges no delivery: their fee
+    // is cancelled with their last line. A cancelled order owes nothing.
+    const sellerGone = (vendorId: number) => {
+        const lines = rawItems.filter((item) => item.vendorId === vendorId);
+        return lines.length > 0 && lines.every(isCancelled);
+    };
+    const allGone = rawItems.length > 0 && rawItems.every(isCancelled);
+    const cancelledShipping = order.vendorShippings?.length
+        ? order.vendorShippings
+              .filter((vs) => sellerGone(vs.vendorId))
+              .reduce((sum, vs) => sum + Number(vs.shippingFee || 0), 0)
+        : allGone
+          ? Number(order.shippingFee || 0)
+          : 0;
+    const cancelledAmount = round2(
+        order.status === OrderStatus.CANCELLED
+            ? Number(order.totalPrice) || 0
+            : computeCancelledAmount(rawItems) + cancelledShipping,
+    );
     const finalTotal = round2(
         Math.max(0, Number(order.totalPrice) - cancelledAmount),
     );
@@ -609,6 +626,8 @@ export interface SanitizedVendorOrderView {
     // this for fulfillment; it is not the sensitive part (other vendors'
     // shipping fees and the order grand total are what stay hidden).
     shippingAddress: Address | null;
+    /** The number the shopper gave at checkout: the one to call about this order. */
+    phoneNumber: string | null;
     orderItems: SanitizedOrderItem[];
     itemsSubtotal: number;
     discountAllocation: number;
@@ -617,10 +636,27 @@ export interface SanitizedVendorOrderView {
     vendorPayable: number;
     cancelledSubtotal: number;
     cancelledItemCount: number;
-    /** Only present so a vendor responsible for fulfillment can see the fee
-     * for its own shipment — never the order's other-vendor fees or total. */
-    ownShippingFee: number | null;
-    ownShippingZone: string | null;
+    /** The seller's settlement, line by line. Shipping is never part of it. */
+    settlement: VendorSettlement;
+}
+
+/**
+ * What a seller is owed on one order and how it is reached. Amounts are
+ * rupees, exact to the paisa:
+ *   listedTotal − productDiscount − dealDiscount = itemsTotal
+ *   itemsTotal − promo.amount = payable
+ * Cancelled lines are reported separately and are not payable.
+ */
+export interface VendorSettlement {
+    listedTotal: number;
+    productDiscount: number;
+    dealDiscount: number;
+    dealNames: string[];
+    itemsTotal: number;
+    /** The seller's share of an item promo; null when none applies. */
+    promo: { code: string; amount: number } | null;
+    cancelled: { count: number; amount: number } | null;
+    payable: number;
 }
 
 /**
@@ -645,39 +681,76 @@ export const sanitizeOrderForVendor = (
      * were never sent. Cancelled lines are still returned — the vendor needs
      * to see what was dropped — but they are counted separately.
      */
-    const lineTotal = (item: OrderItem) => Number(item.price) * item.quantity;
+    // A whole order cancelled or returned owes the seller nothing, even
+    // though its lines were never cancelled one by one.
+    const orderVoid =
+        order.status === OrderStatus.CANCELLED || order.status === OrderStatus.RETURNED;
     const isCancelled = (item: OrderItem) =>
-        item.fulfillmentStatus === ItemFulfillmentStatus.CANCELLED;
+        orderVoid || item.fulfillmentStatus === ItemFulfillmentStatus.CANCELLED;
 
     const activeItems = vendorItems.filter((item) => !isCancelled(item));
     const cancelledItems = vendorItems.filter(isCancelled);
 
-    const itemsSubtotal = activeItems.reduce(
-        (sum, item) => sum + lineTotal(item),
-        0,
-    );
-    const cancelledSubtotal = cancelledItems.reduce(
-        (sum, item) => sum + lineTotal(item),
-        0,
-    );
+    // Everything below is counted in paisa, so the rows always add up
+    // exactly to what is shown as payable.
+    const paisa = (value: unknown) => Math.round((Number(value) || 0) * 100);
+    const rupees = (value: number) => value / 100;
 
-    const orderMerchandiseSubtotal = Number(order.merchandiseSubtotal) || 0;
-    // A SHIPPING promo discounts the customer's shipping fee, never the
-    // merchandise — so it must not be allocated against a vendor's items
-    // (vendors never see the order's shipping at all).
+    const itemsTotal = activeItems.reduce((sum, item) => sum + paisa(item.price) * item.quantity, 0);
+    const productDiscount = activeItems.reduce(
+        (sum, item) => sum + paisa(item.productDiscountSnapshot) * item.quantity,
+        0,
+    );
+    const dealDiscount = activeItems.reduce(
+        (sum, item) => sum + paisa(item.dealDiscountSnapshot) * item.quantity,
+        0,
+    );
+    // An old line without snapshots has no breakdown: its listed price is
+    // what was charged. Otherwise the listed price is rebuilt from the parts,
+    // so listed − own discount − deal is always exactly the items total.
+    const hasBreakdown = activeItems.some((item) => item.basePriceSnapshot != null);
+    const listedTotal = hasBreakdown ? itemsTotal + productDiscount + dealDiscount : itemsTotal;
+
+    // A promo is shared across the order's sellers in proportion to their
+    // merchandise. A SHIPPING promo discounts the customer's delivery, which
+    // is not the seller's, so it is never deducted from them — and is not
+    // shown to them at all.
     const promoApplyOn = order.promoApplyOn ?? null;
-    const allocatableDiscount =
-        promoApplyOn === PromoType.SHIPPING
+    const orderMerchandise = paisa(order.merchandiseSubtotal);
+    const promoPaisa =
+        promoApplyOn === PromoType.SHIPPING || orderMerchandise <= 0
             ? 0
-            : Number(order.discountTotal || 0);
-    const discountAllocation =
-        orderMerchandiseSubtotal > 0
-            ? allocatableDiscount * (itemsSubtotal / orderMerchandiseSubtotal)
-            : 0;
-
-    const ownShipping = (order.vendorShippings ?? []).find(
-        (vs) => vs.vendorId === vendorId,
+            : Math.min(
+                  itemsTotal,
+                  Math.round((paisa(order.discountTotal) * itemsTotal) / orderMerchandise),
+              );
+    const cancelledPaisa = cancelledItems.reduce(
+        (sum, item) => sum + paisa(item.price) * item.quantity,
+        0,
     );
+    const payable = itemsTotal - promoPaisa;
+
+    const settlement: VendorSettlement = {
+        listedTotal: rupees(listedTotal),
+        productDiscount: rupees(hasBreakdown ? productDiscount : 0),
+        dealDiscount: rupees(hasBreakdown ? dealDiscount : 0),
+        dealNames: [
+            ...new Set(
+                activeItems
+                    .filter((item) => paisa(item.dealDiscountSnapshot) > 0 && item.dealNameSnapshot)
+                    .map((item) => item.dealNameSnapshot as string),
+            ),
+        ],
+        itemsTotal: rupees(itemsTotal),
+        promo:
+            promoPaisa > 0 && order.appliedPromoCode
+                ? { code: order.appliedPromoCode.toUpperCase(), amount: rupees(promoPaisa) }
+                : null,
+        cancelled: cancelledItems.length
+            ? { count: cancelledItems.length, amount: rupees(cancelledPaisa) }
+            : null,
+        payable: rupees(payable),
+    };
 
     return {
         id: order.id,
@@ -689,16 +762,25 @@ export const sanitizeOrderForVendor = (
         createdAt: order.createdAt,
         orderedBy: order.orderedBy ? sanitizeUser(order.orderedBy) : null,
         shippingAddress: orderShippingAddress(order),
-        orderItems: vendorItems.map(sanitizeOrderItem),
-        itemsSubtotal,
+        phoneNumber: order.phoneNumber ?? null,
+        // Lines are rarely confirmed one by one, so a finished order would
+        // still show each as "Pending": report what became of them instead.
+        orderItems: vendorItems.map((item) => ({
+            ...sanitizeOrderItem(item),
+            fulfillmentStatus: isCancelled(item)
+                ? ItemFulfillmentStatus.CANCELLED
+                : order.status === OrderStatus.DELIVERED
+                  ? ItemFulfillmentStatus.CONFIRMED
+                  : (item.fulfillmentStatus ?? ItemFulfillmentStatus.PENDING),
+        })),
+        itemsSubtotal: settlement.itemsTotal,
         /** What was taken off by cancelling lines, as a positive figure. */
-        cancelledSubtotal: Number(cancelledSubtotal.toFixed(2)),
+        cancelledSubtotal: rupees(cancelledPaisa),
         cancelledItemCount: cancelledItems.length,
-        discountAllocation: Number(discountAllocation.toFixed(2)),
-        appliedPromoCode: order.appliedPromoCode ?? null,
-        promoApplyOn,
-        vendorPayable: Number((itemsSubtotal - discountAllocation).toFixed(2)),
-        ownShippingFee: ownShipping ? Number(ownShipping.shippingFee) : null,
-        ownShippingZone: ownShipping?.shippingZone ?? null,
+        discountAllocation: rupees(promoPaisa),
+        appliedPromoCode: settlement.promo ? settlement.promo.code : null,
+        promoApplyOn: settlement.promo ? promoApplyOn : null,
+        vendorPayable: settlement.payable,
+        settlement,
     };
 };

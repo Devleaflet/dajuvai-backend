@@ -7,6 +7,7 @@ import AppDataSource from '../config/db.config';
 import { APIError } from '../utils/ApiError.utils';
 import { Subcategory } from '../entities/subcategory.entity';
 import { CloudinaryService } from './image.service';
+import { auditService, userAuditActor } from './audit.service';
 /**
  * Service for managing category-related operations.
  * 
@@ -131,7 +132,16 @@ export class CategoryService {
             restrictionMessage: dto.isAgeRestricted ? (dto.restrictionMessage ?? null) : null,
         });
 
-        return this.categoryRepository.save(category);
+        const saved = await this.categoryRepository.save(category);
+        await auditService.record({
+            module: 'CATEGORY',
+            action: 'CREATED',
+            entityType: 'Category',
+            entityId: saved.id,
+            actor: userAuditActor(user),
+            summary: `Category created: ${saved.name}`,
+        });
+        return saved;
     }
 
     /**
@@ -248,6 +258,15 @@ export class CategoryService {
             }),
         }));
 
+        await auditService.record({
+            module: 'CATEGORY',
+            action: 'UPDATED',
+            entityType: 'Category',
+            entityId: id,
+            actor: userAuditActor(user),
+            summary: `Category updated: ${category.name}`,
+        });
+
         // Return updated category
         return this.categoryRepository.findOne({ where: { id }, relations: ['subcategories', 'createdBy'] });
     }
@@ -287,5 +306,13 @@ export class CategoryService {
         await this.deleteStoredImage(category.image);
 
         await this.categoryRepository.delete(id);
+        await auditService.record({
+            module: 'CATEGORY',
+            action: 'DELETED',
+            entityType: 'Category',
+            entityId: id,
+            actor: userAuditActor(user),
+            summary: `Category deleted: ${category.name}`,
+        });
     }
 }

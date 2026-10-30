@@ -3,6 +3,7 @@ import { BroadcastStatus } from "../entities/broadcast.entity";
 import {
     actionProblem,
     actionUrl,
+    failureReason,
     isPermanentEmailError,
     renderBroadcastEmail,
     settledStatus,
@@ -141,5 +142,25 @@ describe("category actions", () => {
             { appUrl: "https://d.com" },
         );
         expect(html).toContain("Browse the category");
+    });
+});
+
+describe("failureReason", () => {
+    it("keeps the first line of a worker error", () => {
+        const error = new Error('type "broadcast_recipients_recipientType_enum" does not exist\n    at Parser.parseErrorMessage');
+        expect(failureReason(error)).toBe('type "broadcast_recipients_recipientType_enum" does not exist');
+    });
+
+    it("drops credentials and secrets", () => {
+        expect(failureReason(new Error("connect failed redis://default:hunter2@cache:6379"))).toBe(
+            "connect failed redis://cache:6379",
+        );
+        expect(failureReason(new Error("rejected password=hunter2 for x"))).toBe("rejected password=[redacted] for x");
+    });
+
+    it("is short, and never empty", () => {
+        expect(failureReason(new Error("x".repeat(1000)))).toHaveLength(300);
+        expect(failureReason(new Error(""))).toBe("Unknown error");
+        expect(failureReason("plain")).toBe("plain");
     });
 });

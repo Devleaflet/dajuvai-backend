@@ -1,9 +1,10 @@
 import { hiddenProductIds } from "../search/catalog-visibility";
-import { Brackets, EntityManager, In, Not, Repository } from "typeorm";
+import { Brackets, EntityManager, In, LessThanOrEqual, Not, Repository } from "typeorm";
 import AppDataSource from "../config/db.config";
 import { AssignmentStatus, DeliveryAssignment } from "../entities/deliveryAssignment.entity";
 import { ACTIVE_ASSIGNMENT_STATUSES, syncRiderAvailability } from "../utils/riderAvailability.utils";
 import { APIError } from "../errors/ApiError";
+import { lineStockIssue, StockIssue, stockHeldBy, stockIssueError } from "../utils/stockAvailability";
 import {
     IShippingAddressRequest,
     IUpdateOrderStatusRequest,
@@ -45,12 +46,13 @@ import {
     OrderStateChangedError,
     BadRequestError,
     ConflictError,
+    ForbiddenError,
     NotFoundError,
 } from "../errors/HttpErrors";
-import { decodeEsewaReturn, sameAmount, verifyEsewaReturn } from "../utils/esewa.util";
+import { checkEsewaStatus, decodeEsewaReturn, sameAmount, verifyEsewaReturn } from "../utils/esewa.util";
 import { Cart } from "../entities/cart.entity";
 import { CartItem } from "../entities/cartItem.entity";
-import { User } from "../entities/user.entity";
+import { User, UserRole } from "../entities/user.entity";
 import { CartService } from "./cart.service";
 import { getAgeRestrictionSummary } from "./age-restriction.service";
 import { PaymentService } from "./payment.service";
@@ -68,6 +70,7 @@ import {
     sendVendorOrderStatusEmail,
     sendAdminOrderCreatedEmail,
     sendAdminOrderDeliveredEmail,
+    sendTransactionalEmail,
     AdminOrderEmailData,
 } from "../utils/nodemailer.utils";
 import { NotificationService } from "./notification.service";
@@ -102,7 +105,7 @@ import {
     emitProductStockUpdate,
 } from "../socket/socket";
 import { dispatchStatusSideEffects } from "../utils/status-side-effects.utils";
-import { NpsPaymentService } from "./nps-payment.service";
+import { NpsPaymentService, NpsTransactionStatus } from "./nps-payment.service";
 
 /**
  * Service class responsible for managing orders.
@@ -131,8 +134,13 @@ function promoClaimMessage(reason: PromoClaimReason): string {
     return "Promo code usage limit has been reached. Remove the promo code and try again.";
 }
 
+/** How long a lapsed hold is kept while its gateway can't yet say whether it was paid. */
+const GATEWAY_VERDICT_GRACE_MS = 30 * 60 * 1000;
+
+/** How long after a checkout ends its gateway is still asked about a late payment. */
+const LATE_PAYMENT_WINDOW_MINUTES = 60;
+
 /** Stock rows an order sold out, to be cleared from carts after it commits. */
-type DepletedStock = { variantIds: number[]; productIds: number[] };
 
 export class OrderService {
     private orderRepository: Repository<Order>;
@@ -285,9 +293,15 @@ export class OrderService {
             const dealDiscountTotal = snapshot.dealDiscountAmount * quantity;
 
             return {
+                cartItemId: item.id ?? null,
                 productId: item.product?.id ?? null,
                 variantId: item.variant?.id ?? null,
                 name: item.product?.name ?? "Product",
+                // Enough to show the line without a cart (Buy Now).
+                image: item.variant?.variantImages?.[0] || item.product?.productImages?.[0] || null,
+                vendorName: item.product?.vendor?.businessName ?? null,
+                attributes: item.variant?.attributes ?? null,
+                stock: Number((item.variant ?? item.product)?.stock) || 0,
                 quantity,
                 basePrice: snapshot.basePrice,
                 unitPrice: snapshot.unitPrice,
@@ -509,19 +523,25 @@ export class OrderService {
             return address;
         }
 
-        // Create new address
-        const newAddress = this.addressRepository.create({
-            province: shippingAddress.province,
-            district: shippingAddress.district,
-            districtId,
-            city: shippingAddress.city,
-            localAddress: shippingAddress.streetAddress,
-            landmark: shippingAddress.landmark,
-            // phoneNumber,
-            userId,
-        });
+        // Create new address. Two first checkouts at once both get here;
+        // the second insert is skipped and both use the one row.
+        await this.addressRepository
+            .createQueryBuilder()
+            .insert()
+            .into(Address)
+            .values({
+                province: shippingAddress.province,
+                district: shippingAddress.district,
+                districtId,
+                city: shippingAddress.city,
+                localAddress: shippingAddress.streetAddress,
+                landmark: shippingAddress.landmark,
+                userId,
+            })
+            .orIgnore()
+            .execute();
 
-        const savedAddress = await this.addressRepository.save(newAddress);
+        const savedAddress = await this.addressRepository.findOneOrFail({ where: { userId } });
         user.address = savedAddress;
         await this.userRepository.save(user);
         return savedAddress;
@@ -656,10 +676,14 @@ export class OrderService {
     }
 
     /**
-     * Persist a priced checkout as a CheckoutDraft (online payments only).
-     * Nothing is reserved or claimed here — the draft is just a validated
-     * snapshot that materializeDraftOrder() turns into a real Order once
-     * the payment gateway confirms success.
+     * Persist a priced checkout as a CheckoutDraft (online payments only),
+     * holding its stock while the shopper pays.
+     *
+     * The stock is taken here, under the same row locks as a COD order, so
+     * two shoppers paying for the last unit can't both be charged for it:
+     * the second is told it sold out before they reach the gateway. The
+     * hold goes back on the shelf if the payment fails, is cancelled or
+     * expires (endDraft). The promo is still claimed only once paid.
      */
     private async createCheckoutDraft(args: {
         userId: number;
@@ -692,6 +716,10 @@ export class OrderService {
                 ),
                 idempotencyKey: orderData.idempotencyKey ?? null,
                 instrumentName: orderData.instrumentName ?? null,
+                // The cart lines this order takes, removed once it is paid.
+                cartItemIds: isBuyNow
+                    ? []
+                    : items.map((item) => item.id).filter((id) => Number.isInteger(id)),
             },
             items: items.map((item) => ({
                 productId: item.product.id,
@@ -712,9 +740,28 @@ export class OrderService {
             },
             addressId: address.id,
             expiresAt: new Date(Date.now() + CHECKOUT_DRAFT_TTL_MS),
+            stockHeld: true,
         });
 
-        return await this.checkoutDraftRepository.save(draft);
+        return AppDataSource.transaction(async (manager) => {
+            // One payment in flight per shopper: starting again returns the
+            // earlier attempt's hold first, or they would race themselves
+            // for the last unit.
+            await this.lockShopperCheckout(userId, manager);
+            await this.endOwnPendingDrafts(userId, manager);
+
+            await this.updateStock(
+                items.map((item) => ({
+                    productId: item.product.id,
+                    variantId: item.variant ? item.variant.id : null,
+                    quantity: item.quantity,
+                    product: { name: item.product.name },
+                })),
+                manager,
+            );
+
+            return manager.getRepository(CheckoutDraft).save(draft);
+        });
     }
 
     /**
@@ -749,24 +796,22 @@ export class OrderService {
             if (existing) return existing;
         }
 
-        if (draft.status !== CheckoutDraftStatus.PENDING) {
-            throw new APIError(400, "This checkout session has ended");
-        }
-
-        if (draft.expiresAt && draft.expiresAt <= new Date()) {
-            await this.checkoutDraftRepository
-                .update(
-                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
-                    { status: CheckoutDraftStatus.EXPIRED },
-                )
-                .catch(() => undefined);
-            throw new APIError(400, "This checkout session has expired");
-        }
-
+        // Callers reach this only once the gateway has confirmed the
+        // payment. A draft that expired or was cancelled meanwhile has given
+        // its stock back; it still becomes the order the shopper paid for if
+        // the stock is still there, and is otherwise a refund case below.
         let orderId: number;
+        // Looked up before the transaction: it reads through its own pool
+        // connection, which must never be awaited while this one holds locks.
+        const fallbackDistrict = await this.shippingService.resolveDistrictByName(
+            draft.payload?.shippingAddress?.district,
+        );
         try {
             const result = await AppDataSource.transaction(async (manager) => {
                 const draftRepo = manager.getRepository(CheckoutDraft);
+
+                // Shopper first, as in every checkout transaction.
+                await this.lockShopperCheckout(draft.userId, manager);
 
                 // Serialize concurrent callbacks (redirect + webhook + poll).
                 const lockedDraft = await draftRepo.findOne({
@@ -782,9 +827,13 @@ export class OrderService {
                 ) {
                     return { alreadyCompleted: true, orderId: lockedDraft.orderId };
                 }
-                if (lockedDraft.status !== CheckoutDraftStatus.PENDING) {
+                if (lockedDraft.status === CheckoutDraftStatus.COMPLETED) {
                     throw new APIError(400, "This checkout session has ended");
                 }
+
+                // Draft, then cart, then stock: the lock order a cash order
+                // by the same shopper uses (reserveStockAndSaveOrder).
+                await manager.query(`SELECT id FROM carts WHERE "userId" = $1 FOR UPDATE`, [lockedDraft.userId]);
 
                 const payload = lockedDraft.payload || {};
                 const totals = lockedDraft.totals || {};
@@ -845,10 +894,7 @@ export class OrderService {
                     : null;
                 if (!address) {
                     const ship = payload.shippingAddress || {};
-                    const resolvedDistrict =
-                        await this.shippingService.resolveDistrictByName(
-                            ship.district,
-                        );
+                    const resolvedDistrict = fallbackDistrict;
                     const rebuilt = manager.getRepository(Address).create({
                         province: ship.province,
                         district: ship.district,
@@ -946,31 +992,78 @@ export class OrderService {
                     throw new APIError(500, "Failed to create order");
                 }
 
-                const depleted = await this.updateStock(savedOrder.orderItems, manager);
+                // Stock held since checkout is already off the shelf; a draft
+                // whose hold was returned takes it now, or fails as sold out.
+                if (!lockedDraft.stockHeld) {
+                    await this.updateStock(savedOrder.orderItems, manager);
+                }
+
+                // Only the lines this order bought leave the cart; a sold-out
+                // line the shopper left in it stays there, flagged.
+                const cartItemIds: number[] = Array.isArray(payload.cartItemIds) ? payload.cartItemIds : [];
+                if (cartItemIds.length) {
+                    await manager.query(
+                        `DELETE FROM cart_items ci USING carts c
+                          WHERE ci.cart_id = c.id AND c."userId" = $1 AND ci.id = ANY($2)`,
+                        [lockedDraft.userId, cartItemIds],
+                    );
+                }
 
                 lockedDraft.status = CheckoutDraftStatus.COMPLETED;
                 lockedDraft.orderId = savedOrder.id;
+                lockedDraft.stockHeld = false;
                 await draftRepo.save(lockedDraft);
 
-                return { alreadyCompleted: false, orderId: savedOrder.id, depleted };
+                return {
+                    alreadyCompleted: false,
+                    orderId: savedOrder.id,
+                    // Drafts from before cartItemIds were recorded cleared the cart.
+                    clearWholeCart: !payload.isBuyNow && !Array.isArray(payload.cartItemIds),
+                };
             });
 
             orderId = result.orderId;
-            if ("depleted" in result) await this.removeDepletedFromCarts(result.depleted);
+            if ("clearWholeCart" in result && result.clearWholeCart) {
+                // The order is committed; a cart that fails to clear is not
+                // a failed payment.
+                await this.cartService.clearCart(draft.userId).catch((error) =>
+                    console.error(`[CHECKOUT-DRAFT] Cart not cleared after draft ${draft.id}:`, error),
+                );
+            }
         } catch (error) {
             // The gateway already collected money — this is a reconciliation
-            // case. Mark the draft cancelled, log loudly with the transaction
-            // reference, and surface an explicit support-facing message.
-            await this.checkoutDraftRepository
-                .update(
-                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
-                    { status: CheckoutDraftStatus.CANCELLED },
-                )
-                .catch(() => undefined);
+            // case. End the draft (returning any stock it still held), log
+            // loudly with the transaction reference, and surface an explicit
+            // support-facing message.
+            await this.endDraft(draft.id, CheckoutDraftStatus.CANCELLED).catch(() => undefined);
             console.error(
                 `[CHECKOUT-DRAFT] Payment succeeded but order materialization failed. draftId=${draft.id} orderNumber=${draft.orderNumber} transactionId=${transactionId ?? "n/a"}`,
                 error,
             );
+            // A log line nobody reads leaves a shopper charged with nothing
+            // to show for it; the team must refund or fulfil by hand. Told
+            // once per checkout, however often the shopper's page re-polls.
+            const [, firstFailure] = await this.checkoutDraftRepository
+                .query(
+                    `UPDATE checkout_drafts
+                        SET payload = COALESCE(payload, '{}'::jsonb) || jsonb_build_object('paidWithoutOrderAt', now())
+                      WHERE id = $1 AND NOT (COALESCE(payload, '{}'::jsonb) ? 'paidWithoutOrderAt')
+                  RETURNING id`,
+                    [draft.id],
+                )
+                .catch(() => [[], 1]);
+            if (firstFailure) await sendTransactionalEmail(
+                config.USER_EMAIL,
+                `Payment received without an order - ${draft.orderNumber}`,
+                [
+                    `A ${draft.paymentMethod} payment was confirmed, but checkout ${draft.orderNumber} could not become an order.`,
+                    `Amount: Rs ${draft.totals?.totalPrice}`,
+                    `Gateway reference: ${transactionId ?? draft.esewaTransactionUuid ?? draft.mTransactionId ?? "n/a"}`,
+                    `Customer id: ${draft.userId}, checkout draft id: ${draft.id}`,
+                    `Reason: ${error instanceof Error ? error.message : String(error)}`,
+                    "Refund the customer, or place the order for them, and let them know.",
+                ].join("\n"),
+            ).catch((mailError) => console.error("[CHECKOUT-DRAFT] Payment alert email failed:", mailError));
             throw new APIError(
                 500,
                 "Your payment was received but the order could not be completed. Please contact support with your transaction reference.",
@@ -999,8 +1092,8 @@ export class OrderService {
             throw new APIError(500, "Failed to load materialized order");
         }
 
-        // Cart clear (sendOrderEmails also clears for non-buy-now), emails,
-        // audit trail and stock broadcast — same side effects as a COD order.
+        // Emails, audit trail and stock broadcast — same side effects as a
+        // COD order. The cart lines were consumed in the transaction above.
         try {
             await this.sendOrderEmails(orderId);
         } catch (error) {
@@ -1034,41 +1127,172 @@ export class OrderService {
     }
 
     /**
-     * Cancel a still-PENDING draft (payment failed/cancelled at gateway).
-     * No stock or promo was ever reserved, so there is nothing to restore.
-     * Idempotent — already-terminal drafts are left untouched.
+     * Ends a pending draft that will not become an order, and puts any stock
+     * it held back on the shelf. Decided under the draft's row lock, so a
+     * webhook, a status poll and the cron racing to end the same draft
+     * return its stock exactly once. Returns whether this call ended it.
+     */
+    private async endDraft(
+        draftId: number,
+        status: CheckoutDraftStatus.CANCELLED | CheckoutDraftStatus.EXPIRED,
+        manager?: EntityManager,
+    ): Promise<boolean> {
+        if (!manager) {
+            return AppDataSource.transaction((txManager) => this.endDraft(draftId, status, txManager));
+        }
+        const draftRepo = manager.getRepository(CheckoutDraft);
+        const draft = await draftRepo.findOne({
+            where: { id: draftId },
+            lock: { mode: "pessimistic_write" },
+        });
+        if (!draft || draft.status !== CheckoutDraftStatus.PENDING) return false;
+        if (draft.stockHeld) await this.restoreStock(draft.items, manager);
+        await draftRepo.update(draft.id, { status, stockHeld: false });
+        return true;
+    }
+
+    /**
+     * Makes one shopper's checkouts take turns, for the rest of the
+     * transaction. Two tabs paying at once can't both find "no pending
+     * draft" and both hold stock: a row lock can't see a draft not yet
+     * inserted. Always taken first, before any draft, cart or stock lock.
+     */
+    private async lockShopperCheckout(userId: number, manager: EntityManager): Promise<void> {
+        await manager.query("SELECT pg_advisory_xact_lock(hashtext($1))", [`checkout:user:${userId}`]);
+    }
+
+    /**
+     * Ends every pending draft of this shopper, returning their holds. All
+     * are locked first, in id order, so "draft rows first" holds for the
+     * whole set — two tabs can leave a shopper with more than one.
+     */
+    private async endOwnPendingDrafts(userId: number, manager: EntityManager): Promise<void> {
+        const drafts: { id: number }[] = await manager.query(
+            `SELECT id FROM checkout_drafts WHERE "userId" = $1 AND status = 'PENDING' ORDER BY id FOR UPDATE`,
+            [userId],
+        );
+        for (const { id } of drafts) {
+            await this.endDraft(id, CheckoutDraftStatus.CANCELLED, manager);
+        }
+    }
+
+    /**
+     * Cancel a still-PENDING draft (payment failed/cancelled at gateway),
+     * returning its stock. Idempotent — already-ended drafts are untouched.
      */
     async cancelCheckoutDraft(
         draft: CheckoutDraft,
         reason: string,
     ): Promise<void> {
         if (draft.status !== CheckoutDraftStatus.PENDING) return;
-        await this.checkoutDraftRepository
-            .update(
-                { id: draft.id, status: CheckoutDraftStatus.PENDING },
-                { status: CheckoutDraftStatus.CANCELLED },
-            )
-            .catch((error) =>
-                console.error(
-                    `[CHECKOUT-DRAFT] Failed to cancel draft ${draft.id} (${reason}):`,
-                    error,
-                ),
-            );
+        await this.endDraft(draft.id, CheckoutDraftStatus.CANCELLED).catch((error) =>
+            console.error(
+                `[CHECKOUT-DRAFT] Failed to cancel draft ${draft.id} (${reason}):`,
+                error,
+            ),
+        );
     }
 
     /**
-     * Cron hook: expire PENDING drafts whose TTL elapsed without a gateway
-     * verdict. Returns the number of drafts expired.
+     * Cron hook: settle or expire PENDING drafts whose hold elapsed. Returns
+     * the number of drafts expired.
+     *
+     * A shopper who paid and never came back (closed the tab, lost signal)
+     * has no return trip to settle on, and eSewa sends no webhook — so the
+     * gateway is asked before the stock goes back. While it says the payment
+     * is still in progress, or can't be reached, the hold is kept for
+     * GATEWAY_VERDICT_GRACE_MS more; a payment confirmed after that still
+     * becomes the order on the shopper's return (materializeDraftOrder
+     * re-takes the stock).
      */
     async expireStaleCheckoutDrafts(now: Date = new Date()): Promise<number> {
-        const result = await this.checkoutDraftRepository
-            .createQueryBuilder()
-            .update(CheckoutDraft)
-            .set({ status: CheckoutDraftStatus.EXPIRED })
-            .where("status = :status", { status: CheckoutDraftStatus.PENDING })
-            .andWhere('"expiresAt" <= :now', { now })
-            .execute();
-        return result.affected ?? 0;
+        const stale = await this.checkoutDraftRepository.find({
+            where: { status: CheckoutDraftStatus.PENDING, expiresAt: LessThanOrEqual(now) },
+        });
+        let expired = 0;
+        for (const draft of stale) {
+            try {
+                const verdict = await this.draftPaymentVerdict(draft);
+                if (verdict === "Success") {
+                    await this.materializeDraftOrder(draft, draft.esewaTransactionUuid ?? draft.mTransactionId);
+                    continue;
+                }
+                const undecided = verdict === "Pending" || verdict === "Unknown";
+                const lapsedFor = now.getTime() - new Date(draft.expiresAt).getTime();
+                if (undecided && lapsedFor < GATEWAY_VERDICT_GRACE_MS) continue;
+                if (await this.endDraft(draft.id, CheckoutDraftStatus.EXPIRED)) expired++;
+            } catch (error) {
+                // One stuck draft must not keep every later one's stock held.
+                console.error(`[CHECKOUT-DRAFT] Could not expire draft ${draft.id}:`, error);
+            }
+        }
+        return expired;
+    }
+
+    /**
+     * Cron hook: a checkout can end while its payment is still landing — the
+     * shopper paid, lost the redirect back, and started another checkout
+     * (which ends their pending ones), or backed out of the payment page
+     * after paying. eSewa never calls back, so checkouts that reached a
+     * gateway and ended within LATE_PAYMENT_WINDOW_MINUTES are asked again; a
+     * confirmed payment becomes the order. Ones whose payment already failed
+     * to become an order are with the team (see materializeDraftOrder).
+     * Returns the number settled.
+     */
+    async settleLatePayments(): Promise<number> {
+        const ended = await this.checkoutDraftRepository
+            .createQueryBuilder("draft")
+            .where("draft.status IN (:...ended)", {
+                ended: [CheckoutDraftStatus.CANCELLED, CheckoutDraftStatus.EXPIRED],
+            })
+            .andWhere("(draft.esewaTransactionUuid IS NOT NULL OR draft.mTransactionId IS NOT NULL)")
+            // Measured by the database's clock: it is the one that stamped
+            // updatedAt, and the server's may sit in another time zone.
+            .andWhere("draft.updatedAt > now() - make_interval(mins => :minutes)", {
+                minutes: LATE_PAYMENT_WINDOW_MINUTES,
+            })
+            .andWhere("NOT (COALESCE(draft.payload, '{}'::jsonb) ? 'paidWithoutOrderAt')")
+            .getMany();
+        let settled = 0;
+        for (const draft of ended) {
+            try {
+                if ((await this.draftPaymentVerdict(draft)) !== "Success") continue;
+                await this.materializeDraftOrder(draft, draft.esewaTransactionUuid ?? draft.mTransactionId);
+                settled++;
+            } catch (error) {
+                console.error(`[CHECKOUT-DRAFT] Could not settle late payment for draft ${draft.id}:`, error);
+            }
+        }
+        return settled;
+    }
+
+    /**
+     * Asks the gateway this draft was sent to whether the shopper paid, in
+     * the NPX status vocabulary. "Success" only when the gateway collected
+     * the draft's exact total. Never throws: an unreachable gateway is
+     * "Unknown".
+     */
+    async draftPaymentVerdict(draft: CheckoutDraft): Promise<NpsTransactionStatus> {
+        const total = draft.totals?.totalPrice;
+        if (draft.esewaTransactionUuid) {
+            const status = await checkEsewaStatus(draft.esewaTransactionUuid, total);
+            if (status === "COMPLETE") return "Success";
+            if (status === "PENDING") return "Pending";
+            if (status === "NOT_FOUND" || status === "CANCELED" || status === "FULL_REFUND") return "Failed";
+            return "Unknown";
+        }
+        if (draft.mTransactionId) {
+            const { status, raw } = await this.npsPaymentService.checkTransactionStatus(draft.mTransactionId);
+            if (status !== "Success") return status;
+            const collected = raw?.data?.Amount;
+            if (sameAmount(collected, total ?? NaN)) return "Success";
+            console.error(
+                `[NPX] Amount mismatch for draft ${draft.id}: gateway collected ${collected}, draft total ${total}`,
+            );
+            return "Unknown";
+        }
+        // Never sent to a gateway: nothing can have been paid.
+        return "Failed";
     }
 
     /**
@@ -1327,7 +1551,25 @@ export class OrderService {
             const cart = await this.getCart(userId);
             items = cart.items;
         }
-        await this.assertItemsPurchasable(items);
+
+        // Lines that can't be filled are priced out and listed, so the total
+        // is what the order will cost. Buy Now has nothing to fall back on.
+        const { fillable, issues: unavailableItems } = await this.partitionCheckoutLines(items, userId);
+        if (isBuyNow && unavailableItems.length) throw stockIssueError(unavailableItems);
+        items = fillable;
+        if (!items.length) {
+            return {
+                merchandiseSubtotal: 0,
+                priceBreakdown: this.buildCheckoutPriceBreakdown([], 0, null),
+                vendorShippingBreakdown: [],
+                shippingTotal: 0,
+                discountTotal: 0,
+                appliedPromoCode: null,
+                taxTotal: 0,
+                grandTotal: 0,
+                unavailableItems,
+            };
+        }
 
         const customerDistrict =
             await this.shippingService.resolveDistrictByName(
@@ -1399,6 +1641,7 @@ export class OrderService {
             appliedPromoCode,
             taxTotal,
             grandTotal,
+            unavailableItems,
         };
     }
 
@@ -1422,7 +1665,8 @@ export class OrderService {
                     email: email.toLowerCase(),
                 },
             },
-            relations: ["orderedBy"],
+            // Lines and seller shipping make the payable total the shopper sees.
+            relations: ["orderedBy", "orderItems", "vendorShippings"],
         });
 
         if (!order) {
@@ -1553,6 +1797,10 @@ export class OrderService {
                 items = cart.items;
             }
 
+            // Stock is re-checked under row locks when it is taken; this
+            // decides which lines to take and says plainly what changed.
+            items = await this.linesToOrder(items, isBuyNow ? undefined : orderData.cartItems, userId);
+
             const ageSummary = getAgeRestrictionSummary(
                 items.map((item) => item.product),
             );
@@ -1565,10 +1813,6 @@ export class OrderService {
                     "Age confirmation is required for restricted products",
                 );
             }
-
-            // Check availability and stock before creating the order
-            await this.assertItemsPurchasable(items);
-            await this.validateStock(items);
 
             // Either fetch user's existing address or create a new one based on input
             const address = await this.getOrCreateAddress(
@@ -1649,10 +1893,6 @@ export class OrderService {
                           },
                 );
 
-                // 🔹 Only clear cart if it's not Buy Now
-                if (!isBuyNow) {
-                    await this.cartService.clearCart(userId);
-                }
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
                 paymentMethod === PaymentMethod.ESEWA ||
@@ -1660,10 +1900,11 @@ export class OrderService {
             ) {
                 // Deferred order creation: an online-payment checkout only
                 // becomes a real Order after the gateway confirms success.
-                // Here we persist a priced CheckoutDraft instead — no order
-                // row, no stock reservation, no promo claim — so cancelling
-                // or abandoning the payment never leaves a phantom order
-                // behind. materializeDraftOrder() creates the order later.
+                // Here we persist a priced CheckoutDraft that holds the stock
+                // — no order row, no promo claim — so cancelling or
+                // abandoning the payment never leaves a phantom order behind
+                // and gives the stock back. materializeDraftOrder() creates
+                // the order later.
                 const draft = await this.createCheckoutDraft({
                     userId,
                     orderData,
@@ -1675,8 +1916,15 @@ export class OrderService {
                 });
 
                 if (paymentMethod === PaymentMethod.ESEWA) {
-                    esewaRedirectUrl =
-                        await this.initateEsewaPaymentForDraft(draft);
+                    try {
+                        esewaRedirectUrl =
+                            await this.initateEsewaPaymentForDraft(draft);
+                    } catch (error) {
+                        // No payment can follow, so the stock goes back now
+                        // rather than when the hold expires.
+                        await this.cancelCheckoutDraft(draft, "eSewa could not start the payment");
+                        throw error;
+                    }
                 }
 
                 return {
@@ -2063,11 +2311,6 @@ export class OrderService {
 
         const user = order.orderedBy;
 
-        // Clear cart if not "Buy Now"
-        if (!order.isBuyNow) {
-            await this.cartService.clearCart(user.id);
-        }
-
         // Extract unique vendor IDs
         const vendorIds = [
             ...new Set(order.orderItems.map((item) => item.vendorId)),
@@ -2136,6 +2379,7 @@ export class OrderService {
                 },
                 promoApplyOn,
                 order.vendorShippings,
+                order.paymentMethod,
             );
         } catch (error) {
             console.error("Failed to send customer order email:", error);
@@ -2189,12 +2433,20 @@ export class OrderService {
                 );
             }
         }
+
+        // The admin inbox hears about online-paid orders too, as it does for
+        // cash on delivery (sent from the controller there).
+        try {
+            await this.sendAdminOrderPlacedEmail(order.id);
+        } catch (error) {
+            console.error("Failed to send admin order placed email:", error);
+        }
     }
 
     async esewaFailed(userId: number, orderId?: number, draftId?: number) {
-        // Draft-based checkout resolution first — the draft flow never
-        // reserved stock or claimed promos, so failure handling is a single
-        // idempotent status flip.
+        // Draft-based checkout resolution first: cancelling returns the
+        // stock the draft held. No promo was claimed yet, and a draft that
+        // already ended is left alone.
         if (draftId) {
             const draft = await this.checkoutDraftRepository.findOne({
                 where: { id: draftId, userId },
@@ -2342,8 +2594,16 @@ export class OrderService {
 
         // Persist the uuid BEFORE contacting eSewa so the success callback
         // can always resolve back to this draft, even on retries.
+        // Targeted, and only while still pending: a full save of this
+        // in-memory draft could undo an end or a settlement made meanwhile.
+        const updated = await this.checkoutDraftRepository.update(
+            { id: draft.id, status: CheckoutDraftStatus.PENDING },
+            { esewaTransactionUuid: transaction_uuid },
+        );
+        if (!updated.affected) {
+            throw new APIError(410, "This checkout session has ended. Please check out again.", "CHECKOUT_ENDED");
+        }
         draft.esewaTransactionUuid = transaction_uuid;
-        await this.checkoutDraftRepository.save(draft);
 
         const totalPrice = draft.totals?.totalPrice;
 
@@ -2426,109 +2686,77 @@ export class OrderService {
         return jsonString;
     }
 
-    // Separate method for stock validation
     /**
-     * Refuses items the public catalogue no longer shows — a vendor that was
-     * un-approved or is being deleted keeps its rows, and a cart filled
-     * before that must not still check them out.
+     * Splits checkout lines into those the shelf can fill and those it
+     * can't (sold out, fewer left than asked, or a product the public
+     * catalogue no longer shows). Estimate and order share this split, so
+     * the totals a shopper sees are the totals they are charged.
      */
-    private async assertItemsPurchasable(items: Array<{ product?: { id: number; name?: string } }>): Promise<void> {
+    private async partitionCheckoutLines(
+        items: any[],
+        userId?: number,
+    ): Promise<{ fillable: any[]; issues: StockIssue[] }> {
         const ids = [...new Set(items.map((item) => Number(item.product?.id)).filter(Number.isInteger))];
-        const hidden = new Set(await hiddenProductIds(AppDataSource.manager, ids));
-        const blocked = items.find((item) => hidden.has(Number(item.product?.id)));
-        if (blocked) {
+        const [hidden, held] = await Promise.all([
+            hiddenProductIds(AppDataSource.manager, ids).then((rows) => new Set(rows)),
+            userId ? this.heldByShopper(userId) : Promise.resolve(undefined),
+        ]);
+        const issues: StockIssue[] = [];
+        const fillable = items.filter((item) => {
+            const issue = lineStockIssue(item, hidden, held);
+            if (issue) issues.push(issue);
+            return !issue;
+        });
+        return { fillable, issues };
+    }
+
+    /** See stockHeldBy: a shopper's unpaid online checkouts still count as theirs. */
+    private heldByShopper(userId: number): Promise<Map<string, number>> {
+        return stockHeldBy(AppDataSource.manager, userId);
+    }
+
+    /**
+     * The lines this order buys.
+     *
+     * `agreed` is what the checkout showed as included ({ cart line id,
+     * quantity }). A line another shopper emptied stays in the cart, flagged,
+     * and is left out — the shopper saw that before pressing Place order. But
+     * if anything they agreed to has changed since, the order stops and says
+     * what changed, rather than buying a different order than the one shown.
+     * A client that sends no `agreed` gets the strict rule: any line that
+     * can't be filled stops the order.
+     */
+    private async linesToOrder(
+        items: any[],
+        agreed?: Array<{ id: number; quantity: number }>,
+        userId?: number,
+    ): Promise<any[]> {
+        const { fillable, issues } = await this.partitionCheckoutLines(items, userId);
+        if (!agreed) {
+            if (issues.length) throw stockIssueError(issues);
+            return items;
+        }
+
+        const agreedQuantity = new Map(agreed.map((line) => [line.id, line.quantity]));
+        const changed = issues.filter((issue) => agreedQuantity.has(issue.cartItemId));
+        if (changed.length) throw stockIssueError(changed);
+
+        const asShown =
+            fillable.length === agreed.length &&
+            fillable.every((item) => agreedQuantity.get(item.id) === item.quantity);
+        if (!asShown) {
             throw new APIError(
                 409,
-                `"${blocked.product?.name ?? "A product"}" is no longer available. Remove it from your cart to continue.`,
-                "PRODUCT_UNAVAILABLE",
+                "Your cart changed since this page loaded. Review your order, then place it again.",
+                "CHECKOUT_CHANGED",
             );
         }
-    }
-
-    private async validateStock(cartItems: CartItem[]): Promise<void> {
-        const variantIds = [
-            ...new Set(
-                cartItems
-                    .map((item) =>
-                        item.variant ? Number(item.variant.id) : null,
-                    )
-                    .filter(
-                        (id): id is number =>
-                            typeof id === "number" && Number.isFinite(id),
-                    ),
-            ),
-        ];
-
-        const productIds = [
-            ...new Set(
-                cartItems
-                    .map((item) =>
-                        !item.variant ? Number(item.product?.id) : null,
-                    )
-                    .filter(
-                        (id): id is number =>
-                            typeof id === "number" && Number.isFinite(id),
-                    ),
-            ),
-        ];
-
-        const [variants, products] = await Promise.all([
-            variantIds.length
-                ? this.variantRepository.find({ where: { id: In(variantIds) } })
-                : Promise.resolve([]),
-            productIds.length
-                ? this.productRepository.find({ where: { id: In(productIds) } })
-                : Promise.resolve([]),
-        ]);
-
-        const variantsById = new Map<number, Variant>(
-            variants.map((v) => [v.id, v]),
-        );
-        const productsById = new Map<number, Product>(
-            products.map((p) => [p.id, p]),
-        );
-
-        for (const item of cartItems) {
-            if (item.variant) {
-                const variant = variantsById.get(Number(item.variant.id));
-
-                if (!variant) {
-                    throw new APIError(
-                        404,
-                        `Variant not found for product: ${item.product?.name}`,
-                    );
-                }
-
-                if (variant.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        "Insufficient stock",
-                        "INSUFFICIENT_STOCK",
-                    );
-                }
-
-                continue;
-            }
-
-            const product = productsById.get(Number(item.product?.id));
-
-            if (!product) {
-                throw new APIError(
-                    404,
-                    `Product not found for cart item ID: ${item.id}`,
-                );
-            }
-
-            if (!product.stock || product.stock < item.quantity) {
-                throw new APIError(
-                    400,
-                    `Insufficient stock for product "${product.name}". ` +
-                        `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
-                    "INSUFFICIENT_STOCK",
-                );
-            }
+        if (!fillable.length) {
+            throw new APIError(400, "Nothing in your cart can be ordered right now.", "NOTHING_TO_ORDER");
         }
+        return fillable;
     }
+
     /**
      * Restore (add back) stock for cancelled/failed order items.
      * Runs inside its own row-locked transaction unless an outer transaction
@@ -2580,10 +2808,14 @@ export class OrderService {
         const variantRepo = manager.getRepository(Variant);
         const productRepo = manager.getRepository(Product);
 
+        // withDeleted: an archived product still gets its stock back (it
+        // may be restored). A row that is gone entirely is skipped, not
+        // fatal — a returned hold or cancelled order must not get stuck on it.
         const [variants, products] = await Promise.all([
             variantIds.length
                 ? variantRepo
                       .createQueryBuilder("variant")
+                      .withDeleted()
                       .setLock("pessimistic_write")
                       .where("variant.id IN (:...ids)", { ids: variantIds })
                       .orderBy("variant.id")
@@ -2592,6 +2824,7 @@ export class OrderService {
             productIds.length
                 ? productRepo
                       .createQueryBuilder("product")
+                      .withDeleted()
                       .setLock("pessimistic_write")
                       .where("product.id IN (:...ids)", { ids: productIds })
                       .orderBy("product.id")
@@ -2613,10 +2846,8 @@ export class OrderService {
             if (item.variantId) {
                 const variant = variantsById.get(Number(item.variantId));
                 if (!variant) {
-                    throw new APIError(
-                        404,
-                        `Variant not found for order item ID: ${item.id}`,
-                    );
+                    console.warn(`[STOCK] Variant ${item.variantId} is gone; ${item.quantity} not returned.`);
+                    continue;
                 }
 
                 variant.stock += item.quantity;
@@ -2629,10 +2860,8 @@ export class OrderService {
             if (item.productId) {
                 const product = productsById.get(Number(item.productId));
                 if (!product) {
-                    throw new APIError(
-                        404,
-                        `Product not found for order item ID: ${item.id}`,
-                    );
+                    console.warn(`[STOCK] Product ${item.productId} is gone; ${item.quantity} not returned.`);
+                    continue;
                 }
 
                 product.stock += item.quantity;
@@ -2681,11 +2910,20 @@ export class OrderService {
         }> = [],
         consumeCart?: { userId: number; cartItemIds: number[] },
     ): Promise<Order> {
-        let depleted: DepletedStock | undefined;
-        const saved = await AppDataSource.transaction(async (manager) => {
+        return AppDataSource.transaction(async (manager) => {
             const orderRepo = manager.getRepository(Order);
             const vendorShippingRepo =
                 manager.getRepository(OrderVendorShipping);
+
+            // Locks are taken shopper, draft rows, cart row, then stock rows —
+            // the order a payment settlement uses too — so the two can't
+            // deadlock when one shopper does both at once.
+            //
+            // A shopper paying by cash after backing out of an online
+            // payment: their unpaid hold goes back first, so it is theirs to
+            // take here.
+            await this.lockShopperCheckout(order.orderedById, manager);
+            await this.endOwnPendingDrafts(order.orderedById, manager);
 
             // A cart checkout consumes the cart lines it priced, in this
             // transaction. The cart row is locked first, so a second
@@ -2762,12 +3000,10 @@ export class OrderService {
                 throw new APIError(500, "Failed to create order");
             }
 
-            depleted = await this.updateStock(savedOrder.orderItems, manager);
+            await this.updateStock(savedOrder.orderItems, manager);
 
             return savedOrder;
         });
-        await this.removeDepletedFromCarts(depleted);
-        return saved;
     }
 
     /**
@@ -2817,7 +3053,7 @@ export class OrderService {
     private async updateStock(
         orderItems: any[],
         manager?: EntityManager,
-    ): Promise<DepletedStock> {
+    ): Promise<void> {
         if (!manager) {
             return AppDataSource.transaction((txManager) =>
                 this.updateStock(orderItems, txManager),
@@ -2891,9 +3127,20 @@ export class OrderService {
             products.map((p) => [p.id, p]),
         );
 
-        const depleted: DepletedStock = { variantIds: [], productIds: [] };
         const variantsToSave = new Map<number, Variant>();
         const productsToSave = new Map<number, Product>();
+        // Every short line, not just the first: the shopper fixes them all at once.
+        const shortages: StockIssue[] = [];
+        const short = (item: any, row: { stock: number }) =>
+            shortages.push({
+                cartItemId: null,
+                productId: Number(item.productId) || null,
+                variantId: Number(item.variantId) || null,
+                name: item.product?.name || "An item",
+                requested: item.quantity,
+                available: Math.max(0, row.stock),
+                reason: row.stock > 0 ? "LOW_STOCK" : "SOLD_OUT",
+            });
 
         for (const item of orderItems) {
             if (item.variantId) {
@@ -2907,12 +3154,8 @@ export class OrderService {
                 }
 
                 if (variant.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for variant "${variant.sku || variant.id}" of product "${item.product?.name || "Unknown"}". ` +
-                            `Available: ${variant.stock}, Requested: ${item.quantity}`,
-                        "INSUFFICIENT_STOCK",
-                    );
+                    short(item, variant);
+                    continue;
                 }
 
                 variant.stock -= item.quantity;
@@ -2933,12 +3176,8 @@ export class OrderService {
                 }
 
                 if (!product.stock || product.stock < item.quantity) {
-                    throw new APIError(
-                        400,
-                        `Insufficient stock for product "${product.name || product.id}". ` +
-                            `Available: ${product.stock || 0}, Requested: ${item.quantity}`,
-                        "INSUFFICIENT_STOCK",
-                    );
+                    short({ ...item, product: item.product ?? product }, { stock: product.stock || 0 });
+                    continue;
                 }
 
                 product.stock -= item.quantity;
@@ -2954,48 +3193,18 @@ export class OrderService {
             );
         }
 
+        // Thrown inside the caller's transaction, so nothing above is kept.
+        if (shortages.length) throw stockIssueError(shortages);
+
         if (variantsToSave.size) {
             const savedVariants = await variantRepo.save([
                 ...variantsToSave.values(),
             ]);
             await this.syncVariantParentProducts(savedVariants, manager);
-
-            depleted.variantIds = [...variantsToSave.values()]
-                .filter((v) => v.stock <= 0)
-                .map((v) => v.id);
         }
 
         if (productsToSave.size) {
             await productRepo.save([...productsToSave.values()]);
-
-            depleted.productIds = [...productsToSave.values()]
-                .filter((p) => p.stock <= 0)
-                .map((p) => p.id);
-        }
-
-        return depleted;
-    }
-
-    /**
-     * Takes sold-out stock out of every shopper's cart. Called only after the
-     * order has committed: run inside the checkout transaction it deleted other
-     * shoppers' cart lines while their own checkouts held those rows and waited
-     * on this one's stock lock — a deadlock — and an error swallowed there left
-     * the transaction aborted, so its COMMIT silently rolled the order back.
-     * Best-effort: a line it misses is flagged by getCart's stock check.
-     */
-    private async removeDepletedFromCarts(depleted: DepletedStock | undefined): Promise<void> {
-        if (!depleted) return;
-        const cartItemRepo = AppDataSource.getRepository(CartItem);
-        try {
-            if (depleted.variantIds.length) {
-                await cartItemRepo.delete({ variantId: In(depleted.variantIds) });
-            }
-            if (depleted.productIds.length) {
-                await cartItemRepo.delete({ product: { id: In(depleted.productIds) } });
-            }
-        } catch (error) {
-            console.warn("Removing sold-out stock from carts failed:", error);
         }
     }
 
@@ -4292,6 +4501,25 @@ export class OrderService {
      * the vendor has no items on this order, so a vendor can never read
      * another vendor's — or another customer's unrelated — order history.
      */
+    /**
+     * The order's timeline as the shopper may see it: each status and when,
+     * with the reason only where the shopper was already told it (the reason
+     * statuses). No internal notes, no staff (QA BUG-026).
+     */
+    async getCustomerStatusTimeline(
+        orderId: number,
+    ): Promise<{ status: OrderStatus; reason: string | null; at: Date }[]> {
+        const rows = await this.orderStatusHistoryRepository.find({
+            where: { orderId },
+            order: { createdAt: "ASC" },
+        });
+        return rows.map((row) => ({
+            status: row.newStatus,
+            reason: customerFacingReason(row.newStatus, row.reason) ?? null,
+            at: row.createdAt,
+        }));
+    }
+
     async getOrderStatusHistoryForVendor(
         vendorId: number,
         orderId: number,
@@ -4305,7 +4533,10 @@ export class OrderService {
                 "Order not found or you are not authorized to view it",
             );
         }
-        return this.getOrderStatusHistory(orderId);
+        // Vendors see what happened and the customer-facing reason. The admin's
+        // internal note and who on staff made the change stay internal.
+        const rows = await this.getOrderStatusHistory(orderId);
+        return rows.map((row) => ({ ...row, note: null, changedBy: null }));
     }
 
     /**
@@ -4597,14 +4828,26 @@ export class OrderService {
 
     async getOrderDetailByMerchantTransactionId(
         mTransactionId: string,
-        opts?: { returnedFromGateway?: boolean },
+        opts?: { returnedFromGateway?: boolean; requester?: { id: number; role: string } },
     ): Promise<Order | null> {
+        // Ownership before anything else: settling a draft from the gateway
+        // is a side effect, and a stranger's lookup must not cause it.
+        const assertOwner = (ownerId: number) => {
+            const requester = opts?.requester;
+            if (requester && requester.id !== ownerId && requester.role !== UserRole.ADMIN) {
+                throw new ForbiddenError("Not authorized");
+            }
+        };
+
         const order = await this.orderRepository.findOne({
             where: {
                 mTransactionId: mTransactionId,
             },
         });
-        if (order) return order;
+        if (order) {
+            assertOwner(order.orderedById);
+            return order;
+        }
 
         // Deferred-order flow: the transaction belongs to a checkout draft.
         // The gateway is the source of truth — query it and settle the draft
@@ -4614,6 +4857,7 @@ export class OrderService {
             where: { mTransactionId },
         });
         if (!draft) return null;
+        assertOwner(draft.userId);
 
         if (draft.status === CheckoutDraftStatus.COMPLETED && draft.orderId) {
             return (
@@ -4624,24 +4868,9 @@ export class OrderService {
         }
 
         if (draft.status === CheckoutDraftStatus.PENDING) {
-            // TTL elapsed without a gateway verdict — the session is over.
-            if (draft.expiresAt && draft.expiresAt <= new Date()) {
-                await this.checkoutDraftRepository.update(
-                    { id: draft.id, status: CheckoutDraftStatus.PENDING },
-                    { status: CheckoutDraftStatus.EXPIRED },
-                );
-                draft.status = CheckoutDraftStatus.EXPIRED;
-                return this.buildDraftOrderView(
-                    draft,
-                    PaymentStatus.UNPAID,
-                    OrderStatus.CANCELLED,
-                );
-            }
-
-            const { status } =
-                await this.npsPaymentService.checkTransactionStatus(
-                    mTransactionId,
-                );
+            // The gateway is asked even once the hold has run out: a payment
+            // it confirmed is still the shopper's order.
+            const status = await this.draftPaymentVerdict(draft);
 
             if (status === "Success") {
                 try {
@@ -4663,6 +4892,16 @@ export class OrderService {
                     draft,
                     "Gateway reported failure",
                 );
+                return this.buildDraftOrderView(
+                    draft,
+                    PaymentStatus.UNPAID,
+                    OrderStatus.CANCELLED,
+                );
+            } else if (draft.expiresAt && draft.expiresAt <= new Date()) {
+                // The hold ran out with nothing paid: the session is over and
+                // the stock goes back on the shelf.
+                await this.endDraft(draft.id, CheckoutDraftStatus.EXPIRED);
+                draft.status = CheckoutDraftStatus.EXPIRED;
                 return this.buildDraftOrderView(
                     draft,
                     PaymentStatus.UNPAID,
@@ -4696,15 +4935,24 @@ export class OrderService {
             );
         }
 
-        // CANCELLED / EXPIRED draft — no order exists or will exist.
+        // CANCELLED / EXPIRED: the hold ended, but the shopper may still
+        // have paid (the gateway outlived the hold). A confirmed payment
+        // still becomes the order; anything else shows as cancelled.
+        const verdict = await this.draftPaymentVerdict(draft);
+        if (verdict === "Success") {
+            try {
+                return await this.materializeDraftOrder(draft, mTransactionId);
+            } catch (error) {
+                console.error(
+                    "[CHECKOUT-DRAFT] late payment could not be settled during status lookup:",
+                    error instanceof Error ? error.message : error,
+                );
+            }
+        }
         return this.buildDraftOrderView(
             draft,
             PaymentStatus.UNPAID,
             OrderStatus.CANCELLED,
         );
-    }
-
-    async deleteOrder() {
-        const order = await this.orderRepository.delete({});
     }
 }
