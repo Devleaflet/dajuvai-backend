@@ -2177,6 +2177,8 @@ export class OrderService {
                   day: "numeric",
                   hour: "2-digit",
                   minute: "2-digit",
+                  // The server runs in UTC; the admin reading this is in Nepal.
+                  timeZone: "Asia/Kathmandu",
               })
             : "N/A";
 

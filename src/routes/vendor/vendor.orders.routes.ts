@@ -12,9 +12,9 @@ const vendorOrdersController = new VendorOrdersController();
  *     summary: Get vendor order page statistics
  *     description: |
  *       Returns three stat cards for the vendor orders page:
- *       - needingFulfillment: order items in PENDING status awaiting action
- *       - inDelivery: order items currently SHIPPED or OUT_FOR_DELIVERY
- *       - completedToday: order items with DELIVERED status updated today
+ *       - needingFulfillment: orders still placed and awaiting fulfilment
+ *       - inDelivery: orders currently with a rider
+ *       - completedToday: orders with DELIVERED status updated today
  *
  *       Note: Order listing is already available at /api/vendor/dashboard/orders
  *     tags:

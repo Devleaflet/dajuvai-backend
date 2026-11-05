@@ -7,9 +7,11 @@ export class VendorOrdersService {
 
     /**
      * Returns order page stat cards for the vendor:
-     * - needingFulfillment: PENDING order items awaiting action
-     * - inDelivery: order items currently SHIPPED or OUT_FOR_DELIVERY
-     * - completedToday: order items marked DELIVERED today
+     * Each card counts orders (the cards and the table say "orders"); an
+     * order with three of this vendor's lines is still one order.
+     * - needingFulfillment: orders still ORDER_PLACED
+     * - inDelivery: orders with a rider
+     * - completedToday: orders delivered today
      */
     async getOrderPageStats(vendorId: number) {
         const [needingFulfillment, inDelivery, completedToday] = await Promise.all([
@@ -22,7 +24,7 @@ export class VendorOrdersService {
     }
 
     /**
-     * Count order items for this vendor where the parent order is ORDER_PLACED.
+     * Count this vendor's orders where the parent order is ORDER_PLACED.
      */
     async getNeedingFulfillmentCount(vendorId: number): Promise<number> {
         return this.orderItemRepository
@@ -30,11 +32,13 @@ export class VendorOrdersService {
             .innerJoin('oi.order', 'order')
             .where('oi.vendorId = :vendorId', { vendorId })
             .andWhere('order.status = :status', { status: OrderStatus.ORDER_PLACED })
-            .getCount();
+            .select('COUNT(DISTINCT order.id)', 'count')
+            .getRawOne()
+            .then((row) => Number(row?.count ?? 0));
     }
 
     /**
-     * Count order items for this vendor where the parent order is ASSIGNED_TO_RIDER.
+     * Count this vendor's orders where the parent order is ASSIGNED_TO_RIDER.
      */
     async getInDeliveryCount(vendorId: number): Promise<number> {
         return this.orderItemRepository
@@ -42,11 +46,13 @@ export class VendorOrdersService {
             .innerJoin('oi.order', 'order')
             .where('oi.vendorId = :vendorId', { vendorId })
             .andWhere('order.status = :status', { status: OrderStatus.ASSIGNED_TO_RIDER })
-            .getCount();
+            .select('COUNT(DISTINCT order.id)', 'count')
+            .getRawOne()
+            .then((row) => Number(row?.count ?? 0));
     }
 
     /**
-     * Count order items for this vendor that were delivered today.
+     * Count this vendor's orders that were delivered today.
      * Uses DATE() comparison against CURRENT_DATE for timezone-aware accuracy.
      */
     async getCompletedTodayCount(vendorId: number): Promise<number> {
@@ -56,6 +62,8 @@ export class VendorOrdersService {
             .where('oi.vendorId = :vendorId', { vendorId })
             .andWhere('order.status = :status', { status: OrderStatus.DELIVERED })
             .andWhere('DATE(order.updatedAt) = CURRENT_DATE')
-            .getCount();
+            .select('COUNT(DISTINCT order.id)', 'count')
+            .getRawOne()
+            .then((row) => Number(row?.count ?? 0));
     }
 }

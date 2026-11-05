@@ -396,8 +396,8 @@ export const sendCustomerOrderEmail = async (
         : "";
 
     const html = emailLayout({
-        preheader: `Order #${orderNumber} is confirmed · ${money(orderTotal)}`,
-        eyebrow: "Order confirmed",
+        preheader: `Order #${orderNumber} received · ${money(orderTotal)}`,
+        eyebrow: "Order placed",
         title: "Thanks — your order is in",
         html: [
             paragraph("We've received your order and the sellers are getting it ready. Here's what you bought."),
