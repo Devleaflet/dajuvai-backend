@@ -7,6 +7,8 @@ import {
     requireAdminStaffOrVendor,
 } from "../middlewares/auth.middleware";
 import { uploadMiddleware } from "../config/multer.config";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 
 const router = Router();
 const commissionController = new CommissionController();
@@ -16,7 +18,7 @@ const commissionController = new CommissionController();
  * /api/commission:
  *   post:
  *     summary: Upload/replace the commission document
- *     description: Admin or staff uploads a new commission PDF directly (stored on the server, not Cloudinary). Vendors are notified in real-time over Socket.io (event "commission:update").
+ *     description: Admin, or staff with the vendor permission, uploads a new commission PDF directly (stored on the server, not Cloudinary). Vendors are notified in real-time over Socket.io (event "commission:update").
  *     tags: [Commission]
  *     security:
  *       - bearerAuth: []
@@ -91,7 +93,7 @@ const commissionController = new CommissionController();
  *                   type: string
  *                   example: "Unauthorized"
  *       403:
- *         description: Admin or staff access required
+ *         description: Admin, or staff with the vendor permission, required
  *         content:
  *           application/json:
  *             schema:
@@ -102,12 +104,13 @@ const commissionController = new CommissionController();
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Admin or staff access required"
+ *                   example: "Admin, or staff with the vendor permission, required"
  */
 router.post(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.CREATE_EDIT),
     uploadMiddleware,
     commissionController.uploadDocument.bind(commissionController),
 );
@@ -288,7 +291,7 @@ router.get(
  *                   type: string
  *                   example: "Unauthorized"
  *       403:
- *         description: Admin or staff access required
+ *         description: Admin, or staff with the vendor permission, required
  *         content:
  *           application/json:
  *             schema:
@@ -299,7 +302,7 @@ router.get(
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Admin or staff access required"
+ *                   example: "Admin, or staff with the vendor permission, required"
  *       404:
  *         description: No commission document has been uploaded yet
  *         content:
@@ -318,6 +321,7 @@ router.delete(
     "/",
     authMiddleware,
     isAdminOrStaff,
+    checkPermission(ModuleName.VENDOR, PermissionLevel.DELETE),
     commissionController.deleteDocument.bind(commissionController),
 );
 

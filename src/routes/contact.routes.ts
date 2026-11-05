@@ -2,6 +2,8 @@ import { Router } from 'express';
 import { ContactController } from '../controllers/contact.controller';
 import { authMiddleware, isAdmin, isAdminOrStaff, validateZod } from '../middlewares/auth.middleware';
 import { adminContactQuerySchema, contactSchema } from '../utils/zod_validations/contact.zod';
+import { checkPermission } from '../middlewares/permission.middleware';
+import { ModuleName, PermissionLevel } from '../entities/permission.enum';
 
 const router = Router();
 const contactController = new ContactController();
@@ -259,6 +261,6 @@ router.post('/', validateZod(contactSchema), contactController.createContact.bin
  *                   type: string
  *                   example: "Error message describing what went wrong"
  */
-router.get('/admin', authMiddleware, isAdminOrStaff, validateZod(adminContactQuerySchema, "query"), contactController.getAdminContacts.bind(contactController));
+router.get('/admin', authMiddleware, isAdminOrStaff, checkPermission(ModuleName.CUSTOMER, PermissionLevel.VIEW), validateZod(adminContactQuerySchema, "query"), contactController.getAdminContacts.bind(contactController));
 
 export default router;

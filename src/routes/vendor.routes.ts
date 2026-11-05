@@ -190,10 +190,16 @@ router.get(
  * @swagger
  * /api/vendors/partial/vendors:
  *   get:
- *     summary: Get partial vendor list (public)
- *     description: Retrieves a lightweight list of approved vendors (id, businessName, logo). Used for vendor selection dropdowns and public displays.
+ *     summary: Get partial vendor list (admin or staff)
+ *     description: Retrieves a lightweight list of approved vendors (id, slug, businessName) for admin vendor pickers. Never includes contact details.
  *     tags: [Vendors]
+ *     security:
+ *       - bearerAuth: []
  *     responses:
+ *       401:
+ *         description: Not signed in
+ *       403:
+ *         description: Admin or staff access required
  *       200:
  *         description: Successfully retrieved partial vendor list
  *         content:
@@ -235,6 +241,8 @@ router.get(
  */
 router.get(
     "/partial/vendors",
+    authMiddleware,
+    isAdminOrStaff,
     vendorController.getPartialVendors.bind(vendorController),
 );
 

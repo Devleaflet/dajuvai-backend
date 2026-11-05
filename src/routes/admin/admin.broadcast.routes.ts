@@ -1,6 +1,8 @@
 import { Router } from "express";
 import { AdminBroadcastController } from "../../controllers/admin.broadcast.controller";
-import { authMiddleware, isAdmin, validateZod } from "../../middlewares/auth.middleware";
+import { authMiddleware, isAdminOrStaff, validateZod } from "../../middlewares/auth.middleware";
+import { checkPermission } from "../../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../../entities/permission.enum";
 import { broadcastLimiter, generalNotificationLimiter, readLimiter } from "../../middlewares/pushRateLimiter.middleware";
 import {
     broadcastDeliveriesQuerySchema,
@@ -15,10 +17,19 @@ import {
     updateBroadcastSchema,
 } from "../../utils/zod_validations/broadcast.zod";
 
-// Admin only, not staff: one send reaches every customer and vendor.
+// Admins, and staff holding the broadcast permission: one send reaches every
+// customer and vendor, so reading, editing/sending and deleting are separate
+// levels of that permission (ADMIN short-circuits all three).
 const adminBroadcastRouter = Router();
 const controller = new AdminBroadcastController();
-const admin = [authMiddleware, isAdmin];
+const guard = (level: PermissionLevel) => [
+    authMiddleware,
+    isAdminOrStaff,
+    checkPermission(ModuleName.BROADCAST, level),
+];
+const canView = guard(PermissionLevel.VIEW);
+const canEdit = guard(PermissionLevel.CREATE_EDIT);
+const canDelete = guard(PermissionLevel.DELETE);
 const byId = validateZod(broadcastIdParamSchema, "params");
 // Sending and testing reach people, so they get the tight limiter; editing
 // drafts only touches the database.
@@ -100,7 +111,7 @@ const editLimiter = generalNotificationLimiter;
  *       401: { description: Authentication required. }
  *       403: { description: Admin role required. }
  */
-adminBroadcastRouter.get("/availability", ...admin, readLimiter, controller.availability.bind(controller));
+adminBroadcastRouter.get("/availability", ...canView, readLimiter, controller.availability.bind(controller));
 
 /**
  * @swagger
@@ -150,7 +161,7 @@ adminBroadcastRouter.get("/availability", ...admin, readLimiter, controller.avai
  *       401: { description: Authentication required. }
  *       403: { description: Admin role required. }
  */
-adminBroadcastRouter.get("/recipients", ...admin, readLimiter, validateZod(recipientSearchQuerySchema, "query"), controller.recipients.bind(controller));
+adminBroadcastRouter.get("/recipients", ...canView, readLimiter, validateZod(recipientSearchQuerySchema, "query"), controller.recipients.bind(controller));
 
 /**
  * @swagger
@@ -188,7 +199,7 @@ adminBroadcastRouter.get("/recipients", ...admin, readLimiter, validateZod(recip
  *       401: { description: Authentication required. }
  *       403: { description: Admin role required. }
  */
-adminBroadcastRouter.get("/targets", ...admin, readLimiter, validateZod(targetSearchQuerySchema, "query"), controller.targets.bind(controller));
+adminBroadcastRouter.get("/targets", ...canView, readLimiter, validateZod(targetSearchQuerySchema, "query"), controller.targets.bind(controller));
 
 /**
  * @swagger
@@ -234,7 +245,7 @@ adminBroadcastRouter.get("/targets", ...admin, readLimiter, validateZod(targetSe
  *       401: { description: Authentication required. }
  *       403: { description: Admin role required. }
  */
-adminBroadcastRouter.post("/preview", ...admin, readLimiter, validateZod(previewBroadcastSchema), controller.preview.bind(controller));
+adminBroadcastRouter.post("/preview", ...canView, readLimiter, validateZod(previewBroadcastSchema), controller.preview.bind(controller));
 
 /**
  * @swagger
@@ -289,8 +300,8 @@ adminBroadcastRouter.post("/preview", ...admin, readLimiter, validateZod(preview
  *       401: { description: Authentication required. }
  *       403: { description: Admin role required. }
  */
-adminBroadcastRouter.get("/", ...admin, readLimiter, validateZod(broadcastListQuerySchema, "query"), controller.list.bind(controller));
-adminBroadcastRouter.post("/", ...admin, editLimiter, validateZod(createBroadcastSchema), controller.create.bind(controller));
+adminBroadcastRouter.get("/", ...canView, readLimiter, validateZod(broadcastListQuerySchema, "query"), controller.list.bind(controller));
+adminBroadcastRouter.post("/", ...canEdit, editLimiter, validateZod(createBroadcastSchema), controller.create.bind(controller));
 
 /**
  * @swagger
@@ -364,9 +375,9 @@ adminBroadcastRouter.post("/", ...admin, editLimiter, validateZod(createBroadcas
  *       404: { description: No such broadcast. }
  *       409: { description: Sent broadcasts are kept as a record. }
  */
-adminBroadcastRouter.get("/:id", ...admin, readLimiter, byId, controller.get.bind(controller));
-adminBroadcastRouter.put("/:id", ...admin, editLimiter, byId, validateZod(updateBroadcastSchema), controller.update.bind(controller));
-adminBroadcastRouter.delete("/:id", ...admin, editLimiter, byId, controller.remove.bind(controller));
+adminBroadcastRouter.get("/:id", ...canView, readLimiter, byId, controller.get.bind(controller));
+adminBroadcastRouter.put("/:id", ...canEdit, editLimiter, byId, validateZod(updateBroadcastSchema), controller.update.bind(controller));
+adminBroadcastRouter.delete("/:id", ...canDelete, editLimiter, byId, controller.remove.bind(controller));
 
 /**
  * @swagger
@@ -416,7 +427,7 @@ adminBroadcastRouter.delete("/:id", ...admin, editLimiter, byId, controller.remo
  *       403: { description: Admin role required. }
  *       404: { description: No such broadcast. }
  */
-adminBroadcastRouter.get("/:id/deliveries", ...admin, readLimiter, byId, validateZod(broadcastDeliveriesQuerySchema, "query"), controller.deliveries.bind(controller));
+adminBroadcastRouter.get("/:id/deliveries", ...canView, readLimiter, byId, validateZod(broadcastDeliveriesQuerySchema, "query"), controller.deliveries.bind(controller));
 
 /**
  * @swagger
@@ -452,7 +463,7 @@ adminBroadcastRouter.get("/:id/deliveries", ...admin, readLimiter, byId, validat
  *       409: { description: Already sent. }
  *       503: { description: Broadcasts are disabled or the queue is unreachable. }
  */
-adminBroadcastRouter.post("/:id/send", ...admin, broadcastLimiter, byId, validateZod(sendBroadcastSchema), controller.send.bind(controller));
+adminBroadcastRouter.post("/:id/send", ...canEdit, broadcastLimiter, byId, validateZod(sendBroadcastSchema), controller.send.bind(controller));
 
 /**
  * @swagger
@@ -483,7 +494,7 @@ adminBroadcastRouter.post("/:id/send", ...admin, broadcastLimiter, byId, validat
  *       404: { description: No such broadcast. }
  *       409: { description: The broadcast has finished, or is a draft. }
  */
-adminBroadcastRouter.post("/:id/cancel", ...admin, editLimiter, byId, controller.cancel.bind(controller));
+adminBroadcastRouter.post("/:id/cancel", ...canEdit, editLimiter, byId, controller.cancel.bind(controller));
 
 /**
  * @swagger
@@ -509,7 +520,7 @@ adminBroadcastRouter.post("/:id/cancel", ...admin, editLimiter, byId, controller
  *       403: { description: Admin role required. }
  *       404: { description: No such broadcast. }
  */
-adminBroadcastRouter.post("/:id/duplicate", ...admin, editLimiter, byId, controller.duplicate.bind(controller));
+adminBroadcastRouter.post("/:id/duplicate", ...canEdit, editLimiter, byId, controller.duplicate.bind(controller));
 
 /**
  * @swagger
@@ -554,6 +565,6 @@ adminBroadcastRouter.post("/:id/duplicate", ...admin, editLimiter, byId, control
  *       403: { description: Admin role required. }
  *       404: { description: No such broadcast or recipient. }
  */
-adminBroadcastRouter.post("/:id/test", ...admin, broadcastLimiter, byId, validateZod(testBroadcastSchema), controller.test.bind(controller));
+adminBroadcastRouter.post("/:id/test", ...canEdit, broadcastLimiter, byId, validateZod(testBroadcastSchema), controller.test.bind(controller));
 
 export default adminBroadcastRouter;

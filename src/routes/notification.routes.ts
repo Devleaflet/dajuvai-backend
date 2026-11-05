@@ -10,6 +10,8 @@ import {
   isAdminOrStaff,
   validateZod,
 } from "../middlewares/auth.middleware";
+import { checkPermission } from "../middlewares/permission.middleware";
+import { ModuleName, PermissionLevel } from "../entities/permission.enum";
 import {
   readLimiter,
   generalNotificationLimiter,
@@ -309,7 +311,7 @@ notificationRoutes.delete(
  *                   type: string
  *                   example: "Error message describing what went wrong"
  *       403:
- *         description: Not an admin or staff
+ *         description: Not an admin, or staff without the broadcast permission
  *         content:
  *           application/json:
  *             schema:
@@ -320,7 +322,7 @@ notificationRoutes.delete(
  *                   example: false
  *                 message:
  *                   type: string
- *                   example: "Admin or staff access required"
+ *                   example: "Broadcast permission required"
  *       429:
  *         description: Rate limit exceeded
  *         content:
@@ -340,6 +342,7 @@ notificationRoutes.post(
   authMiddleware,
   generalNotificationLimiter,
   isAdminOrStaff,
+  checkPermission(ModuleName.BROADCAST, PermissionLevel.CREATE_EDIT),
   validateZod(sendToUserSchema),
   controller.sendToUserController.bind(controller),
 );
@@ -400,6 +403,7 @@ notificationRoutes.post(
   authMiddleware,
   multicastLimiter,
   isAdminOrStaff,
+  checkPermission(ModuleName.BROADCAST, PermissionLevel.CREATE_EDIT),
   validateZod(sendToUsersSchema),
   controller.sendToUsersController.bind(controller),
 );
@@ -456,6 +460,7 @@ notificationRoutes.post(
   authMiddleware,
   broadcastLimiter,
   isAdminOrStaff,
+  checkPermission(ModuleName.BROADCAST, PermissionLevel.CREATE_EDIT),
   validateZod(sendToTopicSchema),
   controller.sendToTopicController.bind(controller),
 );
@@ -494,6 +499,7 @@ notificationRoutes.get(
   authMiddleware,
   readLimiter,
   isAdminOrStaff,
+  checkPermission(ModuleName.BROADCAST, PermissionLevel.VIEW),
   validateZod(dispatchQuerySchema, "query"),
   controller.getDispatchHistoryController.bind(controller),
 );
@@ -520,6 +526,7 @@ notificationRoutes.get(
   authMiddleware,
   readLimiter,
   isAdminOrStaff,
+  checkPermission(ModuleName.BROADCAST, PermissionLevel.VIEW),
   controller.getPushStatsController.bind(controller),
 );
 

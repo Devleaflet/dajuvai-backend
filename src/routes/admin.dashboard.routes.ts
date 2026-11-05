@@ -8,7 +8,8 @@ import { AdminDashboardController } from "../controllers/admin.dashboard.control
 const adminDashboardController = new AdminDashboardController();
 
 const adminDashboardRouter = Router();
-adminDashboardRouter.use(authMiddleware, isAdminOrStaff);
+// Revenue and per-vendor sales are order data: a staff account needs the order module to see them.
+adminDashboardRouter.use(authMiddleware, isAdminOrStaff, checkPermission(ModuleName.ORDER, PermissionLevel.VIEW));
 
 /**
  * @swagger

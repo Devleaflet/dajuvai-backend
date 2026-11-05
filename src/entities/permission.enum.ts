@@ -2,6 +2,7 @@ export enum ModuleName {
     ARRANGEMENT = "arrangement",
     AUDIT = "audit",
     BANNER = "banner",
+    BROADCAST = "broadcast",
     CATALOG = "catalog",
     CATEGORY = "category",
     CUSTOMER = "customer",

@@ -72,7 +72,6 @@ export class VendorService {
                 isApproved: true,
             },
             select: {
-                email: true,
                 id: true,
                 slug: true,
                 businessName: true,
