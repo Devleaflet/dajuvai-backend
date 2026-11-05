@@ -142,6 +142,15 @@ const LATE_PAYMENT_WINDOW_MINUTES = 60;
 
 /** Stock rows an order sold out, to be cleared from carts after it commits. */
 
+/** Order statuses that pin down where the parcel physically is. */
+const DELIVERY_STATUS_FOR_ORDER_STATUS: Partial<Record<OrderStatus, DeliveryStatus>> = {
+    [OrderStatus.ARRIVED_AT_WAREHOUSE]: DeliveryStatus.AT_WAREHOUSE,
+    [OrderStatus.ASSIGNED_TO_RIDER]: DeliveryStatus.RIDER_ASSIGNED,
+    [OrderStatus.DELIVERED]: DeliveryStatus.DELIVERED,
+    [OrderStatus.NOT_RECEIVED]: DeliveryStatus.DELIVERY_FAILED,
+    [OrderStatus.RETURNED]: DeliveryStatus.RETURNED_WAREHOUSE,
+};
+
 export class OrderService {
     private orderRepository: Repository<Order>;
     private addressRepository: Repository<Address>;
@@ -1023,6 +1032,22 @@ export class OrderService {
             });
 
             orderId = result.orderId;
+            if (result.alreadyCompleted) {
+                // A racing callback (redirect, webhook, poll) already turned this
+                // draft into an order and sent its emails, history row and stock
+                // broadcast. Doing them again duplicated all three.
+                const completed = await this.orderRepository.findOne({
+                    where: { id: orderId },
+                    relations: [
+                        "orderItems",
+                        "orderItems.product",
+                        "orderItems.variant",
+                        "vendorShippings",
+                    ],
+                    withDeleted: true,
+                });
+                if (completed) return completed;
+            }
             if ("clearWholeCart" in result && result.clearWholeCart) {
                 // The order is committed; a cart that fails to clear is not
                 // a failed payment.
@@ -4243,6 +4268,10 @@ export class OrderService {
         }
 
         order.status = targetStatus;
+        // The delivery column the admin tables show follows the order status;
+        // without this it stayed "order_processing" all the way to delivered.
+        const delivery = DELIVERY_STATUS_FOR_ORDER_STATUS[targetStatus];
+        if (delivery) order.deliveryStatus = delivery;
         await this.orderRepository.save(order);
 
         // Leaving the rider by any route but the rider's own — an admin
@@ -4536,7 +4565,14 @@ export class OrderService {
         // Vendors see what happened and the customer-facing reason. The admin's
         // internal note and who on staff made the change stay internal.
         const rows = await this.getOrderStatusHistory(orderId);
-        return rows.map((row) => ({ ...row, note: null, changedBy: null }));
+        return rows.map((row) => ({
+            ...row,
+            // Only the reason statuses carry a customer-facing reason; any
+            // other reason is internal, exactly as on the customer timeline.
+            reason: customerFacingReason(row.newStatus, row.reason) ?? null,
+            note: null,
+            changedBy: null,
+        }));
     }
 
     /**

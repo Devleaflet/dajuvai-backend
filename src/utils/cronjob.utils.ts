@@ -14,6 +14,7 @@ import { deviceTokenService } from "../service/deviceToken.service";
 import { VendorService } from "../service/vendor.service";
 import { UserDeletionService } from "../service/user-deletion.service";
 import { OrderService } from "../service/order.service";
+import { CheckoutDraft, CheckoutDraftStatus } from "../entities/checkoutDraft.entity";
 
 const userDB = AppDataSource.getRepository(User);
 const orderDB = AppDataSource.getRepository(Order);
@@ -155,7 +156,33 @@ export const startOrderCleanupJob = () => {
                 select: { id: true, status: true },
             });
 
+            // An order materialised from a checkout draft exists only because the
+            // gateway confirmed payment; if it is still UNPAID, the step that
+            // marks it paid failed after the order was committed. Finish that
+            // step instead of cancelling (and restocking) an order that was paid.
+            const paidDrafts = staleOrders.length
+                ? await AppDataSource.getRepository(CheckoutDraft).find({
+                      where: {
+                          orderId: In(staleOrders.map((order) => order.id)),
+                          status: CheckoutDraftStatus.COMPLETED,
+                      },
+                  })
+                : [];
+            const paidDraftByOrder = new Map(paidDrafts.map((draft) => [draft.orderId, draft]));
+
             for (const order of staleOrders) {
+                const paidDraft = paidDraftByOrder.get(order.id);
+                if (paidDraft) {
+                    await new OrderService()
+                        .orderSuccess(
+                            order.id,
+                            paidDraft.mTransactionId || paidDraft.esewaTransactionUuid || "",
+                        )
+                        .catch((error) =>
+                            console.error(`[CRON] could not mark paid draft order ${order.id} as paid:`, error),
+                        );
+                    continue;
+                }
                 await cancelUnpaidOrder(
                     order,
                     "Online payment was not completed within 15 minutes, so the order was cancelled and its stock returned.",

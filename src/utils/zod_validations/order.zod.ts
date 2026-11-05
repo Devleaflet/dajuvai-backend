@@ -78,8 +78,6 @@ export const createOrderSchema = z.object({
     variantId: z.number().optional(),
     quantity: z.number().int().positive().optional().default(1),
     ageRestrictedAcknowledged: z.boolean().optional().default(false),
-    /** Carried through to the order so the charge shown at checkout is stored. */
-    serviceCharge: z.number().nonnegative().optional(),
     /** Which instrument the gateway reported, for reconciliation. */
     instrumentName: z.string().trim().min(1).optional(),
     /** Lets a retried checkout resolve to the same order rather than a second. */
@@ -106,6 +104,20 @@ export const createOrderSchema = z.object({
 export const cancelCheckoutSchema = z.object({
     draftId: z.number().int().positive(),
 });
+
+/**
+ * The web checkout estimate. Only the fields a shopper or a tampered request
+ * can make nonsensical are checked here (a negative or fractional quantity
+ * priced a negative or NaN total); everything else passes through to the
+ * estimator, which validates the cart itself.
+ */
+export const estimateCheckoutSchema = z
+    .object({
+        productId: z.number().int().positive().optional(),
+        variantId: z.number().int().positive().optional(),
+        quantity: z.number().int().positive().optional(),
+    })
+    .passthrough();
 
 export const mobileCheckoutEstimateSchema = z.object({
     shippingAddress: shippingAddressSchema,

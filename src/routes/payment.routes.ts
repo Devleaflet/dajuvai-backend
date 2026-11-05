@@ -436,6 +436,9 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
         // Everything about the request is checked before the gateway is
         // contacted; `persist` records the transaction once it exists.
         let persist: () => Promise<unknown>;
+        // What the gateway is asked to charge: always the server's total, never
+        // the client's figure (which only has to agree with it to the paisa).
+        let chargeAmount = Number(amount);
 
         if (hasDraftId) {
             // Draft-based checkout: no order exists yet — it materializes
@@ -452,6 +455,7 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
             if (!Number.isFinite(draftTotal) || Math.abs(draftTotal - Number(amount)) > 0.01) {
                 throw new APIError(400, "Payment amount does not match the checkout total");
             }
+            chargeAmount = draftTotal;
 
             // Targeted, and only while still pending: saving the whole draft
             // loaded above could undo an end or a settlement that happened
@@ -506,6 +510,7 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
                     "Payment amount does not match the order total",
                 );
             }
+            chargeAmount = payable;
 
             // An order that is already paid must not be paid again, and one
             // that was cancelled must not be payable at all.
@@ -528,7 +533,7 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
         const processData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
             MerchantName: CONFIG.MERCHANT_NAME,
-            Amount: amount.toString(),
+            Amount: String(Number(chargeAmount.toFixed(2))),
             MerchantTxnId: merchantTxnId,
         };
 
@@ -561,7 +566,7 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
         const paymentData: Record<string, string> = {
             MerchantId: CONFIG.MERCHANT_ID,
             MerchantName: CONFIG.MERCHANT_NAME,
-            Amount: amount.toString(),
+            Amount: String(Number(chargeAmount.toFixed(2))),
             MerchantTxnId: merchantTxnId,
             ProcessId: processId,
             InstrumentCode: instrumentCode || "",
@@ -719,7 +724,7 @@ paymentRouter.get("/response", (req: Request, res: Response) => {
     const { MerchantTxnId, GatewayTxnId } = req.query;
 
     res.redirect(
-        `${config.FRONTEND_URL}/order/payment-response?MerchantTxnId=${MerchantTxnId}&GatewayTxnId=${GatewayTxnId}`,
+        `${config.FRONTEND_URL}/order/payment-response?MerchantTxnId=${encodeURIComponent(String(MerchantTxnId ?? ""))}&GatewayTxnId=${encodeURIComponent(String(GatewayTxnId ?? ""))}`,
     );
 });
 

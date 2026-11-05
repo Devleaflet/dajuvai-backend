@@ -504,6 +504,9 @@ export class NotificationService {
     }
 
     async getNotificationById(id: string) {
+        // The key is a UUID column: anything else is a Postgres cast error
+        // (a 500), not a lookup. It is simply not a notification.
+        if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return null;
         return await this.notificationRepo.findOne({
             where: { id },
             relations: ["order"],

@@ -47,7 +47,8 @@ describe("checkout request contracts", () => {
             idempotencyKey: " checkout-123 ",
         });
 
-        expect(parsed.serviceCharge).toBe(25);
+        // A client-sent charge is never stored: totals are the server's.
+        expect("serviceCharge" in parsed).toBe(false);
         expect(parsed.instrumentName).toBe("Mobile Banking");
         expect(parsed.idempotencyKey).toBe("checkout-123");
     });

@@ -17,6 +17,7 @@ import { validateZod } from "../middlewares/validation.middleware";
 import {
     cancelCheckoutSchema,
     createOrderSchema,
+    estimateCheckoutSchema,
     shippingAddressSchema,
     updateOrderStatusSchema,
     updateOrderItemFulfillmentSchema,
@@ -235,6 +236,7 @@ router.post(
 router.post(
     "/estimate",
     authMiddleware,
+    validateZod(estimateCheckoutSchema),
     asyncHandler(orderController.estimateCheckout.bind(orderController)),
 );
 

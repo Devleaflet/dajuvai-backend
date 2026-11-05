@@ -54,6 +54,9 @@ export class DeliveryService {
     }
 
     private validateAndTransition(order: Order, target: DeliveryStatus): void {
+        // changeOrderStatus keeps deliveryStatus in step with the order status,
+        // so the target can already be the current state.
+        if (order.deliveryStatus === target) return;
         const allowed = this.ALLOWED_STATUS_TRANSITIONS[order.deliveryStatus];
         if (!allowed?.includes(target)) {
             throw new APIError(
