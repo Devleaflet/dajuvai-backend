@@ -83,6 +83,18 @@ mkdirSync(uploadDir, { recursive: true }); // recursive:true ensures parent dirs
 
 // Initialize Express app
 const app = express();
+// No framework banner, and the baseline browser protections on every response
+// (the API serves JSON and Swagger, never pages meant to be framed).
+app.disable("x-powered-by");
+app.use((_req, res, next) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  if (config.NODE_ENV === "production") {
+    res.setHeader("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
+  }
+  next();
+});
 
 // Create HTTP server early so process-level hooks can reference it for graceful shutdown
 const server = createServer(app);
@@ -150,7 +162,11 @@ app.use((req, res, next) => {
   next();
 });
 // Setup Swagger UI for API documentation at /docs route
-app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+// The full route map is a reconnaissance gift on the public API; production
+// serves it only when ENABLE_API_DOCS=true is set deliberately.
+if (config.NODE_ENV !== "production" || process.env.ENABLE_API_DOCS === "true") {
+  app.use("/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
+}
 
 app.use("/api/auth", userRouter);
 app.use("/api/categories", categoryRoutes);
