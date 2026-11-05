@@ -8,6 +8,7 @@ import AppDataSource from "../config/db.config";
 import {
   isIssuedBeforeCutoff,
   isTokenRevoked,
+  JWT_VERIFY_OPTIONS,
 } from "../service/token-revocation.service";
 import { Vendor } from "../entities/vendor.entity";
 import { Product } from "../entities/product.entity";
@@ -39,7 +40,7 @@ export interface AuthRequest<P = {}, ResBody = {}, ReqBody = {}, ReqQuery = {}>
    * needs the `jti`, and nothing else in the request can tell it apart from
    * any other session the same account holds.
    */
-  auth?: { jti?: string; iat?: number; exp?: number };
+  auth?: { jti?: string; sid?: string; iat?: number; exp?: number };
 }
 
 /**
@@ -184,7 +185,7 @@ export const combinedAuthMiddleware = async (
   }
 
   try {
-    const decoded = jwt.verify(token, config.JWT_SECRET) as {
+    const decoded = jwt.verify(token, config.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
       id: number;
       email: string;
       businessName?: string;
@@ -198,7 +199,7 @@ export const combinedAuthMiddleware = async (
     }
 
     // One door, two subject types — both get the same revocation rules.
-    if (await isTokenRevoked(decoded.jti as string | undefined)) {
+    if (await isTokenRevoked(decoded.jti as string | undefined, decoded.sid as string | undefined)) {
       return next(new AuthError("This session has been signed out. Please log in again."));
     }
 
@@ -209,6 +210,9 @@ export const combinedAuthMiddleware = async (
       }
       if (isIssuedBeforeCutoff(decoded.iat as number | undefined, vendor.tokensValidFrom)) {
         return next(new AuthError("Your password changed. Please log in again."));
+      }
+      if (vendorDeletionPending(vendor)) {
+        return next(new AuthError(VENDOR_DELETION_MESSAGE));
       }
       req.vendor = vendor;
       return next();
@@ -267,7 +271,7 @@ export const vendorAuthMiddleware = async (
   }
 
   try {
-    const decoded = jwt.verify(vendorToken, config.JWT_SECRET) as {
+    const decoded = jwt.verify(vendorToken, config.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
       id: number;
       email: string;
       businessName?: string;
@@ -278,11 +282,11 @@ export const vendorAuthMiddleware = async (
       return next(new AuthError("Invalid token: not a vendor session"));
     }
 
-    const vendorClaims = decoded as { jti?: string; iat?: number };
+    const vendorClaims = decoded as { jti?: string; sid?: string; iat?: number };
 
     // Revocation applies to vendors too: a vendor logout and a vendor password
     // reset must end the session they were issued for.
-    if (await isTokenRevoked(vendorClaims.jti)) {
+    if (await isTokenRevoked(vendorClaims.jti, vendorClaims.sid)) {
       return next(new AuthError("This session has been signed out. Please log in again."));
     }
 
@@ -293,6 +297,9 @@ export const vendorAuthMiddleware = async (
 
     if (isIssuedBeforeCutoff(vendorClaims.iat, vendor.tokensValidFrom)) {
       return next(new AuthError("Your password changed. Please log in again."));
+    }
+    if (vendorDeletionPending(vendor)) {
+      return next(new AuthError(VENDOR_DELETION_MESSAGE));
     }
     req.vendor = vendor;
     return next();
@@ -328,6 +335,18 @@ const DELETION_GRACE_ALLOWLIST: ReadonlyArray<{ method: string; path: RegExp }> 
   { method: "POST", path: /^\/logout$/ },
 ];
 
+/**
+ * A vendor who scheduled their account for deletion is signed out everywhere:
+ * listing, editing and order work stop with the request, not 15 minutes later.
+ * Reactivation is the credential-based /api/vendors/reactivate, which needs no
+ * session.
+ */
+const VENDOR_DELETION_MESSAGE =
+  "This vendor account is scheduled for deletion. Sign in again to reactivate it.";
+function vendorDeletionPending(vendor: Vendor): boolean {
+  return Boolean(vendor.deletionRequestedAt || vendor.deletionScheduledFor || vendor.deletionFinalizedAt);
+}
+
 function allowsPendingDeletion(req: Request): boolean {
   // `req.path` is relative to the router this middleware runs in, which is what
   // the patterns above are written against.
@@ -355,12 +374,13 @@ export const authMiddleware = async (
   }
 
   try {
-    const decoded = jwt.verify(token, config.JWT_SECRET) as {
+    const decoded = jwt.verify(token, config.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
       id: number;
       email: string;
       role?: string;
       businessName?: string;
       jti?: string;
+      sid?: string;
       iat?: number;
       exp?: number;
     };
@@ -387,7 +407,7 @@ export const authMiddleware = async (
      * before this shipped: they carry no `jti`, and an account that has never
      * revoked anything has `tokensValidFrom` null.
      */
-    if (await isTokenRevoked(decoded.jti)) {
+    if (await isTokenRevoked(decoded.jti, decoded.sid)) {
       return next(new AuthError("This session has been signed out. Please log in again."));
     }
 
@@ -426,7 +446,7 @@ export const authMiddleware = async (
     }
 
     req.user = user;
-    req.auth = { jti: decoded.jti, iat: decoded.iat, exp: decoded.exp };
+    req.auth = { jti: decoded.jti, sid: decoded.sid, iat: decoded.iat, exp: decoded.exp };
     return next();
   } catch (err) {
     if (err instanceof JwtTokenExpiredError) {

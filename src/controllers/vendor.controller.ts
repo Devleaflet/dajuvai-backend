@@ -45,7 +45,8 @@ import {
 import { DistrictService } from "../service/district.service";
 import { findUserByEmail } from "../service/user.service";
 import config from "../config/env.config";
-import { isIssuedBeforeCutoff, newTokenId } from "../service/token-revocation.service";
+import { TokenSubjectType } from "../entities/revokedToken.entity";
+import { isIssuedBeforeCutoff, isTokenRevoked, newSessionId, newTokenId, revokeToken, JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
 import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
 import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
 import {
@@ -89,6 +90,7 @@ export class VendorController {
     }
 
     private issueVendorSession(res: Response, vendor: any) {
+        const sid = newSessionId();
         const token = jwt.sign(
             // `jti` so this specific session can be revoked on logout; see
             // `token-revocation.service.ts`.
@@ -97,12 +99,13 @@ export class VendorController {
                 email: vendor.email,
                 businessName: vendor.businessName,
                 jti: newTokenId(),
+                sid,
             },
             this.jwtSecret,
             { expiresIn: "15m" },
         );
         const refreshToken = jwt.sign(
-            { id: vendor.id, email: vendor.email, businessName: vendor.businessName },
+            { id: vendor.id, email: vendor.email, businessName: vendor.businessName, sid },
             config.JWT_REFRESH_SECRET,
             { expiresIn: "7d" },
         );
@@ -354,17 +357,24 @@ export class VendorController {
 
         if (!token) throw new AuthError("Refresh token missing");
 
-        const decoded = jwt.verify(token, config.JWT_REFRESH_SECRET) as {
+        const decoded = jwt.verify(token, config.JWT_REFRESH_SECRET, JWT_VERIFY_OPTIONS) as {
             id: number;
             email: string;
             businessName: string;
+            sid?: string;
             iat?: number;
         };
+        if (await isTokenRevoked(decoded.sid)) {
+            throw new AuthError("This session has been signed out. Please log in again.");
+        }
 
         const vendor = await this.vendorService.findVendorByEmailLogin(
             decoded.email,
         );
         if (!vendor) throw new AuthError("Vendor not found");
+        if (vendor.deletionRequestedAt || vendor.deletionScheduledFor || vendor.deletionFinalizedAt) {
+            throw new AuthError("This vendor account is scheduled for deletion. Sign in again to reactivate it.");
+        }
         // A password change or reset ends every session signed before it,
         // refresh tokens included.
         if (isIssuedBeforeCutoff(decoded.iat, vendor.tokensValidFrom)) {
@@ -376,6 +386,8 @@ export class VendorController {
                 id: vendor.id,
                 email: vendor.email,
                 businessName: vendor.businessName,
+                jti: newTokenId(),
+                sid: decoded.sid,
             },
             this.jwtSecret,
             { expiresIn: "15m" },
@@ -429,7 +441,36 @@ export class VendorController {
         });
     }
 
-    async logout(_req: Request, res: Response): Promise<void> {
+    async logout(req: Request, res: Response): Promise<void> {
+        // The route is unauthenticated so an expired session can still log
+        // out; the token is read here only to revoke it and its session, which
+        // also ends the refresh token signed alongside it.
+        const raw = req.cookies?.vendorToken || req.headers.authorization?.split(" ")[1];
+        if (raw) {
+            try {
+                const claims = jwt.verify(raw, this.jwtSecret, {
+                    ...JWT_VERIFY_OPTIONS,
+                    ignoreExpiration: true,
+                }) as { id?: number; jti?: string; sid?: string; exp?: number; businessName?: string };
+                if (claims.businessName && claims.id) {
+                    for (const id of [claims.jti, claims.sid]) {
+                        if (!id) continue;
+                        await revokeToken({
+                            jti: id,
+                            subjectType: TokenSubjectType.VENDOR,
+                            subjectId: claims.id,
+                            expiresAtSeconds:
+                                id === claims.sid
+                                    ? Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60
+                                    : claims.exp,
+                            reason: "logout",
+                        });
+                    }
+                }
+            } catch {
+                // A token that does not verify has nothing to revoke.
+            }
+        }
         res.clearCookie("vendorToken");
         res.clearCookie("vendorRefreshToken");
         res.status(200).json({

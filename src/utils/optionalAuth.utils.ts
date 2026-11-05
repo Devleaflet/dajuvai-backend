@@ -1,4 +1,5 @@
 import { Request } from "express";
+import { JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
 import jwt from "jsonwebtoken";
 
 import config from "../config/env.config";
@@ -27,7 +28,7 @@ export function optionalUserIdFromRequest(req: Request): number | null {
     if (!token) return null;
 
     try {
-        const decoded = jwt.verify(token, config.JWT_SECRET) as {
+        const decoded = jwt.verify(token, config.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
             id?: number;
             businessName?: string;
         };
@@ -62,7 +63,7 @@ export function optionalCallerFromRequest(req: Pick<Request, "headers"> & { cook
     if (!token) return null;
 
     try {
-        const decoded = jwt.verify(token, config.JWT_SECRET) as {
+        const decoded = jwt.verify(token, config.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
             id?: number;
             role?: string;
             businessName?: string;

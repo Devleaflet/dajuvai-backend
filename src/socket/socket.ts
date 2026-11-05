@@ -1,4 +1,5 @@
 import { Server as HttpServer } from "http";
+import { JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
 import { Server, Socket } from "socket.io";
 import jwt from "jsonwebtoken";
 import AppDataSource from "../config/db.config";
@@ -51,7 +52,7 @@ export const initSocket = (server: HttpServer) => {
                 return next(new Error("Unauthorized"));
             }
 
-            const decoded = jwt.verify(token, config.JWT_SECRET) as {
+            const decoded = jwt.verify(token, config.JWT_SECRET, JWT_VERIFY_OPTIONS) as {
                 id: number;
                 role?: string;
                 businessName?: string;

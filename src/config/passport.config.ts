@@ -14,6 +14,7 @@ import { UserDeletionService } from "../service/user-deletion.service";
 import {
   isIssuedBeforeCutoff,
   isTokenRevoked,
+  JWT_VERIFY_OPTIONS,
 } from "../service/token-revocation.service";
 
 // Initialize User repository to interact with the database
@@ -42,6 +43,8 @@ const opts = {
     cookieExtractor, // Accepts token from cookie
   ]),
   secretOrKey: config.JWT_SECRET,
+  // Same pin as every other verify: only HS256, the algorithm this API signs with.
+  algorithms: JWT_VERIFY_OPTIONS.algorithms,
 };
 
 // Configures JWT Strategy for token-based authentication
@@ -80,7 +83,7 @@ passport.use(
          * refused at every door. Without this check, logging out revoked the
          * token for one half of the API and not the other.
          */
-        if (await isTokenRevoked(jwt_payload.jti)) {
+        if (await isTokenRevoked(jwt_payload.jti, jwt_payload.sid)) {
           return done(null, false);
         }
 

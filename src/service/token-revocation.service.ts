@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { LessThan } from "typeorm";
+import { In, LessThan } from "typeorm";
 
 import AppDataSource from "../config/db.config";
 import { RevokedToken, TokenSubjectType } from "../entities/revokedToken.entity";
@@ -26,6 +26,22 @@ const revokedRepository = () => AppDataSource.getRepository(RevokedToken);
 
 /** A fresh token id. Short enough for the column, unique enough to be a key. */
 export function newTokenId(): string {
+    return randomUUID();
+}
+
+/**
+ * Every token this API signs is HS256. Pinning it on verify means a token
+ * signed with another algorithm is refused, whatever key it was signed with.
+ */
+export const JWT_VERIFY_OPTIONS: { algorithms: ["HS256"] } = { algorithms: ["HS256"] };
+
+/**
+ * One id per sign-in, carried by that sign-in's access and refresh tokens and
+ * by every access token the refresh token later mints. Logout revokes it, so
+ * the refresh token stops working too — otherwise logging out only ends the
+ * current 15-minute access token.
+ */
+export function newSessionId(): string {
     return randomUUID();
 }
 
@@ -66,12 +82,13 @@ export async function revokeToken(input: {
 }
 
 /** Whether this token has been withdrawn. Called on every authenticated request. */
-export async function isTokenRevoked(jti: string | undefined): Promise<boolean> {
-    // Tokens signed before revocation existed carry no `jti`. They cannot be
-    // revoked individually — `tokensValidFrom` is what covers them.
-    if (!jti) return false;
+export async function isTokenRevoked(...ids: Array<string | undefined>): Promise<boolean> {
+    // Tokens signed before revocation existed carry no `jti` (or `sid`). They
+    // cannot be revoked individually — `tokensValidFrom` is what covers them.
+    const present = ids.filter((id): id is string => typeof id === "string" && id.length > 0);
+    if (!present.length) return false;
 
-    return (await revokedRepository().countBy({ jti })) > 0;
+    return (await revokedRepository().countBy({ jti: In(present) })) > 0;
 }
 
 /**

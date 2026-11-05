@@ -70,7 +70,7 @@ import {
     isVendor,
 } from "../middlewares/auth.middleware";
 import { AuthError } from "../errors/HttpErrors";
-import { isIssuedBeforeCutoff, newTokenId, revokeToken } from "../service/token-revocation.service";
+import { isIssuedBeforeCutoff, isTokenRevoked, newSessionId, newTokenId, revokeToken, JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
 import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
 import { issueUserSessionTokens } from "../service/oauth.service";
 import { TokenSubjectType } from "../entities/revokedToken.entity";
@@ -269,15 +269,16 @@ export class UserController {
         // mid-session. Shorten it to 15m once that app is retired and the
         // Next console — which mints its own sealed cookie and discards this
         // one — is the only admin client.
+        const sid = newSessionId();
         const token = jwt.sign(
-            { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
+            { id: user.id, email: user.email, role: user.role, jti: newTokenId(), sid },
             config.JWT_SECRET,
             { expiresIn: "7d" },
         );
 
         // Generate refresh token (long-lived)
         const refreshToken = jwt.sign(
-            { id: user.id, email: user.email, role: user.role },
+            { id: user.id, email: user.email, role: user.role, sid },
             config.JWT_REFRESH_SECRET,
             { expiresIn: "7d" },
         );
@@ -684,15 +685,16 @@ export class UserController {
             }
 
             // Generate access token (short-lived)
+            const sid = newSessionId();
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId(), sid },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
 
             // Generate refresh token (long-lived)
             const refreshToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, sid },
                 config.JWT_REFRESH_SECRET,
                 { expiresIn: "1d" },
             );
@@ -834,13 +836,15 @@ export class UserController {
                 parsed.data.password,
             );
 
+            const sid = newSessionId();
+
             const token = jwt.sign(
-                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId(), sid },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
             const refreshToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role },
+                { id: user.id, email: user.email, role: user.role, sid },
                 config.JWT_REFRESH_SECRET,
                 { expiresIn: "1d" },
             );
@@ -909,10 +913,11 @@ export class UserController {
                 return;
             }
 
-            const decoded = jwt.verify(token, config.JWT_REFRESH_SECRET) as {
+            const decoded = jwt.verify(token, config.JWT_REFRESH_SECRET, JWT_VERIFY_OPTIONS) as {
                 id: number;
                 email: string;
                 role: string;
+                sid?: string;
                 iat?: number;
             };
 
@@ -929,6 +934,15 @@ export class UserController {
             // A password change or reset ends every session signed before it.
             // Without this a refresh token kept minting access tokens for a
             // day after the password changed, which made the cutoff moot.
+            if (await isTokenRevoked(decoded.sid)) {
+                res.status(401).json({
+                    success: false,
+                    errorCode: "SESSION_REVOKED",
+                    message: "This session has been signed out. Please log in again.",
+                });
+                return;
+            }
+
             if (isIssuedBeforeCutoff(decoded.iat, user.tokensValidFrom)) {
                 res.status(401).json({
                     success: false,
@@ -953,7 +967,7 @@ export class UserController {
             }
 
             const newAccessToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role, jti: newTokenId() },
+                { id: user.id, email: user.email, role: user.role, jti: newTokenId(), sid: decoded.sid },
                 this.jwtSecret,
                 { expiresIn: "15m" },
             );
@@ -999,6 +1013,17 @@ export class UserController {
                 subjectType: TokenSubjectType.USER,
                 subjectId: req.user.id,
                 expiresAtSeconds: req.auth.exp,
+                reason: "logout",
+            });
+        }
+        // The session id is shared with the refresh token; revoking it is what
+        // stops the refresh token from minting new access tokens.
+        if (req.auth?.sid && req.user?.id) {
+            await revokeToken({
+                jti: req.auth.sid,
+                subjectType: TokenSubjectType.USER,
+                subjectId: req.user.id,
+                expiresAtSeconds: Math.floor(Date.now() / 1000) + 7 * 24 * 60 * 60,
                 reason: "logout",
             });
         }
@@ -1929,7 +1954,7 @@ export class UserController {
             // Verify email change JWT
             let decoded: { id: number; newEmail: string; type: string };
             try {
-                decoded = jwt.verify(emailChangeToken, this.jwtSecret) as {
+                decoded = jwt.verify(emailChangeToken, this.jwtSecret, JWT_VERIFY_OPTIONS) as {
                     id: number;
                     newEmail: string;
                     type: string;

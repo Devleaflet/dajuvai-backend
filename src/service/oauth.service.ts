@@ -3,7 +3,7 @@ import jwt from "jsonwebtoken";
 
 import config from "../config/env.config";
 import { AuthProvider, User } from "../entities/user.entity";
-import { newTokenId } from "./token-revocation.service";
+import { newSessionId, newTokenId } from "./token-revocation.service";
 
 /**
  * Web social sign-in (Google, Facebook), shared so the two providers cannot
@@ -123,7 +123,7 @@ export async function resolveOAuthUser(
  * `POST /api/auth/refresh-token` accepts.
  */
 export function issueUserSessionTokens(user: Pick<User, "id" | "email" | "role">) {
-    const claims = { id: user.id, email: user.email, role: user.role };
+    const claims = { id: user.id, email: user.email, role: user.role, sid: newSessionId() };
     return {
         token: jwt.sign({ ...claims, jti: newTokenId() }, config.JWT_SECRET, { expiresIn: "15m" }),
         refreshToken: jwt.sign(claims, config.JWT_REFRESH_SECRET, { expiresIn: "1d" }),

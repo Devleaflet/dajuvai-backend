@@ -100,7 +100,7 @@ export const verificationTokenSchema = z.object({
  */
 export const verifyTokenSchema = z.object({
     email: z.string().email('Invalid email format'),
-    token: z.string().min(1, 'Token is required'),
+    token: z.string().trim().min(1, 'Token is required'),
 });
 
 /**
@@ -109,7 +109,7 @@ export const verifyTokenSchema = z.object({
  */
 export const resetCodeSchema = z.object({
     email: z.string().email('Invalid email format'),
-    token: z.string().regex(/^\d{6}$/, 'Code must be 6 digits'),
+    token: z.string().trim().regex(/^\d{6}$/, 'Code must be 6 digits'),
 });
 
 /**
@@ -184,16 +184,6 @@ export const updateUserSchema = z.object({
  * Validates newPass, confirmPass, and token.
  * Ensures newPass and confirmPass match.
  */
-export const resetPasswordSchema = z.object({
-    email: z.string().email('Invalid email format'),
-    newPass: z.string().min(8, 'New password must be at least 8 characters long'),
-    confirmPass: z.string().min(1, 'Confirm password is required'),
-    token: z.string().min(1, 'Token is required'),
-}).refine(data => data.newPass === data.confirmPass, {
-    message: 'Passwords do not match',
-    path: ['confirmPass'],
-});
-
 /** Same rules signup enforces, so a changed password is never weaker than a new one. */
 const strongPassword = z.string()
     .min(8, 'Password must be at least 8 characters long')
@@ -202,6 +192,17 @@ const strongPassword = z.string()
     .regex(/[a-z]/, 'Password must contain at least one lowercase letter')
     .regex(/[0-9]/, 'Password must contain at least one number')
     .regex(/[^A-Za-z0-9]/, 'Password must contain at least one special character');
+
+export const resetPasswordSchema = z.object({
+    email: z.string().email('Invalid email format'),
+    newPass: strongPassword,
+    confirmPass: z.string().min(1, 'Confirm password is required'),
+    token: z.string().trim().min(1, 'Token is required'),
+}).refine(data => data.newPass === data.confirmPass, {
+    message: 'Passwords do not match',
+    path: ['confirmPass'],
+});
+
 
 /** Checks the signed-in account's current password before a new one is asked for. */
 export const verifyCurrentPasswordSchema = z.object({
@@ -215,7 +216,7 @@ export const verifyCurrentPasswordSchema = z.object({
  */
 export const changePasswordSchema = z.object({
     currentPassword: z.string().min(1).max(100).optional(),
-    token: z.string().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
+    token: z.string().trim().regex(/^\d{6}$/, 'Enter the 6-digit code').optional(),
     newPassword: strongPassword,
     confirmPassword: z.string().min(1, 'Confirm your new password'),
 }).refine(data => Boolean(data.currentPassword) !== Boolean(data.token), {

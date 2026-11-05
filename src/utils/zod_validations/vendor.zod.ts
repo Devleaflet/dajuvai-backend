@@ -86,7 +86,7 @@ export const verificationTokenSchema = z.object({
  */
 export const verifyTokenSchema = z.object({
   email: z.string().email("Invalid email format"),
-  token: z.string().regex(/^\d{6}$/, "Token must be 6 digits"),
+  token: z.string().trim().regex(/^\d{6}$/, "Token must be 6 digits"),
 });
 
 /**
@@ -99,13 +99,17 @@ export const resetPasswordSchema = z
     newPass: z
       .string()
       .min(8, "Password must be at least 8 characters long")
-      .max(100, "Password must not exceed 100 characters"),
+      .max(100, "Password must not exceed 100 characters")
+      .regex(/[A-Z]/, "Password must contain at least one uppercase letter")
+      .regex(/[a-z]/, "Password must contain at least one lowercase letter")
+      .regex(/[0-9]/, "Password must contain at least one number")
+      .regex(/[^A-Za-z0-9]/, "Password must contain at least one special character"),
     confirmPass: z
       .string()
       .min(8, "Password must be at least 8 characters long")
       .max(100, "Password must not exceed 100 characters"),
     email: z.string().email("Invalid email format"),
-    token: z.string().regex(/^\d{6}$/, "Token must be 6 digits"),
+    token: z.string().trim().regex(/^\d{6}$/, "Token must be 6 digits"),
   })
   .refine((data) => data.newPass === data.confirmPass, {
     message: "Passwords must match",
