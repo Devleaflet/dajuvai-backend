@@ -1918,6 +1918,7 @@ export class ProductService {
     }
 
     let isAdmin = false;
+    let isStaff = false;
     if (actor.userId !== undefined) {
       const user = await this.userRepository.findOne({
         where: { id: actor.userId },
@@ -1926,18 +1927,21 @@ export class ProductService {
         throw new APIError(404, "User not found");
       }
       isAdmin = user.role === UserRole.ADMIN;
+      // Staff only reach here through checkPermissionUnlessVendor(PRODUCT, …),
+      // so the route has already proven they hold the product permission.
+      isStaff = user.role === UserRole.STAFF;
     }
 
     const isVendorOwner =
       actor.vendorId !== undefined && product.vendor?.id === actor.vendorId;
 
-    if (!isAdmin && !isVendorOwner) {
+    if (!isAdmin && !isStaff && !isVendorOwner) {
       throw new APIError(403, `You can only ${action} your own products`);
     }
 
-    return isAdmin
-      ? { type: AuditActorType.ADMIN, id: actor.userId }
-      : { type: AuditActorType.VENDOR, id: actor.vendorId };
+    if (isAdmin) return { type: AuditActorType.ADMIN, id: actor.userId };
+    if (isStaff) return { type: AuditActorType.STAFF, id: actor.userId };
+    return { type: AuditActorType.VENDOR, id: actor.vendorId };
   }
 
   async deleteProductImage(

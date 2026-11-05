@@ -371,11 +371,22 @@ vendorDashBoardRouter.get("/low-stock", vendorAuthMiddleware, isVendor, vendorDa
  * /api/vendor/dashboard/analytics/top-selling-products:
  *   get:
  *     summary: Get vendor's top selling products
- *     description: Returns realized top-selling products for the authenticated vendor, ranked by quantity sold. Only PAID orders with status CONFIRMED or DELIVERED are included.
+ *     description: Returns realized top-selling products for the authenticated vendor, ranked by quantity sold. Only PAID orders with status CONFIRMED or DELIVERED are included. Optional startDate/endDate limit the ranking to that range.
  *     tags:
  *       - Vendor Dashboard
  *     security:
  *       - bearerAuth: []
+ *     parameters:
+ *       - in: query
+ *         name: startDate
+ *         schema:
+ *           type: string
+ *           format: date
+ *       - in: query
+ *         name: endDate
+ *         schema:
+ *           type: string
+ *           format: date
  *     responses:
  *       200:
  *         description: Top selling products retrieved successfully

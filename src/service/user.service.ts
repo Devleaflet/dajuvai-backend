@@ -202,14 +202,27 @@ export const findUserByResetToken = async (
  */
 export const getUserByIdService = async (
     id: number,
-): Promise<(SanitizedUser & { permissions?: Record<string, string> }) | null> => {
+): Promise<
+    | (SanitizedUser & {
+          permissions?: Record<string, string>;
+          deletionRequestedAt: Date | null;
+          deletionScheduledFor: Date | null;
+      })
+    | null
+> => {
     const user = await userDB.findOne({
         where: { id: id },
         relations: ["address"],
     });
 
     if (!user) return null;
-    const sanitized = sanitizeUser(user);
+    // The account screen shows "deletion scheduled for …" from these; the
+    // generic sanitizer leaves them out because other views share it.
+    const sanitized = {
+        ...sanitizeUser(user),
+        deletionRequestedAt: user.deletionRequestedAt ?? null,
+        deletionScheduledFor: user.deletionScheduledFor ?? null,
+    };
 
     if (user.role === UserRole.STAFF) {
         const permissions = await getFormattedStaffPermissions(user.id);

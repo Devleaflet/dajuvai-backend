@@ -1907,6 +1907,7 @@ router.delete(
     "/:categoryId/subcategories/:subcategoryId/products/:id/images",
     combinedAuthMiddleware,
     isVendorAccountOwnerOrAdminOrStaff,
+    checkPermissionUnlessVendor(ModuleName.PRODUCT, PermissionLevel.DELETE),
     productController.deleteProductImage.bind(productController),
 );
 export default router;

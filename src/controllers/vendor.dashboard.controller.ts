@@ -40,8 +40,20 @@ export class VendorDashboardController {
         res.status(200).json(lowStockProducts);
     }
 
-    async getTopSellingProduct(req: VendorAuthRequest, res: Response, _next: NextFunction): Promise<void> {
-        const topSellingProduct = await this.dashboardService.getTopProductsByVendor(req.vendor.id);
+    async getTopSellingProduct(
+        req: VendorAuthRequest<{}, {}, {}, { startDate?: string; endDate?: string }>,
+        res: Response,
+        _next: NextFunction,
+    ): Promise<void> {
+        // The dashboard's range picker sends these; ignoring them showed
+        // all-time best sellers under a "7 days" label.
+        const { startDate, endDate } = req.query;
+        const topSellingProduct = await this.dashboardService.getTopProductsByVendor(
+            req.vendor.id,
+            5,
+            startDate,
+            endDate,
+        );
         res.status(200).json(topSellingProduct);
     }
 
