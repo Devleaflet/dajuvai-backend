@@ -12,10 +12,17 @@ describe("slugify", () => {
         expect(slugify("Fast & Fine+")).toBe("fast-and-fine");
     });
 
-    it("drops scripts with no Latin form and collapses punctuation", () => {
-        expect(slugify("Nepali Spicy Buff Pickle (अचार)")).toBe("nepali-spicy-buff-pickle");
+    it("romanises Devanagari and collapses punctuation", () => {
+        expect(slugify("Nepali Spicy Buff Pickle (अचार)")).toBe("nepali-spicy-buff-pickle-achar");
         expect(slugify("Earphone Jnuobi YX-29/28")).toBe("earphone-jnuobi-yx-29-28");
-        expect(slugify("अचार")).toBe("");
+        expect(slugify("अचार")).toBe("achar");
+        expect(slugify("ढाका टोपी")).toBe("dhaka-topi");
+        expect(slugify("नेपाली हस्तनिर्मित")).toBe("nepali-hastanirmit");
+        expect(slugify("चिया ५००")).toBe("chiya-500");
+    });
+
+    it("drops scripts it cannot romanise", () => {
+        expect(slugify("日本")).toBe("");
     });
 
     it("caps length on a word boundary", () => {
@@ -28,7 +35,8 @@ describe("slugify", () => {
 
 describe("baseSlug", () => {
     it("falls back when nothing survives", () => {
-        expect(baseSlug("अचार", "product")).toBe("product");
+        expect(baseSlug("日本", "product")).toBe("product");
+        expect(baseSlug("अचार", "product")).toBe("achar");
         expect(baseSlug(null, "user")).toBe("user");
     });
 

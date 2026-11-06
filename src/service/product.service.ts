@@ -16,6 +16,7 @@ import { Brand } from "../entities/brand.entity";
 import { Banner } from "../entities/banner.entity";
 import {
   InventoryStatus,
+  normalizeKeywords,
   ProductInterface,
 } from "../utils/zod_validations/product.zod";
 import { CategoryService } from "./category.service";
@@ -611,7 +612,9 @@ export class ProductService {
       name,
       brand,
       description,
-      keywords,
+      // The create route takes the raw body, so the schema's normalisation
+      // never ran: keywords were stored exactly as typed.
+      keywords: typeof keywords === "string" ? normalizeKeywords(keywords) : keywords,
       basePrice: isVariantProduct ? null : normalizedBasePrice,
       discountAmount: normalizedProductDiscount.discountAmount,
       discountPercent: normalizedProductDiscount.discountPercent,
@@ -808,7 +811,8 @@ export class ProductService {
     product.name = name ?? product.name;
     product.brand = brand ?? product.brand;
     product.description = description ?? product.description;
-    product.keywords = keywords ?? product.keywords;
+    product.keywords =
+      typeof keywords === "string" ? normalizeKeywords(keywords) : product.keywords;
     product.subcategoryId = subcategoryId;
 
     if (!effectiveHasVariants) {

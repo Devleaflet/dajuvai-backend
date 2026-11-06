@@ -24,6 +24,17 @@ interface VariantInterface {
   variantImages?: string[];
 }
 
+/** 'wool, cotton ,LENIN, wool' -> 'wool,cotton,lenin': trimmed, lowercased, de-duplicated. */
+export function normalizeKeywords(value: string): string {
+  const keywords = new Set(
+    value
+      .split(",")
+      .map((k) => k.trim().toLowerCase())
+      .filter(Boolean),
+  );
+  return [...keywords].join(",");
+}
+
 export interface ProductInterface {
   name: string;
   brand?: string;
@@ -52,16 +63,7 @@ const ProductBaseSchema = z.object({
   // make user input consistent: 'wool, cotton ,lenin' -> 'wool,cotton,lenin'
   keywords: z
     .string()
-    .transform((value) => {
-      const keywords = new Set(
-        value
-          .split(",")
-          .map((k) => k.trim().toLowerCase())
-          .filter(Boolean),
-      );
-
-      return [...keywords].join(",");
-    })
+    .transform(normalizeKeywords)
     .optional(),
   basePrice: z.preprocess(
     (value) =>
