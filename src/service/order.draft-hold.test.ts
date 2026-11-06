@@ -41,7 +41,7 @@ describe("OrderService.endDraft", () => {
 
         expect(repo.findOne).toHaveBeenCalledWith(expect.objectContaining({ lock: { mode: "pessimistic_write" } }));
         expect(service.restoreStock).toHaveBeenCalledWith([{ productId: 1, variantId: null, quantity: 2, price: 100 }], expect.anything());
-        expect(repo.update).toHaveBeenCalledWith(5, { status: "EXPIRED", stockHeld: false });
+        expect(repo.update).toHaveBeenCalledWith(5, { status: "EXPIRED", stockHeld: false, promoHeld: false });
     });
 
     it("does nothing to a draft another caller already ended", async () => {
@@ -57,7 +57,7 @@ describe("OrderService.endDraft", () => {
 
         expect(await service.endDraft(5, "CANCELLED")).toBe(true);
         expect(service.restoreStock).not.toHaveBeenCalled();
-        expect(repo.update).toHaveBeenCalledWith(5, { status: "CANCELLED", stockHeld: false });
+        expect(repo.update).toHaveBeenCalledWith(5, { status: "CANCELLED", stockHeld: false, promoHeld: false });
     });
 });
 
