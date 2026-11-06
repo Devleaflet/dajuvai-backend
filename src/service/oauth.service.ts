@@ -126,7 +126,7 @@ export function issueUserSessionTokens(user: Pick<User, "id" | "email" | "role">
     const claims = { id: user.id, email: user.email, role: user.role, sid: newSessionId() };
     return {
         token: jwt.sign({ ...claims, jti: newTokenId() }, config.JWT_SECRET, { expiresIn: "15m" }),
-        refreshToken: jwt.sign(claims, config.JWT_REFRESH_SECRET, { expiresIn: "1d" }),
+        refreshToken: jwt.sign({ ...claims, jti: newTokenId() }, config.JWT_REFRESH_SECRET, { expiresIn: "1d" }),
     };
 }
 

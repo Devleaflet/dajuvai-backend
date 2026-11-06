@@ -98,6 +98,58 @@ export async function isTokenRevoked(...ids: Array<string | undefined>): Promise
  * second as the change is treated as older, which is the safe direction: worst
  * case someone signs in again.
  */
+/**
+ * Refresh-token rotation that does not strand older clients.
+ *
+ * Every refresh hands out a new refresh token (`jti`, with its parent's id as
+ * `pjti`). A token is retired only once its successor has been *used*: that
+ * proves the client keeps the new tokens, so an app build that never stores
+ * them keeps refreshing with its original token and keeps working.
+ *
+ * Presenting a retired token means two parties hold the session — the
+ * classic sign of a stolen refresh token — so the whole session (`sid`) is
+ * revoked and both must sign in again. Parallel requests that raced one
+ * refresh are given `REFRESH_REUSE_GRACE_MS` before that applies.
+ *
+ * Returns false when the session was just revoked for reuse.
+ */
+export async function rotateRefreshToken(
+    claims: { jti?: string; pjti?: string; sid?: string; exp?: number },
+    subject: { type: TokenSubjectType; id: number },
+): Promise<boolean> {
+    if (claims.jti) {
+        const graceMs = Number(process.env.REFRESH_REUSE_GRACE_MS) || 60_000;
+        // Age measured in the database, so it uses one clock for both ends.
+        const [retired] = await revokedRepository().query(
+            `SELECT reason, EXTRACT(EPOCH FROM (LOCALTIMESTAMP - "revokedAt")) * 1000 AS "ageMs"
+             FROM revoked_tokens WHERE jti = $1`,
+            [claims.jti],
+        );
+        if (retired && !(retired.reason === "rotated" && Number(retired.ageMs) < graceMs)) {
+            if (claims.sid) {
+                await revokeToken({
+                    jti: claims.sid,
+                    subjectType: subject.type,
+                    subjectId: subject.id,
+                    expiresAtSeconds: claims.exp,
+                    reason: "refresh-reuse",
+                });
+            }
+            return false;
+        }
+    }
+    if (claims.pjti) {
+        await revokeToken({
+            jti: claims.pjti,
+            subjectType: subject.type,
+            subjectId: subject.id,
+            expiresAtSeconds: claims.exp,
+            reason: "rotated",
+        });
+    }
+    return true;
+}
+
 export function isIssuedBeforeCutoff(
     issuedAtSeconds: number | undefined,
     tokensValidFrom: Date | null | undefined,

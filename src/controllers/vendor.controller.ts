@@ -46,7 +46,7 @@ import { DistrictService } from "../service/district.service";
 import { findUserByEmail } from "../service/user.service";
 import config from "../config/env.config";
 import { TokenSubjectType } from "../entities/revokedToken.entity";
-import { isIssuedBeforeCutoff, isTokenRevoked, newSessionId, newTokenId, revokeToken, JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
+import { isIssuedBeforeCutoff, isTokenRevoked, newSessionId, newTokenId, revokeToken, rotateRefreshToken, JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
 import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
 import { createAuthAccountConflict } from "../service/auth-account-conflict.policy";
 import {
@@ -105,7 +105,7 @@ export class VendorController {
             { expiresIn: "15m" },
         );
         const refreshToken = jwt.sign(
-            { id: vendor.id, email: vendor.email, businessName: vendor.businessName, sid },
+            { id: vendor.id, email: vendor.email, businessName: vendor.businessName, sid, jti: newTokenId() },
             config.JWT_REFRESH_SECRET,
             { expiresIn: "7d" },
         );
@@ -362,7 +362,10 @@ export class VendorController {
             email: string;
             businessName: string;
             sid?: string;
+            jti?: string;
+            pjti?: string;
             iat?: number;
+            exp?: number;
         };
         if (await isTokenRevoked(decoded.sid)) {
             throw new AuthError("This session has been signed out. Please log in again.");
@@ -400,7 +403,32 @@ export class VendorController {
             maxAge: 15 * 60 * 1000,
         });
 
-        res.status(200).json({ success: true, token: newAccessToken });
+        // A new refresh token every time; see rotateRefreshToken. It keeps the
+        // session's original expiry, so refreshing never extends it.
+        if (!(await rotateRefreshToken(decoded, { type: TokenSubjectType.VENDOR, id: vendor.id }))) {
+            res.clearCookie("vendorToken");
+            res.clearCookie("vendorRefreshToken");
+            throw new AuthError("This session has been signed out. Please log in again.");
+        }
+        const newRefreshToken = jwt.sign(
+            {
+                id: vendor.id,
+                email: vendor.email,
+                businessName: vendor.businessName,
+                sid: decoded.sid,
+                jti: newTokenId(),
+                pjti: decoded.jti,
+                exp: decoded.exp,
+            },
+            config.JWT_REFRESH_SECRET,
+        );
+        res.cookie("vendorRefreshToken", newRefreshToken, {
+            httpOnly: true,
+            secure: config.NODE_ENV === "production",
+            sameSite: "strict",
+            maxAge: Math.max(0, (decoded.exp ?? 0) * 1000 - Date.now()),
+        });
+        res.status(200).json({ success: true, token: newAccessToken, refreshToken: newRefreshToken });
     }
 
     async reactivate(

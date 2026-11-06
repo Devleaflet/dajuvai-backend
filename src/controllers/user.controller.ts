@@ -70,7 +70,7 @@ import {
     isVendor,
 } from "../middlewares/auth.middleware";
 import { AuthError } from "../errors/HttpErrors";
-import { isIssuedBeforeCutoff, isTokenRevoked, newSessionId, newTokenId, revokeToken, JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
+import { isIssuedBeforeCutoff, isTokenRevoked, newSessionId, newTokenId, revokeToken, rotateRefreshToken, JWT_VERIFY_OPTIONS } from "../service/token-revocation.service";
 import { applyPasswordChange, assertCurrentPassword } from "../service/password-change.service";
 import { issueUserSessionTokens } from "../service/oauth.service";
 import { TokenSubjectType } from "../entities/revokedToken.entity";
@@ -278,7 +278,7 @@ export class UserController {
 
         // Generate refresh token (long-lived)
         const refreshToken = jwt.sign(
-            { id: user.id, email: user.email, role: user.role, sid },
+            { id: user.id, email: user.email, role: user.role, sid, jti: newTokenId() },
             config.JWT_REFRESH_SECRET,
             { expiresIn: "7d" },
         );
@@ -694,7 +694,7 @@ export class UserController {
 
             // Generate refresh token (long-lived)
             const refreshToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role, sid },
+                { id: user.id, email: user.email, role: user.role, sid, jti: newTokenId() },
                 config.JWT_REFRESH_SECRET,
                 { expiresIn: "1d" },
             );
@@ -844,7 +844,7 @@ export class UserController {
                 { expiresIn: "15m" },
             );
             const refreshToken = jwt.sign(
-                { id: user.id, email: user.email, role: user.role, sid },
+                { id: user.id, email: user.email, role: user.role, sid, jti: newTokenId() },
                 config.JWT_REFRESH_SECRET,
                 { expiresIn: "1d" },
             );
@@ -918,7 +918,10 @@ export class UserController {
                 email: string;
                 role: string;
                 sid?: string;
+                jti?: string;
+                pjti?: string;
                 iat?: number;
+                exp?: number;
             };
 
             const userRepo = AppDataSource.getRepository(User);
@@ -979,7 +982,38 @@ export class UserController {
                 maxAge: 15 * 60 * 1000,
             });
 
-            res.status(200).json({ success: true, token: newAccessToken });
+            // A new refresh token every time; see rotateRefreshToken. It keeps
+            // the session's original expiry, so refreshing never extends it.
+            if (!(await rotateRefreshToken(decoded, { type: TokenSubjectType.USER, id: user.id }))) {
+                res.clearCookie("token");
+                res.clearCookie("refreshToken");
+                res.status(401).json({
+                    success: false,
+                    errorCode: "SESSION_REVOKED",
+                    message: "This session has been signed out. Please log in again.",
+                });
+                return;
+            }
+            const newRefreshToken = jwt.sign(
+                {
+                    id: user.id,
+                    email: user.email,
+                    role: user.role,
+                    sid: decoded.sid,
+                    jti: newTokenId(),
+                    pjti: decoded.jti,
+                    exp: decoded.exp,
+                },
+                config.JWT_REFRESH_SECRET,
+            );
+            res.cookie("refreshToken", newRefreshToken, {
+                httpOnly: true,
+                secure: config.NODE_ENV === "production",
+                sameSite: "strict",
+                maxAge: Math.max(0, (decoded.exp ?? 0) * 1000 - Date.now()),
+            });
+
+            res.status(200).json({ success: true, token: newAccessToken, refreshToken: newRefreshToken });
         } catch (error) {
             res.status(401).json({
                 success: false,
