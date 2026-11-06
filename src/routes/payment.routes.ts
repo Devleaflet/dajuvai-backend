@@ -9,6 +9,7 @@ import { CheckoutDraft, CheckoutDraftStatus } from "../entities/checkoutDraft.en
 import { WebhookProvider } from "../entities/processedWebhook.entity";
 import {
     claimWebhookEvent,
+    releaseWebhookEvent,
     linkWebhookEventToOrder,
     webhookEventId,
 } from "../service/webhook-dedupe.service";
@@ -465,7 +466,17 @@ paymentRouter.post("/initiate-payment", authMiddleware, async (req: AuthRequest<
                     { id: draft.id, status: CheckoutDraftStatus.PENDING },
                     {
                         mTransactionId: merchantTxnId,
-                        payload: { ...(draft.payload || {}), instrumentName: instrumentCode || null },
+                        payload: {
+                            ...(draft.payload || {}),
+                            instrumentName: instrumentCode || null,
+                            // A shopper who starts the payment again gets a new
+                            // transaction; the earlier one may still be paid, so it
+                            // stays on the draft for settlement to ask about.
+                            previousTxnIds: [
+                                ...((draft.payload?.previousTxnIds as string[] | undefined) ?? []),
+                                ...(draft.mTransactionId ? [draft.mTransactionId] : []),
+                            ],
+                        },
                     },
                 );
                 if (!updated.affected) {
@@ -783,6 +794,7 @@ paymentRouter.get("/response", (req: Request, res: Response) => {
  *                   example: "Internal server error"
  */
 paymentRouter.get("/notification", async (req: Request, res: Response) => {
+    let claimedEventId: string | null = null;
     try {
         const { MerchantTxnId, GatewayTxnId } = req.query;
 
@@ -835,6 +847,7 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
             eventId,
             payload: { MerchantTxnId, GatewayTxnId, Status },
         });
+        claimedEventId = claimed ? eventId : null;
 
         if (!claimed) {
             console.log(
@@ -856,9 +869,13 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
 
         if (!order) {
             // Draft-based checkout: materialize or cancel the draft instead.
-            const draft = await draftDb.findOne({
-                where: { mTransactionId: MerchantTxnId },
-            });
+            const draft =
+                (await draftDb.findOne({ where: { mTransactionId: MerchantTxnId } })) ??
+                // An earlier attempt on a draft whose payment was started again.
+                (await draftDb
+                    .createQueryBuilder("draft")
+                    .where(`draft.payload -> 'previousTxnIds' ? :txn`, { txn: MerchantTxnId })
+                    .getOne());
             if (draft) {
                 await settleDraftFromGateway(draft, MerchantTxnId, verdict);
                 res.send("received");
@@ -975,6 +992,11 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
 
         res.send("received");
     } catch (error) {
+        if (claimedEventId) {
+            await releaseWebhookEvent(WebhookProvider.NPX, claimedEventId).catch((releaseError) =>
+                console.error("[NPX] could not release webhook claim:", releaseError),
+            );
+        }
         if (error instanceof APIError) {
             res.status(error.status).json({
                 success: false,

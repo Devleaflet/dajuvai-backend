@@ -769,6 +769,16 @@ export class OrderService {
                 manager,
             );
 
+            if (order.appliedPromoCode) {
+                const hold = await this.claimPromoUsage(order.appliedPromoCode, manager, {
+                    userId,
+                });
+                if (hold.claimed === false) {
+                    throw new APIError(400, promoClaimMessage(hold.reason));
+                }
+                draft.promoHeld = true;
+            }
+
             return manager.getRepository(CheckoutDraft).save(draft);
         });
     }
@@ -959,18 +969,38 @@ export class OrderService {
 
                 // Claim the promo usage slot atomically with the order save,
                 // exactly like the COD path in reserveStockAndSaveOrder.
+                // The shopper has already paid the discounted total, so the
+                // promo never fails the order here. A draft that still holds
+                // its slot turns it into a redemption; one whose hold was
+                // returned (it expired before the payment settled) takes a
+                // slot now, past the limit if it must.
                 if (savedOrder.appliedPromoCode) {
-                    const claim = await this.claimPromoUsage(
-                        savedOrder.appliedPromoCode,
-                        manager,
-                        {
-                            userId: lockedDraft.userId,
-                            orderId: savedOrder.id,
-                        },
-                    );
-                    if (claim.claimed === false) {
-                        throw new APIError(400, promoClaimMessage(claim.reason));
+                    const claimant = { userId: lockedDraft.userId, orderId: savedOrder.id };
+                    if (lockedDraft.promoHeld) {
+                        await this.recordPromoRedemption(savedOrder.appliedPromoCode, claimant, manager);
+                    } else {
+                        const claim = await this.claimPromoUsage(
+                            savedOrder.appliedPromoCode,
+                            manager,
+                            claimant,
+                        );
+                        if (claim.claimed === false) {
+                            console.warn(
+                                `[CHECKOUT-DRAFT] promo ${savedOrder.appliedPromoCode} over its limit on paid draft ${lockedDraft.id}; honouring the price paid`,
+                            );
+                            await manager
+                                .getRepository(Promo)
+                                .createQueryBuilder()
+                                .update(Promo)
+                                .set({ usageCount: () => '"usageCount" + 1' })
+                                .where('LOWER("promoCode") = LOWER(:code)', {
+                                    code: normalizePromoCode(savedOrder.appliedPromoCode),
+                                })
+                                .execute();
+                            await this.recordPromoRedemption(savedOrder.appliedPromoCode, claimant, manager);
+                        }
                     }
+                    lockedDraft.promoHeld = false;
                 }
 
                 const vendorShippingRows: Array<Record<string, any>> =
@@ -1172,7 +1202,10 @@ export class OrderService {
         });
         if (!draft || draft.status !== CheckoutDraftStatus.PENDING) return false;
         if (draft.stockHeld) await this.restoreStock(draft.items, manager);
-        await draftRepo.update(draft.id, { status, stockHeld: false });
+        if (draft.promoHeld && draft.totals?.appliedPromoCode) {
+            await this.returnPromoSlot(draft.totals.appliedPromoCode, manager);
+        }
+        await draftRepo.update(draft.id, { status, stockHeld: false, promoHeld: false });
         return true;
     }
 
@@ -1307,14 +1340,26 @@ export class OrderService {
             return "Unknown";
         }
         if (draft.mTransactionId) {
-            const { status, raw } = await this.npsPaymentService.checkTransactionStatus(draft.mTransactionId);
-            if (status !== "Success") return status;
-            const collected = raw?.data?.Amount;
-            if (sameAmount(collected, total ?? NaN)) return "Success";
-            console.error(
-                `[NPX] Amount mismatch for draft ${draft.id}: gateway collected ${collected}, draft total ${total}`,
-            );
-            return "Unknown";
+            const verdictFor = async (txnId: string): Promise<NpsTransactionStatus> => {
+                const { status, raw } = await this.npsPaymentService.checkTransactionStatus(txnId);
+                if (status !== "Success") return status;
+                const collected = raw?.data?.Amount;
+                if (sameAmount(collected, total ?? NaN)) return "Success";
+                console.error(
+                    `[NPX] Amount mismatch for draft ${draft.id} (${txnId}): gateway collected ${collected}, draft total ${total}`,
+                );
+                return "Unknown";
+            };
+            const current = await verdictFor(draft.mTransactionId);
+            if (current === "Success") return current;
+            // A payment started again leaves the earlier transaction behind;
+            // if that one was paid, the draft was paid.
+            for (const txnId of (draft.payload?.previousTxnIds as string[] | undefined) ?? []) {
+                if ((await verdictFor(txnId).catch(() => "Unknown" as NpsTransactionStatus)) === "Success") {
+                    return "Success";
+                }
+            }
+            return current;
         }
         // Never sent to a gateway: nothing can have been paid.
         return "Failed";
@@ -1432,7 +1477,7 @@ export class OrderService {
     private async claimPromoUsage(
         promoCode: string,
         manager?: EntityManager,
-        claimant?: { userId: number; orderId: number },
+        claimant?: { userId: number; orderId?: number },
     ): Promise<PromoClaimResult> {
         const normalized = normalizePromoCode(promoCode);
         if (!normalized) return { claimed: false, reason: "invalid" };
@@ -1446,7 +1491,7 @@ export class OrderService {
             .update(Promo)
             .set({ usageCount: () => '"usageCount" + 1' })
             .where(
-                'LOWER("promoCode") = LOWER(:code) AND ("maxUsageCount" = 0 OR "usageCount" < "maxUsageCount")',
+                'LOWER("promoCode") = LOWER(:code) AND "isValid" = true AND ("maxUsageCount" = 0 OR "usageCount" < "maxUsageCount")',
                 { code: normalized },
             )
             .execute();
@@ -1486,13 +1531,45 @@ export class OrderService {
             }
         }
 
-        await redemptionRepo.insert({
-            promoId: promo.id,
-            userId: claimant.userId,
-            orderId: claimant.orderId,
-        });
+        // A checkout draft holds the slot without an order yet; its
+        // redemption is written when it becomes one.
+        if (claimant.orderId !== undefined) {
+            await redemptionRepo.insert({
+                promoId: promo.id,
+                userId: claimant.userId,
+                orderId: claimant.orderId,
+            });
+        }
 
         return { claimed: true };
+    }
+
+    /** Records the redemption for a slot already counted (a draft's hold). */
+    private async recordPromoRedemption(
+        promoCode: string,
+        claimant: { userId: number; orderId: number },
+        manager: EntityManager,
+    ): Promise<void> {
+        const promo = await manager
+            .getRepository(Promo)
+            .createQueryBuilder("promo")
+            .where('LOWER(promo."promoCode") = LOWER(:code)', { code: normalizePromoCode(promoCode) })
+            .getOne();
+        if (!promo) return;
+        await manager.getRepository(PromoRedemption).insert({ promoId: promo.id, ...claimant });
+    }
+
+    /** Gives back a slot counted for a draft that ended without an order. */
+    private async returnPromoSlot(promoCode: string, manager: EntityManager): Promise<void> {
+        await manager
+            .getRepository(Promo)
+            .createQueryBuilder()
+            .update(Promo)
+            .set({ usageCount: () => 'GREATEST("usageCount" - 1, 0)' })
+            .where('LOWER("promoCode") = LOWER(:code) AND "usageCount" > 0', {
+                code: normalizePromoCode(promoCode),
+            })
+            .execute();
     }
 
     /**
@@ -1753,7 +1830,8 @@ export class OrderService {
             // Idempotency: a retry resolves to this customer's own order for
             // the key — never someone else's — and is flagged so the caller
             // does not send the order-placed emails a second time.
-            if (idempotencyKey) {
+            const replayOf = async () => {
+                if (!idempotencyKey) return null;
                 const existingOrder = await this.orderRepository.findOne({
                     where: { idempotencyKey, orderedById: userId },
                     relations: [
@@ -1773,7 +1851,10 @@ export class OrderService {
                         replayed: true,
                     };
                 }
-            }
+                return null;
+            };
+            const replay = await replayOf();
+            if (replay) return replay;
 
             await this.updateUserDetail(userId, fullName, phoneNumber);
 
@@ -1905,18 +1986,29 @@ export class OrderService {
                 // Row-locked: stock is revalidated and decremented in the
                 // same transaction as the order save, so a concurrent
                 // checkout for the last unit can't oversell.
-                order = await this.reserveStockAndSaveOrder(
-                    order,
-                    vendorShippingRows,
-                    isBuyNow
-                        ? undefined
-                        : {
-                              userId,
-                              cartItemIds: items
-                                  .map((item: { id?: number }) => item.id)
-                                  .filter((id): id is number => Number.isInteger(id)),
-                          },
-                );
+                try {
+                    order = await this.reserveStockAndSaveOrder(
+                        order,
+                        vendorShippingRows,
+                        isBuyNow
+                            ? undefined
+                            : {
+                                  userId,
+                                  cartItemIds: items
+                                      .map((item: { id?: number }) => item.id)
+                                      .filter((id): id is number => Number.isInteger(id)),
+                              },
+                    );
+                } catch (error) {
+                    // Two requests with one idempotency key raced past the
+                    // check above; the loser hits the unique index. It is the
+                    // same order, so answer with it rather than a 409.
+                    if ((error as { code?: string })?.code === "23505" && idempotencyKey) {
+                        const replay = await replayOf();
+                        if (replay) return replay;
+                    }
+                    throw error;
+                }
 
             } else if (
                 paymentMethod === PaymentMethod.ONLINE_PAYMENT ||
@@ -4891,9 +4983,13 @@ export class OrderService {
         // The gateway is the source of truth — query it and settle the draft
         // so the existing Transaction.tsx polling contract keeps working
         // (pending → keep polling, cancelled → show cancelled).
-        const draft = await this.checkoutDraftRepository.findOne({
-            where: { mTransactionId },
-        });
+        const draft =
+            (await this.checkoutDraftRepository.findOne({ where: { mTransactionId } })) ??
+            // An earlier attempt on a draft whose payment was started again.
+            (await this.checkoutDraftRepository
+                .createQueryBuilder("draft")
+                .where(`draft.payload -> 'previousTxnIds' ? :txn`, { txn: mTransactionId })
+                .getOne());
         if (!draft) return null;
         assertOwner(draft.userId);
 

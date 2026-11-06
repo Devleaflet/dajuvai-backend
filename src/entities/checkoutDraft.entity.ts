@@ -113,6 +113,14 @@ export class CheckoutDraft {
     @Column({ type: "boolean", default: false })
     stockHeld: boolean;
 
+    /**
+     * True while this draft holds one use of its promo code. Taken with the
+     * stock, so a limit-1 code cannot be paid for twice; given back when the
+     * draft ends without an order, turned into a redemption when it becomes one.
+     */
+    @Column({ type: "boolean", default: false })
+    promoHeld: boolean;
+
     @CreateDateColumn()
     createdAt: Date;
 

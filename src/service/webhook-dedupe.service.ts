@@ -78,6 +78,17 @@ export async function claimWebhookEvent(input: {
 }
 
 /**
+ * Gives a claimed event back when handling it failed.
+ *
+ * The claim is taken before the work so two deliveries cannot both act; but
+ * if the work then throws, keeping the claim would make the gateway's retry
+ * look like a duplicate and the payment would wait for the cron instead.
+ */
+export async function releaseWebhookEvent(provider: string, eventId: string): Promise<void> {
+    await AppDataSource.getRepository(ProcessedWebhook).delete({ provider, eventId });
+}
+
+/**
  * Attaches the order to an event once it is known.
  *
  * The claim happens before the order is resolved — that ordering is what makes
