@@ -733,6 +733,8 @@ export interface AdminOrderEmailData {
     vendors: AdminOrderEmailVendor[];
     subtotal: number;
     shippingTotal: number;
+    /** Age-restricted items: whoever delivers must check a photo ID. */
+    idCheck?: { required: boolean; minimumAge: number | null };
     discountTotal: number;
     grandTotal: number;
     districtShipping: Array<{ district: string; fee: number }>;
@@ -759,6 +761,13 @@ const buildAdminOrderEmailHtml = (data: AdminOrderEmailData, mode: "created" | "
                     ? "A new order has been placed. Review the details and begin processing."
                     : "This order has been delivered to the customer. Delivery is complete.",
             ),
+            data.idCheck?.required
+                ? notice(
+                      `Contains age-restricted products${data.idCheck.minimumAge ? ` (minimum age ${esc(data.idCheck.minimumAge)}+)` : ""}. The rider must check a valid government-issued photo ID before handing them over.`,
+                      "warning",
+                      "ID check on delivery",
+                  )
+                : "",
             heading("Order"),
             detailsTable([
                 ["Order number", `#${data.orderNumber}`],

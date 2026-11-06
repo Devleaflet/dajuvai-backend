@@ -2379,9 +2379,17 @@ export class OrderService {
             }
         }
 
+        const ageSummary = getAgeRestrictionSummary(
+            (order.orderItems || []).map((item) => item.product),
+        );
+
         return {
             orderNumber: order.orderNumber || String(order.id),
             orderDate,
+            idCheck: {
+                required: ageSummary.containsRestrictedItems,
+                minimumAge: ageSummary.minimumRequiredAge,
+            },
             paymentMethod: order.paymentMethod || "",
             paymentStatus: order.paymentStatus || "",
             orderStatus: order.status || "",
