@@ -140,6 +140,8 @@ passport.use(
       clientSecret: config.FACEBOOK_APP_SECRET,
       callbackURL: config.FACEBOOK_CALLBACK_URL,
       profileFields: ["id", "displayName", "photos", "email"],
+      // The library defaults to v3.2, long retired; Meta silently upgrades it.
+      graphAPIVersion: "v21.0",
       // appsecret_proof on Graph calls, so a leaked user token alone cannot
       // be used with this app's id.
       enableProof: true,
