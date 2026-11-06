@@ -99,34 +99,21 @@ export class DeliveryRiderService {
             );
         }
 
-        let riderUserId: number | undefined;
-
-        const updatedAssignment = await AppDataSource.transaction(
-            async (manager) => {
-                assignment.assignmentStatus = AssignmentStatus.DELIVERED;
-                assignment.deliveredAt = new Date();
-                await manager.save(assignment);
-
-                const rider = await manager.findOne(Rider, { where: { id: riderId } });
-                if (rider) {
-                    // Still on delivery if they carry other orders.
-                    await syncRiderAvailability(manager, [rider.id]);
-                    riderUserId = rider.userId ?? undefined;
-                }
-
-                return assignment;
-            },
-        );
-
+        // The order status drives the assignment: changeOrderStatus closes the
+        // rider's open assignment as delivered and frees the rider (unless they
+        // carry other orders). Saving the assignment first and the status after
+        // left the two disagreeing whenever the status change was refused.
         // changedByUserId foreign-keys to the `user` table — riderId here is
         // Rider.id, not User.id, so the linked user id must be used instead.
+        const rider = await AppDataSource.getRepository(Rider).findOne({ where: { id: riderId } });
         await this.orderService.changeOrderStatus(orderId, OrderStatus.DELIVERED, {
+            expectedCurrentStatus: OrderStatus.ASSIGNED_TO_RIDER,
             actorRole: "RIDER",
-            changedByUserId: riderUserId,
+            changedByUserId: rider?.userId ?? undefined,
             reason: "Delivered by rider",
         });
 
-        return updatedAssignment;
+        return this.assignmentRepository.findOneOrFail({ where: { id: assignment.id } });
     }
 
     async markDeliveryFailed(
@@ -154,33 +141,16 @@ export class DeliveryRiderService {
             );
         }
 
-        let riderUserId: number | undefined;
-
-        const updatedAssignment = await AppDataSource.transaction(async (manager) => {
-            assignment.assignmentStatus = AssignmentStatus.FAILED;
-            assignment.failureReason = data.failedReason;
-            await manager.save(assignment);
-
-            const rider = await manager.findOne(Rider, { where: { id: riderId } });
-            if (rider) {
-                // Still on delivery if they carry other orders.
-                await syncRiderAvailability(manager, [rider.id]);
-                riderUserId = rider.userId ?? undefined;
-            }
-
-            return assignment;
+        // As markDelivered: the status change records the failure, with the
+        // rider's reason, on the assignment, so the two cannot disagree.
+        const rider = await AppDataSource.getRepository(Rider).findOne({ where: { id: riderId } });
+        await this.orderService.changeOrderStatus(orderId, OrderStatus.NOT_RECEIVED, {
+            expectedCurrentStatus: OrderStatus.ASSIGNED_TO_RIDER,
+            actorRole: "RIDER",
+            changedByUserId: rider?.userId ?? undefined,
+            reason: data.failedReason,
         });
 
-        await this.orderService.changeOrderStatus(
-            orderId,
-            OrderStatus.NOT_RECEIVED,
-            {
-                actorRole: "RIDER",
-                changedByUserId: riderUserId,
-                reason: data.failedReason,
-            },
-        );
-
-        return updatedAssignment;
+        return this.assignmentRepository.findOneOrFail({ where: { id: assignment.id } });
     }
 }

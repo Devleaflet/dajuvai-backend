@@ -3,8 +3,6 @@ import crypto from "crypto";
 import axios from "axios";
 import { Router } from "express";
 import { DeliveryStatus, Order, OrderStatus, PaymentStatus } from "../entities/order.entity";
-import { Variant } from "../entities/variant.entity";
-import { Product } from "../entities/product.entity";
 import { CheckoutDraft, CheckoutDraftStatus } from "../entities/checkoutDraft.entity";
 import { WebhookProvider } from "../entities/processedWebhook.entity";
 import {
@@ -941,24 +939,10 @@ paymentRouter.get("/notification", async (req: Request, res: Response) => {
                 const alreadyTerminal = (cancellation.affected ?? 0) === 0;
 
                 if (!alreadyTerminal) {
-                    // Restore stock for each item
-                    for (const item of order.orderItems) {
-                        if (item.variant) {
-                            item.variant.stockReserved = Math.max(
-                                0,
-                                (item.variant.stockReserved || 0) - item.quantity,
-                            );
-                            item.variant.stock += item.quantity;
-                            await AppDataSource.getRepository(Variant).save(item.variant);
-                        } else if (item.product) {
-                            item.product.stockReserved = Math.max(
-                                0,
-                                (item.product.stockReserved || 0) - item.quantity,
-                            );
-                            item.product.stock += item.quantity;
-                            await AppDataSource.getRepository(Product).save(item.product);
-                        }
-                    }
+                    // Row-locked and re-read: the product rows loaded at the top
+                    // of this request may be stale by now, and writing back
+                    // `stock + quantity` from them lost other orders' changes.
+                    await new OrderService().restoreStock(order.orderItems);
                 }
 
                 // Kept in step with what the UPDATE above wrote, since the

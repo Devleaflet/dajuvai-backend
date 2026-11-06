@@ -2882,7 +2882,7 @@ export class OrderService {
      * manager is supplied, so concurrent restores of the same rows serialize
      * instead of racing.
      */
-    private async restoreStock(
+    async restoreStock(
         orderItems: any[],
         manager?: EntityManager,
     ): Promise<void> {
@@ -4322,6 +4322,58 @@ export class OrderService {
         // Restock whenever an order lands in a terminal not-fulfilled state,
         // unless it was already in one (avoid double-crediting stock if an
         // admin bounces between CANCELLED/NOT_RECEIVED/RETURNED).
+        // Claim the move before any side effect. Two people (or an admin and a
+        // rider) changing the same order at once both passed the checks above
+        // and both restocked; now only the one whose UPDATE still finds the old
+        // status goes on. If a side effect below fails, the claim is undone.
+        const claimed = await this.orderRepository
+            .createQueryBuilder()
+            .update(Order)
+            .set({ status: targetStatus })
+            .where("id = :id AND status = :previous", { id: order.id, previous: previousStatus })
+            .execute();
+        if (!claimed.affected) {
+            throw new OrderStateChangedError(
+                "This order was just updated by someone else. Refresh and try again.",
+            );
+        }
+        const undoClaim = () =>
+            this.orderRepository
+                .createQueryBuilder()
+                .update(Order)
+                .set({ status: previousStatus })
+                .where("id = :id AND status = :target", { id: order.id, target: targetStatus })
+                .execute();
+
+        try {
+            await this.applyStatusStockEffects(order, previousStatus, targetStatus);
+        } catch (error) {
+            await undoClaim().catch((undoError) =>
+                console.error(`[ORDER] could not undo status claim on order ${order.id}:`, undoError),
+            );
+            throw error;
+        }
+
+        order.status = targetStatus;
+        // The delivery column the admin tables show follows the order status;
+        // without this it stayed "order_processing" all the way to delivered.
+        const delivery = DELIVERY_STATUS_FOR_ORDER_STATUS[targetStatus];
+        if (delivery) order.deliveryStatus = delivery;
+        await this.orderRepository.save(order);
+
+        return this.afterStatusChange(order, previousStatus, targetStatus, options);
+    }
+
+    /**
+     * Stock and promo consequences of a status move: entering an unfulfilled
+     * end state gives stock and the promo slot back; leaving one takes the
+     * stock again (or refuses).
+     */
+    private async applyStatusStockEffects(
+        order: Order,
+        previousStatus: OrderStatus,
+        targetStatus: OrderStatus,
+    ): Promise<void> {
         const terminalUnfulfilled = [
             OrderStatus.CANCELLED,
             OrderStatus.NOT_RECEIVED,
@@ -4361,13 +4413,21 @@ export class OrderService {
             );
         }
 
-        order.status = targetStatus;
-        // The delivery column the admin tables show follows the order status;
-        // without this it stayed "order_processing" all the way to delivered.
-        const delivery = DELIVERY_STATUS_FOR_ORDER_STATUS[targetStatus];
-        if (delivery) order.deliveryStatus = delivery;
-        await this.orderRepository.save(order);
+    }
 
+    /** Assignment, history, audit and notifications after a status move. */
+    private async afterStatusChange(
+        order: Order,
+        previousStatus: OrderStatus,
+        targetStatus: OrderStatus,
+        options: {
+            actorRole: StatusActorRole;
+            changedByUserId?: number;
+            auditActorType?: AuditActorType;
+            reason?: string;
+            note?: string;
+        },
+    ): Promise<SanitizedOrderFull> {
         // Leaving the rider by any route but the rider's own — an admin
         // cancelling, delivering or returning it from the orders page — used to
         // leave the assignment open for ever: the rider still counted as
